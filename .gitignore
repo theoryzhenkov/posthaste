@@ -11,12 +11,30 @@ site/
 .envrc
 .age-key
 
+# build output
+/target/
+/crates/target/
+/src-tauri/target/
+/web/dist/
+/web/node_modules/
+
+# local app/dev data
+/crates/data/
+/dev/stalwart/data/
+/dev/stalwart/logs/
+/dev/posthaste/
+src-tauri/gen/schemas/
+
 # editor
 .idea/
 .vscode/
 *.swp
+*.swo
 *~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# legacy
+/swift/MailClient/.build
