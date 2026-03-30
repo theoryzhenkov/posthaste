@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Query grammar, filter compilation, smart mailbox model, thread arcs, search UX"
-modified: 2026-03-29
-reviewed: 2026-03-29
+modified: 2026-03-31
+reviewed: 2026-03-31
 depends:
   - path: spec/L0-search
   - path: spec/L1-sync
@@ -98,7 +98,7 @@ Compilation rules:
 - Date prefixes convert relative expressions to absolute ISO 8601 timestamps at compilation time
 - Free text (no prefix) compiles to JMAP's `text` filter, which searches across all text fields
 
-The mailbox resolution step uses an in-memory map of mailbox names and roles to IDs, maintained by the Rust sync engine (updated on each `Mailbox/changes` cycle). The compiler never reads from GRDB directly, preserving the invariant that Rust does not read from the cache. If a mailbox name cannot be resolved, the compiler returns a typed error rather than silently dropping the filter.
+The mailbox resolution step uses an in-memory map of mailbox names and roles to IDs, maintained by the Rust sync engine (updated on each `Mailbox/changes` cycle). The compiler does not query SQLite at runtime for this; the in-memory map is cheaper and avoids contention. If a mailbox name cannot be resolved, the compiler returns a typed error rather than silently dropping the filter.
 
 ## Smart mailbox data model
 
@@ -132,7 +132,7 @@ enum SortField { receivedAt, from, subject, size }
 enum SortOrder { ascending, descending }
 ```
 
-Persisted in GRDB:
+Persisted in SQLite:
 
 ```sql
 CREATE TABLE smart_mailbox (
@@ -165,7 +165,7 @@ A smart mailbox "Newsletters" with query `tag:newsletter` and sub_grouping `BySe
   - alice@example.com (query: `tag:newsletter from:alice@example.com`)
   - bob@list.org (query: `tag:newsletter from:bob@list.org`)
 
-Group values are computed by executing the parent query and extracting distinct values of the grouping field from the results. The distinct values are cached in GRDB and refreshed on each sync cycle. This avoids re-executing the parent query every time the sidebar renders.
+Group values are computed by executing the parent query and extracting distinct values of the grouping field from the results. The distinct values are cached in SQLite and refreshed on each sync cycle. This avoids re-executing the parent query every time the sidebar renders.
 
 `ByMailingList` requires access to the `List-Id` header, which is not part of the synced email metadata. This grouping mode depends on locally cached headers from fetched email bodies. It will only produce groups for emails whose bodies have been fetched, which is an acceptable limitation since mailing list emails are typically read and thus already cached.
 
@@ -181,7 +181,7 @@ The toolbar search field accepts the full query language. As the user types, the
 - Keywords: after `tag:`, suggest known JMAP keywords
 - Named dates: after `before:`, `after:`, or `date:`, suggest `today`, `yesterday`, `thisweek`, `thismonth`, `thisyear`
 
-Completion is local-only, drawing from the GRDB cache. No network requests during typing.
+Completion is local-only, drawing from the SQLite cache. No network requests during typing.
 
 ### Execution pipeline
 
@@ -202,7 +202,7 @@ Shift+click refines the current query by appending with AND. If the search bar c
 
 ### Search history
 
-The last 50 queries are stored in GRDB with timestamps. Cmd+[ and Cmd+] navigate back and forward through search history. Each history entry stores: query text, result scroll position, and the mailbox context (which mailbox was selected when the search ran). This allows the user to return to a previous search and pick up where they left off.
+The last 50 queries are stored in SQLite with timestamps. Cmd+[ and Cmd+] navigate back and forward through search history. Each history entry stores: query text, result scroll position, and the mailbox context (which mailbox was selected when the search ran). This allows the user to return to a previous search and pick up where they left off.
 
 ### Save as smart mailbox
 
@@ -259,7 +259,7 @@ Arcs are semicircles drawn above the baseline connecting a parent node to its re
 
 ### Rendering
 
-Rendered as a SwiftUI `Canvas` view at the top of the thread detail pane. The target is 60fps for threads up to 500 messages. For threads over 500 messages, the view shows a simplified version with arcs only for messages near the current selection. The arc data is computed in Rust (since it depends on the reply tree built from headers) and passed to Swift via UniFFI as a flat array of nodes and edges.
+Rendered as an SVG element (or HTML Canvas) at the top of the thread detail panel. The target is 60fps for threads up to 500 messages. For threads over 500 messages, the view shows a simplified version with arcs only for messages near the current selection. The arc data is computed in Rust and served via the API as a flat array of nodes and edges.
 
 ## Assertions
 
