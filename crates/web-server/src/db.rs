@@ -100,10 +100,48 @@ pub fn init_db(path: &str) -> Result<Connection, DbError> {
             text_body TEXT,
             fetched_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS sync_state (
+            type_name TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
         ",
     )?;
 
     Ok(conn)
+}
+
+pub fn get_sync_state(conn: &Connection, type_name: &str) -> Result<Option<String>, DbError> {
+    let mut stmt = conn.prepare("SELECT state FROM sync_state WHERE type_name = ?1")?;
+    let mut rows = stmt.query_map(params![type_name], |row| row.get::<_, String>(0))?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+pub fn save_sync_state(conn: &Connection, type_name: &str, state: &str) -> Result<(), DbError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO sync_state (type_name, state, updated_at) VALUES (?1, ?2, ?3)",
+        params![type_name, state, now],
+    )?;
+    Ok(())
+}
+
+pub fn delete_emails_by_ids(conn: &Connection, ids: &[String]) -> Result<(), DbError> {
+    for id in ids {
+        conn.execute("DELETE FROM email_keyword WHERE email_id = ?1", params![id])?;
+        conn.execute("DELETE FROM email_mailbox WHERE email_id = ?1", params![id])?;
+        conn.execute("DELETE FROM email_body WHERE email_id = ?1", params![id])?;
+        conn.execute("DELETE FROM email WHERE id = ?1", params![id])?;
+    }
+    Ok(())
 }
 
 pub fn import_mock_data(conn: &Connection) {
