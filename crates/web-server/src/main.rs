@@ -31,7 +31,13 @@ async fn main() {
         println!("Connecting to JMAP server at {url}...");
         match jmap::connect(&url, &user, &pass).await {
             Ok(client) => {
-                println!("Connected! Syncing...");
+                let has_state = db::get_sync_state(&conn, "email")
+                    .ok()
+                    .flatten()
+                    .is_some();
+                let mode = if has_state { "incremental" } else { "full, first run" };
+                println!("Connected! Syncing ({mode})...");
+
                 if let Err(e) = jmap::sync_mailboxes(&client, &conn).await {
                     eprintln!("Failed to sync mailboxes: {e}");
                 }
