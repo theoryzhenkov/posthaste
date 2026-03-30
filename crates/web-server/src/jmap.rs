@@ -3,8 +3,14 @@ use jmap_client::{email, mailbox};
 use rusqlite::Connection;
 
 pub async fn connect(url: &str, username: &str, password: &str) -> Result<Client, jmap_client::Error> {
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(String::from))
+        .unwrap_or_default();
+
     Client::new()
         .credentials((username, password))
+        .follow_redirects([host])
         .connect(url)
         .await
 }
@@ -87,33 +93,45 @@ pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<(), Box<d
         return Ok(());
     }
 
-    // Fetch email properties in bulk via request builder
-    let mut request = client.build();
-    request
-        .get_email()
-        .ids(email_ids.iter().map(String::as_str))
-        .properties([
-            email::Property::Id,
-            email::Property::ThreadId,
-            email::Property::MailboxIds,
-            email::Property::Keywords,
-            email::Property::Subject,
-            email::Property::From,
-            email::Property::Preview,
-            email::Property::ReceivedAt,
-            email::Property::HasAttachment,
-            email::Property::Size,
-        ]);
-    let emails = request
-        .send_get_email()
-        .await?
-        .take_list();
+    println!("  Fetching {} emails in batches...", email_ids.len());
 
-    // Clear and re-insert
+    // Clear tables before re-inserting
     conn.execute("DELETE FROM email", [])?;
     conn.execute("DELETE FROM email_mailbox", [])?;
     conn.execute("DELETE FROM email_keyword", [])?;
 
+    // Fetch in batches of 100 (well within maxObjectsInGet: 500)
+    let batch_size = 100;
+    for (i, chunk) in email_ids.chunks(batch_size).enumerate() {
+        let mut request = client.build();
+        request
+            .get_email()
+            .ids(chunk.iter().map(String::as_str))
+            .properties([
+                email::Property::Id,
+                email::Property::ThreadId,
+                email::Property::MailboxIds,
+                email::Property::Keywords,
+                email::Property::Subject,
+                email::Property::From,
+                email::Property::Preview,
+                email::Property::ReceivedAt,
+                email::Property::HasAttachment,
+                email::Property::Size,
+            ]);
+        let emails = request
+            .send_get_email()
+            .await?
+            .take_list();
+
+        println!("  Batch {}: {} emails fetched", i + 1, emails.len());
+        insert_emails(conn, &emails)?;
+    }
+
+    Ok(())
+}
+
+fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Result<(), Box<dyn std::error::Error>> {
     for em in emails {
         let id = em.id().unwrap_or_default();
         let thread_id = em.thread_id().unwrap_or_default();
