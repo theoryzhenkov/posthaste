@@ -322,6 +322,93 @@ pub fn get_thread(conn: &Connection, thread_id: &str) -> Result<Vec<EmailRow>, D
     )
 }
 
+/// Get mailbox ID by role, falling back to name lookup.
+pub fn get_mailbox_by_role_or_name(
+    conn: &Connection,
+    role: &str,
+    name: &str,
+) -> Result<Option<String>, DbError> {
+    // Try role first
+    let mut stmt = conn.prepare("SELECT id FROM mailbox WHERE role = ?1 LIMIT 1")?;
+    let mut rows = stmt.query_map(params![role], |row| row.get::<_, String>(0))?;
+    if let Some(row) = rows.next() {
+        return Ok(Some(row?));
+    }
+    // Fall back to name
+    let mut stmt = conn.prepare("SELECT id FROM mailbox WHERE name = ?1 LIMIT 1")?;
+    let mut rows = stmt.query_map(params![name], |row| row.get::<_, String>(0))?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+/// Update is_read/is_flagged column and email_keyword table.
+pub fn update_email_keyword(
+    conn: &Connection,
+    email_id: &str,
+    keyword: &str,
+    set: bool,
+) -> Result<(), DbError> {
+    // Update denormalized column
+    match keyword {
+        "$seen" => {
+            conn.execute(
+                "UPDATE email SET is_read = ?1 WHERE id = ?2",
+                params![set as i32, email_id],
+            )?;
+        }
+        "$flagged" => {
+            conn.execute(
+                "UPDATE email SET is_flagged = ?1 WHERE id = ?2",
+                params![set as i32, email_id],
+            )?;
+        }
+        _ => {}
+    }
+
+    // Update keyword table
+    if set {
+        conn.execute(
+            "INSERT OR IGNORE INTO email_keyword (email_id, keyword) VALUES (?1, ?2)",
+            params![email_id, keyword],
+        )?;
+    } else {
+        conn.execute(
+            "DELETE FROM email_keyword WHERE email_id = ?1 AND keyword = ?2",
+            params![email_id, keyword],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Move email: remove from current mailboxes, add to target mailbox.
+pub fn move_email_to_mailbox(
+    conn: &Connection,
+    email_id: &str,
+    target_mailbox_id: &str,
+) -> Result<(), DbError> {
+    conn.execute(
+        "DELETE FROM email_mailbox WHERE email_id = ?1",
+        params![email_id],
+    )?;
+    conn.execute(
+        "INSERT INTO email_mailbox (email_id, mailbox_id) VALUES (?1, ?2)",
+        params![email_id, target_mailbox_id],
+    )?;
+    Ok(())
+}
+
+/// Delete email from all tables.
+pub fn delete_email_record(conn: &Connection, email_id: &str) -> Result<(), DbError> {
+    conn.execute("DELETE FROM email_keyword WHERE email_id = ?1", params![email_id])?;
+    conn.execute("DELETE FROM email_mailbox WHERE email_id = ?1", params![email_id])?;
+    conn.execute("DELETE FROM email_body WHERE email_id = ?1", params![email_id])?;
+    conn.execute("DELETE FROM email WHERE id = ?1", params![email_id])?;
+    Ok(())
+}
+
 pub fn get_email_body(conn: &Connection, email_id: &str) -> Result<Option<EmailBodyRow>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT email_id, html, text_body FROM email_body WHERE email_id = ?1",

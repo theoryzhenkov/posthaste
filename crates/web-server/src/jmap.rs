@@ -340,6 +340,37 @@ async fn full_sync_emails(client: &Client, conn: &Connection) -> Result<(), Sync
     Ok(())
 }
 
+// --- Email mutation helpers ---
+
+/// Set or unset a keyword ($seen, $flagged, etc.)
+pub async fn set_email_keyword(
+    client: &Client,
+    email_id: &str,
+    keyword: &str,
+    set: bool,
+) -> Result<(), SyncError> {
+    client.email_set_keyword(email_id, keyword, set).await?;
+    Ok(())
+}
+
+/// Move email to a single mailbox (replaces all current mailbox memberships).
+pub async fn move_email_to_mailbox(
+    client: &Client,
+    email_id: &str,
+    mailbox_id: &str,
+) -> Result<(), SyncError> {
+    client
+        .email_set_mailboxes(email_id, [mailbox_id])
+        .await?;
+    Ok(())
+}
+
+/// Permanently destroy an email.
+pub async fn destroy_email(client: &Client, email_id: &str) -> Result<(), SyncError> {
+    client.email_destroy(email_id).await?;
+    Ok(())
+}
+
 // --- Shared helpers ---
 
 fn insert_mailbox(conn: &Connection, mb: &jmap_client::mailbox::Mailbox) -> Result<(), SyncError> {

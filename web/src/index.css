@@ -373,6 +373,29 @@ body {
   color: var(--color-text-secondary);
 }
 
+.message-detail__actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.message-detail__actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+  font-family: inherit;
+  transition: background-color 0.1s;
+}
+
+.message-detail__actions button:hover {
+  background: var(--color-hover);
+}
+
 .message-detail__body {
   flex: 1;
   overflow: auto;

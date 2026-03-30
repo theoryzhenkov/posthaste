@@ -26,3 +26,13 @@ export interface EmailBody {
   html: string | null;
   text: string | null;
 }
+
+export type EmailAction =
+  | { action: "markRead" }
+  | { action: "markUnread" }
+  | { action: "flag" }
+  | { action: "unflag" }
+  | { action: "archive" }
+  | { action: "trash" }
+  | { action: "delete" }
+  | { action: "move"; mailboxId: string };

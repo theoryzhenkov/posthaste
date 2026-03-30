@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{db, jmap, sanitize};
 use crate::AppState;
@@ -222,4 +222,138 @@ pub async fn get_email_body(
         html: sanitized_html,
         text,
     }))
+}
+
+// --- Email mutations ---
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+pub enum EmailActionRequest {
+    MarkRead,
+    MarkUnread,
+    Flag,
+    Unflag,
+    Archive,
+    Trash,
+    Delete,
+    Move { mailbox_id: String },
+}
+
+/// Describes a mutation to apply: keyword change, mailbox move, or destroy.
+enum EmailMutation {
+    Keyword { keyword: &'static str, set: bool },
+    MoveTo { mailbox_id: String },
+    Destroy,
+}
+
+impl EmailActionRequest {
+    /// Convert the action into a concrete mutation, resolving mailbox IDs for
+    /// archive/trash via the local DB.
+    fn into_mutation(
+        self,
+        conn: &rusqlite::Connection,
+    ) -> Result<EmailMutation, StatusCode> {
+        match self {
+            Self::MarkRead => Ok(EmailMutation::Keyword { keyword: "$seen", set: true }),
+            Self::MarkUnread => Ok(EmailMutation::Keyword { keyword: "$seen", set: false }),
+            Self::Flag => Ok(EmailMutation::Keyword { keyword: "$flagged", set: true }),
+            Self::Unflag => Ok(EmailMutation::Keyword { keyword: "$flagged", set: false }),
+            Self::Archive => {
+                let mailbox_id = db::get_mailbox_by_role_or_name(conn, "archive", "Archive")
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                    .ok_or(StatusCode::NOT_FOUND)?;
+                Ok(EmailMutation::MoveTo { mailbox_id })
+            }
+            Self::Trash => {
+                let mailbox_id = db::get_mailbox_by_role_or_name(conn, "trash", "Deleted Items")
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                    .ok_or(StatusCode::NOT_FOUND)?;
+                Ok(EmailMutation::MoveTo { mailbox_id })
+            }
+            Self::Delete => Ok(EmailMutation::Destroy),
+            Self::Move { mailbox_id } => Ok(EmailMutation::MoveTo { mailbox_id }),
+        }
+    }
+}
+
+pub async fn post_email_action(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(action): Json<EmailActionRequest>,
+) -> Result<Json<EmailResponse>, StatusCode> {
+    let client = state
+        .jmap_client
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    // Resolve the action to a concrete mutation (may need DB for mailbox lookups).
+    let mutation = {
+        let state = state.clone();
+        let action = action;
+        tokio::task::spawn_blocking(move || {
+            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            action.into_mutation(&conn)
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??
+    };
+
+    // Apply JMAP mutation (remote).
+    match &mutation {
+        EmailMutation::Keyword { keyword, set } => {
+            jmap::set_email_keyword(client, &id, keyword, *set)
+                .await
+                .map_err(|e| {
+                    eprintln!("JMAP error: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+        }
+        EmailMutation::MoveTo { mailbox_id } => {
+            jmap::move_email_to_mailbox(client, &id, mailbox_id)
+                .await
+                .map_err(|e| {
+                    eprintln!("JMAP error: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+        }
+        EmailMutation::Destroy => {
+            jmap::destroy_email(client, &id)
+                .await
+                .map_err(|e| {
+                    eprintln!("JMAP error: {e}");
+                    StatusCode::BAD_GATEWAY
+                })?;
+        }
+    }
+
+    // Apply local DB mutation and return updated email.
+    let state = state.clone();
+    let id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        match mutation {
+            EmailMutation::Keyword { keyword, set } => {
+                db::update_email_keyword(&conn, &id, keyword, set)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
+            EmailMutation::MoveTo { mailbox_id } => {
+                db::move_email_to_mailbox(&conn, &id, &mailbox_id)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
+            EmailMutation::Destroy => {
+                db::delete_email_record(&conn, &id)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                // Return empty response for delete — email no longer exists.
+                return Err(StatusCode::NO_CONTENT);
+            }
+        }
+
+        match db::get_email(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+            Some(row) => Ok(Json(email_row_to_response(row))),
+            None => Err(StatusCode::NOT_FOUND),
+        }
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }

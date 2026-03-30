@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchEmail, fetchEmailBody } from "../api/client";
+import type { EmailActions } from "../hooks/useEmailActions";
 import { formatRelativeTime } from "../utils/relativeTime";
 import { EmailFrame } from "./EmailFrame";
 
 interface MessageDetailProps {
   emailId: string | null;
+  actions: EmailActions;
 }
 
-export function MessageDetail({ emailId }: MessageDetailProps) {
+export function MessageDetail({ emailId, actions }: MessageDetailProps) {
   const {
     data: email,
     isLoading,
@@ -69,11 +71,33 @@ export function MessageDetail({ emailId }: MessageDetailProps) {
           </span>
         </div>
         <div className="message-detail__tags">
-          {email.isFlagged && <span className="message-detail__tag">⭐ Flagged</span>}
+          {email.isFlagged && (
+            <span className="message-detail__tag">⭐ Flagged</span>
+          )}
           {email.hasAttachment && (
             <span className="message-detail__tag">📎 Attachment</span>
           )}
         </div>
+      </div>
+      <div className="message-detail__actions">
+        <button
+          onClick={() => actions.toggleRead(email)}
+          title={email.isRead ? "Mark unread" : "Mark read"}
+        >
+          {email.isRead ? "Mark Unread" : "Mark Read"}
+        </button>
+        <button
+          onClick={() => actions.toggleFlag(email)}
+          title={email.isFlagged ? "Unflag" : "Flag"}
+        >
+          {email.isFlagged ? "Unflag" : "Flag"}
+        </button>
+        <button onClick={() => actions.archive(email.id)} title="Archive">
+          Archive
+        </button>
+        <button onClick={() => actions.trash(email.id)} title="Move to Trash">
+          Trash
+        </button>
       </div>
       <div className="message-detail__body">
         {bodyLoading ? (

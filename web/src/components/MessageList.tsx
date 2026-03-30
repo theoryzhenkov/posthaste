@@ -1,19 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { fetchEmails } from "../api/client";
 import type { Email } from "../api/types";
+import type { EmailActions } from "../hooks/useEmailActions";
 import { MessageRow } from "./MessageRow";
 
 interface MessageListProps {
   mailboxId: string | null;
   selectedEmailId: string | null;
   onSelectEmail: (id: string) => void;
+  actions: EmailActions;
 }
 
 export function MessageList({
   mailboxId,
   selectedEmailId,
   onSelectEmail,
+  actions,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -26,6 +29,11 @@ export function MessageList({
     queryFn: () => fetchEmails(mailboxId!),
     enabled: mailboxId !== null,
   });
+
+  const selectedEmail = useMemo(
+    () => emails?.find((e: Email) => e.id === selectedEmailId) ?? null,
+    [emails, selectedEmailId],
+  );
 
   const navigateEmail = useCallback(
     (direction: 1 | -1) => {
@@ -52,7 +60,6 @@ export function MessageList({
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
-      // Don't capture if typing in an input
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
       switch (e.key) {
@@ -66,12 +73,25 @@ export function MessageList({
           e.preventDefault();
           navigateEmail(-1);
           break;
+        case "u":
+          if (selectedEmail) actions.toggleRead(selectedEmail);
+          break;
+        case "s":
+          if (selectedEmail) actions.toggleFlag(selectedEmail);
+          break;
+        case "e":
+          if (selectedEmail) actions.archive(selectedEmail.id);
+          break;
+        case "#":
+        case "Backspace":
+          if (selectedEmail) actions.trash(selectedEmail.id);
+          break;
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navigateEmail]);
+  }, [navigateEmail, selectedEmail, actions]);
 
   if (!mailboxId) {
     return (
