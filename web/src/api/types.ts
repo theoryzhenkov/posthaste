@@ -20,3 +20,9 @@ export interface Email {
   mailboxIds: string[];
   keywords: string[];
 }
+
+export interface EmailBody {
+  emailId: string;
+  html: string | null;
+  text: string | null;
+}

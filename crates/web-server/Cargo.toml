@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 jmap-core = { path = "../jmap-core" }
 mail-engine = { path = "../mail-engine" }
+ammonia = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
 rusqlite = { workspace = true }

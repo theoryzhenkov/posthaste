@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchEmail } from "../api/client";
+import { fetchEmail, fetchEmailBody } from "../api/client";
 import { formatRelativeTime } from "../utils/relativeTime";
+import { EmailFrame } from "./EmailFrame";
 
 interface MessageDetailProps {
   emailId: string | null;
@@ -14,6 +15,12 @@ export function MessageDetail({ emailId }: MessageDetailProps) {
   } = useQuery({
     queryKey: ["email", emailId],
     queryFn: () => fetchEmail(emailId!),
+    enabled: emailId !== null,
+  });
+
+  const { data: body, isLoading: bodyLoading } = useQuery({
+    queryKey: ["emailBody", emailId],
+    queryFn: () => fetchEmailBody(emailId!),
     enabled: emailId !== null,
   });
 
@@ -69,7 +76,15 @@ export function MessageDetail({ emailId }: MessageDetailProps) {
         </div>
       </div>
       <div className="message-detail__body">
-        <p>{email.preview ?? "No content available."}</p>
+        {bodyLoading ? (
+          <p className="message-detail__loading">Loading email body...</p>
+        ) : body?.html ? (
+          <EmailFrame html={body.html} />
+        ) : body?.text ? (
+          <pre className="message-detail__text">{body.text}</pre>
+        ) : (
+          <p>{email.preview ?? "No content available."}</p>
+        )}
       </div>
     </div>
   );
