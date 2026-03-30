@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use mail_engine::MailEngine;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -34,6 +36,13 @@ pub struct EmailRow {
     pub size: i64,
     pub mailbox_ids: Vec<String>,
     pub keywords: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EmailBodyRow {
+    pub email_id: String,
+    pub html: Option<String>,
+    pub text_body: Option<String>,
 }
 
 pub fn init_db(path: &str) -> Result<Connection, DbError> {
@@ -82,6 +91,14 @@ pub fn init_db(path: &str) -> Result<Connection, DbError> {
             email_id TEXT NOT NULL,
             keyword TEXT NOT NULL,
             PRIMARY KEY (account_id, email_id, keyword)
+        );
+
+        CREATE TABLE IF NOT EXISTS email_body (
+            email_id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL DEFAULT 'mock-account-1',
+            html TEXT,
+            text_body TEXT,
+            fetched_at INTEGER NOT NULL
         );
         ",
     )?;
@@ -265,4 +282,43 @@ pub fn get_thread(conn: &Connection, thread_id: &str) -> Result<Vec<EmailRow>, D
          FROM email WHERE thread_id = ?1 ORDER BY received_at ASC",
         &[&thread_id as &dyn rusqlite::ToSql],
     )
+}
+
+pub fn get_email_body(conn: &Connection, email_id: &str) -> Result<Option<EmailBodyRow>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT email_id, html, text_body FROM email_body WHERE email_id = ?1",
+    )?;
+
+    let mut rows = stmt.query_map(params![email_id], |row| {
+        Ok(EmailBodyRow {
+            email_id: row.get(0)?,
+            html: row.get(1)?,
+            text_body: row.get(2)?,
+        })
+    })?;
+
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+pub fn save_email_body(
+    conn: &Connection,
+    email_id: &str,
+    html: Option<&str>,
+    text_body: Option<&str>,
+) -> Result<(), DbError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before epoch")
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO email_body (email_id, html, text_body, fetched_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![email_id, html, text_body, now],
+    )?;
+
+    Ok(())
 }
