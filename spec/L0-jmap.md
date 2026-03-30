@@ -7,7 +7,7 @@ depends:
   - path: README
 dependents:
   - path: spec/L1-jmap
-  - path: spec/L0-bridge
+  - path: spec/L0-api
   - path: spec/L0-sync
   - path: spec/L0-accounts
   - path: spec/L0-compose
