@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Multi-account scoping invariant and deferral rationale"
-modified: 2026-03-29
-reviewed: 2026-03-29
+modified: 2026-03-31
+reviewed: 2026-03-31
 depends:
   - path: README
   - path: spec/L0-jmap
@@ -18,7 +18,7 @@ Multi-account UI is out of scope for MVP. The implementation targets a single Fa
 
 ## The invariant
 
-All GRDB tables use `(account_id, ...)` composite primary keys. All Rust-side state (sync state strings, session objects) is keyed by account ID. All `CacheWriter` method signatures include `accountId` as their first parameter. The UI may hardcode a single account ID for v1, but no code path assumes there is only one account.
+All SQLite tables use `(account_id, ...)` composite primary keys. All Rust-side state (sync state strings, session objects) is keyed by account ID. All API endpoints that return account-scoped data filter by account ID internally. The UI may hardcode a single account ID for v1, but no code path assumes there is only one account.
 
 ## Credential storage
 

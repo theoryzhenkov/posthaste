@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why custom query language, search execution strategy, smart mailbox rationale"
-modified: 2026-03-29
-reviewed: 2026-03-29
+modified: 2026-03-31
+reviewed: 2026-03-31
 depends:
   - path: README
   - path: spec/L0-sync
@@ -30,7 +30,7 @@ For MVP, all standard prefixes (from, to, subject, body, date, keyword, mailbox)
 
 ## Smart mailboxes
 
-A smart mailbox is a saved query string with display metadata: name, icon, color, sort order, auto-grouping. They are stored locally in GRDB, not synced to the server. JMAP has no concept of client-defined virtual mailboxes, and syncing them would require a custom extension that limits portability.
+A smart mailbox is a saved query string with display metadata: name, icon, color, sort order, auto-grouping. They are stored locally in SQLite, not synced to the server. JMAP has no concept of client-defined virtual mailboxes, and syncing them would require a custom extension that limits portability.
 
 The query text is the authoritative representation. A parsed AST can be cached for performance, but it is always regenerated from the text when the grammar version changes. This means grammar evolution never invalidates saved smart mailboxes; re-parsing the original text against the new grammar is sufficient.
 

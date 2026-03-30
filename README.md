@@ -75,7 +75,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 ## Domains
 
 - **jmap** -- JMAP protocol types, session, method calls, push. [L0](spec/L0-jmap.md)
-- **sync** -- Bidirectional sync engine, local GRDB replica, state tokens
+- **sync** -- Bidirectional sync engine, local SQLite replica, state tokens
 - **search** -- Query language, smart mailboxes, search execution. [L0](spec/L0-search.md)
 - **compose** -- Markdown composition, MIME assembly, send/draft lifecycle
 - **ui** -- Web UI, React components, thread view, HTML rendering, keyboard model

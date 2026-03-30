@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-03-29
-reviewed: 2026-03-29
+modified: 2026-03-31
+reviewed: 2026-03-31
 depends:
   - path: spec/L0-compose
   - path: spec/L1-jmap
@@ -77,7 +77,7 @@ New -> Editing -> Saving -> Saved -> Sending -> Sent
 
 ## ComposeSession interface
 
-Rust object exposed to Swift via UniFFI. Swift holds a reference and calls methods; the session manages all internal state and JMAP interaction.
+Rust object managed by the backend. The frontend interacts with it via REST API endpoints; the session manages all internal state and JMAP interaction.
 
 ```
 ComposeSession {
@@ -144,7 +144,7 @@ ComposeError
 - HTML output contains no external resource references
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
 - Send uses EmailSubmission/set, which handles server-side Sent folder placement
-- The compose session is a Rust object; Swift holds a reference via UniFFI
+- The compose session is a Rust object; the frontend interacts via REST API
 - `render_preview()` is called on text change (debounced) and returns HTML for WKWebView
 - Attachments are uploaded before send, not inline with the email body
 
