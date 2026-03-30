@@ -1,6 +1,12 @@
 use mail_engine::MailEngine;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection};
 use serde::Serialize;
+
+#[derive(Debug, thiserror::Error)]
+pub enum DbError {
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MailboxRow {
@@ -30,9 +36,9 @@ pub struct EmailRow {
     pub keywords: Vec<String>,
 }
 
-pub fn init_db(path: &str) -> Connection {
-    let conn = Connection::open(path).expect("failed to open SQLite database");
-    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
+pub fn init_db(path: &str) -> Result<Connection, DbError> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "wal")?;
 
     conn.execute_batch(
         "
@@ -78,10 +84,9 @@ pub fn init_db(path: &str) -> Connection {
             PRIMARY KEY (account_id, email_id, keyword)
         );
         ",
-    )
-    .expect("failed to create tables");
+    )?;
 
-    conn
+    Ok(conn)
 }
 
 pub fn import_mock_data(conn: &Connection) {
@@ -150,32 +155,31 @@ pub fn import_mock_data(conn: &Connection) {
     }
 }
 
-pub fn get_mailboxes(conn: &Connection) -> Vec<MailboxRow> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, parent_id, role, sort_order, total_emails, unread_emails
-             FROM mailbox ORDER BY sort_order",
-        )
-        .expect("failed to prepare mailbox query");
+pub fn get_mailboxes(conn: &Connection) -> Result<Vec<MailboxRow>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, parent_id, role, sort_order, total_emails, unread_emails
+         FROM mailbox ORDER BY sort_order",
+    )?;
 
-    stmt.query_map([], |row| {
-        Ok(MailboxRow {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            parent_id: row.get(2)?,
-            role: row.get(3)?,
-            sort_order: row.get(4)?,
-            total_emails: row.get(5)?,
-            unread_emails: row.get(6)?,
-        })
-    })
-    .expect("failed to query mailboxes")
-    .collect::<Result<Vec<_>>>()
-    .expect("failed to collect mailboxes")
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MailboxRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                parent_id: row.get(2)?,
+                role: row.get(3)?,
+                sort_order: row.get(4)?,
+                total_emails: row.get(5)?,
+                unread_emails: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(rows)
 }
 
-fn query_emails(conn: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) -> Vec<EmailRow> {
-    let mut stmt = conn.prepare(sql).expect("failed to prepare email query");
+fn query_emails(conn: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<Vec<EmailRow>, DbError> {
+    let mut stmt = conn.prepare(sql)?;
 
     let email_rows: Vec<EmailRow> = stmt
         .query_map(params, |row| {
@@ -194,37 +198,32 @@ fn query_emails(conn: &Connection, sql: &str, params: &[&dyn rusqlite::ToSql]) -
                 mailbox_ids: Vec::new(),
                 keywords: Vec::new(),
             })
-        })
-        .expect("failed to query emails")
-        .collect::<Result<Vec<_>>>()
-        .expect("failed to collect emails");
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    // Enrich with mailbox_ids and keywords
-    email_rows
+    // Prepare enrichment statements once outside the loop
+    let mut mailbox_stmt = conn.prepare("SELECT mailbox_id FROM email_mailbox WHERE email_id = ?1")?;
+    let mut keyword_stmt = conn.prepare("SELECT keyword FROM email_keyword WHERE email_id = ?1")?;
+
+    let enriched = email_rows
         .into_iter()
         .map(|mut e| {
-            e.mailbox_ids = conn
-                .prepare("SELECT mailbox_id FROM email_mailbox WHERE email_id = ?1")
-                .expect("failed to prepare mailbox_ids query")
-                .query_map(params![e.id], |row| row.get(0))
-                .expect("failed to query mailbox_ids")
-                .collect::<Result<Vec<String>>>()
-                .expect("failed to collect mailbox_ids");
+            e.mailbox_ids = mailbox_stmt
+                .query_map(params![e.id], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
 
-            e.keywords = conn
-                .prepare("SELECT keyword FROM email_keyword WHERE email_id = ?1")
-                .expect("failed to prepare keywords query")
-                .query_map(params![e.id], |row| row.get(0))
-                .expect("failed to query keywords")
-                .collect::<Result<Vec<String>>>()
-                .expect("failed to collect keywords");
+            e.keywords = keyword_stmt
+                .query_map(params![e.id], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
 
-            e
+            Ok(e)
         })
-        .collect()
+        .collect::<Result<Vec<_>, DbError>>()?;
+
+    Ok(enriched)
 }
 
-pub fn get_emails_in_mailbox(conn: &Connection, mailbox_id: &str) -> Vec<EmailRow> {
+pub fn get_emails_in_mailbox(conn: &Connection, mailbox_id: &str) -> Result<Vec<EmailRow>, DbError> {
     query_emails(
         conn,
         "SELECT e.id, e.thread_id, e.subject, e.from_name, e.from_email, e.preview,
@@ -237,7 +236,7 @@ pub fn get_emails_in_mailbox(conn: &Connection, mailbox_id: &str) -> Vec<EmailRo
     )
 }
 
-pub fn get_all_emails(conn: &Connection) -> Vec<EmailRow> {
+pub fn get_all_emails(conn: &Connection) -> Result<Vec<EmailRow>, DbError> {
     query_emails(
         conn,
         "SELECT id, thread_id, subject, from_name, from_email, preview,
@@ -247,18 +246,18 @@ pub fn get_all_emails(conn: &Connection) -> Vec<EmailRow> {
     )
 }
 
-pub fn get_email(conn: &Connection, email_id: &str) -> Option<EmailRow> {
+pub fn get_email(conn: &Connection, email_id: &str) -> Result<Option<EmailRow>, DbError> {
     let results = query_emails(
         conn,
         "SELECT id, thread_id, subject, from_name, from_email, preview,
                 received_at, has_attachment, is_read, is_flagged, size
          FROM email WHERE id = ?1",
         &[&email_id as &dyn rusqlite::ToSql],
-    );
-    results.into_iter().next()
+    )?;
+    Ok(results.into_iter().next())
 }
 
-pub fn get_thread(conn: &Connection, thread_id: &str) -> Vec<EmailRow> {
+pub fn get_thread(conn: &Connection, thread_id: &str) -> Result<Vec<EmailRow>, DbError> {
     query_emails(
         conn,
         "SELECT id, thread_id, subject, from_name, from_email, preview,

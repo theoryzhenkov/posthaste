@@ -20,8 +20,8 @@ async fn main() {
     let jmap_username = std::env::var("JMAP_USERNAME").ok();
     let jmap_password = std::env::var("JMAP_PASSWORD").ok();
 
-    std::fs::create_dir_all("data").ok();
-    let conn = db::init_db("data/mail.sqlite");
+    std::fs::create_dir_all("data").expect("failed to create data directory");
+    let conn = db::init_db("data/mail.sqlite").expect("failed to initialize database");
 
     if let (Some(url), Some(user), Some(pass)) = (jmap_url, jmap_username, jmap_password) {
         println!("Connecting to JMAP server at {url}...");

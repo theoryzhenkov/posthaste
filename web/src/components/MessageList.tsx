@@ -66,13 +66,6 @@ export function MessageList({
           e.preventDefault();
           navigateEmail(-1);
           break;
-        case "Enter":
-          // Select already handled by navigateEmail setting the ID
-          break;
-        case "/":
-          // Placeholder: focus search bar when implemented
-          e.preventDefault();
-          break;
       }
     }
 

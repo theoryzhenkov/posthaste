@@ -81,53 +81,77 @@ fn unix_to_iso8601(ts: i64) -> String {
     )
 }
 
-pub async fn list_mailboxes(State(state): State<Arc<AppState>>) -> Json<Vec<MailboxResponse>> {
-    let conn = state.db.lock().expect("db lock poisoned");
-    let rows = db::get_mailboxes(&conn);
-    let response: Vec<MailboxResponse> = rows
-        .into_iter()
-        .map(|r| MailboxResponse {
-            id: r.id,
-            name: r.name,
-            role: r.role,
-            unread_emails: r.unread_emails,
-            total_emails: r.total_emails,
-        })
-        .collect();
-    Json(response)
+pub async fn list_mailboxes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<MailboxResponse>>, StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = db::get_mailboxes(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let response: Vec<MailboxResponse> = rows
+            .into_iter()
+            .map(|r| MailboxResponse {
+                id: r.id,
+                name: r.name,
+                role: r.role,
+                unread_emails: r.unread_emails,
+                total_emails: r.total_emails,
+            })
+            .collect();
+        Ok(Json(response))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 pub async fn list_emails_in_mailbox(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Json<Vec<EmailResponse>> {
-    let conn = state.db.lock().expect("db lock poisoned");
-    let rows = db::get_emails_in_mailbox(&conn, &id);
-    Json(rows.into_iter().map(email_row_to_response).collect())
+) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = db::get_emails_in_mailbox(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
-pub async fn list_all_emails(State(state): State<Arc<AppState>>) -> Json<Vec<EmailResponse>> {
-    let conn = state.db.lock().expect("db lock poisoned");
-    let rows = db::get_all_emails(&conn);
-    Json(rows.into_iter().map(email_row_to_response).collect())
+pub async fn list_all_emails(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = db::get_all_emails(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 pub async fn get_email(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<EmailResponse>, StatusCode> {
-    let conn = state.db.lock().expect("db lock poisoned");
-    match db::get_email(&conn, &id) {
-        Some(row) => Ok(Json(email_row_to_response(row))),
-        None => Err(StatusCode::NOT_FOUND),
-    }
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        match db::get_email(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+            Some(row) => Ok(Json(email_row_to_response(row))),
+            None => Err(StatusCode::NOT_FOUND),
+        }
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }
 
 pub async fn get_thread(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Json<Vec<EmailResponse>> {
-    let conn = state.db.lock().expect("db lock poisoned");
-    let rows = db::get_thread(&conn, &id);
-    Json(rows.into_iter().map(email_row_to_response).collect())
+) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
+    tokio::task::spawn_blocking(move || {
+        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let rows = db::get_thread(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
 }

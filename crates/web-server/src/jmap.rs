@@ -2,6 +2,22 @@ use jmap_client::client::Client;
 use jmap_client::{email, mailbox};
 use rusqlite::Connection;
 
+use crate::db::DbError;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SyncError {
+    #[error("JMAP error: {0}")]
+    Jmap(#[from] jmap_client::Error),
+    #[error("Database error: {0}")]
+    Database(#[from] DbError),
+}
+
+impl From<rusqlite::Error> for SyncError {
+    fn from(err: rusqlite::Error) -> Self {
+        SyncError::Database(DbError::from(err))
+    }
+}
+
 pub async fn connect(url: &str, username: &str, password: &str) -> Result<Client, jmap_client::Error> {
     let host = url::Url::parse(url)
         .ok()
@@ -15,7 +31,7 @@ pub async fn connect(url: &str, username: &str, password: &str) -> Result<Client
         .await
 }
 
-pub async fn sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), SyncError> {
     // Query all mailbox IDs
     let mailbox_ids = client
         .mailbox_query(
@@ -60,11 +76,15 @@ pub async fn sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), Bo
         let total_emails = mb.total_emails();
         let unread_emails = mb.unread_emails();
 
-        let role_str = match role {
+        let role_str: Option<String> = match role {
+            mailbox::Role::Inbox => Some("inbox".into()),
+            mailbox::Role::Drafts => Some("drafts".into()),
+            mailbox::Role::Sent => Some("sent".into()),
+            mailbox::Role::Trash => Some("trash".into()),
+            mailbox::Role::Junk => Some("junk".into()),
+            mailbox::Role::Archive => Some("archive".into()),
             mailbox::Role::None => None,
-            r => Some(format!("{}", serde_json::to_value(&r).ok()
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_else(|| format!("{:?}", r).to_lowercase()))),
+            other => Some(format!("{:?}", other).to_lowercase()),
         };
 
         conn.execute(
@@ -76,7 +96,7 @@ pub async fn sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), Bo
     Ok(())
 }
 
-pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<(), SyncError> {
     // Query email IDs sorted by receivedAt descending
     let email_ids = client
         .email_query(
@@ -131,7 +151,7 @@ pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<(), Box<d
     Ok(())
 }
 
-fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Result<(), Box<dyn std::error::Error>> {
+fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Result<(), SyncError> {
     for em in emails {
         let id = em.id().unwrap_or_default();
         let thread_id = em.thread_id().unwrap_or_default();
@@ -148,8 +168,8 @@ fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Res
             .unwrap_or((None, None));
 
         let keywords = em.keywords();
-        let is_read = keywords.iter().any(|k| *k == "$seen");
-        let is_flagged = keywords.iter().any(|k| *k == "$flagged");
+        let is_read = keywords.contains(&"$seen");
+        let is_flagged = keywords.contains(&"$flagged");
 
         conn.execute(
             "INSERT OR REPLACE INTO email (id, thread_id, subject, from_name, from_email, preview, received_at, has_attachment, size, is_read, is_flagged) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",

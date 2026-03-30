@@ -1643,7 +1643,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "serde",
- "serde_json",
+ "thiserror",
  "tokio",
  "tower-http",
  "url",
