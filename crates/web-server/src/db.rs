@@ -30,12 +30,13 @@ pub struct EmailRow {
     pub keywords: Vec<String>,
 }
 
-pub fn init_db() -> Connection {
-    let conn = Connection::open_in_memory().expect("failed to open in-memory SQLite database");
+pub fn init_db(path: &str) -> Connection {
+    let conn = Connection::open(path).expect("failed to open SQLite database");
+    conn.execute_batch("PRAGMA journal_mode=WAL;").ok();
 
     conn.execute_batch(
         "
-        CREATE TABLE mailbox (
+        CREATE TABLE IF NOT EXISTS mailbox (
             id TEXT NOT NULL,
             account_id TEXT NOT NULL DEFAULT 'mock-account-1',
             name TEXT NOT NULL,
@@ -47,7 +48,7 @@ pub fn init_db() -> Connection {
             PRIMARY KEY (account_id, id)
         );
 
-        CREATE TABLE email (
+        CREATE TABLE IF NOT EXISTS email (
             id TEXT NOT NULL,
             account_id TEXT NOT NULL DEFAULT 'mock-account-1',
             thread_id TEXT NOT NULL,
@@ -63,14 +64,14 @@ pub fn init_db() -> Connection {
             PRIMARY KEY (account_id, id)
         );
 
-        CREATE TABLE email_mailbox (
+        CREATE TABLE IF NOT EXISTS email_mailbox (
             account_id TEXT NOT NULL DEFAULT 'mock-account-1',
             email_id TEXT NOT NULL,
             mailbox_id TEXT NOT NULL,
             PRIMARY KEY (account_id, email_id, mailbox_id)
         );
 
-        CREATE TABLE email_keyword (
+        CREATE TABLE IF NOT EXISTS email_keyword (
             account_id TEXT NOT NULL DEFAULT 'mock-account-1',
             email_id TEXT NOT NULL,
             keyword TEXT NOT NULL,
@@ -80,11 +81,15 @@ pub fn init_db() -> Connection {
     )
     .expect("failed to create tables");
 
-    import_mock_data(&conn);
     conn
 }
 
-fn import_mock_data(conn: &Connection) {
+pub fn import_mock_data(conn: &Connection) {
+    conn.execute("DELETE FROM email_keyword", []).expect("failed to clear email_keyword");
+    conn.execute("DELETE FROM email_mailbox", []).expect("failed to clear email_mailbox");
+    conn.execute("DELETE FROM email", []).expect("failed to clear email");
+    conn.execute("DELETE FROM mailbox", []).expect("failed to clear mailbox");
+
     let engine = MailEngine::new();
 
     for mb in engine.get_mailboxes() {
