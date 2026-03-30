@@ -1,4 +1,4 @@
-import type { Email, Mailbox } from "./types";
+import type { Email, EmailBody, Mailbox } from "./types";
 import { ApiError } from "./errors";
 
 const BASE_URL = "http://localhost:3001/api";
@@ -25,4 +25,8 @@ export async function fetchEmail(emailId: string): Promise<Email> {
 
 export async function fetchThread(threadId: string): Promise<Email[]> {
   return request<Email[]>(`/threads/${threadId}`);
+}
+
+export async function fetchEmailBody(emailId: string): Promise<EmailBody> {
+  return request<EmailBody>(`/emails/${emailId}/body`);
 }

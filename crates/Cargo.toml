@@ -3,6 +3,7 @@ members = ["jmap-core", "mail-engine", "web-server"]
 resolver = "2"
 
 [workspace.dependencies]
+ammonia = "4"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 rusqlite = { version = "0.33", features = ["bundled"] }

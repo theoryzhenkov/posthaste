@@ -305,7 +305,7 @@ body {
 .message-detail {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .message-detail--empty {
@@ -374,9 +374,21 @@ body {
 }
 
 .message-detail__body {
-  padding: 24px;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--color-text);
+  flex: 1;
+  overflow: auto;
+}
+
+.message-detail__loading {
+  color: var(--color-text-secondary);
+  padding: 20px;
+  text-align: center;
+}
+
+.message-detail__text {
   white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 16px;
+  margin: 0;
 }
