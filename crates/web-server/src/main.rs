@@ -1,5 +1,6 @@
 mod api;
 mod db;
+mod jmap;
 
 use std::sync::{Arc, Mutex};
 
@@ -13,7 +14,39 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let conn = db::init_db();
+    dotenvy::dotenv().ok();
+
+    let jmap_url = std::env::var("JMAP_URL").ok();
+    let jmap_username = std::env::var("JMAP_USERNAME").ok();
+    let jmap_password = std::env::var("JMAP_PASSWORD").ok();
+
+    std::fs::create_dir_all("data").ok();
+    let conn = db::init_db("data/mail.sqlite");
+
+    if let (Some(url), Some(user), Some(pass)) = (jmap_url, jmap_username, jmap_password) {
+        println!("Connecting to JMAP server at {url}...");
+        match jmap::connect(&url, &user, &pass).await {
+            Ok(client) => {
+                println!("Connected! Syncing...");
+                if let Err(e) = jmap::sync_mailboxes(&client, &conn).await {
+                    eprintln!("Failed to sync mailboxes: {e}");
+                }
+                if let Err(e) = jmap::sync_emails(&client, &conn).await {
+                    eprintln!("Failed to sync emails: {e}");
+                }
+                println!("Sync complete.");
+            }
+            Err(e) => {
+                eprintln!("Failed to connect to JMAP: {e}");
+                eprintln!("Falling back to mock data.");
+                db::import_mock_data(&conn);
+            }
+        }
+    } else {
+        println!("No JMAP credentials. Using mock data.");
+        db::import_mock_data(&conn);
+    }
+
     let state = Arc::new(AppState {
         db: Mutex::new(conn),
     });
