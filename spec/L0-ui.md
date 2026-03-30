@@ -1,43 +1,41 @@
 ---
 scope: L0
-summary: "Why SwiftUI, thin-UI principle, navigation model, rendering approach"
-modified: 2026-03-29
-reviewed: 2026-03-29
+summary: "Why React, thin-frontend principle, navigation model, rendering approach"
+modified: 2026-03-31
+reviewed: 2026-03-31
 depends:
   - path: README
-  - path: spec/L0-bridge
+  - path: spec/L0-api
 dependents:
   - path: spec/L1-ui
 ---
 
 # UI domain -- L0
 
-## Thin UI principle
+## Thin frontend principle
 
-The SwiftUI layer is a projection of state held in GRDB. It contains no business logic, no protocol code, no data transformation beyond view formatting. All reads come from GRDB via `ValueObservation`. All writes go through the Rust core via UniFFI. This means the UI can be tested with a pre-populated database and mock Rust objects, with no network dependency.
+The React frontend is a stateless view layer. It fetches data from the Rust API, renders it, and sends mutations back. No business logic, no protocol code, no local database. State management uses React Query for server state (cached API responses with automatic refetching) and local React state for UI-only concerns (selection, focus, panel sizes). The frontend can be tested against a mock API server.
 
-## Why SwiftUI
+## Why React + TypeScript
 
-SwiftUI is mature enough for a three-column mail client on macOS. It provides `NavigationSplitView` for the standard mail layout, native dark mode, system font rendering, and accessibility out of the box. The alternative, AppKit, offers more control but requires significantly more code for the same result.
+React's component model handles complex UI state well -- keyboard shortcut routing, multi-panel layouts, virtualized lists. TypeScript provides type safety for the API contract. The ecosystem offers mature solutions for every UI problem a mail client faces. The alternative (Leptos, Dioxus, or other Rust WASM frameworks) would keep the entire stack in Rust but has a much smaller ecosystem and less mature tooling for complex UIs.
 
-WKWebView (AppKit under the hood) handles HTML email rendering, which is the one area where SwiftUI falls short. The rest of the UI is native SwiftUI.
+## Why web-first
+
+A browser-based UI eliminates platform-specific code entirely. The same frontend works on macOS, Windows, and Linux. Later, Tauri can wrap it in a native window for desktop distribution. The tradeoff is losing native OS integration (Spotlight, system notifications, mailto: handler), but these can be added via Tauri or a native wrapper without changing the frontend.
 
 ## Navigation model
 
-Three-column split view. Left column: mailbox sidebar with per-account sections and smart mailboxes. Center column: message list, flat or threaded. Right column: message detail or thread conversation view.
-
-The sidebar and message list are SwiftUI native. The message detail uses WKWebView for HTML content. Selection state flows left-to-right: selecting a mailbox populates the message list, selecting a message populates the detail pane.
+Three-column CSS Grid layout. Left: mailbox sidebar. Center: message list. Right: message detail / thread conversation. This mirrors the traditional mail client layout. Selection flows left-to-right: clicking a mailbox loads its messages, clicking a message shows its content.
 
 ## HTML email rendering
 
-This is the hardest UI problem. Real-world email HTML is broken, inconsistent, and sometimes hostile. The rendering pipeline works in two stages. First, Rust sanitizes the HTML via `ammonia` (strips scripts, dangerous attributes, scopes CSS) and injects dark mode CSS. Second, Swift renders the clean HTML in a WKWebView with JavaScript disabled and no network access. Remote images are blocked by default, with a per-message "Load images" button.
-
-Sanitization runs in Rust so that Swift never touches raw, potentially malicious HTML. The WKWebView is locked down as a pure rendering surface.
+Email HTML is sanitized in Rust (via ammonia) before reaching the frontend. The frontend renders it in a sandboxed iframe with `sandbox="allow-popups"` (no scripts, no forms, no same-origin access). Remote images are blocked by default; the user clicks "Load images" to re-request the email with images allowed. Dark mode support is handled by injecting CSS in the Rust sanitization pipeline.
 
 ## Keyboard-first design
 
-Following MailMate's philosophy, every action is keyboard-accessible. Single-key shortcuts handle common actions (archive, delete, reply, forward). Multi-stroke sequences handle less common actions. The initial shortcut set follows MailMate conventions where possible, and shortcuts are configurable via plist files.
+Same philosophy as the native spec -- every action is keyboard-accessible. j/k navigation, single-key actions, multi-stroke sequences (g+i for inbox). Implemented via a React keyboard event handler at the app root level with a focus management system that routes keys to the active panel.
 
 ## What we don't build for v1
 
-Custom themes, toolbar customization, notification preferences, multiple window support, full-screen compose, print, share extensions, Spotlight indexing, and `mailto:` handler registration. These are real features but not required for the MVP.
+Offline mode (Service Worker), push notifications, drag-and-drop, custom themes, print, and mobile-responsive layout. Desktop-first, always-connected.
