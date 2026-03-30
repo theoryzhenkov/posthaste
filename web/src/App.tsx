@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
 import { Sidebar } from "./components/Sidebar";
+import { useEmailActions } from "./hooks/useEmailActions";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,6 +19,8 @@ function MailClient() {
     null,
   );
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+
+  const actions = useEmailActions(selectedMailboxId);
 
   const handleSelectMailbox = useCallback((id: string) => {
     setSelectedMailboxId(id);
@@ -38,8 +41,9 @@ function MailClient() {
         mailboxId={selectedMailboxId}
         selectedEmailId={selectedEmailId}
         onSelectEmail={handleSelectEmail}
+        actions={actions}
       />
-      <MessageDetail emailId={selectedEmailId} />
+      <MessageDetail emailId={selectedEmailId} actions={actions} />
     </div>
   );
 }
