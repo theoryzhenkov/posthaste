@@ -1,9 +1,11 @@
 [workspace]
-members = ["jmap-core", "mail-engine", "uniffi-bridge"]
+members = ["jmap-core", "mail-engine", "web-server"]
 resolver = "2"
 
 [workspace.dependencies]
-uniffi = { version = "0.29", features = ["cli"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
