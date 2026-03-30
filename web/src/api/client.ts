@@ -24,5 +24,5 @@ export async function fetchEmail(emailId: string): Promise<Email> {
 }
 
 export async function fetchThread(threadId: string): Promise<Email[]> {
-  return request<Email[]>(`/threads/${threadId}/emails`);
+  return request<Email[]>(`/threads/${threadId}`);
 }
