@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
 
-use crate::db;
+use crate::{db, jmap, sanitize};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -154,4 +154,72 @@ pub async fn get_thread(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailBodyResponse {
+    pub email_id: String,
+    pub html: Option<String>,
+    pub text: Option<String>,
+}
+
+pub async fn get_email_body(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<EmailBodyResponse>, StatusCode> {
+    // 1. Check cache
+    let cached = {
+        let state = state.clone();
+        let id = id.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            db::get_email_body(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??
+    };
+
+    if let Some(body) = cached {
+        return Ok(Json(EmailBodyResponse {
+            email_id: body.email_id,
+            html: body.html,
+            text: body.text_body,
+        }));
+    }
+
+    // 2. Fetch from JMAP
+    let client = state
+        .jmap_client
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let (raw_html, text) = jmap::fetch_email_body(client, &id).await.map_err(|e| {
+        eprintln!("Failed to fetch email body: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    // 3. Sanitize HTML
+    let sanitized_html = raw_html.map(|h| sanitize::sanitize_email_html(&h));
+
+    // 4. Cache
+    {
+        let state = state.clone();
+        let id = id.clone();
+        let html = sanitized_html.clone();
+        let text = text.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            db::save_email_body(&conn, &id, html.as_deref(), text.as_deref())
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    }
+
+    // 5. Return
+    Ok(Json(EmailBodyResponse {
+        email_id: id,
+        html: sanitized_html,
+        text,
+    }))
 }

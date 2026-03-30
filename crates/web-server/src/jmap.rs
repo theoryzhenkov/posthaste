@@ -151,6 +151,46 @@ pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<(), SyncE
     Ok(())
 }
 
+pub async fn fetch_email_body(
+    client: &Client,
+    email_id: &str,
+) -> Result<(Option<String>, Option<String>), SyncError> {
+    let mut request = client.build();
+    let get_request = request.get_email().ids([email_id]).properties([
+        email::Property::Id,
+        email::Property::BodyValues,
+        email::Property::HtmlBody,
+        email::Property::TextBody,
+    ]);
+    get_request
+        .arguments()
+        .body_properties([email::BodyProperty::PartId, email::BodyProperty::Type])
+        .fetch_all_body_values(true);
+
+    let mut emails = request.send_get_email().await?.take_list();
+    let email = emails
+        .pop()
+        .ok_or_else(|| SyncError::Jmap(jmap_client::Error::Internal("email not found".into())))?;
+
+    let html = email.html_body().and_then(|parts| {
+        parts
+            .first()
+            .and_then(|part| part.part_id())
+            .and_then(|part_id| email.body_value(part_id))
+            .map(|v| v.value().to_string())
+    });
+
+    let text = email.text_body().and_then(|parts| {
+        parts
+            .first()
+            .and_then(|part| part.part_id())
+            .and_then(|part_id| email.body_value(part_id))
+            .map(|v| v.value().to_string())
+    });
+
+    Ok((html, text))
+}
+
 fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Result<(), SyncError> {
     for em in emails {
         let id = em.id().unwrap_or_default();
