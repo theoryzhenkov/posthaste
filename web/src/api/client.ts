@@ -1,4 +1,13 @@
-import type { Email, EmailAction, EmailBody, Mailbox } from "./types";
+import type {
+  Email,
+  EmailAction,
+  EmailBody,
+  IdentityResponse,
+  Mailbox,
+  PreviewResponse,
+  ReplyDataResponse,
+  SendEmailRequest,
+} from "./types";
 import { ApiError } from "./errors";
 
 const BASE_URL = "http://localhost:3001/api";
@@ -48,4 +57,29 @@ export async function performEmailAction(
   action: EmailAction,
 ): Promise<Email> {
   return postRequest<Email>(`/emails/${emailId}/actions`, action);
+}
+
+export async function sendEmail(req: SendEmailRequest): Promise<void> {
+  const response = await fetch(`${BASE_URL}/compose/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, response.statusText);
+  }
+}
+
+export async function previewMarkdown(body: string): Promise<PreviewResponse> {
+  return postRequest<PreviewResponse>("/compose/preview", { body });
+}
+
+export async function fetchIdentity(): Promise<IdentityResponse> {
+  return request<IdentityResponse>("/identity");
+}
+
+export async function fetchReplyData(
+  emailId: string,
+): Promise<ReplyDataResponse> {
+  return request<ReplyDataResponse>(`/emails/${emailId}/reply-data`);
 }

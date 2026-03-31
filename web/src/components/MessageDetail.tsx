@@ -7,9 +7,18 @@ import { EmailFrame } from "./EmailFrame";
 interface MessageDetailProps {
   emailId: string | null;
   actions: EmailActions;
+  onReply: (emailId: string) => void;
+  onReplyAll: (emailId: string) => void;
+  onForward: (emailId: string) => void;
 }
 
-export function MessageDetail({ emailId, actions }: MessageDetailProps) {
+export function MessageDetail({
+  emailId,
+  actions,
+  onReply,
+  onReplyAll,
+  onForward,
+}: MessageDetailProps) {
   const {
     data: email,
     isLoading,
@@ -80,6 +89,16 @@ export function MessageDetail({ emailId, actions }: MessageDetailProps) {
         </div>
       </div>
       <div className="message-detail__actions">
+        <button onClick={() => onReply(email.id)} title="Reply">
+          Reply
+        </button>
+        <button onClick={() => onReplyAll(email.id)} title="Reply All">
+          Reply All
+        </button>
+        <button onClick={() => onForward(email.id)} title="Forward">
+          Forward
+        </button>
+        <span className="message-detail__actions-separator" />
         <button
           onClick={() => actions.toggleRead(email)}
           title={email.isRead ? "Mark unread" : "Mark read"}

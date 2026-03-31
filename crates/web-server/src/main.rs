@@ -1,4 +1,5 @@
 mod api;
+mod compose;
 mod db;
 mod jmap;
 mod sanitize;
@@ -143,6 +144,10 @@ async fn main() {
         .route("/api/emails/{id}/body", get(api::get_email_body))
         .route("/api/emails/{id}/actions", post(api::post_email_action))
         .route("/api/threads/{id}", get(api::get_thread))
+        .route("/api/compose/preview", post(api::preview_markdown))
+        .route("/api/compose/send", post(api::send_email))
+        .route("/api/identity", get(api::get_identity))
+        .route("/api/emails/{id}/reply-data", get(api::get_reply_data))
         .layer(cors)
         .with_state(state);
 

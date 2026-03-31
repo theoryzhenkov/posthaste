@@ -10,6 +10,10 @@ interface MessageListProps {
   selectedEmailId: string | null;
   onSelectEmail: (id: string) => void;
   actions: EmailActions;
+  onCompose: () => void;
+  onReply: (emailId: string) => void;
+  onReplyAll: (emailId: string) => void;
+  onForward: (emailId: string) => void;
 }
 
 export function MessageList({
@@ -17,6 +21,10 @@ export function MessageList({
   selectedEmailId,
   onSelectEmail,
   actions,
+  onCompose,
+  onReply,
+  onReplyAll,
+  onForward,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -87,12 +95,34 @@ export function MessageList({
         case "Backspace":
           if (selectedEmail) actions.trash(selectedEmail.id);
           break;
+        case "n":
+          e.preventDefault();
+          onCompose();
+          break;
+        case "r":
+          if (selectedEmail) {
+            e.preventDefault();
+            onReply(selectedEmail.id);
+          }
+          break;
+        case "R":
+          if (selectedEmail) {
+            e.preventDefault();
+            onReplyAll(selectedEmail.id);
+          }
+          break;
+        case "f":
+          if (selectedEmail) {
+            e.preventDefault();
+            onForward(selectedEmail.id);
+          }
+          break;
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navigateEmail, selectedEmail, actions]);
+  }, [navigateEmail, selectedEmail, actions, onCompose, onReply, onReplyAll, onForward]);
 
   if (!mailboxId) {
     return (

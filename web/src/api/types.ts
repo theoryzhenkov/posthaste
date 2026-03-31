@@ -36,3 +36,38 @@ export type EmailAction =
   | { action: "trash" }
   | { action: "delete" }
   | { action: "move"; mailboxId: string };
+
+export interface Recipient {
+  name: string | null;
+  email: string;
+}
+
+export interface SendEmailRequest {
+  to: Recipient[];
+  cc: Recipient[];
+  bcc: Recipient[];
+  subject: string;
+  body: string; // Markdown
+  inReplyTo: string | null;
+  references: string | null;
+}
+
+export interface PreviewResponse {
+  html: string;
+}
+
+export interface IdentityResponse {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface ReplyDataResponse {
+  to: Recipient[];
+  cc: Recipient[];
+  replySubject: string;
+  forwardSubject: string;
+  quotedBody: string | null;
+  inReplyTo: string | null;
+  references: string | null;
+}
