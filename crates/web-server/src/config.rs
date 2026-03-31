@@ -3,12 +3,10 @@ use std::path::{Path, PathBuf};
 
 use mail_config::TomlConfigRepository;
 use mail_domain::{
-    AccountDriver, AccountSettings, AccountTransportSettings, AppSettings, ConfigRepository,
-    SecretRef,
+    now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings,
+    AccountTransportSettings, AppSettings, ConfigRepository, SecretRef,
 };
 use serde::Deserialize;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 const APP_DIR_NAME: &str = "mail";
 
@@ -110,7 +108,7 @@ pub fn import_bootstrap(
 
     // Import seed accounts
     for account in &bootstrap.seed.accounts {
-        let now = now_iso8601()?;
+        let now = domain_now_iso8601()?;
         let source = AccountSettings {
             id: account.id.clone().into(),
             name: account.name.clone(),
@@ -195,14 +193,7 @@ fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
 }
 
 fn default_bootstrap_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+    xdg_dir("XDG_CONFIG_HOME", ".config")
         .join(APP_DIR_NAME)
         .join("bootstrap.toml")
-}
-
-fn now_iso8601() -> Result<String, String> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|err| err.to_string())
 }

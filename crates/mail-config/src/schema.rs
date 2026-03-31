@@ -2,7 +2,7 @@ use mail_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings, SecretKind,
     SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -119,11 +119,11 @@ impl SourceToml {
             created_at: self
                 .created_at
                 .clone()
-                .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+                .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
             updated_at: self
                 .updated_at
                 .clone()
-                .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+                .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
         }
     }
 
@@ -264,11 +264,11 @@ impl SmartMailboxToml {
             created_at: self
                 .created_at
                 .clone()
-                .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+                .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
             updated_at: self
                 .updated_at
                 .clone()
-                .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+                .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
         })
     }
 

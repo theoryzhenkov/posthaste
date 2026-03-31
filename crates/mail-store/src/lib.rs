@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -6,20 +6,36 @@ use std::time::Duration;
 
 use hex::encode as hex_encode;
 use mail_domain::{
-    AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
-    ConversationSummary, ConversationView, DomainEvent, EventFilter, FetchedBody, MailStore,
-    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, RawMessageRef,
-    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxValue, StoreError, SyncBatch, SyncCursor, SyncObject,
-    ThreadId, ThreadView,
+    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, CommandResult,
+    ConversationCursor, ConversationId, ConversationPage, ConversationSummary, ConversationView,
+    DomainEvent, EventFilter, FetchedBody, MailStore, MailboxId, MailboxSummary, MessageDetail,
+    MessageId, MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError,
+    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+
+#[derive(Debug)]
+struct MessageSummaryRow {
+    id: MessageId,
+    source_id: AccountId,
+    source_name: String,
+    source_thread_id: ThreadId,
+    conversation_id: ConversationId,
+    subject: Option<String>,
+    from_name: Option<String>,
+    from_email: Option<String>,
+    preview: Option<String>,
+    received_at: String,
+    has_attachment: bool,
+    is_read: bool,
+    is_flagged: bool,
+}
 
 pub struct DatabaseStore {
     db_path: PathBuf,
@@ -121,15 +137,11 @@ impl DatabaseStore {
                  ORDER BY received_at ASC",
             )
             .map_err(sql_to_store_error)?;
-        let rows = statement
-            .query_map(params![account_id.as_str(), thread_id.as_str()], |row| {
-                row_to_message_summary(&connection, row)
-            })
-            .map_err(sql_to_store_error)?;
-        let messages = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_to_store_error)?;
-        Ok(messages)
+        let rows = load_message_summary_rows(
+            &mut statement,
+            params![account_id.as_str(), thread_id.as_str()],
+        )?;
+        hydrate_message_summaries(&connection, rows)
     }
 }
 
@@ -242,14 +254,8 @@ impl MailStore for DatabaseStore {
                  ORDER BY m.received_at ASC, m.id ASC",
             )
             .map_err(sql_to_store_error)?;
-        let rows = statement
-            .query_map(params![conversation_id.as_str()], |row| {
-                row_to_message_summary(&connection, row)
-            })
-            .map_err(sql_to_store_error)?;
-        let messages = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_to_store_error)?;
+        let rows = load_message_summary_rows(&mut statement, params![conversation_id.as_str()])?;
+        let messages = hydrate_message_summaries(&connection, rows)?;
         if messages.is_empty() {
             return Ok(None);
         }
@@ -293,24 +299,15 @@ impl MailStore for DatabaseStore {
              ORDER BY m.received_at DESC"
         };
         let mut statement = connection.prepare(sql).map_err(sql_to_store_error)?;
-        let summaries = if let Some(mailbox_id) = mailbox_id {
-            statement
-                .query_map(params![account_id.as_str(), mailbox_id.as_str()], |row| {
-                    row_to_message_summary(&connection, row)
-                })
-                .map_err(sql_to_store_error)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(sql_to_store_error)?
+        let summary_rows = if let Some(mailbox_id) = mailbox_id {
+            load_message_summary_rows(
+                &mut statement,
+                params![account_id.as_str(), mailbox_id.as_str()],
+            )?
         } else {
-            statement
-                .query_map(params![account_id.as_str()], |row| {
-                    row_to_message_summary(&connection, row)
-                })
-                .map_err(sql_to_store_error)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(sql_to_store_error)?
+            load_message_summary_rows(&mut statement, params![account_id.as_str()])?
         };
-        Ok(summaries)
+        hydrate_message_summaries(&connection, summary_rows)
     }
 
     fn query_messages_by_rule(
@@ -408,15 +405,12 @@ impl MailStore for DatabaseStore {
                  WHERE m.account_id = ?1 AND m.id = ?2",
             )
             .map_err(sql_to_store_error)?;
-
-        let summary = statement
-            .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
-                row_to_message_summary(&connection, row)
-            })
-            .optional()
-            .map_err(sql_to_store_error)?;
-
-        let Some(summary) = summary else {
+        let rows = load_message_summary_rows(
+            &mut statement,
+            params![account_id.as_str(), message_id.as_str()],
+        )?;
+        let mut summaries = hydrate_message_summaries(&connection, rows)?;
+        let Some(summary) = summaries.pop() else {
             return Ok(None);
         };
 
@@ -802,7 +796,7 @@ impl MailStore for DatabaseStore {
                 events.push(insert_event_tx(
                     tx,
                     account_id,
-                    "message.updated",
+                    EVENT_TOPIC_MESSAGE_UPDATED,
                     message.mailbox_ids.first(),
                     Some(&message.id),
                     json!({
@@ -847,7 +841,7 @@ impl MailStore for DatabaseStore {
                     events.push(insert_event_tx(
                         tx,
                         account_id,
-                        "message.arrived",
+                        EVENT_TOPIC_MESSAGE_ARRIVED,
                         Some(mailbox_id),
                         Some(&message.id),
                         json!({
@@ -1031,7 +1025,7 @@ impl MailStore for DatabaseStore {
                 events.push(insert_event_tx(
                     tx,
                     account_id,
-                    "message.arrived",
+                    EVENT_TOPIC_MESSAGE_ARRIVED,
                     Some(mailbox_id),
                     Some(message_id),
                     json!({ "messageId": message_id.as_str(), "mailboxId": mailbox_id.as_str() }),
@@ -1072,7 +1066,7 @@ impl MailStore for DatabaseStore {
             let event = insert_event_tx(
                 tx,
                 account_id,
-                "message.updated",
+                EVENT_TOPIC_MESSAGE_UPDATED,
                 previous_mailboxes.first(),
                 Some(message_id),
                 json!({ "messageId": message_id.as_str(), "deleted": true }),
@@ -1090,33 +1084,33 @@ impl MailStore for DatabaseStore {
              FROM event_log
              WHERE 1 = 1"
             .to_string();
-        let mut bindings: Vec<String> = Vec::new();
+        let mut bindings: Vec<SqlValue> = Vec::new();
 
         if let Some(account_id) = &filter.account_id {
             sql.push_str(" AND account_id = ?");
             sql.push_str(&(bindings.len() + 1).to_string());
-            bindings.push(account_id.to_string());
+            bindings.push(SqlValue::Text(account_id.to_string()));
         }
 
         if let Some(after_seq) = filter.after_seq {
             sql.push_str(" AND seq > ?");
             sql.push_str(&(bindings.len() + 1).to_string());
-            bindings.push(after_seq.to_string());
+            bindings.push(SqlValue::Integer(after_seq));
         }
         if let Some(topic) = &filter.topic {
             sql.push_str(" AND topic = ?");
             sql.push_str(&(bindings.len() + 1).to_string());
-            bindings.push(topic.clone());
+            bindings.push(SqlValue::Text(topic.clone()));
         }
         if let Some(mailbox_id) = &filter.mailbox_id {
             sql.push_str(" AND mailbox_id = ?");
             sql.push_str(&(bindings.len() + 1).to_string());
-            bindings.push(mailbox_id.to_string());
+            bindings.push(SqlValue::Text(mailbox_id.to_string()));
         }
         sql.push_str(" ORDER BY seq ASC");
 
         let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
-        let params_ref = rusqlite::params_from_iter(bindings.iter());
+        let params_ref = rusqlite::params_from_iter(bindings);
         let rows = statement
             .query_map(params_ref, row_to_event)
             .map_err(sql_to_store_error)?;
@@ -1335,13 +1329,8 @@ fn query_messages_by_rule(
          ORDER BY m.received_at DESC"
     );
     let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
-    let rows = statement
-        .query_map(params_from_iter(params), |row| {
-            row_to_message_summary(connection, row)
-        })
-        .map_err(sql_to_store_error)?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(sql_to_store_error)
+    let rows = load_message_summary_rows(&mut statement, params_from_iter(params))?;
+    hydrate_message_summaries(connection, rows)
 }
 
 fn query_conversations_by_rule(
@@ -1411,13 +1400,20 @@ fn query_conversations(
                     OVER (PARTITION BY filtered.conversation_id) AS unread_count
             FROM filtered
         ),
+        distinct_source_groups AS (
+            SELECT DISTINCT
+                filtered.conversation_id,
+                filtered.account_id,
+                filtered.account_name
+            FROM filtered
+        ),
         source_groups AS (
             SELECT
-                filtered.conversation_id,
-                GROUP_CONCAT(DISTINCT filtered.account_id) AS source_ids,
-                GROUP_CONCAT(DISTINCT filtered.account_name) AS source_names
-            FROM filtered
-            GROUP BY filtered.conversation_id
+                distinct_source_groups.conversation_id,
+                GROUP_CONCAT(distinct_source_groups.account_id, char(31)) AS source_ids,
+                GROUP_CONCAT(distinct_source_groups.account_name, char(31)) AS source_names
+            FROM distinct_source_groups
+            GROUP BY distinct_source_groups.conversation_id
         ),
         latest AS (
             SELECT
@@ -1740,6 +1736,56 @@ fn push_placeholders(values: &[String], params: &mut Vec<SqlValue>) -> String {
     vec!["?"; values.len()].join(", ")
 }
 
+fn load_message_summary_rows<P: rusqlite::Params>(
+    statement: &mut rusqlite::Statement<'_>,
+    params: P,
+) -> Result<Vec<MessageSummaryRow>, StoreError> {
+    let rows = statement
+        .query_map(params, row_to_message_summary_row)
+        .map_err(sql_to_store_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)
+}
+
+fn hydrate_message_summaries(
+    connection: &Connection,
+    rows: Vec<MessageSummaryRow>,
+) -> Result<Vec<MessageSummary>, StoreError> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mailbox_ids = fetch_mailbox_ids_bulk(connection, &rows)?;
+    let keywords = fetch_keywords_bulk(connection, &rows)?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let key = (
+                row.source_id.as_str().to_string(),
+                row.id.as_str().to_string(),
+            );
+            MessageSummary {
+                id: row.id,
+                source_id: row.source_id,
+                source_name: row.source_name,
+                source_thread_id: row.source_thread_id,
+                conversation_id: row.conversation_id,
+                subject: row.subject,
+                from_name: row.from_name,
+                from_email: row.from_email,
+                preview: row.preview,
+                received_at: row.received_at,
+                has_attachment: row.has_attachment,
+                is_read: row.is_read,
+                is_flagged: row.is_flagged,
+                mailbox_ids: mailbox_ids.get(&key).cloned().unwrap_or_default(),
+                keywords: keywords.get(&key).cloned().unwrap_or_default(),
+            }
+        })
+        .collect())
+}
+
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     connection
         .pragma_update(None, "journal_mode", "wal")
@@ -1750,19 +1796,12 @@ fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn row_to_message_summary(
-    connection: &Connection,
+fn row_to_message_summary_row(
     row: &rusqlite::Row<'_>,
-) -> Result<MessageSummary, rusqlite::Error> {
-    let message_id = MessageId(row.get(0)?);
-    let source_id = AccountId(row.get(1)?);
-    let mailbox_ids =
-        fetch_mailbox_ids(connection, &source_id, &message_id).map_err(store_to_sqlite_error)?;
-    let keywords =
-        fetch_keywords(connection, &source_id, &message_id).map_err(store_to_sqlite_error)?;
-    Ok(MessageSummary {
-        id: message_id.clone(),
-        source_id,
+) -> Result<MessageSummaryRow, rusqlite::Error> {
+    Ok(MessageSummaryRow {
+        id: MessageId(row.get(0)?),
+        source_id: AccountId(row.get(1)?),
         source_name: row.get(2)?,
         source_thread_id: ThreadId(row.get(3)?),
         conversation_id: ConversationId(row.get(4)?),
@@ -1774,8 +1813,6 @@ fn row_to_message_summary(
         has_attachment: row.get::<_, i64>(10)? != 0,
         is_read: row.get::<_, i64>(11)? != 0,
         is_flagged: row.get::<_, i64>(12)? != 0,
-        mailbox_ids,
-        keywords,
     })
 }
 
@@ -1816,6 +1853,15 @@ fn fetch_mailbox_ids(
     Ok(mailbox_ids)
 }
 
+fn fetch_mailbox_ids_bulk(
+    connection: &Connection,
+    rows: &[MessageSummaryRow],
+) -> Result<HashMap<(String, String), Vec<MailboxId>>, StoreError> {
+    fetch_message_values_bulk(connection, rows, "message_mailbox", "mailbox_id", |row| {
+        Ok(MailboxId(row.get(2)?))
+    })
+}
+
 fn fetch_mailbox_ids_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -1840,28 +1886,72 @@ fn fetch_mailbox_ids_tx(
     Ok(mailbox_ids)
 }
 
-fn fetch_keywords(
+fn fetch_keywords_bulk(
     connection: &Connection,
-    account_id: &AccountId,
-    message_id: &MessageId,
-) -> Result<Vec<String>, StoreError> {
-    let mut statement = connection
-        .prepare(
-            "SELECT keyword
-             FROM message_keyword
-             WHERE account_id = ?1 AND message_id = ?2
-             ORDER BY keyword",
-        )
-        .map_err(sql_to_store_error)?;
-    let rows = statement
-        .query_map(params![account_id.as_str(), message_id.as_str()], |row| {
-            row.get(0)
-        })
-        .map_err(sql_to_store_error)?;
-    let keywords = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_to_store_error)?;
-    Ok(keywords)
+    rows: &[MessageSummaryRow],
+) -> Result<HashMap<(String, String), Vec<String>>, StoreError> {
+    fetch_message_values_bulk(connection, rows, "message_keyword", "keyword", |row| {
+        row.get(2)
+    })
+}
+
+fn fetch_message_values_bulk<T>(
+    connection: &Connection,
+    rows: &[MessageSummaryRow],
+    table: &str,
+    value_column: &str,
+    mut map_value: impl FnMut(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
+) -> Result<HashMap<(String, String), Vec<T>>, StoreError> {
+    const CHUNK_SIZE: usize = 400;
+
+    let mut seen = HashSet::new();
+    let mut keys = Vec::new();
+    for row in rows {
+        let key = (
+            row.source_id.as_str().to_string(),
+            row.id.as_str().to_string(),
+        );
+        if seen.insert(key.clone()) {
+            keys.push(key);
+        }
+    }
+
+    let mut values_by_key = HashMap::new();
+    for chunk in keys.chunks(CHUNK_SIZE) {
+        let mut params = Vec::with_capacity(chunk.len() * 2);
+        let mut predicates = Vec::with_capacity(chunk.len());
+        for (account_id, message_id) in chunk {
+            predicates.push("(account_id = ? AND message_id = ?)".to_string());
+            params.push(SqlValue::Text(account_id.clone()));
+            params.push(SqlValue::Text(message_id.clone()));
+        }
+        let sql = format!(
+            "SELECT account_id, message_id, {value_column}
+             FROM {table}
+             WHERE {}
+             ORDER BY account_id, message_id, {value_column}",
+            predicates.join(" OR ")
+        );
+        let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(params_from_iter(params), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    map_value(row)?,
+                ))
+            })
+            .map_err(sql_to_store_error)?;
+        for row in rows {
+            let (account_id, message_id, value) = row.map_err(sql_to_store_error)?;
+            values_by_key
+                .entry((account_id, message_id))
+                .or_insert_with(Vec::new)
+                .push(value);
+        }
+    }
+
+    Ok(values_by_key)
 }
 
 fn fetch_keywords_tx(
@@ -2361,10 +2451,14 @@ fn split_group_concat_ids(value: Option<String>) -> Vec<AccountId> {
 fn split_group_concat_strings(value: Option<String>) -> Vec<String> {
     value
         .unwrap_or_default()
-        .split(',')
+        .split('\u{1f}')
         .filter(|part| !part.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+fn now_iso8601() -> Result<String, StoreError> {
+    domain_now_iso8601().map_err(StoreError::Failure)
 }
 
 fn normalize_header_token(value: Option<&str>) -> Option<String> {
@@ -2431,9 +2525,7 @@ fn synthesize_raw_mime(message: &mail_domain::MessageRecord) -> Option<String> {
         .body_text
         .as_deref()
         .unwrap_or(message.preview.as_deref().unwrap_or(""));
-    Some(format!(
-        "From: {from}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{text}\r\n"
-    ))
+    Some(synthesize_plain_text_raw_mime(&from, subject, Some(text)))
 }
 
 fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
@@ -2448,12 +2540,6 @@ fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
     }
 }
 
-fn now_iso8601() -> Result<String, StoreError> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|err| StoreError::Failure(err.to_string()))
-}
-
 fn bool_to_i64(value: bool) -> i64 {
     if value {
         1
@@ -2464,10 +2550,6 @@ fn bool_to_i64(value: bool) -> i64 {
 
 fn sql_to_store_error(err: rusqlite::Error) -> StoreError {
     StoreError::Failure(err.to_string())
-}
-
-fn store_to_sqlite_error(err: StoreError) -> rusqlite::Error {
-    rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }
 
 fn io_to_store_error(err: std::io::Error) -> StoreError {
@@ -2644,13 +2726,24 @@ mod tests {
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
 
-        let first = store.append_event(&account, "message.updated", None, None, json!({"n": 1}))?;
-        let _second =
-            store.append_event(&account, "message.updated", None, None, json!({"n": 2}))?;
+        let first = store.append_event(
+            &account,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            None,
+            json!({"n": 1}),
+        )?;
+        let _second = store.append_event(
+            &account,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            None,
+            json!({"n": 2}),
+        )?;
 
         let events = store.list_events(&EventFilter {
             account_id: Some(account),
-            topic: Some("message.updated".to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: None,
             after_seq: Some(first.seq),
         })?;
@@ -2722,6 +2815,127 @@ mod tests {
     }
 
     #[test]
+    fn bulk_message_hydration_preserves_order_and_account_scoped_metadata() -> Result<(), StoreError>
+    {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account_a = AccountId::from("primary");
+        let account_b = AccountId::from("secondary");
+        setup_source(&store, &account_a, "Primary")?;
+        setup_source(&store, &account_b, "Secondary")?;
+
+        store.apply_sync_batch(
+            &account_a,
+            &SyncBatch {
+                mailboxes: vec![
+                    mail_domain::MailboxRecord {
+                        id: MailboxId::from("archive"),
+                        name: "Archive".to_string(),
+                        role: Some("archive".to_string()),
+                        unread_emails: 0,
+                        total_emails: 0,
+                    },
+                    mail_domain::MailboxRecord {
+                        id: MailboxId::from("inbox"),
+                        name: "Inbox".to_string(),
+                        role: Some("inbox".to_string()),
+                        unread_emails: 0,
+                        total_emails: 0,
+                    },
+                ],
+                messages: vec![
+                    MessageRecord {
+                        received_at: "2026-03-31T11:00:00Z".to_string(),
+                        mailbox_ids: vec![MailboxId::from("inbox")],
+                        keywords: vec!["$flagged".to_string(), "zeta".to_string()],
+                        ..sample_message("newer", "inbox", Some("mime-newer"))
+                    },
+                    MessageRecord {
+                        received_at: "2026-03-31T10:00:00Z".to_string(),
+                        mailbox_ids: vec![MailboxId::from("archive"), MailboxId::from("inbox")],
+                        keywords: vec!["$seen".to_string(), "alpha".to_string()],
+                        ..sample_message("shared-id", "inbox", Some("mime-a"))
+                    },
+                ],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "state-a".to_string(),
+                    updated_at: "2026-03-31T11:00:00Z".to_string(),
+                }],
+            },
+        )?;
+
+        store.apply_sync_batch(
+            &account_b,
+            &SyncBatch {
+                mailboxes: vec![mail_domain::MailboxRecord {
+                    id: MailboxId::from("trash"),
+                    name: "Trash".to_string(),
+                    role: Some("trash".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: vec![MessageRecord {
+                    mailbox_ids: vec![MailboxId::from("trash")],
+                    keywords: vec!["beta".to_string()],
+                    ..sample_message("shared-id", "trash", Some("mime-b"))
+                }],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "state-b".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )?;
+
+        let listed = store.list_messages(&account_a, None)?;
+        assert_eq!(
+            listed
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newer", "shared-id"]
+        );
+        assert_eq!(listed[0].mailbox_ids, vec![MailboxId::from("inbox")]);
+        assert_eq!(
+            listed[0].keywords,
+            vec!["$flagged".to_string(), "zeta".to_string()]
+        );
+        assert_eq!(
+            listed[1].mailbox_ids,
+            vec![MailboxId::from("archive"), MailboxId::from("inbox")]
+        );
+        assert_eq!(
+            listed[1].keywords,
+            vec!["$seen".to_string(), "alpha".to_string()]
+        );
+
+        let queried = store.query_messages_by_rule(&SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                    field: SmartMailboxField::Keyword,
+                    operator: SmartMailboxOperator::Equals,
+                    negated: false,
+                    value: SmartMailboxValue::String("beta".to_string()),
+                })],
+            },
+        })?;
+        assert_eq!(queried.len(), 1);
+        assert_eq!(queried[0].source_id, account_b);
+        assert_eq!(queried[0].mailbox_ids, vec![MailboxId::from("trash")]);
+        assert_eq!(queried[0].keywords, vec!["beta".to_string()]);
+        Ok(())
+    }
+
+    #[test]
     fn arrival_event_only_emits_for_new_mailbox_membership() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
@@ -2775,11 +2989,11 @@ mod tests {
 
         let first_arrivals: Vec<_> = first_events
             .iter()
-            .filter(|event| event.topic == "message.arrived")
+            .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_ARRIVED)
             .collect();
         let second_arrivals: Vec<_> = second_events
             .iter()
-            .filter(|event| event.topic == "message.arrived")
+            .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_ARRIVED)
             .collect();
 
         assert_eq!(first_arrivals.len(), 1);

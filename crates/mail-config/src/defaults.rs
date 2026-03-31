@@ -1,7 +1,7 @@
 use mail_domain::{
     SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
@@ -23,7 +23,7 @@ fn role_mailbox(
     default_key: &str,
     role: &str,
 ) -> SmartMailbox {
-    let timestamp = "1970-01-01T00:00:00Z".to_string();
+    let timestamp = RFC3339_EPOCH.to_string();
     SmartMailbox {
         id: SmartMailboxId::from(id),
         name: name.to_string(),
@@ -49,7 +49,7 @@ fn role_mailbox(
 }
 
 fn all_mail_mailbox() -> SmartMailbox {
-    let timestamp = "1970-01-01T00:00:00Z".to_string();
+    let timestamp = RFC3339_EPOCH.to_string();
     SmartMailbox {
         id: SmartMailboxId::from("default-all-mail"),
         name: "All Mail".to_string(),

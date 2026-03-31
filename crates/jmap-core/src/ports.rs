@@ -149,19 +149,10 @@ pub trait MailStore: Send + Sync {
         message_id: Option<&MessageId>,
         payload: serde_json::Value,
     ) -> Result<DomainEvent, StoreError>;
-    fn upsert_source_projection(
-        &self,
-        _source_id: &AccountId,
-        _name: &str,
-    ) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn delete_source_projection(&self, _source_id: &AccountId) -> Result<(), StoreError> {
-        Ok(())
-    }
-    fn delete_source_data(&self, _account_id: &AccountId) -> Result<(), StoreError> {
-        Ok(())
-    }
+    fn upsert_source_projection(&self, source_id: &AccountId, name: &str)
+        -> Result<(), StoreError>;
+    fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError>;
+    fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError>;
 }
 
 pub trait SecretStore: Send + Sync {

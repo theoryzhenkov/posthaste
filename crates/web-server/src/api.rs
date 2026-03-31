@@ -11,13 +11,14 @@ use mail_domain::{
     AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor, ConversationId,
     ConversationPage, ConversationSummary, ConversationView, DomainEvent, EventFilter, MailboxId,
     MailboxSummary, MessageDetail, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    now_iso8601 as domain_now_iso8601,
     SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand,
     SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmartMailboxRule,
-    SmartMailboxSummary,
+    SmartMailboxSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
@@ -291,7 +292,7 @@ pub async fn create_account(
         ));
     }
 
-    let timestamp = now_iso8601().map_err(internal_error)?;
+    let timestamp = domain_now_iso8601().map_err(internal_error)?;
     let mut account = AccountSettings {
         id: account_id.clone(),
         name,
@@ -308,7 +309,7 @@ pub async fn create_account(
         .save_source(&account)
         .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, "account.created")
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
         .map_err(store_error_to_api)?;
 
     let settings = state
@@ -329,20 +330,8 @@ pub async fn patch_account(
         .get_source(&account_id)
         .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
-    if let Some(name) = request.name {
-        account.name = name;
-    }
-    if let Some(driver) = request.driver {
-        account.driver = driver;
-    }
-    if let Some(enabled) = request.enabled {
-        account.enabled = enabled;
-    }
-    if let Some(transport) = request.transport {
-        account.transport.base_url = normalize_optional(transport.base_url);
-        account.transport.username = normalize_optional(transport.username);
-    }
-    account.updated_at = now_iso8601().map_err(internal_error)?;
+    apply_account_patch(&mut account, &request);
+    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     let existing_secret_ref = account.transport.secret_ref.clone();
     let secret_request = request.secret.unwrap_or_default();
     apply_secret_instruction(
@@ -358,7 +347,7 @@ pub async fn patch_account(
         .save_source(&account)
         .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, "account.updated")
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
         .map_err(store_error_to_api)?;
 
     let settings = state
@@ -425,7 +414,7 @@ pub async fn delete_account(
         .service
         .delete_source(&account_id)
         .map_err(ApiError::from_service_error)?;
-    append_and_publish_account_event(&state, &account_id, "account.deleted")
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_DELETED)
         .map_err(store_error_to_api)?;
     Ok(Json(OkResponse { ok: true }))
 }
@@ -503,7 +492,7 @@ pub async fn create_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateSmartMailboxRequest>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
-    let timestamp = now_iso8601().map_err(internal_error)?;
+    let timestamp = domain_now_iso8601().map_err(internal_error)?;
     let smart_mailbox = SmartMailbox {
         id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
         name: request.name,
@@ -552,7 +541,7 @@ pub async fn patch_smart_mailbox(
     if let Some(rule) = request.rule {
         smart_mailbox.rule = rule;
     }
-    smart_mailbox.updated_at = now_iso8601().map_err(internal_error)?;
+    smart_mailbox.updated_at = domain_now_iso8601().map_err(internal_error)?;
     state
         .service
         .save_smart_mailbox(&smart_mailbox)
@@ -851,10 +840,7 @@ fn account_transport_overview(account: &AccountSettings) -> AccountTransportOver
 fn secret_status(secret_ref: Option<&SecretRef>) -> SecretStatus {
     match secret_ref {
         Some(secret_ref) => SecretStatus {
-            storage: match secret_ref.kind {
-                SecretKind::Env => SecretStorage::Env,
-                SecretKind::Os => SecretStorage::Os,
-            },
+            storage: secret_ref.kind.clone(),
             configured: true,
             label: match secret_ref.kind {
                 SecretKind::Env => Some(secret_ref.key.clone()),
@@ -1055,6 +1041,26 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
     })
 }
 
+fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountRequest) {
+    if let Some(name) = &request.name {
+        account.name = name.clone();
+    }
+    if let Some(driver) = &request.driver {
+        account.driver = driver.clone();
+    }
+    if let Some(enabled) = request.enabled {
+        account.enabled = enabled;
+    }
+    if let Some(transport) = &request.transport {
+        if transport.base_url.is_some() {
+            account.transport.base_url = normalize_optional(transport.base_url.clone());
+        }
+        if transport.username.is_some() {
+            account.transport.username = normalize_optional(transport.username.clone());
+        }
+    }
+}
+
 async fn set_account_enabled(
     state: Arc<AppState>,
     account_id: String,
@@ -1067,22 +1073,14 @@ async fn set_account_enabled(
         .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
     account.enabled = enabled;
-    account.updated_at = now_iso8601().map_err(internal_error)?;
+    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     state
         .service
         .save_source(&account)
         .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(
-        &state,
-        &account_id,
-        if enabled {
-            "account.updated"
-        } else {
-            "account.updated"
-        },
-    )
-    .map_err(store_error_to_api)?;
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+        .map_err(store_error_to_api)?;
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -1108,12 +1106,6 @@ fn store_error_to_api(error: mail_domain::StoreError) -> ApiError {
 
 fn internal_error(error: String) -> ApiError {
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", error)
-}
-
-fn now_iso8601() -> Result<String, String> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|err| err.to_string())
 }
 
 fn generate_smart_mailbox_id(name: &str) -> String {
@@ -1161,7 +1153,29 @@ fn parse_conversation_cursor(cursor: Option<&str>) -> Result<Option<Conversation
     let Some(cursor) = cursor else {
         return Ok(None);
     };
-    let Some((latest_received_at, conversation_id)) = cursor.split_once('\t') else {
+    let Some((len_prefix, remainder)) = cursor.split_once(':') else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor must include a timestamp and conversation id",
+        ));
+    };
+    let timestamp_len = len_prefix.parse::<usize>().map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor must include a timestamp and conversation id",
+        )
+    })?;
+    if timestamp_len == 0 || remainder.len() <= timestamp_len {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor must include a timestamp and conversation id",
+        ));
+    }
+    let (latest_received_at, conversation_id) = remainder.split_at(timestamp_len);
+    let Some(conversation_id) = conversation_id.strip_prefix(':') else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_cursor",
@@ -1183,7 +1197,8 @@ fn parse_conversation_cursor(cursor: Option<&str>) -> Result<Option<Conversation
 
 fn encode_conversation_cursor(cursor: &ConversationCursor) -> String {
     format!(
-        "{}\t{}",
+        "{}:{}:{}",
+        cursor.latest_received_at.len(),
         cursor.latest_received_at,
         cursor.conversation_id.as_str()
     )
@@ -1229,7 +1244,7 @@ mod tests {
         let event = DomainEvent {
             seq: 5,
             account_id: AccountId::from("primary"),
-            topic: "message.arrived".to_string(),
+            topic: EVENT_TOPIC_MESSAGE_ARRIVED.to_string(),
             occurred_at: "2026-03-31T10:00:00Z".to_string(),
             mailbox_id: Some(MailboxId::from("inbox")),
             message_id: Some(MessageId::from("message-1")),
@@ -1237,7 +1252,7 @@ mod tests {
         };
         let matching_filter = EventFilter {
             account_id: Some(AccountId::from("primary")),
-            topic: Some("message.arrived".to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
             mailbox_id: Some(MailboxId::from("inbox")),
             after_seq: Some(4),
         };
@@ -1246,7 +1261,7 @@ mod tests {
             &event,
             &EventFilter {
                 account_id: None,
-                topic: Some("message.arrived".to_string()),
+                topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
                 mailbox_id: Some(MailboxId::from("inbox")),
                 after_seq: Some(4),
             }
@@ -1255,7 +1270,7 @@ mod tests {
             &event,
             &EventFilter {
                 account_id: Some(AccountId::from("secondary")),
-                topic: Some("message.arrived".to_string()),
+                topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
                 mailbox_id: Some(MailboxId::from("inbox")),
                 after_seq: Some(4),
             }
@@ -1314,5 +1329,45 @@ mod tests {
         assert_eq!(status.storage, SecretStorage::Os);
         assert!(status.configured);
         assert_eq!(status.label, None);
+    }
+
+    #[test]
+    fn patch_account_preserves_username_when_username_is_omitted() {
+        let mut account = AccountSettings {
+            id: AccountId::from("primary"),
+            name: "Primary".to_string(),
+            driver: AccountDriver::Jmap,
+            enabled: true,
+            transport: mail_domain::AccountTransportSettings {
+                base_url: Some("https://before.example/jmap".to_string()),
+                username: Some("alice@example.com".to_string()),
+                secret_ref: None,
+            },
+            created_at: "2026-03-31T10:00:00Z".to_string(),
+            updated_at: "2026-03-31T10:00:00Z".to_string(),
+        };
+
+        apply_account_patch(
+            &mut account,
+            &PatchAccountRequest {
+                name: None,
+                driver: None,
+                enabled: None,
+                transport: Some(AccountTransportRequest {
+                    base_url: Some("https://after.example/jmap".to_string()),
+                    username: None,
+                }),
+                secret: None,
+            },
+        );
+
+        assert_eq!(
+            account.transport.base_url.as_deref(),
+            Some("https://after.example/jmap")
+        );
+        assert_eq!(
+            account.transport.username.as_deref(),
+            Some("alice@example.com")
+        );
     }
 }
