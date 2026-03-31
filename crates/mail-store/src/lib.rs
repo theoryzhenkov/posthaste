@@ -2425,10 +2425,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use mail_domain::{
-        AccountDriver, AccountSettings, AccountTransportSettings, MessageRecord, SmartMailbox,
-        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-        SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule,
-        SmartMailboxRuleNode, SmartMailboxValue, SyncCursor,
+        MessageRecord, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+        SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+        SmartMailboxValue, SyncCursor,
     };
 
     use super::*;
@@ -2471,45 +2470,8 @@ mod tests {
         }
     }
 
-    fn create_account(store: &DatabaseStore, account_id: &AccountId, name: &str) -> Result<(), StoreError> {
-        store.create_account(&AccountSettings {
-            id: account_id.clone(),
-            name: name.to_string(),
-            driver: AccountDriver::Mock,
-            enabled: true,
-            transport: AccountTransportSettings {
-                base_url: None,
-                username: None,
-                secret_ref: None,
-            },
-            created_at: "2026-03-31T10:00:00Z".to_string(),
-            updated_at: "2026-03-31T10:00:00Z".to_string(),
-        })
-    }
-
-    fn user_smart_mailbox(id: &str, name: &str, field: SmartMailboxField, value: SmartMailboxValue) -> SmartMailbox {
-        SmartMailbox {
-            id: SmartMailboxId::from(id),
-            name: name.to_string(),
-            position: 99,
-            kind: SmartMailboxKind::User,
-            default_key: None,
-            parent_id: None,
-            rule: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::All,
-                    negated: false,
-                    nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                        field,
-                        operator: SmartMailboxOperator::Equals,
-                        negated: false,
-                        value,
-                    })],
-                },
-            },
-            created_at: "2026-03-31T10:00:00Z".to_string(),
-            updated_at: "2026-03-31T10:00:00Z".to_string(),
-        }
+    fn setup_source(store: &DatabaseStore, account_id: &AccountId, name: &str) -> Result<(), StoreError> {
+        store.upsert_source_projection(account_id, name)
     }
 
     #[test]
@@ -2518,8 +2480,8 @@ mod tests {
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account_a = AccountId::from("primary");
         let account_b = AccountId::from("secondary");
-        create_account(&store, &account_a, "Primary")?;
-        create_account(&store, &account_b, "Secondary")?;
+        setup_source(&store, &account_a, "Primary")?;
+        setup_source(&store, &account_b, "Secondary")?;
 
         store.apply_sync_batch(
             &account_a,
@@ -2580,7 +2542,7 @@ mod tests {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
-        create_account(&store, &account, "Primary")?;
+        setup_source(&store, &account, "Primary")?;
         let result = store.apply_sync_batch(
             &account,
             &SyncBatch {
@@ -2632,27 +2594,13 @@ mod tests {
     }
 
     #[test]
-    fn seeded_default_smart_mailboxes_are_available_in_sidebar() -> Result<(), StoreError> {
-        let root = temp_root();
-        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
-
-        let smart_mailboxes = store.list_smart_mailboxes()?;
-        let sidebar = store.get_sidebar()?;
-
-        assert!(smart_mailboxes.iter().any(|mailbox| mailbox.id.as_str() == "default-inbox"));
-        assert!(smart_mailboxes.iter().any(|mailbox| mailbox.id.as_str() == "default-all-mail"));
-        assert_eq!(smart_mailboxes.len(), sidebar.smart_mailboxes.len());
-        Ok(())
-    }
-
-    #[test]
     fn smart_mailbox_queries_messages_across_enabled_sources() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account_a = AccountId::from("primary");
         let account_b = AccountId::from("secondary");
-        create_account(&store, &account_a, "Primary")?;
-        create_account(&store, &account_b, "Secondary")?;
+        setup_source(&store, &account_a, "Primary")?;
+        setup_source(&store, &account_b, "Secondary")?;
 
         for account in [&account_a, &account_b] {
             store.apply_sync_batch(
@@ -2681,15 +2629,20 @@ mod tests {
             )?;
         }
 
-        let smart_mailbox = user_smart_mailbox(
-            "sm-inbox",
-            "Inbox across sources",
-            SmartMailboxField::MailboxRole,
-            SmartMailboxValue::String("inbox".to_string()),
-        );
-        store.create_smart_mailbox(&smart_mailbox)?;
+        let rule = SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                    field: SmartMailboxField::MailboxRole,
+                    operator: SmartMailboxOperator::Equals,
+                    negated: false,
+                    value: SmartMailboxValue::String("inbox".to_string()),
+                })],
+            },
+        };
 
-        let messages = store.list_smart_mailbox_messages(&smart_mailbox.id)?;
+        let messages = store.query_messages_by_rule(&rule)?;
 
         assert_eq!(messages.len(), 2);
         assert!(messages.iter().any(|message| message.source_id == account_a));
@@ -2698,44 +2651,11 @@ mod tests {
     }
 
     #[test]
-    fn invalid_smart_mailbox_rule_is_rejected() -> Result<(), StoreError> {
-        let root = temp_root();
-        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
-        let smart_mailbox = SmartMailbox {
-            id: SmartMailboxId::from("sm-bad"),
-            name: "Broken".to_string(),
-            position: 10,
-            kind: SmartMailboxKind::User,
-            default_key: None,
-            parent_id: None,
-            rule: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::All,
-                    negated: false,
-                    nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                        field: SmartMailboxField::IsRead,
-                        operator: SmartMailboxOperator::Contains,
-                        negated: false,
-                        value: SmartMailboxValue::String("yes".to_string()),
-                    })],
-                },
-            },
-            created_at: "2026-03-31T10:00:00Z".to_string(),
-            updated_at: "2026-03-31T10:00:00Z".to_string(),
-        };
-
-        let result = store.create_smart_mailbox(&smart_mailbox);
-
-        assert!(result.is_err());
-        Ok(())
-    }
-
-    #[test]
     fn arrival_event_only_emits_for_new_mailbox_membership() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
-        create_account(&store, &account, "Primary")?;
+        setup_source(&store, &account, "Primary")?;
         let first_batch = SyncBatch {
             mailboxes: vec![
                 mail_domain::MailboxRecord {
