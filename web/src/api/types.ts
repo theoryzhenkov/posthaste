@@ -1,3 +1,5 @@
+export const DEFAULT_ACCOUNT_ID = "primary";
+
 export interface Mailbox {
   id: string;
   name: string;
@@ -6,14 +8,14 @@ export interface Mailbox {
   totalEmails: number;
 }
 
-export interface Email {
+export interface MessageSummary {
   id: string;
   threadId: string;
   subject: string | null;
   fromName: string | null;
   fromEmail: string | null;
   preview: string | null;
-  receivedAt: string; // ISO 8601
+  receivedAt: string;
   hasAttachment: boolean;
   isRead: boolean;
   isFlagged: boolean;
@@ -21,53 +23,38 @@ export interface Email {
   keywords: string[];
 }
 
-export interface EmailBody {
-  emailId: string;
-  html: string | null;
-  text: string | null;
+export interface RawMessageRef {
+  path: string;
+  sha256: string;
+  size: number;
+  mimeType: string;
+  fetchedAt: string;
 }
 
-export type EmailAction =
-  | { action: "markRead" }
-  | { action: "markUnread" }
-  | { action: "flag" }
-  | { action: "unflag" }
-  | { action: "archive" }
-  | { action: "trash" }
-  | { action: "delete" }
-  | { action: "move"; mailboxId: string };
-
-export interface Recipient {
-  name: string | null;
-  email: string;
+export interface MessageDetail extends MessageSummary {
+  bodyHtml: string | null;
+  bodyText: string | null;
+  rawMessage: RawMessageRef | null;
 }
 
-export interface SendEmailRequest {
-  to: Recipient[];
-  cc: Recipient[];
-  bcc: Recipient[];
-  subject: string;
-  body: string; // Markdown
-  inReplyTo: string | null;
-  references: string | null;
-}
-
-export interface PreviewResponse {
-  html: string;
-}
-
-export interface IdentityResponse {
+export interface ThreadView {
   id: string;
-  name: string;
-  email: string;
+  messages: MessageSummary[];
 }
 
-export interface ReplyDataResponse {
-  to: Recipient[];
-  cc: Recipient[];
-  replySubject: string;
-  forwardSubject: string;
-  quotedBody: string | null;
-  inReplyTo: string | null;
-  references: string | null;
+export interface DomainEvent {
+  seq: number;
+  accountId: string;
+  topic: string;
+  occurredAt: string;
+  mailboxId: string | null;
+  messageId: string | null;
+  payload: Record<string, unknown>;
 }
+
+export type MessageCommand =
+  | { kind: "setKeywords"; add: string[]; remove: string[] }
+  | { kind: "addToMailbox"; mailboxId: string }
+  | { kind: "removeFromMailbox"; mailboxId: string }
+  | { kind: "replaceMailboxes"; mailboxIds: string[] }
+  | { kind: "destroy" };

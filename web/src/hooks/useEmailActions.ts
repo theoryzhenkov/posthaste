@@ -1,52 +1,104 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { performEmailAction } from "../api/client";
-import type { Email, EmailAction } from "../api/types";
+import { performMessageCommand } from "../api/client";
+import type { Mailbox, MessageSummary } from "../api/types";
 
 export type EmailActions = ReturnType<typeof useEmailActions>;
 
-export function useEmailActions(selectedMailboxId: string | null) {
+function requiredMailboxByRole(
+  mailboxes: Mailbox[] | undefined,
+  role: string,
+): Mailbox {
+  const mailbox = mailboxes?.find((candidate) => candidate.role === role);
+  if (!mailbox) {
+    throw new Error(`Missing mailbox with role ${role}`);
+  }
+  return mailbox;
+}
+
+export function useEmailActions(accountId: string, selectedMailboxId: string | null) {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: ({
       emailId,
-      action,
+      command,
     }: {
       emailId: string;
-      action: EmailAction;
-    }) => performEmailAction(emailId, action),
+      command:
+        | { kind: "setKeywords"; add: string[]; remove: string[] }
+        | { kind: "replaceMailboxes"; mailboxIds: string[] }
+        | { kind: "destroy" };
+    }) => performMessageCommand(emailId, command, accountId),
     onSuccess: (_data, { emailId }) => {
       queryClient.invalidateQueries({
-        queryKey: ["emails", selectedMailboxId],
+        queryKey: ["messages", accountId, selectedMailboxId],
       });
-      queryClient.invalidateQueries({ queryKey: ["email", emailId] });
-      queryClient.invalidateQueries({ queryKey: ["mailboxes"] });
+      queryClient.invalidateQueries({ queryKey: ["message", accountId, emailId] });
+      queryClient.invalidateQueries({ queryKey: ["mailboxes", accountId] });
     },
   });
 
+  const mailboxes = queryClient.getQueryData<Mailbox[]>(["mailboxes", accountId]);
+
   return {
     markRead: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "markRead" } }),
+      mutation.mutate({
+        emailId,
+        command: { kind: "setKeywords", add: ["$seen"], remove: [] },
+      }),
     markUnread: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "markUnread" } }),
-    toggleRead: (email: Email) =>
+      mutation.mutate({
+        emailId,
+        command: { kind: "setKeywords", add: [], remove: ["$seen"] },
+      }),
+    toggleRead: (email: MessageSummary) =>
       email.isRead
-        ? mutation.mutate({ emailId: email.id, action: { action: "markUnread" } })
-        : mutation.mutate({ emailId: email.id, action: { action: "markRead" } }),
+        ? mutation.mutate({
+            emailId: email.id,
+            command: { kind: "setKeywords", add: [], remove: ["$seen"] },
+          })
+        : mutation.mutate({
+            emailId: email.id,
+            command: { kind: "setKeywords", add: ["$seen"], remove: [] },
+          }),
     flag: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "flag" } }),
+      mutation.mutate({
+        emailId,
+        command: { kind: "setKeywords", add: ["$flagged"], remove: [] },
+      }),
     unflag: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "unflag" } }),
-    toggleFlag: (email: Email) =>
+      mutation.mutate({
+        emailId,
+        command: { kind: "setKeywords", add: [], remove: ["$flagged"] },
+      }),
+    toggleFlag: (email: MessageSummary) =>
       email.isFlagged
-        ? mutation.mutate({ emailId: email.id, action: { action: "unflag" } })
-        : mutation.mutate({ emailId: email.id, action: { action: "flag" } }),
+        ? mutation.mutate({
+            emailId: email.id,
+            command: { kind: "setKeywords", add: [], remove: ["$flagged"] },
+          })
+        : mutation.mutate({
+            emailId: email.id,
+            command: { kind: "setKeywords", add: ["$flagged"], remove: [] },
+          }),
     archive: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "archive" } }),
+      mutation.mutate({
+        emailId,
+        command: {
+          kind: "replaceMailboxes",
+          mailboxIds: [requiredMailboxByRole(mailboxes, "archive").id],
+        },
+      }),
     trash: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "trash" } }),
+      mutation.mutate({
+        emailId,
+        command: {
+          kind: "replaceMailboxes",
+          mailboxIds: [requiredMailboxByRole(mailboxes, "trash").id],
+        },
+      }),
     deletePermanently: (emailId: string) =>
-      mutation.mutate({ emailId, action: { action: "delete" } }),
+      mutation.mutate({ emailId, command: { kind: "destroy" } }),
     isPending: mutation.isPending,
   };
 }

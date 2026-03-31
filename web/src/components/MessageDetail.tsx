@@ -1,37 +1,36 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchEmail, fetchEmailBody } from "../api/client";
+import { fetchMessage } from "../api/client";
 import type { EmailActions } from "../hooks/useEmailActions";
 import { formatRelativeTime } from "../utils/relativeTime";
 import { EmailFrame } from "./EmailFrame";
 
 interface MessageDetailProps {
+  accountId: string;
   emailId: string | null;
   actions: EmailActions;
-  onReply: (emailId: string) => void;
-  onReplyAll: (emailId: string) => void;
-  onForward: (emailId: string) => void;
+}
+
+function senderInitials(senderDisplay: string): string {
+  return senderDisplay
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 export function MessageDetail({
+  accountId,
   emailId,
   actions,
-  onReply,
-  onReplyAll,
-  onForward,
 }: MessageDetailProps) {
   const {
-    data: email,
+    data: message,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["email", emailId],
-    queryFn: () => fetchEmail(emailId!),
-    enabled: emailId !== null,
-  });
-
-  const { data: body, isLoading: bodyLoading } = useQuery({
-    queryKey: ["emailBody", emailId],
-    queryFn: () => fetchEmailBody(emailId!),
+    queryKey: ["message", accountId, emailId],
+    queryFn: () => fetchMessage(emailId!, accountId),
     enabled: emailId !== null,
   });
 
@@ -53,7 +52,7 @@ export function MessageDetail({
     );
   }
 
-  if (error || !email) {
+  if (error || !message) {
     return (
       <div className="message-detail message-detail--empty">
         <p className="message-detail__placeholder message-detail__placeholder--error">
@@ -63,70 +62,111 @@ export function MessageDetail({
     );
   }
 
-  const senderDisplay = email.fromName
-    ? `${email.fromName} <${email.fromEmail ?? ""}>`
-    : (email.fromEmail ?? "Unknown sender");
+  const senderDisplay = message.fromName
+    ? `${message.fromName} <${message.fromEmail ?? ""}>`
+    : (message.fromEmail ?? "Unknown sender");
+  const tags = [
+    message.isFlagged ? "Starred" : null,
+    message.hasAttachment ? "Attachment" : null,
+    ...message.keywords,
+  ].filter(Boolean) as string[];
+  const senderShort = senderInitials(message.fromName ?? message.fromEmail ?? "U");
 
   return (
     <div className="message-detail">
       <div className="message-detail__header">
-        <h2 className="message-detail__subject">
-          {email.subject ?? "(no subject)"}
-        </h2>
-        <div className="message-detail__meta">
-          <span className="message-detail__from">{senderDisplay}</span>
-          <span className="message-detail__date">
-            {formatRelativeTime(email.receivedAt)}
-          </span>
+        <p className="message-detail__eyebrow">message</p>
+        <div className="message-detail__headline">
+          <h2 className="message-detail__subject">
+            {message.subject ?? "(no subject)"}
+          </h2>
+          <span className="message-detail__sender-chip">{senderShort || "?"}</span>
+        </div>
+        <div className="message-detail__meta-grid">
+          <div className="message-detail__meta-item">
+            <span className="message-detail__meta-label">from</span>
+            <span className="message-detail__from">{senderDisplay}</span>
+          </div>
+          <div className="message-detail__meta-item">
+            <span className="message-detail__meta-label">received</span>
+            <span className="message-detail__date">
+              {formatRelativeTime(message.receivedAt)}
+            </span>
+          </div>
+          {message.threadId && (
+            <div className="message-detail__meta-item">
+              <span className="message-detail__meta-label">thread</span>
+              <span>{message.threadId}</span>
+            </div>
+          )}
+          {message.mailboxIds.length > 0 && (
+            <div className="message-detail__meta-item">
+              <span className="message-detail__meta-label">mailboxes</span>
+              <span>{message.mailboxIds.join(", ")}</span>
+            </div>
+          )}
+          {message.rawMessage && (
+            <div className="message-detail__meta-item">
+              <span className="message-detail__meta-label">raw file</span>
+              <span>{message.rawMessage.path}</span>
+            </div>
+          )}
         </div>
         <div className="message-detail__tags">
-          {email.isFlagged && (
-            <span className="message-detail__tag">⭐ Flagged</span>
-          )}
-          {email.hasAttachment && (
-            <span className="message-detail__tag">📎 Attachment</span>
-          )}
+          {tags.map((tag) => (
+            <span className="message-detail__tag" key={tag}>
+              {tag}
+            </span>
+          ))}
         </div>
       </div>
       <div className="message-detail__actions">
-        <button onClick={() => onReply(email.id)} title="Reply">
-          Reply
-        </button>
-        <button onClick={() => onReplyAll(email.id)} title="Reply All">
-          Reply All
-        </button>
-        <button onClick={() => onForward(email.id)} title="Forward">
-          Forward
-        </button>
-        <span className="message-detail__actions-separator" />
-        <button
-          onClick={() => actions.toggleRead(email)}
-          title={email.isRead ? "Mark unread" : "Mark read"}
-        >
-          {email.isRead ? "Mark Unread" : "Mark Read"}
-        </button>
-        <button
-          onClick={() => actions.toggleFlag(email)}
-          title={email.isFlagged ? "Unflag" : "Flag"}
-        >
-          {email.isFlagged ? "Unflag" : "Flag"}
-        </button>
-        <button onClick={() => actions.archive(email.id)} title="Archive">
-          Archive
-        </button>
-        <button onClick={() => actions.trash(email.id)} title="Move to Trash">
-          Trash
-        </button>
+        <div className="message-detail__actions-group">
+          <button
+            className="message-detail__action"
+            onClick={() => actions.toggleRead(message)}
+            title={message.isRead ? "Mark unread" : "Mark read"}
+            type="button"
+          >
+            {message.isRead ? "mark unread" : "mark read"}
+          </button>
+          <button
+            className="message-detail__action"
+            onClick={() => actions.toggleFlag(message)}
+            title={message.isFlagged ? "Unflag" : "Flag"}
+            type="button"
+          >
+            {message.isFlagged ? "unstar" : "star"}
+          </button>
+          <button
+            className="message-detail__action"
+            onClick={() => actions.archive(message.id)}
+            title="Archive"
+            type="button"
+          >
+            archive
+          </button>
+          <button
+            className="message-detail__action message-detail__action--danger"
+            onClick={() => actions.trash(message.id)}
+            title="Move to Trash"
+            type="button"
+          >
+            trash
+          </button>
+        </div>
       </div>
       <div className="message-detail__body">
-        {bodyLoading ? (
-          <p className="message-detail__loading">Loading email body...</p>
-        ) : body?.html ? (
-          <EmailFrame html={body.html} />
-        ) : body?.text ? (
-          <pre className="message-detail__text">{body.text}</pre>
+        {message.bodyHtml ? (
+          <div className="message-detail__body-card">
+            <EmailFrame html={message.bodyHtml} />
+          </div>
+        ) : message.bodyText ? (
+          <pre className="message-detail__text">{message.bodyText}</pre>
         ) : (
-          <p>{email.preview ?? "No content available."}</p>
+          <p className="message-detail__fallback">
+            {message.preview ?? "No content available."}
+          </p>
         )}
       </div>
     </div>

@@ -1,536 +1,374 @@
+use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use mail_domain::{
+    AccountId, AddToMailboxCommand, CommandResult, DomainEvent, EventFilter, MailboxId,
+    MailboxSummary, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceError,
+    SetKeywordsCommand, ThreadId,
+};
+use serde::Deserialize;
+use serde_json::json;
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
-use crate::{compose, db, jmap, sanitize};
-use crate::AppState;
+use crate::{sanitize, AppState};
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MailboxResponse {
-    pub id: String,
-    pub name: String,
-    pub role: Option<String>,
-    pub unread_emails: i64,
-    pub total_emails: i64,
+pub struct ListMessagesQuery {
+    pub mailbox_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EmailResponse {
-    pub id: String,
-    pub thread_id: String,
-    pub subject: Option<String>,
-    pub from_name: Option<String>,
-    pub from_email: Option<String>,
-    pub preview: Option<String>,
-    pub received_at: String, // ISO 8601
-    pub has_attachment: bool,
-    pub is_read: bool,
-    pub is_flagged: bool,
-    pub mailbox_ids: Vec<String>,
-    pub keywords: Vec<String>,
+pub struct EventsQuery {
+    pub account_id: String,
+    pub topic: Option<String>,
+    pub mailbox_id: Option<String>,
+    pub after_seq: Option<i64>,
 }
 
-fn email_row_to_response(row: db::EmailRow) -> EmailResponse {
-    EmailResponse {
-        id: row.id,
-        thread_id: row.thread_id,
-        subject: row.subject,
-        from_name: row.from_name,
-        from_email: row.from_email,
-        preview: row.preview,
-        received_at: unix_to_iso8601(row.received_at),
-        has_attachment: row.has_attachment,
-        is_read: row.is_read,
-        is_flagged: row.is_flagged,
-        mailbox_ids: row.mailbox_ids,
-        keywords: row.keywords,
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiErrorBody {
+    pub code: String,
+    pub message: String,
+    pub details: serde_json::Value,
+}
+
+pub struct ApiError {
+    status: StatusCode,
+    body: ApiErrorBody,
+}
+
+impl ApiError {
+    pub fn from_service_error(error: ServiceError) -> Self {
+        let status = match error.code() {
+            "not_found" => StatusCode::NOT_FOUND,
+            "conflict" | "state_mismatch" => StatusCode::CONFLICT,
+            "auth_error" => StatusCode::UNAUTHORIZED,
+            "gateway_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
+            "network_error" => StatusCode::BAD_GATEWAY,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        Self {
+            status,
+            body: ApiErrorBody {
+                code: error.code().to_string(),
+                message: error.to_string(),
+                details: json!({}),
+            },
+        }
+    }
+
+    pub fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            body: ApiErrorBody {
+                code: code.to_string(),
+                message: message.into(),
+                details: json!({}),
+            },
+        }
     }
 }
 
-/// Convert unix timestamp to ISO 8601 string without external crate.
-fn unix_to_iso8601(ts: i64) -> String {
-    // Compute date/time from unix timestamp (UTC)
-    let secs_per_day: i64 = 86400;
-    let days = ts.div_euclid(secs_per_day);
-    let day_secs = ts.rem_euclid(secs_per_day);
-
-    let hours = day_secs / 3600;
-    let minutes = (day_secs % 3600) / 60;
-    let seconds = day_secs % 60;
-
-    // Days since 1970-01-01 to y/m/d (civil_from_days algorithm)
-    let z = days + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y, m, d, hours, minutes, seconds
-    )
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.body)).into_response()
+    }
 }
 
 pub async fn list_mailboxes(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<MailboxResponse>>, StatusCode> {
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let rows = db::get_mailboxes(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let response: Vec<MailboxResponse> = rows
-            .into_iter()
-            .map(|r| MailboxResponse {
-                id: r.id,
-                name: r.name,
-                role: r.role,
-                unread_emails: r.unread_emails,
-                total_emails: r.total_emails,
-            })
-            .collect();
-        Ok(Json(response))
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    Path(account_id): Path<String>,
+) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    state
+        .service
+        .list_mailboxes(&AccountId(account_id))
+        .map(Json)
+        .map_err(ApiError::from_service_error)
 }
 
-pub async fn list_emails_in_mailbox(
+pub async fn list_messages(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let rows = db::get_emails_in_mailbox(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    Path(account_id): Path<String>,
+    Query(query): Query<ListMessagesQuery>,
+) -> Result<Json<Vec<mail_domain::MessageSummary>>, ApiError> {
+    let mailbox_id = query.mailbox_id.map(MailboxId);
+    state
+        .service
+        .list_messages(&AccountId(account_id), mailbox_id.as_ref())
+        .map(Json)
+        .map_err(ApiError::from_service_error)
 }
 
-pub async fn list_all_emails(
+pub async fn get_message(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let rows = db::get_all_emails(&conn).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-}
-
-pub async fn get_email(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<EmailResponse>, StatusCode> {
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        match db::get_email(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
-            Some(row) => Ok(Json(email_row_to_response(row))),
-            None => Err(StatusCode::NOT_FOUND),
-        }
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    Path((account_id, message_id)): Path<(String, String)>,
+) -> Result<Json<mail_domain::MessageDetail>, ApiError> {
+    let result = state
+        .service
+        .get_message_detail(&AccountId(account_id), &MessageId(message_id))
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    let mut detail = result.detail.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "message detail not available",
+        )
+    })?;
+    detail.body_html = detail
+        .body_html
+        .as_ref()
+        .map(|html| sanitize::sanitize_email_html(html));
+    Ok(Json(detail))
 }
 
 pub async fn get_thread(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<EmailResponse>>, StatusCode> {
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let rows = db::get_thread(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(Json(rows.into_iter().map(email_row_to_response).collect()))
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    Path((account_id, thread_id)): Path<(String, String)>,
+) -> Result<Json<mail_domain::ThreadView>, ApiError> {
+    state
+        .service
+        .get_thread(&AccountId(account_id), &ThreadId(thread_id))
+        .map(Json)
+        .map_err(ApiError::from_service_error)
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmailBodyResponse {
-    pub email_id: String,
-    pub html: Option<String>,
-    pub text: Option<String>,
-}
-
-pub async fn get_email_body(
+pub async fn set_keywords(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<EmailBodyResponse>, StatusCode> {
-    // 1. Check cache
-    let cached = {
-        let state = state.clone();
-        let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            db::get_email_body(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        })
+    Path((account_id, message_id)): Path<(String, String)>,
+    Json(command): Json<SetKeywordsCommand>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = state
+        .service
+        .set_keywords(&AccountId(account_id), &MessageId(message_id), &command)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+pub async fn add_to_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path((account_id, message_id)): Path<(String, String)>,
+    Json(command): Json<AddToMailboxCommand>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = state
+        .service
+        .add_to_mailbox(&AccountId(account_id), &MessageId(message_id), &command)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+pub async fn remove_from_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path((account_id, message_id)): Path<(String, String)>,
+    Json(command): Json<RemoveFromMailboxCommand>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = state
+        .service
+        .remove_from_mailbox(&AccountId(account_id), &MessageId(message_id), &command)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+pub async fn replace_mailboxes(
+    State(state): State<Arc<AppState>>,
+    Path((account_id, message_id)): Path<(String, String)>,
+    Json(command): Json<ReplaceMailboxesCommand>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = state
+        .service
+        .replace_mailboxes(&AccountId(account_id), &MessageId(message_id), &command)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+pub async fn destroy_message(
+    State(state): State<Arc<AppState>>,
+    Path((account_id, message_id)): Path<(String, String)>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = state
+        .service
+        .destroy_message(&AccountId(account_id), &MessageId(message_id))
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+pub async fn trigger_sync(
+    State(state): State<Arc<AppState>>,
+    Path(account_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let account_id = AccountId(account_id);
+    let events = state
+        .service
+        .sync_account(&account_id)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&events);
+    Ok(Json(json!({ "ok": true, "eventCount": events.len() })))
+}
+
+pub async fn stream_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<EventsQuery>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let filter = EventFilter {
+        account_id: AccountId(query.account_id),
+        topic: query.topic,
+        mailbox_id: query.mailbox_id.map(MailboxId),
+        after_seq: query.after_seq,
     };
-
-    if let Some(body) = cached {
-        return Ok(Json(EmailBodyResponse {
-            email_id: body.email_id,
-            html: body.html,
-            text: body.text_body,
-        }));
-    }
-
-    // 2. Fetch from JMAP
-    let client = state
-        .jmap_client
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let (raw_html, text) = jmap::fetch_email_body(client, &id).await.map_err(|e| {
-        eprintln!("Failed to fetch email body: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    // 3. Sanitize HTML
-    let sanitized_html = raw_html.map(|h| sanitize::sanitize_email_html(&h));
-
-    // 4. Cache
-    {
-        let state = state.clone();
-        let id = id.clone();
-        let html = sanitized_html.clone();
-        let text = text.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            db::save_email_body(&conn, &id, html.as_deref(), text.as_deref())
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    }
-
-    // 5. Return
-    Ok(Json(EmailBodyResponse {
-        email_id: id,
-        html: sanitized_html,
-        text,
-    }))
-}
-
-// --- Email mutations ---
-
-#[derive(Deserialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
-pub enum EmailActionRequest {
-    MarkRead,
-    MarkUnread,
-    Flag,
-    Unflag,
-    Archive,
-    Trash,
-    Delete,
-    Move { mailbox_id: String },
-}
-
-/// Describes a mutation to apply: keyword change, mailbox move, or destroy.
-enum EmailMutation {
-    Keyword { keyword: &'static str, set: bool },
-    MoveTo { mailbox_id: String },
-    Destroy,
-}
-
-impl EmailActionRequest {
-    /// Convert the action into a concrete mutation, resolving mailbox IDs for
-    /// archive/trash via the local DB.
-    fn into_mutation(
-        self,
-        conn: &rusqlite::Connection,
-    ) -> Result<EmailMutation, StatusCode> {
-        match self {
-            Self::MarkRead => Ok(EmailMutation::Keyword { keyword: "$seen", set: true }),
-            Self::MarkUnread => Ok(EmailMutation::Keyword { keyword: "$seen", set: false }),
-            Self::Flag => Ok(EmailMutation::Keyword { keyword: "$flagged", set: true }),
-            Self::Unflag => Ok(EmailMutation::Keyword { keyword: "$flagged", set: false }),
-            Self::Archive => {
-                let mailbox_id = db::get_mailbox_by_role_or_name(conn, "archive", "Archive")
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                    .ok_or(StatusCode::NOT_FOUND)?;
-                Ok(EmailMutation::MoveTo { mailbox_id })
-            }
-            Self::Trash => {
-                let mailbox_id = db::get_mailbox_by_role_or_name(conn, "trash", "Deleted Items")
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                    .ok_or(StatusCode::NOT_FOUND)?;
-                Ok(EmailMutation::MoveTo { mailbox_id })
-            }
-            Self::Delete => Ok(EmailMutation::Destroy),
-            Self::Move { mailbox_id } => Ok(EmailMutation::MoveTo { mailbox_id }),
-        }
-    }
-}
-
-pub async fn post_email_action(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(action): Json<EmailActionRequest>,
-) -> Result<Json<EmailResponse>, StatusCode> {
-    let client = state
-        .jmap_client
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    // Resolve the action to a concrete mutation (may need DB for mailbox lookups).
-    let mutation = {
-        let state = state.clone();
-        let action = action;
-        tokio::task::spawn_blocking(move || {
-            let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            action.into_mutation(&conn)
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??
+    let backlog = state
+        .service
+        .list_events(&filter)
+        .map_err(ApiError::from_service_error)?;
+    let receiver = state.event_sender.subscribe();
+    let backlog_filter = EventFilter {
+        account_id: filter.account_id.clone(),
+        topic: filter.topic.clone(),
+        mailbox_id: filter.mailbox_id.clone(),
+        after_seq: filter.after_seq,
     };
+    let backlog_stream = tokio_stream::iter(
+        backlog
+            .into_iter()
+            .filter(move |event| matches_event(event, &backlog_filter))
+            .map(event_to_sse),
+    );
+    let live_filter = EventFilter {
+        account_id: filter.account_id.clone(),
+        topic: filter.topic.clone(),
+        mailbox_id: filter.mailbox_id.clone(),
+        after_seq: filter.after_seq,
+    };
+    let live_stream = BroadcastStream::new(receiver).filter_map(move |message| {
+        let live_filter = EventFilter {
+            account_id: live_filter.account_id.clone(),
+            topic: live_filter.topic.clone(),
+            mailbox_id: live_filter.mailbox_id.clone(),
+            after_seq: live_filter.after_seq,
+        };
+        match message {
+            Ok(event) if matches_event(&event, &live_filter) => Some(event_to_sse(event)),
+            _ => None,
+        }
+    });
+    Ok(Sse::new(backlog_stream.chain(live_stream)).keep_alive(KeepAlive::default()))
+}
 
-    // Apply JMAP mutation (remote).
-    match &mutation {
-        EmailMutation::Keyword { keyword, set } => {
-            jmap::set_email_keyword(client, &id, keyword, *set)
-                .await
-                .map_err(|e| {
-                    eprintln!("JMAP error: {e}");
-                    StatusCode::BAD_GATEWAY
-                })?;
-        }
-        EmailMutation::MoveTo { mailbox_id } => {
-            jmap::move_email_to_mailbox(client, &id, mailbox_id)
-                .await
-                .map_err(|e| {
-                    eprintln!("JMAP error: {e}");
-                    StatusCode::BAD_GATEWAY
-                })?;
-        }
-        EmailMutation::Destroy => {
-            jmap::destroy_email(client, &id)
-                .await
-                .map_err(|e| {
-                    eprintln!("JMAP error: {e}");
-                    StatusCode::BAD_GATEWAY
-                })?;
+fn matches_event(event: &DomainEvent, filter: &EventFilter) -> bool {
+    if event.account_id != filter.account_id {
+        return false;
+    }
+    if let Some(after_seq) = filter.after_seq {
+        if event.seq <= after_seq {
+            return false;
         }
     }
-
-    // Apply local DB mutation and return updated email.
-    let state = state.clone();
-    let id = id.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        match mutation {
-            EmailMutation::Keyword { keyword, set } => {
-                db::update_email_keyword(&conn, &id, keyword, set)
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            }
-            EmailMutation::MoveTo { mailbox_id } => {
-                db::move_email_to_mailbox(&conn, &id, &mailbox_id)
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            }
-            EmailMutation::Destroy => {
-                db::delete_email_record(&conn, &id)
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                // Return empty response for delete — email no longer exists.
-                return Err(StatusCode::NO_CONTENT);
-            }
+    if let Some(topic) = &filter.topic {
+        if &event.topic != topic {
+            return false;
         }
-
-        match db::get_email(&conn, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
-            Some(row) => Ok(Json(email_row_to_response(row))),
-            None => Err(StatusCode::NOT_FOUND),
+    }
+    if let Some(mailbox_id) = &filter.mailbox_id {
+        if event.mailbox_id.as_ref() != Some(mailbox_id) {
+            return false;
         }
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    }
+    true
 }
 
-// --- Compose & Send ---
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SendEmailRequest {
-    pub to: Vec<RecipientRequest>,
-    #[serde(default)]
-    pub cc: Vec<RecipientRequest>,
-    #[serde(default)]
-    pub bcc: Vec<RecipientRequest>,
-    pub subject: String,
-    pub body: String, // Markdown
-    pub in_reply_to: Option<String>,
-    pub references: Option<String>,
+fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
+    Ok(Event::default()
+        .event(event.topic.as_str())
+        .id(event.seq.to_string())
+        .json_data(event)
+        .unwrap_or_else(|_| Event::default().data("{}")))
 }
 
-#[derive(Deserialize)]
-pub struct RecipientRequest {
-    pub name: Option<String>,
-    pub email: String,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Deserialize)]
-pub struct PreviewRequest {
-    pub body: String,
-}
+    #[test]
+    fn matches_event_applies_all_filters() {
+        let event = DomainEvent {
+            seq: 5,
+            account_id: AccountId::from("primary"),
+            topic: "message.arrived".to_string(),
+            occurred_at: "2026-03-31T10:00:00Z".to_string(),
+            mailbox_id: Some(MailboxId::from("inbox")),
+            message_id: Some(MessageId::from("message-1")),
+            payload: json!({"messageId": "message-1"}),
+        };
+        let matching_filter = EventFilter {
+            account_id: AccountId::from("primary"),
+            topic: Some("message.arrived".to_string()),
+            mailbox_id: Some(MailboxId::from("inbox")),
+            after_seq: Some(4),
+        };
+        let wrong_mailbox_filter = EventFilter {
+            account_id: AccountId::from("primary"),
+            topic: Some("message.arrived".to_string()),
+            mailbox_id: Some(MailboxId::from("archive")),
+            after_seq: Some(4),
+        };
 
-#[derive(Serialize)]
-pub struct PreviewResponse {
-    pub html: String,
-}
+        assert!(matches_event(&event, &matching_filter));
+        assert!(!matches_event(&event, &wrong_mailbox_filter));
+        assert!(!matches_event(
+            &event,
+            &EventFilter {
+                account_id: AccountId::from("secondary"),
+                topic: matching_filter.topic.clone(),
+                mailbox_id: matching_filter.mailbox_id.clone(),
+                after_seq: matching_filter.after_seq,
+            }
+        ));
+        assert!(!matches_event(
+            &event,
+            &EventFilter {
+                account_id: AccountId::from("primary"),
+                topic: Some("message.updated".to_string()),
+                mailbox_id: Some(MailboxId::from("inbox")),
+                after_seq: Some(4),
+            }
+        ));
+        assert!(!matches_event(
+            &event,
+            &EventFilter {
+                account_id: AccountId::from("primary"),
+                topic: Some("message.arrived".to_string()),
+                mailbox_id: Some(MailboxId::from("inbox")),
+                after_seq: Some(5),
+            }
+        ));
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdentityResponse {
-    pub id: String,
-    pub name: String,
-    pub email: String,
-}
+    #[test]
+    fn api_error_maps_state_mismatch_to_conflict() {
+        let error = ApiError::from_service_error(ServiceError::from(
+            mail_domain::GatewayError::StateMismatch,
+        ));
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReplyDataResponse {
-    pub to: Vec<RecipientResponse>,
-    pub cc: Vec<RecipientResponse>,
-    pub reply_subject: String,
-    pub forward_subject: String,
-    pub quoted_body: Option<String>,
-    pub in_reply_to: Option<String>,
-    pub references: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct RecipientResponse {
-    pub name: Option<String>,
-    pub email: String,
-}
-
-pub async fn preview_markdown(Json(req): Json<PreviewRequest>) -> Json<PreviewResponse> {
-    Json(PreviewResponse {
-        html: compose::render_markdown(&req.body),
-    })
-}
-
-pub async fn get_identity(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<IdentityResponse>, StatusCode> {
-    let client = state
-        .jmap_client
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    let data = compose::get_identity(client).await.map_err(|e| {
-        eprintln!("Failed to get identity: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    Ok(Json(IdentityResponse {
-        id: data.id,
-        name: data.name,
-        email: data.email,
-    }))
-}
-
-pub async fn send_email(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SendEmailRequest>,
-) -> Result<StatusCode, StatusCode> {
-    let client = state
-        .jmap_client
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    // Look up the sender identity
-    let identity = compose::get_identity(client).await.map_err(|e| {
-        eprintln!("Failed to get identity: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    let to: Vec<(Option<String>, String)> = req
-        .to
-        .into_iter()
-        .map(|r| (r.name, r.email))
-        .collect();
-    let cc: Vec<(Option<String>, String)> = req
-        .cc
-        .into_iter()
-        .map(|r| (r.name, r.email))
-        .collect();
-    let bcc: Vec<(Option<String>, String)> = req
-        .bcc
-        .into_iter()
-        .map(|r| (r.name, r.email))
-        .collect();
-
-    compose::send_email(
-        client,
-        &identity.id,
-        &identity.name,
-        &identity.email,
-        &to,
-        &cc,
-        &bcc,
-        &req.subject,
-        &req.body,
-        req.in_reply_to.as_deref(),
-        req.references.as_deref(),
-    )
-    .await
-    .map_err(|e| {
-        eprintln!("Failed to send email: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    Ok(StatusCode::OK)
-}
-
-pub async fn get_reply_data(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<ReplyDataResponse>, StatusCode> {
-    let client = state
-        .jmap_client
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    let data = compose::get_reply_data(client, &id).await.map_err(|e| {
-        eprintln!("Failed to get reply data: {e}");
-        StatusCode::BAD_GATEWAY
-    })?;
-
-    // For simple reply: to = [original from], cc = []
-    // The frontend can decide between reply and reply-all.
-    let to: Vec<RecipientResponse> = data
-        .from
-        .into_iter()
-        .map(|(name, email)| RecipientResponse { name, email })
-        .collect();
-
-    let cc: Vec<RecipientResponse> = data
-        .cc_all
-        .into_iter()
-        .chain(data.to_all.into_iter())
-        .map(|(name, email)| RecipientResponse { name, email })
-        .collect();
-
-    Ok(Json(ReplyDataResponse {
-        to,
-        cc,
-        reply_subject: data.reply_subject,
-        forward_subject: data.forward_subject,
-        quoted_body: data.quoted_body,
-        in_reply_to: data.in_reply_to,
-        references: data.references,
-    }))
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.body.code, "state_mismatch");
+    }
 }

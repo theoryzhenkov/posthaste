@@ -1,126 +1,99 @@
 mod api;
-mod compose;
-mod db;
-mod jmap;
 mod sanitize;
 
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::routing::{get, post};
 use axum::Router;
+use dotenvy::dotenv;
+use mail_domain::{AccountId, DomainEvent, MailService};
+use mail_jmap::{LiveJmapGateway, MockJmapGateway};
+use mail_store::DatabaseStore;
+use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub struct AppState {
-    pub db: Mutex<rusqlite::Connection>,
-    pub jmap_client: Option<jmap_client::client::Client>,
+    pub service: Arc<MailService>,
+    pub event_sender: broadcast::Sender<DomainEvent>,
+}
+
+impl AppState {
+    pub fn publish_events(&self, events: &[DomainEvent]) {
+        for event in events {
+            let _ = self.event_sender.send(event.clone());
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    dotenv().ok();
 
-    let jmap_url = std::env::var("JMAP_URL").ok();
-    let jmap_username = std::env::var("JMAP_USERNAME").ok();
-    let jmap_password = std::env::var("JMAP_PASSWORD").ok();
+    let account_id =
+        AccountId(std::env::var("MAIL_ACCOUNT_ID").unwrap_or_else(|_| "primary".to_string()));
+    let db_path = PathBuf::from(
+        std::env::var("MAIL_DB_PATH").unwrap_or_else(|_| "data/mail.sqlite".to_string()),
+    );
+    let data_root =
+        PathBuf::from(std::env::var("MAIL_DATA_ROOT").unwrap_or_else(|_| "data".to_string()));
+    let store =
+        Arc::new(DatabaseStore::open(&db_path, &data_root).expect("failed to initialize store"));
 
-    std::fs::create_dir_all("data").expect("failed to create data directory");
-    let conn = db::init_db("data/mail.sqlite").expect("failed to initialize database");
-
-    let mut jmap_client = None;
-
-    if let (Some(url), Some(user), Some(pass)) = (jmap_url, jmap_username, jmap_password) {
-        println!("Connecting to JMAP server at {url}...");
-        match jmap::connect(&url, &user, &pass).await {
-            Ok(client) => {
-                let has_state = db::get_sync_state(&conn, "email")
-                    .ok()
-                    .flatten()
-                    .is_some();
-                let mode = if has_state { "incremental" } else { "full, first run" };
-                println!("Connected! Syncing ({mode})...");
-
-                if let Err(e) = jmap::sync_mailboxes(&client, &conn).await {
-                    eprintln!("Failed to sync mailboxes: {e}");
-                }
-                if let Err(e) = jmap::sync_emails(&client, &conn).await {
-                    eprintln!("Failed to sync emails: {e}");
-                }
-                println!("Sync complete.");
-                jmap_client = Some(client);
-            }
-            Err(e) => {
-                eprintln!("Failed to connect to JMAP: {e}");
-                eprintln!("Falling back to mock data.");
-                db::import_mock_data(&conn);
-            }
-        }
+    let service = if let Some(gateway) = build_gateway().await {
+        Arc::new(MailService::new(store).with_gateway(&account_id, gateway))
     } else {
-        println!("No JMAP credentials. Using mock data.");
-        db::import_mock_data(&conn);
-    }
+        Arc::new(MailService::new(store))
+    };
 
+    let (event_sender, _) = broadcast::channel(512);
     let state = Arc::new(AppState {
-        db: Mutex::new(conn),
-        jmap_client,
+        service,
+        event_sender,
     });
 
-    // Background sync: JMAP delta sync every 60s
-    if state.jmap_client.is_some() {
+    if state
+        .service
+        .sync_account(&account_id)
+        .await
+        .map(|events| {
+            state.publish_events(&events);
+        })
+        .is_err()
+    {
+        if let Err(error) = state.service.record_sync_failure(
+            &account_id,
+            "startup_sync_failed",
+            "initial sync failed; serving cached data only",
+        ) {
+            eprintln!("failed to record startup sync failure: {error}");
+        }
+    }
+
+    if has_gateway() {
         let sync_state = state.clone();
+        let sync_account = account_id.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
-            interval.tick().await; // skip the first immediate tick
+            interval.tick().await;
             loop {
                 interval.tick().await;
-                let client = sync_state.jmap_client.as_ref().unwrap();
-
-                // --- Mailbox sync ---
-                let mb_state = {
-                    let conn = sync_state.db.lock().unwrap();
-                    db::get_sync_state(&conn, "mailbox").ok().flatten()
-                };
-                match jmap::fetch_mailbox_sync(client, mb_state.as_deref()).await {
-                    Ok(result) => {
-                        let has_changes = result.created_count > 0
-                            || result.updated_count > 0
-                            || result.destroyed_count > 0;
-                        if has_changes {
-                            eprintln!(
-                                "[sync] Mailbox: {} created, {} updated, {} destroyed",
-                                result.created_count, result.updated_count, result.destroyed_count,
-                            );
-                        }
-                        let conn = sync_state.db.lock().unwrap();
-                        if let Err(e) = jmap::apply_mailbox_sync(&conn, &result) {
-                            eprintln!("[sync] mailbox write error: {e}");
+                match sync_state.service.sync_account(&sync_account).await {
+                    Ok(events) => sync_state.publish_events(&events),
+                    Err(error) => {
+                        eprintln!("background sync failed: {error}");
+                        match sync_state.service.record_sync_failure(
+                            &sync_account,
+                            error.code(),
+                            &error.to_string(),
+                        ) {
+                            Ok(event) => sync_state.publish_events(&[event]),
+                            Err(record_error) => {
+                                eprintln!("failed to persist sync failure event: {record_error}")
+                            }
                         }
                     }
-                    Err(e) => eprintln!("[sync] mailbox fetch error: {e}"),
-                }
-
-                // --- Email sync ---
-                let em_state = {
-                    let conn = sync_state.db.lock().unwrap();
-                    db::get_sync_state(&conn, "email").ok().flatten()
-                };
-                match jmap::fetch_email_sync(client, em_state.as_deref()).await {
-                    Ok(result) => {
-                        let has_changes = result.created_count > 0
-                            || result.updated_count > 0
-                            || result.destroyed_count > 0;
-                        if has_changes {
-                            eprintln!(
-                                "[sync] Email: {} created, {} updated, {} destroyed",
-                                result.created_count, result.updated_count, result.destroyed_count,
-                            );
-                        }
-                        let conn = sync_state.db.lock().unwrap();
-                        if let Err(e) = jmap::apply_email_sync(&conn, &result) {
-                            eprintln!("[sync] email write error: {e}");
-                        }
-                    }
-                    Err(e) => eprintln!("[sync] email fetch error: {e}"),
                 }
             }
         });
@@ -128,34 +101,96 @@ async fn main() {
 
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::exact(
-            "http://localhost:5173".parse().expect("invalid origin"),
+            std::env::var("MAIL_CORS_ORIGIN")
+                .unwrap_or_else(|_| "http://localhost:5173".to_string())
+                .parse()
+                .expect("invalid CORS origin"),
         ))
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
 
     let app = Router::new()
-        .route("/api/mailboxes", get(api::list_mailboxes))
         .route(
-            "/api/mailboxes/{id}/emails",
-            get(api::list_emails_in_mailbox),
+            "/v1/accounts/{account_id}/mailboxes",
+            get(api::list_mailboxes),
         )
-        .route("/api/emails", get(api::list_all_emails))
-        .route("/api/emails/{id}", get(api::get_email))
-        .route("/api/emails/{id}/body", get(api::get_email_body))
-        .route("/api/emails/{id}/actions", post(api::post_email_action))
-        .route("/api/threads/{id}", get(api::get_thread))
-        .route("/api/compose/preview", post(api::preview_markdown))
-        .route("/api/compose/send", post(api::send_email))
-        .route("/api/identity", get(api::get_identity))
-        .route("/api/emails/{id}/reply-data", get(api::get_reply_data))
+        .route(
+            "/v1/accounts/{account_id}/messages",
+            get(api::list_messages),
+        )
+        .route(
+            "/v1/accounts/{account_id}/messages/{message_id}",
+            get(api::get_message),
+        )
+        .route(
+            "/v1/accounts/{account_id}/threads/{thread_id}",
+            get(api::get_thread),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/messages/{message_id}:set-keywords",
+            post(api::set_keywords),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/messages/{message_id}:add-to-mailbox",
+            post(api::add_to_mailbox),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/messages/{message_id}:remove-from-mailbox",
+            post(api::remove_from_mailbox),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/messages/{message_id}:replace-mailboxes",
+            post(api::replace_mailboxes),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/messages/{message_id}:destroy",
+            post(api::destroy_message),
+        )
+        .route(
+            "/v1/accounts/{account_id}/commands/sync",
+            post(api::trigger_sync),
+        )
+        .route("/v1/events", get(api::stream_events))
         .layer(cors)
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
+    let bind_address = std::env::var("MAIL_BIND").unwrap_or_else(|_| "0.0.0.0:3001".to_string());
+    let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
-        .expect("failed to bind to port 3001");
-    println!("Server running at http://localhost:3001");
+        .expect("failed to bind daemon listener");
+    println!("mail-daemon listening on http://{bind_address}");
     axum::serve(listener, app)
         .await
-        .expect("server error");
+        .expect("daemon server failed");
+}
+
+async fn build_gateway() -> Option<Arc<dyn mail_domain::MailGateway>> {
+    match std::env::var("MAIL_DRIVER")
+        .unwrap_or_else(|_| "none".to_string())
+        .as_str()
+    {
+        "mock" => Some(Arc::new(MockJmapGateway::default())),
+        "jmap" => {
+            let url = std::env::var("JMAP_URL").ok()?;
+            let username = std::env::var("JMAP_USERNAME").ok()?;
+            let password = std::env::var("JMAP_PASSWORD").ok()?;
+            match LiveJmapGateway::connect(&url, &username, &password).await {
+                Ok(gateway) => Some(Arc::new(gateway)),
+                Err(error) => {
+                    eprintln!("failed to initialize JMAP gateway: {error}");
+                    None
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+fn has_gateway() -> bool {
+    matches!(
+        std::env::var("MAIL_DRIVER")
+            .unwrap_or_else(|_| "none".to_string())
+            .as_str(),
+        "mock" | "jmap"
+    )
 }

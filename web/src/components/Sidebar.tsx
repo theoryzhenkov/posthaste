@@ -3,6 +3,7 @@ import { fetchMailboxes } from "../api/client";
 import type { Mailbox } from "../api/types";
 
 interface SidebarProps {
+  accountId: string;
   selectedMailboxId: string | null;
   onSelectMailbox: (id: string) => void;
 }
@@ -47,18 +48,28 @@ function MailboxItem({
   );
 }
 
-export function Sidebar({ selectedMailboxId, onSelectMailbox }: SidebarProps) {
+export function Sidebar({
+  accountId,
+  selectedMailboxId,
+  onSelectMailbox,
+}: SidebarProps) {
   const { data: mailboxes, isLoading, error } = useQuery({
-    queryKey: ["mailboxes"],
-    queryFn: fetchMailboxes,
-    refetchInterval: 30_000,
+    queryKey: ["mailboxes", accountId],
+    queryFn: () => fetchMailboxes(accountId),
   });
 
   return (
     <aside className="sidebar">
       <div className="sidebar__header">
-        <h1 className="sidebar__title">Mail</h1>
+        <div className="sidebar__brand">
+          <div className="sidebar__brand-mark">m</div>
+          <div>
+            <p className="sidebar__eyebrow">daemon-backed</p>
+            <h2 className="sidebar__title">Folders</h2>
+          </div>
+        </div>
       </div>
+      <p className="sidebar__section-label">mailboxes</p>
       <nav className="sidebar__nav">
         {isLoading && <p className="sidebar__status">Loading...</p>}
         {error && (
@@ -75,6 +86,10 @@ export function Sidebar({ selectedMailboxId, onSelectMailbox }: SidebarProps) {
           />
         ))}
       </nav>
+      <div className="sidebar__footer">
+        <span>local API</span>
+        <span>SSE sync</span>
+      </div>
     </aside>
   );
 }

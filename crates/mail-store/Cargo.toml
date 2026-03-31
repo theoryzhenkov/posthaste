@@ -1,16 +1,15 @@
 [package]
-name = "mail-jmap"
+name = "mail-store"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 async-trait = { workspace = true }
-jmap-client = { workspace = true }
+hex = { workspace = true }
 mail-domain = { path = "../jmap-core" }
-pulldown-cmark = { workspace = true }
-reqwest = { workspace = true }
+rusqlite = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
-url = "2.5.8"
