@@ -45,6 +45,7 @@ impl MailGateway for MockJmapGateway {
             messages: state.messages.clone(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: true,
             cursors: vec![
                 SyncCursor {
                     object_type: SyncObject::Mailbox,

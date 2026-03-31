@@ -157,10 +157,7 @@ impl ConfigRepository for TomlConfigRepository {
     }
 
     fn delete_source(&self, id: &AccountId) -> Result<(), ConfigError> {
-        let path = self
-            .config_root
-            .join("sources")
-            .join(format!("{id}.toml"));
+        let path = self.config_root.join("sources").join(format!("{id}.toml"));
         if path.exists() {
             fs::remove_file(&path).map_err(io_error)?;
         }
@@ -181,10 +178,7 @@ impl ConfigRepository for TomlConfigRepository {
             .clone())
     }
 
-    fn get_smart_mailbox(
-        &self,
-        id: &SmartMailboxId,
-    ) -> Result<Option<SmartMailbox>, ConfigError> {
+    fn get_smart_mailbox(&self, id: &SmartMailboxId) -> Result<Option<SmartMailbox>, ConfigError> {
         Ok(self
             .snapshot
             .read()
@@ -289,8 +283,7 @@ fn read_app_toml(config_root: &Path) -> Result<AppToml, ConfigError> {
 }
 
 fn write_app_toml(config_root: &Path, app: &AppToml) -> Result<(), ConfigError> {
-    let content =
-        toml::to_string_pretty(app).map_err(|e| ConfigError::Parse(e.to_string()))?;
+    let content = toml::to_string_pretty(app).map_err(|e| ConfigError::Parse(e.to_string()))?;
     atomic_write(&config_root.join("app.toml"), content.as_bytes())
 }
 
@@ -341,13 +334,10 @@ fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbox>, ConfigE
     Ok(mailboxes)
 }
 
-fn write_smart_mailbox_toml(
-    config_root: &Path,
-    mailbox: &SmartMailbox,
-) -> Result<(), ConfigError> {
+fn write_smart_mailbox_toml(config_root: &Path, mailbox: &SmartMailbox) -> Result<(), ConfigError> {
     let toml_struct = SmartMailboxToml::from_smart_mailbox(mailbox);
-    let content = toml::to_string_pretty(&toml_struct)
-        .map_err(|e| ConfigError::Parse(e.to_string()))?;
+    let content =
+        toml::to_string_pretty(&toml_struct).map_err(|e| ConfigError::Parse(e.to_string()))?;
     let path = config_root
         .join("smart-mailboxes")
         .join(format!("{}.toml", mailbox.id));
@@ -369,10 +359,7 @@ fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
 }
 
 fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError> {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     if stem != id {
         return Err(ConfigError::Validation(format!(
             "filename '{}' does not match id '{id}' in {}",
@@ -486,7 +473,10 @@ enabled = true
         let result = repo.reload();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("wrong-name"), "error should mention filename: {err}");
+        assert!(
+            err.contains("wrong-name"),
+            "error should mention filename: {err}"
+        );
         assert!(err.contains("real-id"), "error should mention id: {err}");
     }
 

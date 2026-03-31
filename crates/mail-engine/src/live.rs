@@ -56,6 +56,7 @@ impl MailGateway for LiveJmapGateway {
             messages: email_sync.messages,
             deleted_mailbox_ids: mailbox_sync.deleted_mailbox_ids,
             deleted_message_ids: email_sync.deleted_message_ids,
+            replace_all_mailboxes: mailbox_sync.replace_all_mailboxes,
             cursors: vec![mailbox_sync.cursor, email_sync.cursor],
         })
     }
@@ -362,6 +363,7 @@ impl MailGateway for LiveJmapGateway {
 struct MailboxSync {
     mailboxes: Vec<MailboxRecord>,
     deleted_mailbox_ids: Vec<MailboxId>,
+    replace_all_mailboxes: bool,
     cursor: SyncCursor,
 }
 
@@ -444,6 +446,7 @@ async fn fetch_mailbox_delta(
     Ok(MailboxSync {
         mailboxes: upsert,
         deleted_mailbox_ids: deleted,
+        replace_all_mailboxes: false,
         cursor: SyncCursor {
             object_type: SyncObject::Mailbox,
             state: current_state,
@@ -539,6 +542,7 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
     Ok(MailboxSync {
         mailboxes: response.take_list().iter().map(to_mailbox_record).collect(),
         deleted_mailbox_ids: Vec::new(),
+        replace_all_mailboxes: true,
         cursor: SyncCursor {
             object_type: SyncObject::Mailbox,
             state,

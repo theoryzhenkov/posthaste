@@ -496,6 +496,7 @@ pub struct SyncBatch {
     pub messages: Vec<MessageRecord>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
     pub deleted_message_ids: Vec<MessageId>,
+    pub replace_all_mailboxes: bool,
     pub cursors: Vec<SyncCursor>,
 }
 
