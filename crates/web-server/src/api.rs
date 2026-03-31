@@ -7,15 +7,14 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use mail_domain::{
-    AccountDriver, AccountId, AccountOverview, AccountSettings, AccountTransportOverview,
-    AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor, ConversationId,
-    ConversationPage, ConversationSummary, ConversationView, DomainEvent, EventFilter, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    now_iso8601 as domain_now_iso8601,
-    SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand,
-    SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmartMailboxRule,
-    SmartMailboxSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
+    AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
+    ConversationId, ConversationPage, ConversationSummary, ConversationView, DomainEvent,
+    EventFilter, MailboxId, MailboxSummary, MessageDetail, MessageId, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError,
+    SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind,
+    SmartMailboxRule, SmartMailboxSummary, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

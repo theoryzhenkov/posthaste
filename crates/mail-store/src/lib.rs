@@ -2753,6 +2753,43 @@ mod tests {
     }
 
     #[test]
+    fn event_replay_compares_after_seq_as_integer() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+
+        for n in 1..=11 {
+            store.append_event(
+                &account,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                None,
+                None,
+                json!({ "n": n }),
+            )?;
+        }
+
+        let events = store.list_events(&EventFilter {
+            account_id: Some(account),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
+            mailbox_id: None,
+            after_seq: Some(9),
+        })?;
+
+        assert_eq!(
+            events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+            vec![10, 11]
+        );
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.payload["n"].as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![10, 11]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn smart_mailbox_queries_messages_across_enabled_sources() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
@@ -2932,6 +2969,46 @@ mod tests {
         assert_eq!(queried[0].source_id, account_b);
         assert_eq!(queried[0].mailbox_ids, vec![MailboxId::from("trash")]);
         assert_eq!(queried[0].keywords, vec!["beta".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn list_conversations_preserves_source_names_with_commas() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary, Inc.")?;
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![mail_domain::MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: vec![sample_message("message-1", "inbox", Some("mime"))],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "state".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )?;
+
+        let page = store.list_conversations(Some(&account), None, 10, None)?;
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(
+            page.items[0].source_names,
+            vec!["Primary, Inc.".to_string()]
+        );
+        assert_eq!(page.items[0].latest_source_name, "Primary, Inc.");
         Ok(())
     }
 

@@ -1,11 +1,12 @@
 ---
 scope: L0
 summary: "Why React, thin-frontend principle, navigation model, rendering approach"
-modified: 2026-03-31
-reviewed: 2026-03-31
+modified: 2026-04-01
+reviewed: 2026-04-01
 depends:
   - path: README
   - path: spec/L0-api
+  - path: spec/L0-branding
 dependents:
   - path: spec/L1-ui
 ---
@@ -14,28 +15,41 @@ dependents:
 
 ## Thin frontend principle
 
-The React frontend is a stateless view layer. It fetches data from the Rust API, renders it, and sends mutations back. No business logic, no protocol code, no local database. State management uses React Query for server state (cached API responses with automatic refetching) and local React state for UI-only concerns (selection, focus, panel sizes). The frontend can be tested against a mock API server.
+The React frontend is still a thin client, but "thin" here means protocol-thin and storage-thin, not interaction-free. Rust owns JMAP, sync, sanitization, persistence, and authoritative reconciliation. The frontend owns UI interaction state: selected view, selected message, per-view scroll offsets, keyboard routing, paginated list state, and anchored live-update behavior. React Query manages server state; local React state handles transient view concerns.
 
 ## Why React + TypeScript
 
-React's component model handles complex UI state well -- keyboard shortcut routing, multi-panel layouts, virtualized lists. TypeScript provides type safety for the API contract. The ecosystem offers mature solutions for every UI problem a mail client faces. The alternative (Leptos, Dioxus, or other Rust WASM frameworks) would keep the entire stack in Rust but has a much smaller ecosystem and less mature tooling for complex UIs.
+React's component model handles complex UI state well: keyboard routing, multi-panel layouts, paginated lists, and live list updates. TypeScript provides type safety for the API contract. The ecosystem offers mature solutions for the kinds of interaction density a mail client needs.
 
 ## Why web-first
 
-A browser-based UI eliminates platform-specific code entirely. The same frontend works on macOS, Windows, and Linux. Later, Tauri can wrap it in a native window for desktop distribution. The tradeoff is losing native OS integration (Spotlight, system notifications, mailto: handler), but these can be added via Tauri or a native wrapper without changing the frontend.
+A browser-based UI eliminates platform-specific code entirely. The same frontend works on macOS, Windows, and Linux. Later, Tauri can wrap it in a native window for desktop distribution. The tradeoff is losing some native OS integration, but those integrations can be layered on without changing the frontend's data model.
 
 ## Navigation model
 
-Three-column CSS Grid layout. Left: mailbox sidebar. Center: message list. Right: message detail / thread conversation. This mirrors the traditional mail client layout. Selection flows left-to-right: clicking a mailbox loads its messages, clicking a message shows its content.
+Three-column CSS Grid layout. Left: mailbox sidebar. Center: conversation list. Right: message detail. Selection flows left-to-right: choosing a mailbox or smart mailbox loads paginated conversations, then choosing a conversation selects its latest message by default.
 
 ## HTML email rendering
 
-Email HTML is sanitized in Rust (via ammonia) before reaching the frontend. The frontend renders it in a sandboxed iframe with `sandbox="allow-popups"` (no scripts, no forms, no same-origin access). Remote images are blocked by default; the user clicks "Load images" to re-request the email with images allowed. Dark mode support is handled by injecting CSS in the Rust sanitization pipeline.
+Email HTML is sanitized in Rust via `ammonia` before reaching the frontend, with tracking pixels stripped as part of the sanitization pass. The frontend renders sanitized HTML in a sandboxed `srcdoc` iframe with `sandbox="allow-same-origin"`. Scripts remain disabled because `allow-scripts` is never granted. The iframe itself forms the scroll viewport for long messages, which avoids auto-height measurement bugs and keeps the detail pane layout stable. HTTPS and `cid:` images that survive sanitization render directly; there is no separate "load remote images" flow yet.
 
 ## Keyboard-first design
 
-Same philosophy as the native spec -- every action is keyboard-accessible. j/k navigation, single-key actions, multi-stroke sequences (g+i for inbox). Implemented via a React keyboard event handler at the app root level with a focus management system that routes keys to the active panel.
+Same philosophy as the native spec: list navigation and core message actions are keyboard-accessible. The current implementation supports `j/k` and arrow keys for list navigation plus destructive and archive shortcuts from the list/detail context. More of the original keyboard plan can be layered on later without changing the API boundary.
+
+## Live updates
+
+The UI listens to the daemon's EventSource stream and reacts in two ways:
+
+- regular React Query invalidation for sidebar and detail data
+- custom list-level merge logic for the paginated conversation pane
+
+This split exists because a paginated, virtualized conversation list cannot be handled well by broad invalidation alone without causing unnecessary refetches or scroll jumps.
+
+## Theme
+
+Light mode first. The color palette, sidebar treatment, and accent colors are defined in [L0-branding](L0-branding.md). Dark mode is deferred — it will be designed later as an inversion of the light theme.
 
 ## What we don't build for v1
 
-Offline mode (Service Worker), push notifications, drag-and-drop, custom themes, print, and mobile-responsive layout. Desktop-first, always-connected.
+Offline mutation queue, drag-and-drop, custom themes, print, and mobile-first layout. Desktop-first, always-connected.

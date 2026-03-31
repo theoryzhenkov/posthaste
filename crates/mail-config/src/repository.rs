@@ -371,8 +371,7 @@ fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError
 }
 
 fn now_iso8601() -> String {
-    domain_now_iso8601()
-        .unwrap_or_else(|_| RFC3339_EPOCH.to_string())
+    domain_now_iso8601().unwrap_or_else(|_| RFC3339_EPOCH.to_string())
 }
 
 fn io_error(err: std::io::Error) -> ConfigError {
