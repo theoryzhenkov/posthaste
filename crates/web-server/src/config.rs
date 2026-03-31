@@ -177,16 +177,21 @@ struct BootstrapAccountTransportConfig {
 // -- Helpers --
 
 fn default_config_root() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(APP_DIR_NAME)
+    xdg_dir("XDG_CONFIG_HOME", ".config").join(APP_DIR_NAME)
 }
 
 fn default_state_root() -> PathBuf {
-    dirs::data_local_dir()
-        .or_else(dirs::data_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(APP_DIR_NAME)
+    xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR_NAME)
+}
+
+fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
+    std::env::var(env_var)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(fallback_suffix)
+        })
 }
 
 fn default_bootstrap_path() -> PathBuf {
