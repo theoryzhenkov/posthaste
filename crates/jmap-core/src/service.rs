@@ -111,9 +111,7 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    pub fn reset_default_smart_mailboxes(
-        &self,
-    ) -> Result<Vec<SmartMailbox>, ServiceError> {
+    pub fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ServiceError> {
         self.config
             .reset_default_smart_mailboxes()
             .map_err(Into::into)
@@ -174,6 +172,19 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    pub fn list_smart_mailbox_conversations(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<Vec<ConversationSummary>, ServiceError> {
+        let mailbox = self
+            .config
+            .get_smart_mailbox(smart_mailbox_id)?
+            .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
+        self.store
+            .query_conversations_by_rule(&mailbox.rule)
+            .map_err(Into::into)
+    }
+
     pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
         let smart_mailboxes = self.config.list_smart_mailboxes()?;
         let sources = self.config.list_sources()?;
@@ -198,10 +209,7 @@ impl MailService {
             .into_iter()
             .filter(|source| source.enabled)
             .map(|source| {
-                let mailboxes = self
-                    .store
-                    .list_mailboxes(&source.id)
-                    .unwrap_or_default();
+                let mailboxes = self.store.list_mailboxes(&source.id).unwrap_or_default();
                 SidebarSource {
                     id: source.id,
                     name: source.name,

@@ -194,105 +194,27 @@ impl MailStore for DatabaseStore {
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<ConversationSummary>, StoreError> {
         let connection = self.read_connection()?;
-        let mailbox_filter = mailbox_id.map(|mailbox| mailbox.as_str().to_string());
-        let source_filter = account_id.map(|source| source.as_str().to_string());
-        let mut statement = connection
-            .prepare(
-                "WITH filtered AS (
-                    SELECT
-                        m.conversation_id,
-                        m.account_id,
-                        a.name AS account_name,
-                        m.id,
-                        m.subject,
-                        m.from_name,
-                        m.from_email,
-                        m.preview,
-                        m.received_at,
-                        m.has_attachment,
-                        m.is_read,
-                        m.is_flagged
-                    FROM message m
-                    JOIN source_projection a
-                      ON a.source_id = m.account_id
-                    WHERE (?1 IS NULL OR m.account_id = ?1)
-                      AND (
-                        ?2 IS NULL OR EXISTS (
-                            SELECT 1
-                            FROM message_mailbox mm
-                            WHERE mm.account_id = m.account_id
-                              AND mm.message_id = m.id
-                              AND mm.mailbox_id = ?2
-                        )
-                      )
-                ),
-                ranked AS (
-                    SELECT
-                        filtered.*,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY filtered.conversation_id
-                            ORDER BY filtered.received_at DESC, filtered.id DESC
-                        ) AS row_number,
-                        COUNT(*) OVER (PARTITION BY filtered.conversation_id) AS message_count,
-                        SUM(CASE WHEN filtered.is_read = 0 THEN 1 ELSE 0 END)
-                            OVER (PARTITION BY filtered.conversation_id) AS unread_count
-                    FROM filtered
-                ),
-                source_groups AS (
-                    SELECT
-                        filtered.conversation_id,
-                        GROUP_CONCAT(DISTINCT filtered.account_id) AS source_ids,
-                        GROUP_CONCAT(DISTINCT filtered.account_name) AS source_names
-                    FROM filtered
-                    GROUP BY filtered.conversation_id
-                )
-                SELECT
-                    ranked.conversation_id,
-                    ranked.subject,
-                    ranked.preview,
-                    ranked.from_name,
-                    ranked.from_email,
-                    ranked.received_at,
-                    ranked.unread_count,
-                    ranked.message_count,
-                    source_groups.source_ids,
-                    source_groups.source_names,
-                    ranked.account_id,
-                    ranked.account_name,
-                    ranked.id,
-                    ranked.has_attachment,
-                    ranked.is_flagged
-                FROM ranked
-                JOIN source_groups
-                  ON source_groups.conversation_id = ranked.conversation_id
-                WHERE ranked.row_number = 1
-                ORDER BY ranked.received_at DESC",
-            )
-            .map_err(sql_to_store_error)?;
-        let rows = statement
-            .query_map(params![source_filter, mailbox_filter], |row| {
-                Ok(ConversationSummary {
-                    id: ConversationId(row.get(0)?),
-                    subject: row.get(1)?,
-                    preview: row.get(2)?,
-                    from_name: row.get(3)?,
-                    from_email: row.get(4)?,
-                    latest_received_at: row.get(5)?,
-                    unread_count: row.get(6)?,
-                    message_count: row.get(7)?,
-                    source_ids: split_group_concat_ids(row.get::<_, Option<String>>(8)?),
-                    source_names: split_group_concat_strings(row.get::<_, Option<String>>(9)?),
-                    latest_message: mail_domain::SourceMessageRef {
-                        source_id: AccountId(row.get(10)?),
-                        message_id: MessageId(row.get(12)?),
-                    },
-                    latest_source_name: row.get(11)?,
-                    has_attachment: row.get::<_, i64>(13)? != 0,
-                    is_flagged: row.get::<_, i64>(14)? != 0,
-                })
-            })
-            .map_err(sql_to_store_error)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(sql_to_store_error)
+        query_conversations(
+            &connection,
+            "WHERE (?1 IS NULL OR m.account_id = ?1)
+               AND (
+                 ?2 IS NULL OR EXISTS (
+                     SELECT 1
+                     FROM message_mailbox mm
+                     WHERE mm.account_id = m.account_id
+                       AND mm.message_id = m.id
+                       AND mm.mailbox_id = ?2
+                 )
+               )",
+            vec![
+                account_id
+                    .map(|source| SqlValue::Text(source.as_str().to_string()))
+                    .unwrap_or(SqlValue::Null),
+                mailbox_id
+                    .map(|mailbox| SqlValue::Text(mailbox.as_str().to_string()))
+                    .unwrap_or(SqlValue::Null),
+            ],
+        )
     }
 
     fn get_conversation(
@@ -392,6 +314,14 @@ impl MailStore for DatabaseStore {
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
         query_messages_by_rule(&connection, rule)
+    }
+
+    fn query_conversations_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+    ) -> Result<Vec<ConversationSummary>, StoreError> {
+        let connection = self.read_connection()?;
+        query_conversations_by_rule(&connection, rule)
     }
 
     fn query_smart_mailbox_counts(
@@ -1295,21 +1225,27 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
 fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
     match value {
         SmartMailboxValue::String(value) => Ok(value.as_str()),
-        _ => Err(StoreError::Failure("expected string smart mailbox value".to_string())),
+        _ => Err(StoreError::Failure(
+            "expected string smart mailbox value".to_string(),
+        )),
     }
 }
 
 fn expect_strings_value(value: &SmartMailboxValue) -> Result<&[String], StoreError> {
     match value {
         SmartMailboxValue::Strings(values) => Ok(values.as_slice()),
-        _ => Err(StoreError::Failure("expected string array smart mailbox value".to_string())),
+        _ => Err(StoreError::Failure(
+            "expected string array smart mailbox value".to_string(),
+        )),
     }
 }
 
 fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
     match value {
         SmartMailboxValue::Bool(value) => Ok(*value),
-        _ => Err(StoreError::Failure("expected boolean smart mailbox value".to_string())),
+        _ => Err(StoreError::Failure(
+            "expected boolean smart mailbox value".to_string(),
+        )),
     }
 }
 
@@ -1351,9 +1287,116 @@ fn query_messages_by_rule(
     );
     let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
     let rows = statement
-        .query_map(params_from_iter(params), |row| row_to_message_summary(connection, row))
+        .query_map(params_from_iter(params), |row| {
+            row_to_message_summary(connection, row)
+        })
         .map_err(sql_to_store_error)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(sql_to_store_error)
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)
+}
+
+fn query_conversations_by_rule(
+    connection: &Connection,
+    rule: &SmartMailboxRule,
+) -> Result<Vec<ConversationSummary>, StoreError> {
+    let mut params = Vec::new();
+    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    query_conversations(connection, &format!("WHERE ({where_clause})"), params)
+}
+
+fn query_conversations(
+    connection: &Connection,
+    where_clause: &str,
+    params: Vec<SqlValue>,
+) -> Result<Vec<ConversationSummary>, StoreError> {
+    let sql = format!(
+        "WITH filtered AS (
+            SELECT
+                m.conversation_id,
+                m.account_id,
+                a.name AS account_name,
+                m.id,
+                m.subject,
+                m.from_name,
+                m.from_email,
+                m.preview,
+                m.received_at,
+                m.has_attachment,
+                m.is_read,
+                m.is_flagged
+            FROM message m
+            JOIN source_projection a
+              ON a.source_id = m.account_id
+            {where_clause}
+        ),
+        ranked AS (
+            SELECT
+                filtered.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY filtered.conversation_id
+                    ORDER BY filtered.received_at DESC, filtered.id DESC
+                ) AS row_number,
+                COUNT(*) OVER (PARTITION BY filtered.conversation_id) AS message_count,
+                SUM(CASE WHEN filtered.is_read = 0 THEN 1 ELSE 0 END)
+                    OVER (PARTITION BY filtered.conversation_id) AS unread_count
+            FROM filtered
+        ),
+        source_groups AS (
+            SELECT
+                filtered.conversation_id,
+                GROUP_CONCAT(DISTINCT filtered.account_id) AS source_ids,
+                GROUP_CONCAT(DISTINCT filtered.account_name) AS source_names
+            FROM filtered
+            GROUP BY filtered.conversation_id
+        )
+        SELECT
+            ranked.conversation_id,
+            ranked.subject,
+            ranked.preview,
+            ranked.from_name,
+            ranked.from_email,
+            ranked.received_at,
+            ranked.unread_count,
+            ranked.message_count,
+            source_groups.source_ids,
+            source_groups.source_names,
+            ranked.account_id,
+            ranked.account_name,
+            ranked.id,
+            ranked.has_attachment,
+            ranked.is_flagged
+        FROM ranked
+        JOIN source_groups
+          ON source_groups.conversation_id = ranked.conversation_id
+        WHERE ranked.row_number = 1
+        ORDER BY ranked.received_at DESC"
+    );
+    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let rows = statement
+        .query_map(params_from_iter(params), |row| {
+            Ok(ConversationSummary {
+                id: ConversationId(row.get(0)?),
+                subject: row.get(1)?,
+                preview: row.get(2)?,
+                from_name: row.get(3)?,
+                from_email: row.get(4)?,
+                latest_received_at: row.get(5)?,
+                unread_count: row.get(6)?,
+                message_count: row.get(7)?,
+                source_ids: split_group_concat_ids(row.get::<_, Option<String>>(8)?),
+                source_names: split_group_concat_strings(row.get::<_, Option<String>>(9)?),
+                latest_message: mail_domain::SourceMessageRef {
+                    source_id: AccountId(row.get(10)?),
+                    message_id: MessageId(row.get(12)?),
+                },
+                latest_source_name: row.get(11)?,
+                has_attachment: row.get::<_, i64>(13)? != 0,
+                is_flagged: row.get::<_, i64>(14)? != 0,
+            })
+        })
+        .map_err(sql_to_store_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)
 }
 
 fn compile_smart_mailbox_rule(
@@ -1459,7 +1502,9 @@ fn compile_simple_field(
 ) -> Result<String, StoreError> {
     match condition.operator {
         SmartMailboxOperator::Equals => {
-            params.push(SqlValue::Text(expect_string_value(&condition.value)?.to_string()));
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
             Ok(format!("{column} = ?"))
         }
         SmartMailboxOperator::In => {
@@ -1480,7 +1525,9 @@ fn compile_text_field(
 ) -> Result<String, StoreError> {
     match condition.operator {
         SmartMailboxOperator::Equals => {
-            params.push(SqlValue::Text(expect_string_value(&condition.value)?.to_string()));
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
             Ok(format!("COALESCE({column}, '') = ?"))
         }
         SmartMailboxOperator::Contains => {
@@ -1506,7 +1553,9 @@ fn compile_date_field(
     condition: &SmartMailboxCondition,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, StoreError> {
-    params.push(SqlValue::Text(expect_string_value(&condition.value)?.to_string()));
+    params.push(SqlValue::Text(
+        expect_string_value(&condition.value)?.to_string(),
+    ));
     let comparator = match condition.operator {
         SmartMailboxOperator::Before => "<",
         SmartMailboxOperator::After => ">",
@@ -1522,14 +1571,21 @@ fn compile_date_field(
     Ok(format!("{column} {comparator} ?"))
 }
 
-fn compile_bool_field(column: &str, condition: &SmartMailboxCondition) -> Result<String, StoreError> {
+fn compile_bool_field(
+    column: &str,
+    condition: &SmartMailboxCondition,
+) -> Result<String, StoreError> {
     if !matches!(condition.operator, SmartMailboxOperator::Equals) {
         return Err(StoreError::Failure(format!(
             "unsupported operator {:?} for field {:?}",
             condition.operator, condition.field
         )));
     }
-    let expected = if expect_bool_value(&condition.value)? { 1 } else { 0 };
+    let expected = if expect_bool_value(&condition.value)? {
+        1
+    } else {
+        0
+    };
     Ok(format!("{column} = {expected}"))
 }
 
@@ -1540,7 +1596,9 @@ fn compile_exists_membership(
 ) -> Result<String, StoreError> {
     let suffix = match condition.operator {
         SmartMailboxOperator::Equals => {
-            params.push(SqlValue::Text(expect_string_value(&condition.value)?.to_string()));
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
             " = ?".to_string()
         }
         SmartMailboxOperator::In => {
@@ -1916,11 +1974,8 @@ fn merge_conversations_tx(
             params![target.as_str(), other_id],
         )
         .map_err(sql_to_store_error)?;
-        tx.execute(
-            "DELETE FROM conversation WHERE id = ?1",
-            params![other_id],
-        )
-        .map_err(sql_to_store_error)?;
+        tx.execute("DELETE FROM conversation WHERE id = ?1", params![other_id])
+            .map_err(sql_to_store_error)?;
     }
     Ok(())
 }
@@ -2369,7 +2424,11 @@ mod tests {
         }
     }
 
-    fn setup_source(store: &DatabaseStore, account_id: &AccountId, name: &str) -> Result<(), StoreError> {
+    fn setup_source(
+        store: &DatabaseStore,
+        account_id: &AccountId,
+        name: &str,
+    ) -> Result<(), StoreError> {
         store.upsert_source_projection(account_id, name)
     }
 
@@ -2544,8 +2603,12 @@ mod tests {
         let messages = store.query_messages_by_rule(&rule)?;
 
         assert_eq!(messages.len(), 2);
-        assert!(messages.iter().any(|message| message.source_id == account_a));
-        assert!(messages.iter().any(|message| message.source_id == account_b));
+        assert!(messages
+            .iter()
+            .any(|message| message.source_id == account_a));
+        assert!(messages
+            .iter()
+            .any(|message| message.source_id == account_b));
         Ok(())
     }
 

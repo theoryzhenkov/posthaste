@@ -8,11 +8,11 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use mail_domain::{
     AccountDriver, AccountId, AccountOverview, AccountSettings, AccountTransportOverview,
-    AddToMailboxCommand, AppSettings, CommandResult, DomainEvent, EventFilter,
-    ConversationId, ConversationSummary, ConversationView, MailboxId, MailboxSummary,
-    MessageDetail, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind,
-    SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse,
-    SmartMailbox, SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary,
+    AddToMailboxCommand, AppSettings, CommandResult, ConversationId, ConversationSummary,
+    ConversationView, DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageDetail,
+    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef,
+    SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox,
+    SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -224,8 +224,14 @@ pub async fn patch_settings(
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AccountOverview>>, ApiError> {
-    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
-    let accounts = state.service.list_sources().map_err(ApiError::from_service_error)?;
+    let settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
+    let accounts = state
+        .service
+        .list_sources()
+        .map_err(ApiError::from_service_error)?;
     let mut response = Vec::with_capacity(accounts.len());
     for account in accounts {
         response.push(account_overview(&state, &settings, account).await);
@@ -237,7 +243,10 @@ pub async fn get_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
 ) -> Result<Json<AccountOverview>, ApiError> {
-    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
+    let settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
     let account = state
         .service
         .get_source(&AccountId::from(account_id.as_str()))
@@ -282,12 +291,7 @@ pub async fn create_account(
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
-    apply_secret_instruction(
-        state.as_ref(),
-        &mut account,
-        None,
-        &secret,
-    )?;
+    apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
     validate_account_settings(&account)?;
     state
         .service
@@ -297,7 +301,10 @@ pub async fn create_account(
     append_and_publish_account_event(&state, &account_id, "account.created")
         .map_err(store_error_to_api)?;
 
-    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
+    let settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
 
@@ -344,7 +351,10 @@ pub async fn patch_account(
     append_and_publish_account_event(&state, &account_id, "account.updated")
         .map_err(store_error_to_api)?;
 
-    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
+    let settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
 
@@ -576,6 +586,17 @@ pub async fn list_smart_mailbox_messages(
         .map_err(ApiError::from_service_error)
 }
 
+pub async fn list_smart_mailbox_conversations(
+    State(state): State<Arc<AppState>>,
+    Path(smart_mailbox_id): Path<String>,
+) -> Result<Json<Vec<ConversationSummary>>, ApiError> {
+    state
+        .service
+        .list_smart_mailbox_conversations(&SmartMailboxId::from(smart_mailbox_id))
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListConversationsQuery>,
@@ -716,10 +737,14 @@ pub async fn stream_events(
         mailbox_id: query.mailbox_id.map(MailboxId),
         after_seq: query.after_seq,
     };
-    let backlog = state
-        .service
-        .list_events(&filter)
-        .map_err(ApiError::from_service_error)?;
+    let backlog = if filter.after_seq.is_some() {
+        state
+            .service
+            .list_events(&filter)
+            .map_err(ApiError::from_service_error)?
+    } else {
+        Vec::new()
+    };
     let receiver = state.event_sender.subscribe();
     let backlog_filter = filter.clone();
     let backlog_stream = tokio_stream::iter(
@@ -981,10 +1006,7 @@ fn account_secret_ref(account_id: &AccountId) -> SecretRef {
     }
 }
 
-fn delete_managed_secret(
-    state: &AppState,
-    secret_ref: Option<&SecretRef>,
-) -> Result<(), ApiError> {
+fn delete_managed_secret(state: &AppState, secret_ref: Option<&SecretRef>) -> Result<(), ApiError> {
     if let Some(secret_ref) = secret_ref {
         if matches!(secret_ref.kind, SecretKind::Os) {
             state
@@ -1073,13 +1095,23 @@ fn generate_smart_mailbox_id(name: &str) -> String {
         .trim()
         .to_lowercase()
         .chars()
-        .map(|char| if char.is_ascii_alphanumeric() { char } else { '-' })
+        .map(|char| {
+            if char.is_ascii_alphanumeric() {
+                char
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string();
     format!(
         "sm-{}-{}",
-        if slug.is_empty() { "mailbox" } else { slug.as_str() },
+        if slug.is_empty() {
+            "mailbox"
+        } else {
+            slug.as_str()
+        },
         OffsetDateTime::now_utc().unix_timestamp_nanos()
     )
 }
