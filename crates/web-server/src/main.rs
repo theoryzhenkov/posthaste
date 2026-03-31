@@ -161,9 +161,10 @@ async fn main() {
             get(api::list_smart_mailbox_messages),
         )
         .route(
-            "/v1/views/conversations",
-            get(api::list_conversations),
+            "/v1/smart-mailboxes/{smart_mailbox_id}/conversations",
+            get(api::list_smart_mailbox_conversations),
         )
+        .route("/v1/views/conversations", get(api::list_conversations))
         .route(
             "/v1/views/conversations/{conversation_id}",
             get(api::get_conversation),

@@ -72,10 +72,12 @@ pub trait MailStore: Send + Sync {
         &self,
         rule: &SmartMailboxRule,
     ) -> Result<Vec<MessageSummary>, StoreError>;
-    fn query_smart_mailbox_counts(
+    fn query_conversations_by_rule(
         &self,
         rule: &SmartMailboxRule,
-    ) -> Result<(i64, i64), StoreError>;
+    ) -> Result<Vec<ConversationSummary>, StoreError>;
+    fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
+        -> Result<(i64, i64), StoreError>;
     fn list_conversations(
         &self,
         account_id: Option<&AccountId>,
