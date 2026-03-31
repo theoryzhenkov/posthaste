@@ -1,8 +1,8 @@
 ---
 scope: L0
-summary: "REST API + WebSocket boundary between Rust backend and web frontend"
-modified: 2026-03-31
-reviewed: 2026-03-31
+summary: "REST API + SSE boundary between Rust backend and web frontend"
+modified: 2026-04-01
+reviewed: 2026-04-01
 depends:
   - path: README
   - path: spec/L0-jmap
@@ -17,23 +17,31 @@ dependents:
 
 ## Why a REST API boundary
 
-The Rust backend exposes an HTTP API that any frontend can consume -- a React SPA today, a Tauri desktop wrapper or native mobile app tomorrow. This replaces the previous UniFFI bridge approach, which was tightly coupled to Swift/macOS. The REST API is a strictly looser coupling at the cost of serialization overhead, which is negligible for a single-user local app running on localhost.
+The Rust backend exposes an HTTP API that any frontend can consume: a React SPA today, a Tauri wrapper or native mobile client later. This replaces the previous UniFFI bridge approach, which was tightly coupled to Swift/macOS. The REST boundary is a looser coupling at the cost of serialization overhead, which is negligible for a single-user local app running on localhost.
 
 ## Axum
 
-The Rust web framework. Async, tower-based, well-maintained. It handles routing, JSON serialization, CORS, and serves the static frontend in production builds. In development, the frontend runs on Vite's dev server (port 5173) and the backend enables CORS for that origin.
+Axum handles routing, JSON serialization, CORS, and serving the static frontend in production builds. In development, the frontend runs on Vite's dev server and the backend enables CORS for that origin.
 
 ## API design
 
-RESTful JSON endpoints for reads. The frontend fetches data via standard HTTP GET requests. Mutations (move, delete, flag, send) use POST/PUT/DELETE. All responses use camelCase JSON keys (matching TypeScript conventions) even though Rust uses snake_case internally -- serde's `rename_all = "camelCase"` handles the translation.
+RESTful JSON endpoints serve reads. The frontend fetches sidebar data, message detail, and conversations through ordinary HTTP requests. Mutations such as move, delete, flag, and manual sync use POST or DELETE. All responses use camelCase JSON keys even though Rust uses snake_case internally.
 
-## WebSocket for push
+The main list surface is conversation-first rather than raw-message-first:
 
-Planned, not yet implemented. A WebSocket connection at `/ws` will push real-time updates when the sync engine processes changes. This replaces the need for polling. The frontend subscribes on connect and receives events like `{ type: "emailsChanged", mailboxId: "..." }`. Until implemented, the frontend polls or uses React Query's refetch intervals.
+- `/v1/views/conversations`
+- `/v1/smart-mailboxes/{id}/conversations`
+- `/v1/views/conversations/{conversationId}`
+
+List endpoints support cursor pagination with `limit` and `cursor`. The cursor is opaque to the client and encodes the seek position used by the backend's sort order.
+
+## Server-Sent Events for push
+
+Push is implemented with EventSource at `/v1/events`, not WebSocket. The backend writes ordered domain events into `event_log`, publishes them through Axum, and the frontend reconnects with `afterSeq` so it can resume from the last seen event without replaying the full history. This keeps push one-way and simple, which matches the frontend's needs: invalidation, list refresh, and message-detail refresh.
 
 ## Rust owns everything
 
-Unlike the previous architecture where Swift owned the database (GRDB), Rust now owns the entire backend: JMAP protocol, SQLite storage (rusqlite), sync engine, and API layer. The frontend is a stateless view that fetches and displays data. This simplifies the architecture significantly -- no FFI boundary, no callback interfaces, no dual-language cache ownership.
+Unlike the previous architecture where Swift owned the database, Rust now owns the entire backend: JMAP protocol, SQLite storage, sync engine, event log, and API layer. The frontend is a stateless consumer of API data plus local interaction state. This removes the FFI boundary and the risk of split cache ownership.
 
 ## Error handling
 
@@ -44,5 +52,7 @@ API errors are returned as JSON with HTTP status codes. 400 for bad requests, 40
 - The frontend never talks to JMAP directly; all server communication goes through the Rust backend
 - All API responses use camelCase JSON
 - Error responses are structured JSON with `code` and `message` fields
-- The API is stateless from the frontend's perspective (all state lives in the Rust backend)
+- Live updates flow through SSE at `/v1/events`, with `afterSeq` resume support
+- Conversation list endpoints are cursor-paginated and remain stable under live updates
+- The API is stateless from the frontend's perspective; state lives in Rust-owned storage and runtime
 - CORS allows only the configured frontend origin(s)
