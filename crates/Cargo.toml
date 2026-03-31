@@ -1,5 +1,5 @@
 [workspace]
-members = ["jmap-core", "mail-engine", "mail-store", "web-server"]
+members = ["jmap-core", "mail-config", "mail-engine", "mail-store", "web-server"]
 resolver = "2"
 
 [workspace.dependencies]
