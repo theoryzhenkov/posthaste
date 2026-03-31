@@ -28,6 +28,7 @@ export function MessageList({
     queryKey: ["emails", mailboxId],
     queryFn: () => fetchEmails(mailboxId!),
     enabled: mailboxId !== null,
+    refetchInterval: 60_000,
   });
 
   const selectedEmail = useMemo(
