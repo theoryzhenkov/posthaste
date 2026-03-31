@@ -6,12 +6,13 @@ use std::time::Duration;
 
 use hex::encode as hex_encode;
 use mail_domain::{
-    AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView, DomainEvent,
-    EventFilter, FetchedBody, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError,
-    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, FetchedBody, MailStore,
+    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, RawMessageRef,
+    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxValue, StoreError, SyncBatch, SyncCursor, SyncObject,
+    ThreadId, ThreadView,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -192,7 +193,9 @@ impl MailStore for DatabaseStore {
         &self,
         account_id: Option<&AccountId>,
         mailbox_id: Option<&MailboxId>,
-    ) -> Result<Vec<ConversationSummary>, StoreError> {
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, StoreError> {
         let connection = self.read_connection()?;
         query_conversations(
             &connection,
@@ -214,6 +217,8 @@ impl MailStore for DatabaseStore {
                     .map(|mailbox| SqlValue::Text(mailbox.as_str().to_string()))
                     .unwrap_or(SqlValue::Null),
             ],
+            limit,
+            cursor,
         )
     }
 
@@ -319,9 +324,11 @@ impl MailStore for DatabaseStore {
     fn query_conversations_by_rule(
         &self,
         rule: &SmartMailboxRule,
-    ) -> Result<Vec<ConversationSummary>, StoreError> {
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, StoreError> {
         let connection = self.read_connection()?;
-        query_conversations_by_rule(&connection, rule)
+        query_conversations_by_rule(&connection, rule, limit, cursor)
     }
 
     fn query_smart_mailbox_counts(
@@ -1298,17 +1305,38 @@ fn query_messages_by_rule(
 fn query_conversations_by_rule(
     connection: &Connection,
     rule: &SmartMailboxRule,
-) -> Result<Vec<ConversationSummary>, StoreError> {
+    limit: usize,
+    cursor: Option<&ConversationCursor>,
+) -> Result<ConversationPage, StoreError> {
     let mut params = Vec::new();
     let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
-    query_conversations(connection, &format!("WHERE ({where_clause})"), params)
+    query_conversations(
+        connection,
+        &format!("WHERE ({where_clause})"),
+        params,
+        limit,
+        cursor,
+    )
 }
 
 fn query_conversations(
     connection: &Connection,
     where_clause: &str,
-    params: Vec<SqlValue>,
-) -> Result<Vec<ConversationSummary>, StoreError> {
+    mut params: Vec<SqlValue>,
+    limit: usize,
+    cursor: Option<&ConversationCursor>,
+) -> Result<ConversationPage, StoreError> {
+    let page_limit = limit.max(1);
+    let page_filter = if let Some(cursor) = cursor {
+        params.push(SqlValue::Text(cursor.latest_received_at.clone()));
+        params.push(SqlValue::Text(cursor.latest_received_at.clone()));
+        params.push(SqlValue::Text(cursor.conversation_id.as_str().to_string()));
+        "WHERE latest_received_at < ?
+           OR (latest_received_at = ? AND conversation_id < ?)"
+    } else {
+        ""
+    };
+    params.push(SqlValue::Integer((page_limit + 1) as i64));
     let sql = format!(
         "WITH filtered AS (
             SELECT
@@ -1348,28 +1376,49 @@ fn query_conversations(
                 GROUP_CONCAT(DISTINCT filtered.account_name) AS source_names
             FROM filtered
             GROUP BY filtered.conversation_id
+        ),
+        latest AS (
+            SELECT
+                ranked.conversation_id,
+                ranked.subject,
+                ranked.preview,
+                ranked.from_name,
+                ranked.from_email,
+                ranked.received_at AS latest_received_at,
+                ranked.unread_count,
+                ranked.message_count,
+                source_groups.source_ids,
+                source_groups.source_names,
+                ranked.account_id,
+                ranked.account_name,
+                ranked.id,
+                ranked.has_attachment,
+                ranked.is_flagged
+            FROM ranked
+            JOIN source_groups
+              ON source_groups.conversation_id = ranked.conversation_id
+            WHERE ranked.row_number = 1
         )
         SELECT
-            ranked.conversation_id,
-            ranked.subject,
-            ranked.preview,
-            ranked.from_name,
-            ranked.from_email,
-            ranked.received_at,
-            ranked.unread_count,
-            ranked.message_count,
-            source_groups.source_ids,
-            source_groups.source_names,
-            ranked.account_id,
-            ranked.account_name,
-            ranked.id,
-            ranked.has_attachment,
-            ranked.is_flagged
-        FROM ranked
-        JOIN source_groups
-          ON source_groups.conversation_id = ranked.conversation_id
-        WHERE ranked.row_number = 1
-        ORDER BY ranked.received_at DESC"
+            latest.conversation_id,
+            latest.subject,
+            latest.preview,
+            latest.from_name,
+            latest.from_email,
+            latest.latest_received_at,
+            latest.unread_count,
+            latest.message_count,
+            latest.source_ids,
+            latest.source_names,
+            latest.account_id,
+            latest.account_name,
+            latest.id,
+            latest.has_attachment,
+            latest.is_flagged
+        FROM latest
+        {page_filter}
+        ORDER BY latest.latest_received_at DESC, latest.conversation_id DESC
+        LIMIT ?"
     );
     let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
     let rows = statement
@@ -1395,8 +1444,22 @@ fn query_conversations(
             })
         })
         .map_err(sql_to_store_error)?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(sql_to_store_error)
+    let mut items = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)?;
+    let has_more = items.len() > page_limit;
+    if has_more {
+        items.truncate(page_limit);
+    }
+    let next_cursor = if has_more {
+        items.last().map(|item| ConversationCursor {
+            latest_received_at: item.latest_received_at.clone(),
+            conversation_id: item.id.clone(),
+        })
+    } else {
+        None
+    };
+    Ok(ConversationPage { items, next_cursor })
 }
 
 fn compile_smart_mailbox_rule(

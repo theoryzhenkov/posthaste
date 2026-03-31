@@ -3,11 +3,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView, EventFilter,
-    FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
-    PushStream, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
-    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SyncBatch, SyncCursor, SyncObject,
-    ThreadId, ThreadView,
+    AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
+    ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail,
+    MessageId, MessageSummary, PushStream, ReplaceMailboxesCommand, ReplyContext, SecretRef,
+    SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SyncBatch,
+    SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -75,14 +75,18 @@ pub trait MailStore: Send + Sync {
     fn query_conversations_by_rule(
         &self,
         rule: &SmartMailboxRule,
-    ) -> Result<Vec<ConversationSummary>, StoreError>;
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, StoreError>;
     fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
         -> Result<(i64, i64), StoreError>;
     fn list_conversations(
         &self,
         account_id: Option<&AccountId>,
         mailbox_id: Option<&MailboxId>,
-    ) -> Result<Vec<ConversationSummary>, StoreError>;
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, StoreError>;
     fn get_conversation(
         &self,
         conversation_id: &ConversationId,

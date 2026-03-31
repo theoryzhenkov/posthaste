@@ -5,12 +5,12 @@ use serde_json::json;
 
 use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
-    ConfigRepository, ConversationId, ConversationSummary, ConversationView, Identity, MailGateway,
-    MailStore, MailboxId, MailboxSummary, MessageId, MessageSummary, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedConfigRepository, SharedGateway, SharedStore, SidebarResponse, SidebarSmartMailbox,
-    SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncObject, SyncTrigger,
-    ThreadId, ThreadView,
+    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationView,
+    Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId, MessageSummary,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest, ServiceError,
+    SetKeywordsCommand, SharedConfigRepository, SharedGateway, SharedStore, SidebarResponse,
+    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    SyncObject, SyncTrigger, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -175,13 +175,15 @@ impl MailService {
     pub fn list_smart_mailbox_conversations(
         &self,
         smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<Vec<ConversationSummary>, ServiceError> {
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, ServiceError> {
         let mailbox = self
             .config
             .get_smart_mailbox(smart_mailbox_id)?
             .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
         self.store
-            .query_conversations_by_rule(&mailbox.rule)
+            .query_conversations_by_rule(&mailbox.rule, limit, cursor)
             .map_err(Into::into)
     }
 
@@ -247,9 +249,11 @@ impl MailService {
         &self,
         account_id: Option<&AccountId>,
         mailbox_id: Option<&MailboxId>,
-    ) -> Result<Vec<ConversationSummary>, ServiceError> {
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+    ) -> Result<ConversationPage, ServiceError> {
         self.store
-            .list_conversations(account_id, mailbox_id)
+            .list_conversations(account_id, mailbox_id, limit, cursor)
             .map_err(Into::into)
     }
 
