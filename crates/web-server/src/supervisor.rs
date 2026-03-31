@@ -504,18 +504,24 @@ impl SupervisorShared {
         match (previous.as_ref().map(|item| &item.push), &overview.push) {
             (Some(PushStatus::Connected), PushStatus::Connected) => {}
             (_, PushStatus::Connected) => {
-                if let Ok(event) =
-                    self.store
-                        .append_event(account_id, EVENT_TOPIC_PUSH_CONNECTED, None, None, json!({}))
-                {
+                if let Ok(event) = self.store.append_event(
+                    account_id,
+                    EVENT_TOPIC_PUSH_CONNECTED,
+                    None,
+                    None,
+                    json!({}),
+                ) {
                     side_effects.push(event);
                 }
             }
             (Some(PushStatus::Connected), _) => {
-                if let Ok(event) =
-                    self.store
-                        .append_event(account_id, EVENT_TOPIC_PUSH_DISCONNECTED, None, None, json!({}))
-                {
+                if let Ok(event) = self.store.append_event(
+                    account_id,
+                    EVENT_TOPIC_PUSH_DISCONNECTED,
+                    None,
+                    None,
+                    json!({}),
+                ) {
                     side_effects.push(event);
                 }
             }

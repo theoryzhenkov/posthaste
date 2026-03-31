@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use mail_config::TomlConfigRepository;
 use mail_domain::{
-    now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings,
-    AccountTransportSettings, AppSettings, ConfigRepository, SecretRef,
+    now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings,
+    AppSettings, ConfigRepository, SecretRef,
 };
 use serde::Deserialize;
 
