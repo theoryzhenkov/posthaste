@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::ConfigError;
+
 macro_rules! string_id {
     ($name:ident) => {
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -647,6 +649,8 @@ pub enum ServiceError {
     Secret(#[from] SecretStoreError),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Config(#[from] crate::ConfigError),
 }
 
 impl ServiceError {
@@ -663,6 +667,11 @@ impl ServiceError {
             Self::Store(StoreError::NotFound(_)) => "not_found",
             Self::Store(StoreError::Conflict(_)) => "conflict",
             Self::Store(StoreError::Failure(_)) => "storage_failure",
+            Self::Config(ConfigError::NotFound(_)) => "not_found",
+            Self::Config(ConfigError::Conflict(_)) => "conflict",
+            Self::Config(ConfigError::Validation(_)) => "config_validation",
+            Self::Config(ConfigError::Io(_)) => "config_io",
+            Self::Config(ConfigError::Parse(_)) => "config_parse",
         }
     }
 }
