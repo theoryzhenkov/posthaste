@@ -4,10 +4,12 @@ use std::sync::{Arc, RwLock};
 use serde_json::json;
 
 use crate::{
-    AccountId, AddToMailboxCommand, CommandResult, Identity, MailGateway, MailStore, MailboxId,
-    MailboxSummary, MessageId, MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SharedStore,
-    SyncObject, SyncTrigger, ThreadId, ThreadView,
+    AccountId, AddToMailboxCommand, CommandResult, ConversationId, ConversationSummary,
+    ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SharedStore,
+    SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncObject, SyncTrigger,
+    ThreadId, ThreadView,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -61,6 +63,86 @@ impl MailService {
         self.store
             .list_messages(account_id, mailbox_id)
             .map_err(Into::into)
+    }
+
+    pub fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
+        self.store.list_smart_mailboxes().map_err(Into::into)
+    }
+
+    pub fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<SmartMailbox, ServiceError> {
+        self.store
+            .get_smart_mailbox(smart_mailbox_id)?
+            .not_found("smart_mailbox", smart_mailbox_id.as_str())
+    }
+
+    pub fn create_smart_mailbox(
+        &self,
+        smart_mailbox: &SmartMailbox,
+    ) -> Result<(), ServiceError> {
+        self.store
+            .create_smart_mailbox(smart_mailbox)
+            .map_err(Into::into)
+    }
+
+    pub fn update_smart_mailbox(
+        &self,
+        smart_mailbox: &SmartMailbox,
+    ) -> Result<(), ServiceError> {
+        self.store
+            .update_smart_mailbox(smart_mailbox)
+            .map_err(Into::into)
+    }
+
+    pub fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<(), ServiceError> {
+        self.store
+            .delete_smart_mailbox(smart_mailbox_id)
+            .map_err(Into::into)
+    }
+
+    pub fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
+        self.store
+            .reset_default_smart_mailboxes()
+            .map_err(Into::into)
+    }
+
+    pub fn list_smart_mailbox_messages(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<Vec<MessageSummary>, ServiceError> {
+        self.store
+            .list_smart_mailbox_messages(smart_mailbox_id)
+            .map_err(Into::into)
+    }
+
+    pub fn list_conversations(
+        &self,
+        account_id: Option<&AccountId>,
+        mailbox_id: Option<&MailboxId>,
+    ) -> Result<Vec<ConversationSummary>, ServiceError> {
+        self.store
+            .list_conversations(account_id, mailbox_id)
+            .map_err(Into::into)
+    }
+
+    pub fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, ServiceError> {
+        self.store
+            .get_conversation(conversation_id)?
+            .not_found("conversation", conversation_id.as_str())
+    }
+
+    pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
+        self.store.get_sidebar().map_err(Into::into)
     }
 
     pub fn get_thread(
@@ -318,11 +400,12 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
 
-    use crate::{
-        AccountId, CommandResult, DomainEvent, EventFilter, FetchedBody, GatewayError, MailGateway,
-        MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
-        ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, SyncBatch, SyncCursor,
-        SyncObject, ThreadId, ThreadView,
+        use crate::{
+        AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView,
+        DomainEvent, EventFilter, FetchedBody, GatewayError, MailGateway, MailStore, MailboxId,
+        MailboxSummary, MessageDetail, MessageId, MessageSummary, ReplaceMailboxesCommand,
+        ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
+        SmartMailboxSummary, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
     };
 
     use super::MailService;
@@ -348,6 +431,51 @@ mod tests {
             Ok(Vec::new())
         }
 
+        fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, crate::StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn get_smart_mailbox(
+            &self,
+            _smart_mailbox_id: &SmartMailboxId,
+        ) -> Result<Option<SmartMailbox>, crate::StoreError> {
+            Ok(None)
+        }
+
+        fn create_smart_mailbox(
+            &self,
+            _smart_mailbox: &SmartMailbox,
+        ) -> Result<(), crate::StoreError> {
+            Ok(())
+        }
+
+        fn update_smart_mailbox(
+            &self,
+            _smart_mailbox: &SmartMailbox,
+        ) -> Result<(), crate::StoreError> {
+            Ok(())
+        }
+
+        fn delete_smart_mailbox(
+            &self,
+            _smart_mailbox_id: &SmartMailboxId,
+        ) -> Result<(), crate::StoreError> {
+            Ok(())
+        }
+
+        fn reset_default_smart_mailboxes(
+            &self,
+        ) -> Result<Vec<SmartMailboxSummary>, crate::StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn list_smart_mailbox_messages(
+            &self,
+            _smart_mailbox_id: &SmartMailboxId,
+        ) -> Result<Vec<MessageSummary>, crate::StoreError> {
+            Ok(Vec::new())
+        }
+
         fn get_message_detail(
             &self,
             _account_id: &AccountId,
@@ -356,7 +484,10 @@ mod tests {
             Ok(Some(MessageDetail {
                 summary: MessageSummary {
                     id: message_id.clone(),
-                    thread_id: ThreadId::from("thread-1"),
+                    source_id: AccountId::from("primary"),
+                    source_name: "Primary".to_string(),
+                    source_thread_id: ThreadId::from("thread-1"),
+                    conversation_id: ConversationId::from("conversation-1"),
                     subject: None,
                     from_name: None,
                     from_email: None,
@@ -380,6 +511,28 @@ mod tests {
             _thread_id: &ThreadId,
         ) -> Result<Option<ThreadView>, crate::StoreError> {
             Ok(None)
+        }
+
+        fn list_conversations(
+            &self,
+            _account_id: Option<&AccountId>,
+            _mailbox_id: Option<&MailboxId>,
+        ) -> Result<Vec<ConversationSummary>, crate::StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn get_conversation(
+            &self,
+            _conversation_id: &ConversationId,
+        ) -> Result<Option<ConversationView>, crate::StoreError> {
+            Ok(None)
+        }
+
+        fn get_sidebar(&self) -> Result<SidebarResponse, crate::StoreError> {
+            Ok(SidebarResponse {
+                smart_mailboxes: Vec::new(),
+                sources: Vec::new(),
+            })
         }
 
         fn get_sync_cursors(

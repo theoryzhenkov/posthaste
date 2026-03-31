@@ -575,6 +575,9 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
                 email::Property::ReceivedAt,
                 email::Property::HasAttachment,
                 email::Property::Size,
+                email::Property::MessageId,
+                email::Property::References,
+                email::Property::InReplyTo,
             ]);
         let mut response = request.send_get_email().await.map_err(map_gateway_error)?;
         if state.is_none() {
@@ -626,7 +629,7 @@ fn to_message_record(email: &jmap_client::email::Email) -> MessageRecord {
         .unwrap_or((None, None));
     MessageRecord {
         id: MessageId(email.id().unwrap_or_default().to_string()),
-        thread_id: mail_domain::ThreadId(email.thread_id().unwrap_or_default().to_string()),
+        source_thread_id: mail_domain::ThreadId(email.thread_id().unwrap_or_default().to_string()),
         remote_blob_id: email.blob_id().map(|blob_id| BlobId(blob_id.to_string())),
         subject: email.subject().map(String::from),
         from_name,
@@ -647,6 +650,12 @@ fn to_message_record(email: &jmap_client::email::Email) -> MessageRecord {
         body_html: None,
         body_text: None,
         raw_mime: None,
+        rfc_message_id: email.message_id().and_then(|ids| ids.first()).cloned(),
+        in_reply_to: email.in_reply_to().and_then(|ids| ids.first()).cloned(),
+        references: email
+            .references()
+            .map(|references| references.to_vec())
+            .unwrap_or_default(),
     }
 }
 
