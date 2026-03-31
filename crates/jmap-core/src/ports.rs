@@ -1,0 +1,136 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
+use crate::{
+    AccountId, CommandResult, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, ReplaceMailboxesCommand, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, ThreadId, ThreadView,
+};
+use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
+
+#[async_trait]
+pub trait MailGateway: Send + Sync {
+    async fn sync(
+        &self,
+        account_id: &AccountId,
+        cursors: &[SyncCursor],
+    ) -> Result<SyncBatch, GatewayError>;
+    async fn fetch_message_body(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<FetchedBody, GatewayError>;
+    async fn set_keywords(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        expected_state: Option<&str>,
+        command: &SetKeywordsCommand,
+    ) -> Result<(), GatewayError>;
+    async fn replace_mailboxes(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        expected_state: Option<&str>,
+        mailbox_ids: &[MailboxId],
+    ) -> Result<(), GatewayError>;
+    async fn destroy_message(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        expected_state: Option<&str>,
+    ) -> Result<(), GatewayError>;
+    async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError>;
+    async fn fetch_reply_context(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<ReplyContext, GatewayError>;
+    async fn send_message(
+        &self,
+        account_id: &AccountId,
+        request: &SendMessageRequest,
+    ) -> Result<(), GatewayError>;
+}
+
+#[async_trait]
+pub trait MailStore: Send + Sync {
+    fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError>;
+    fn list_messages(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: Option<&MailboxId>,
+    ) -> Result<Vec<MessageSummary>, StoreError>;
+    fn get_message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, StoreError>;
+    fn get_thread(
+        &self,
+        account_id: &AccountId,
+        thread_id: &ThreadId,
+    ) -> Result<Option<ThreadView>, StoreError>;
+    fn get_sync_cursors(&self, account_id: &AccountId) -> Result<Vec<SyncCursor>, StoreError>;
+    fn get_cursor(
+        &self,
+        account_id: &AccountId,
+        object_type: crate::SyncObject,
+    ) -> Result<Option<SyncCursor>, StoreError>;
+    fn get_message_mailboxes(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Vec<MailboxId>, StoreError>;
+    fn apply_sync_batch(
+        &self,
+        account_id: &AccountId,
+        batch: &SyncBatch,
+    ) -> Result<Vec<DomainEvent>, StoreError>;
+    fn apply_message_body(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        body: &FetchedBody,
+    ) -> Result<CommandResult, StoreError>;
+    fn set_keywords(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        command: &SetKeywordsCommand,
+    ) -> Result<CommandResult, StoreError>;
+    fn replace_mailboxes(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        command: &ReplaceMailboxesCommand,
+    ) -> Result<CommandResult, StoreError>;
+    fn destroy_message(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<CommandResult, StoreError>;
+    fn list_events(&self, filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError>;
+    fn append_event(
+        &self,
+        account_id: &AccountId,
+        topic: &str,
+        mailbox_id: Option<&MailboxId>,
+        message_id: Option<&MessageId>,
+        payload: serde_json::Value,
+    ) -> Result<DomainEvent, StoreError>;
+}
+
+pub type SharedStore = Arc<dyn MailStore>;
+pub type SharedGateway = Arc<dyn MailGateway>;
+
+pub trait ServiceResultExt<T> {
+    fn not_found(self, kind: &str, id: &str) -> Result<T, ServiceError>;
+}
+
+impl<T> ServiceResultExt<T> for Option<T> {
+    fn not_found(self, kind: &str, id: &str) -> Result<T, ServiceError> {
+        self.ok_or_else(|| StoreError::NotFound(format!("{kind}:{id}")).into())
+    }
+}

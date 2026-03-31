@@ -1,17 +1,22 @@
 [workspace]
-members = ["jmap-core", "mail-engine", "web-server"]
+members = ["jmap-core", "mail-engine", "mail-store", "web-server"]
 resolver = "2"
 
 [workspace.dependencies]
 ammonia = "4"
+async-trait = "0.1"
 axum = "0.8"
-tower-http = { version = "0.6", features = ["cors", "fs"] }
-rusqlite = { version = "0.33", features = ["bundled"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-jmap-client = "0.4"
 dotenvy = "0.15"
+hex = "0.4"
+jmap-client = "0.4"
 pulldown-cmark = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "=0.3.36", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }

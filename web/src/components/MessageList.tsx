@@ -1,133 +1,118 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { fetchEmails } from "../api/client";
-import type { Email } from "../api/types";
+import { fetchMessages } from "../api/client";
+import type { MessageSummary } from "../api/types";
 import type { EmailActions } from "../hooks/useEmailActions";
 import { MessageRow } from "./MessageRow";
 
 interface MessageListProps {
+  accountId: string;
   mailboxId: string | null;
   selectedEmailId: string | null;
   onSelectEmail: (id: string) => void;
   actions: EmailActions;
-  onCompose: () => void;
-  onReply: (emailId: string) => void;
-  onReplyAll: (emailId: string) => void;
-  onForward: (emailId: string) => void;
 }
 
 export function MessageList({
+  accountId,
   mailboxId,
   selectedEmailId,
   onSelectEmail,
   actions,
-  onCompose,
-  onReply,
-  onReplyAll,
-  onForward,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const {
-    data: emails,
+    data: messages,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["emails", mailboxId],
-    queryFn: () => fetchEmails(mailboxId!),
-    enabled: mailboxId !== null,
-    refetchInterval: 60_000,
+    queryKey: ["messages", accountId, mailboxId],
+    queryFn: () => fetchMessages(mailboxId, accountId),
   });
 
-  const selectedEmail = useMemo(
-    () => emails?.find((e: Email) => e.id === selectedEmailId) ?? null,
-    [emails, selectedEmailId],
+  const selectedMessage = useMemo(
+    () =>
+      messages?.find((message: MessageSummary) => message.id === selectedEmailId) ??
+      null,
+    [messages, selectedEmailId],
+  );
+  const unreadCount = useMemo(
+    () => messages?.filter((message: MessageSummary) => !message.isRead).length ?? 0,
+    [messages],
+  );
+  const starredCount = useMemo(
+    () =>
+      messages?.filter((message: MessageSummary) => message.isFlagged).length ?? 0,
+    [messages],
   );
 
-  const navigateEmail = useCallback(
+  const navigateMessage = useCallback(
     (direction: 1 | -1) => {
-      if (!emails || emails.length === 0) return;
+      if (!messages || messages.length === 0) return;
 
-      const currentIndex = emails.findIndex(
-        (e: Email) => e.id === selectedEmailId,
+      const currentIndex = messages.findIndex(
+        (message: MessageSummary) => message.id === selectedEmailId,
       );
-      let nextIndex: number;
+      const nextIndex =
+        currentIndex === -1
+          ? direction === 1
+            ? 0
+            : messages.length - 1
+          : currentIndex + direction;
 
-      if (currentIndex === -1) {
-        nextIndex = direction === 1 ? 0 : emails.length - 1;
-      } else {
-        nextIndex = currentIndex + direction;
-      }
-
-      if (nextIndex >= 0 && nextIndex < emails.length) {
-        onSelectEmail(emails[nextIndex].id);
+      if (nextIndex >= 0 && nextIndex < messages.length) {
+        onSelectEmail(messages[nextIndex].id);
       }
     },
-    [emails, selectedEmailId, onSelectEmail],
+    [messages, onSelectEmail, selectedEmailId],
   );
 
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      const target = e.target as HTMLElement;
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-      switch (e.key) {
+      switch (event.key) {
         case "j":
         case "ArrowDown":
-          e.preventDefault();
-          navigateEmail(1);
+          event.preventDefault();
+          navigateMessage(1);
           break;
         case "k":
         case "ArrowUp":
-          e.preventDefault();
-          navigateEmail(-1);
+          event.preventDefault();
+          navigateMessage(-1);
           break;
         case "u":
-          if (selectedEmail) actions.toggleRead(selectedEmail);
+          if (selectedMessage) actions.toggleRead(selectedMessage);
           break;
         case "s":
-          if (selectedEmail) actions.toggleFlag(selectedEmail);
+          if (selectedMessage) actions.toggleFlag(selectedMessage);
           break;
         case "e":
-          if (selectedEmail) actions.archive(selectedEmail.id);
+          if (selectedMessage) actions.archive(selectedMessage.id);
           break;
         case "#":
         case "Backspace":
-          if (selectedEmail) actions.trash(selectedEmail.id);
-          break;
-        case "n":
-          e.preventDefault();
-          onCompose();
-          break;
-        case "r":
-          if (selectedEmail) {
-            e.preventDefault();
-            onReply(selectedEmail.id);
-          }
-          break;
-        case "R":
-          if (selectedEmail) {
-            e.preventDefault();
-            onReplyAll(selectedEmail.id);
-          }
-          break;
-        case "f":
-          if (selectedEmail) {
-            e.preventDefault();
-            onForward(selectedEmail.id);
-          }
+          if (selectedMessage) actions.trash(selectedMessage.id);
           break;
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [navigateEmail, selectedEmail, actions, onCompose, onReply, onReplyAll, onForward]);
+  }, [actions, navigateMessage, selectedMessage]);
 
   if (!mailboxId) {
     return (
       <div className="message-list message-list--empty">
-        <p className="message-list__placeholder">Select a mailbox</p>
+        <div className="message-list__empty-state">
+          <p className="message-list__eyebrow">thread index</p>
+          <p className="message-list__placeholder">
+            Select a mailbox to open your message stream.
+          </p>
+        </div>
       </div>
     );
   }
@@ -135,12 +120,29 @@ export function MessageList({
   return (
     <div className="message-list" ref={containerRef}>
       <div className="message-list__header">
+        <div className="message-list__toolbar">
+          <div>
+            <p className="message-list__eyebrow">thread index</p>
+            <h2 className="message-list__title">Mailbox overview</h2>
+          </div>
+        </div>
         <input
           type="text"
           className="message-list__search"
-          placeholder="Search emails..."
+          placeholder="Filter mail (coming soon)"
           disabled
         />
+        <div className="message-list__stats">
+          <span>{messages?.length ?? 0} total</span>
+          <span>{unreadCount} unread</span>
+          <span>{starredCount} starred</span>
+        </div>
+        <div className="message-list__columns" aria-hidden="true">
+          <span>sender</span>
+          <span>subject</span>
+          <span>state</span>
+          <span>received</span>
+        </div>
       </div>
       <div className="message-list__items">
         {isLoading && (
@@ -151,15 +153,15 @@ export function MessageList({
             Failed to load emails
           </p>
         )}
-        {emails && emails.length === 0 && (
+        {messages && messages.length === 0 && (
           <p className="message-list__placeholder">No emails in this mailbox</p>
         )}
-        {emails?.map((email: Email) => (
+        {messages?.map((message: MessageSummary) => (
           <MessageRow
-            key={email.id}
-            email={email}
-            isSelected={email.id === selectedEmailId}
-            onSelect={() => onSelectEmail(email.id)}
+            key={message.id}
+            email={message}
+            isSelected={message.id === selectedEmailId}
+            onSelect={() => onSelectEmail(message.id)}
           />
         ))}
       </div>

@@ -14,25 +14,42 @@ export function EmailFrame({ html }: EmailFrameProps) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        :root {
+            color-scheme: light;
+        }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #333;
+            font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+            font-size: 17px;
+            line-height: 1.72;
+            color: #2f2b28;
             margin: 0;
-            padding: 16px;
+            padding: 24px;
+            background: #fcfbf8;
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
-        img { max-width: 100%; height: auto; }
-        a { color: #0066cc; }
-        blockquote {
-            border-left: 3px solid #ccc;
-            margin: 8px 0;
-            padding: 4px 12px;
-            color: #666;
+        h1, h2, h3, h4 {
+            font-family: "Iowan Old Style", "Palatino Linotype", serif;
+            color: #25211d;
+            line-height: 1.2;
         }
-        pre { overflow-x: auto; background: #f5f5f5; padding: 8px; border-radius: 4px; }
+        img { max-width: 100%; height: auto; }
+        a { color: #355d83; }
+        blockquote {
+            border-left: 2px solid #c8c0b0;
+            margin: 16px 0;
+            padding: 4px 0 4px 16px;
+            color: #6f6a61;
+        }
+        pre {
+            overflow-x: auto;
+            background: #f2efe8;
+            padding: 12px 14px;
+            border-radius: 8px;
+        }
+        code {
+            font-family: "SFMono-Regular", Consolas, monospace;
+        }
     </style>
 </head>
 <body>${html}</body>

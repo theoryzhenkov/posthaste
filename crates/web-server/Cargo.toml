@@ -1,24 +1,24 @@
 [package]
-name = "web-server"
+name = "mail-daemon"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "web-server"
+name = "mail-daemon"
 path = "src/main.rs"
 
 [dependencies]
-jmap-core = { path = "../jmap-core" }
-mail-engine = { path = "../mail-engine" }
 ammonia = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true }
-tower-http = { workspace = true }
-rusqlite = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-jmap-client = { workspace = true }
 dotenvy = { workspace = true }
-reqwest = { workspace = true }
+mail-domain = { path = "../jmap-core" }
+mail-jmap = { path = "../mail-engine" }
+mail-store = { path = "../mail-store" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-pulldown-cmark = { workspace = true }
-url = "2.5.8"
+time = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tower-http = { workspace = true }

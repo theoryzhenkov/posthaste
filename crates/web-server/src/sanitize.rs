@@ -71,15 +71,26 @@ pub fn sanitize_email_html(raw_html: &str) -> String {
         ("img", &["src", "alt", "width", "height"]),
         (
             "td",
-            &["colspan", "rowspan", "align", "valign", "width", "height", "bgcolor"],
+            &[
+                "colspan", "rowspan", "align", "valign", "width", "height", "bgcolor",
+            ],
         ),
         (
             "th",
-            &["colspan", "rowspan", "align", "valign", "width", "height", "bgcolor"],
+            &[
+                "colspan", "rowspan", "align", "valign", "width", "height", "bgcolor",
+            ],
         ),
         (
             "table",
-            &["border", "cellpadding", "cellspacing", "width", "bgcolor", "align"],
+            &[
+                "border",
+                "cellpadding",
+                "cellspacing",
+                "width",
+                "bgcolor",
+                "align",
+            ],
         ),
         ("font", &["color", "face", "size"]),
         ("div", &["align"]),
@@ -90,7 +101,9 @@ pub fn sanitize_email_html(raw_html: &str) -> String {
     ];
 
     for &(tag, attrs) in per_tag {
-        let entry = tag_attributes.entry(tag).or_insert_with(|| global_attrs.clone());
+        let entry = tag_attributes
+            .entry(tag)
+            .or_insert_with(|| global_attrs.clone());
         for &attr in attrs {
             entry.insert(attr);
         }
@@ -214,7 +227,8 @@ mod tests {
 
     #[test]
     fn strips_tracking_pixel() {
-        let input = r#"<p>Hello</p><img src="https://track.example.com/pixel.gif" width="1" height="1">"#;
+        let input =
+            r#"<p>Hello</p><img src="https://track.example.com/pixel.gif" width="1" height="1">"#;
         let result = sanitize_email_html(input);
         assert!(!result.contains("<img"));
     }
@@ -235,7 +249,8 @@ mod tests {
 
     #[test]
     fn keeps_https_img_non_pixel() {
-        let input = r#"<img src="https://example.com/photo.jpg" alt="photo" width="200" height="150">"#;
+        let input =
+            r#"<img src="https://example.com/photo.jpg" alt="photo" width="200" height="150">"#;
         let result = sanitize_email_html(input);
         assert!(result.contains("https://example.com/photo.jpg"));
     }
