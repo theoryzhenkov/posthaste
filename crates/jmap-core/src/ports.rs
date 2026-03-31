@@ -172,6 +172,16 @@ pub trait MailStore: Send + Sync {
     fn delete_account(&self, _account_id: &AccountId) -> Result<(), StoreError> {
         Err(StoreError::Failure("accounts not supported".to_string()))
     }
+    fn upsert_source_projection(
+        &self,
+        _source_id: &AccountId,
+        _name: &str,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+    fn delete_source_projection(&self, _source_id: &AccountId) -> Result<(), StoreError> {
+        Ok(())
+    }
 }
 
 pub trait SecretStore: Send + Sync {

@@ -322,6 +322,33 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    fn upsert_source_projection(
+        &self,
+        source_id: &AccountId,
+        name: &str,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO source_projection (source_id, name) VALUES (?1, ?2)
+                 ON CONFLICT(source_id) DO UPDATE SET name = excluded.name",
+                params![source_id.as_str(), name],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM source_projection WHERE source_id = ?1",
+                params![source_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
@@ -1498,6 +1525,11 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 payload TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS source_projection (
+                source_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
             CREATE INDEX IF NOT EXISTS idx_message_conversation
@@ -1518,6 +1550,7 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
         )
         .map_err(sql_to_store_error)?;
     ensure_projection_columns(connection)?;
+    backfill_source_projection(connection)?;
     Ok(())
 }
 
@@ -1567,6 +1600,16 @@ fn ensure_projection_columns(connection: &Connection) -> Result<(), StoreError> 
         "references_json",
         "ALTER TABLE message ADD COLUMN references_json TEXT NOT NULL DEFAULT '[]'",
     )?;
+    Ok(())
+}
+
+fn backfill_source_projection(connection: &Connection) -> Result<(), StoreError> {
+    connection
+        .execute_batch(
+            "INSERT OR IGNORE INTO source_projection (source_id, name)
+             SELECT account_id, name FROM account_config",
+        )
+        .map_err(sql_to_store_error)?;
     Ok(())
 }
 
