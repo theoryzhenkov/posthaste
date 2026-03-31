@@ -953,7 +953,6 @@ name = "mail-config"
 version = "0.1.0"
 dependencies = [
  "mail-domain",
- "rusqlite",
  "serde",
  "serde_json",
  "thiserror",

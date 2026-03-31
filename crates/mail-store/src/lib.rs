@@ -1165,38 +1165,6 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(
             "
-            CREATE TABLE IF NOT EXISTS app_settings (
-                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                settings_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS account_config (
-                account_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                driver TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                transport_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS smart_mailbox (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                kind TEXT NOT NULL,
-                default_key TEXT,
-                parent_id TEXT,
-                rule_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS smart_mailbox_state (
-                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-                initialized_at TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS mailbox (
                 account_id TEXT NOT NULL,
                 id TEXT NOT NULL,
@@ -1318,55 +1286,7 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 ON event_log (account_id, topic, mailbox_id, seq);
             CREATE INDEX IF NOT EXISTS idx_conversation_message_lookup
                 ON conversation_message (account_id, message_id);
-            CREATE INDEX IF NOT EXISTS idx_smart_mailbox_position
-                ON smart_mailbox (position, name);
             ",
-        )
-        .map_err(sql_to_store_error)?;
-    ensure_projection_columns(connection)?;
-    backfill_source_projection(connection)?;
-    Ok(())
-}
-
-fn ensure_projection_columns(connection: &Connection) -> Result<(), StoreError> {
-    ensure_column(
-        connection,
-        "message",
-        "conversation_id",
-        "ALTER TABLE message ADD COLUMN conversation_id TEXT",
-    )?;
-    ensure_column(
-        connection,
-        "message",
-        "normalized_subject",
-        "ALTER TABLE message ADD COLUMN normalized_subject TEXT",
-    )?;
-    ensure_column(
-        connection,
-        "message",
-        "rfc_message_id",
-        "ALTER TABLE message ADD COLUMN rfc_message_id TEXT",
-    )?;
-    ensure_column(
-        connection,
-        "message",
-        "in_reply_to",
-        "ALTER TABLE message ADD COLUMN in_reply_to TEXT",
-    )?;
-    ensure_column(
-        connection,
-        "message",
-        "references_json",
-        "ALTER TABLE message ADD COLUMN references_json TEXT NOT NULL DEFAULT '[]'",
-    )?;
-    Ok(())
-}
-
-fn backfill_source_projection(connection: &Connection) -> Result<(), StoreError> {
-    connection
-        .execute_batch(
-            "INSERT OR IGNORE INTO source_projection (source_id, name)
-             SELECT account_id, name FROM account_config",
         )
         .map_err(sql_to_store_error)?;
     Ok(())
@@ -1655,27 +1575,6 @@ fn push_placeholders(values: &[String], params: &mut Vec<SqlValue>) -> String {
         params.push(SqlValue::Text(value.clone()));
     }
     vec!["?"; values.len()].join(", ")
-}
-
-fn ensure_column(
-    connection: &Connection,
-    table: &str,
-    column: &str,
-    sql: &str,
-) -> Result<(), StoreError> {
-    let pragma = format!("PRAGMA table_info({table})");
-    let mut statement = connection.prepare(&pragma).map_err(sql_to_store_error)?;
-    let exists = statement
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(sql_to_store_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_to_store_error)?
-        .into_iter()
-        .any(|existing| existing == column);
-    if !exists {
-        connection.execute(sql, []).map_err(sql_to_store_error)?;
-    }
-    Ok(())
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
