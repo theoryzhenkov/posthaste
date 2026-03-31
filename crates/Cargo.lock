@@ -973,6 +973,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "keyring",
+ "mail-config",
  "mail-domain",
  "mail-jmap",
  "mail-store",

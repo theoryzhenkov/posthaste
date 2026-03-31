@@ -4,17 +4,14 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use hex::encode as hex_encode;
 use mail_domain::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    CommandResult, ConversationId, ConversationSummary, ConversationView, DomainEvent,
+    AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView, DomainEvent,
     EventFilter, FetchedBody, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand, SidebarResponse,
-    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary,
-    SmartMailboxValue, StoreError, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError,
+    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -45,7 +42,6 @@ impl DatabaseStore {
             Connection::open(&db_path).map_err(|err| StoreError::Failure(err.to_string()))?;
         configure_connection(&connection)?;
         init_schema(&connection)?;
-        seed_default_smart_mailboxes(&connection)?;
 
         Ok(Self {
             db_path,
@@ -119,7 +115,7 @@ impl DatabaseStore {
                         m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                         m.is_read, m.is_flagged
                  FROM message m
-                 JOIN account_config a ON a.account_id = m.account_id
+                 JOIN source_projection a ON a.source_id = m.account_id
                  WHERE m.account_id = ?1 AND m.thread_id = ?2
                  ORDER BY received_at ASC",
             )
@@ -136,192 +132,7 @@ impl DatabaseStore {
     }
 }
 
-#[async_trait]
 impl MailStore for DatabaseStore {
-    fn get_app_settings(&self) -> Result<AppSettings, StoreError> {
-        let connection = self.read_connection()?;
-        let json: Option<String> = connection
-            .query_row(
-                "SELECT settings_json FROM app_settings WHERE singleton = 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?;
-        match json {
-            Some(json) => serde_json::from_str(&json).map_err(json_to_store_error),
-            None => Ok(AppSettings::default()),
-        }
-    }
-
-    fn put_app_settings(&self, settings: &AppSettings) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            tx.execute(
-                "INSERT INTO app_settings (singleton, settings_json)
-                 VALUES (1, ?1)
-                 ON CONFLICT(singleton) DO UPDATE SET settings_json = excluded.settings_json",
-                params![serde_json::to_string(settings).map_err(json_to_store_error)?],
-            )
-            .map_err(sql_to_store_error)?;
-            Ok(())
-        })
-    }
-
-    fn list_accounts(&self) -> Result<Vec<AccountSettings>, StoreError> {
-        let connection = self.read_connection()?;
-        let mut statement = connection
-            .prepare(
-                "SELECT account_id, name, driver, enabled, transport_json, created_at, updated_at
-                 FROM account_config
-                 ORDER BY name, account_id",
-            )
-            .map_err(sql_to_store_error)?;
-        let rows = statement
-            .query_map([], row_to_account_settings)
-            .map_err(sql_to_store_error)?;
-        let accounts = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_to_store_error)?;
-        Ok(accounts)
-    }
-
-    fn get_account(&self, account_id: &AccountId) -> Result<Option<AccountSettings>, StoreError> {
-        let connection = self.read_connection()?;
-        connection
-            .query_row(
-                "SELECT account_id, name, driver, enabled, transport_json, created_at, updated_at
-                 FROM account_config
-                 WHERE account_id = ?1",
-                params![account_id.as_str()],
-                row_to_account_settings,
-            )
-            .optional()
-            .map_err(sql_to_store_error)
-    }
-
-    fn create_account(&self, account: &AccountSettings) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            let changed = tx
-                .execute(
-                    "INSERT INTO account_config (
-                        account_id, name, driver, enabled, transport_json, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        account.id.as_str(),
-                        account.name,
-                        account.driver.as_str(),
-                        bool_to_i64(account.enabled),
-                        serde_json::to_string(&account.transport).map_err(json_to_store_error)?,
-                        account.created_at,
-                        account.updated_at,
-                    ],
-                )
-                .map_err(sql_to_store_error)?;
-            if changed != 1 {
-                return Err(StoreError::Conflict(format!(
-                    "account:{}",
-                    account.id.as_str()
-                )));
-            }
-            Ok(())
-        })
-    }
-
-    fn update_account(&self, account: &AccountSettings) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            let changed = tx
-                .execute(
-                    "UPDATE account_config
-                     SET name = ?2,
-                         driver = ?3,
-                         enabled = ?4,
-                         transport_json = ?5,
-                         updated_at = ?6
-                     WHERE account_id = ?1",
-                    params![
-                        account.id.as_str(),
-                        account.name,
-                        account.driver.as_str(),
-                        bool_to_i64(account.enabled),
-                        serde_json::to_string(&account.transport).map_err(json_to_store_error)?,
-                        account.updated_at,
-                    ],
-                )
-                .map_err(sql_to_store_error)?;
-            if changed == 0 {
-                return Err(StoreError::NotFound(format!(
-                    "account:{}",
-                    account.id.as_str()
-                )));
-            }
-            Ok(())
-        })
-    }
-
-    fn delete_account(&self, account_id: &AccountId) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            tx.execute(
-                "DELETE FROM app_settings
-                 WHERE singleton = 1
-                   AND json_extract(settings_json, '$.defaultAccountId') = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM account_config WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM mailbox WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM message WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM message_mailbox WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM message_keyword WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM message_body WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM conversation_message WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM thread_view WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM sync_cursor WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            tx.execute(
-                "DELETE FROM event_log WHERE account_id = ?1",
-                params![account_id.as_str()],
-            )
-            .map_err(sql_to_store_error)?;
-            cleanup_orphan_conversations_tx(tx)?;
-            Ok(())
-        })
-    }
-
     fn upsert_source_projection(
         &self,
         source_id: &AccountId,
@@ -402,10 +213,9 @@ impl MailStore for DatabaseStore {
                         m.is_read,
                         m.is_flagged
                     FROM message m
-                    JOIN account_config a
-                      ON a.account_id = m.account_id
-                    WHERE a.enabled = 1
-                      AND (?1 IS NULL OR m.account_id = ?1)
+                    JOIN source_projection a
+                      ON a.source_id = m.account_id
+                    WHERE (?1 IS NULL OR m.account_id = ?1)
                       AND (
                         ?2 IS NULL OR EXISTS (
                             SELECT 1
@@ -499,8 +309,8 @@ impl MailStore for DatabaseStore {
                  JOIN message m
                    ON m.account_id = cm.account_id
                   AND m.id = cm.message_id
-                 JOIN account_config a
-                   ON a.account_id = m.account_id
+                 JOIN source_projection a
+                   ON a.source_id = m.account_id
                  WHERE cm.conversation_id = ?1
                  ORDER BY m.received_at ASC, m.id ASC",
             )
@@ -527,32 +337,6 @@ impl MailStore for DatabaseStore {
         }))
     }
 
-    fn get_sidebar(&self) -> Result<SidebarResponse, StoreError> {
-        let accounts = self.list_accounts()?;
-        let smart_mailboxes = self
-            .list_smart_mailboxes()?
-            .into_iter()
-            .map(|mailbox| SidebarSmartMailbox {
-                id: mailbox.id,
-                name: mailbox.name,
-                unread_messages: mailbox.unread_messages,
-                total_messages: mailbox.total_messages,
-            })
-            .collect();
-        let mut sources = Vec::new();
-        for account in accounts.into_iter().filter(|account| account.enabled) {
-            sources.push(SidebarSource {
-                id: account.id.clone(),
-                name: account.name,
-                mailboxes: self.list_mailboxes(&account.id)?,
-            });
-        }
-        Ok(SidebarResponse {
-            smart_mailboxes,
-            sources,
-        })
-    }
-
     fn list_messages(
         &self,
         account_id: &AccountId,
@@ -564,8 +348,8 @@ impl MailStore for DatabaseStore {
                     m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
-             JOIN account_config a
-               ON a.account_id = m.account_id
+             JOIN source_projection a
+               ON a.source_id = m.account_id
              JOIN message_mailbox mm
                ON mm.account_id = m.account_id
               AND mm.message_id = m.id
@@ -576,8 +360,8 @@ impl MailStore for DatabaseStore {
                     m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
-             JOIN account_config a
-               ON a.account_id = m.account_id
+             JOIN source_projection a
+               ON a.source_id = m.account_id
              WHERE m.account_id = ?1
              ORDER BY m.received_at DESC"
         };
@@ -602,82 +386,72 @@ impl MailStore for DatabaseStore {
         Ok(summaries)
     }
 
-    fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError> {
-        let connection = self.read_connection()?;
-        let mailboxes = load_smart_mailboxes(&connection)?;
-        let mut summaries = Vec::with_capacity(mailboxes.len());
-        for mailbox in mailboxes {
-            let (total_messages, unread_messages) =
-                count_smart_mailbox_messages(&connection, &mailbox.rule)?;
-            summaries.push(SmartMailboxSummary {
-                id: mailbox.id,
-                name: mailbox.name,
-                position: mailbox.position,
-                kind: mailbox.kind,
-                default_key: mailbox.default_key,
-                parent_id: mailbox.parent_id,
-                unread_messages,
-                total_messages,
-                created_at: mailbox.created_at,
-                updated_at: mailbox.updated_at,
-            });
-        }
-        Ok(summaries)
-    }
-
-    fn get_smart_mailbox(
+    fn query_messages_by_rule(
         &self,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<Option<SmartMailbox>, StoreError> {
-        let connection = self.read_connection()?;
-        query_smart_mailbox(&connection, smart_mailbox_id)
-    }
-
-    fn create_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError> {
-        validate_smart_mailbox(smart_mailbox)?;
-        self.write_transaction(|tx| upsert_smart_mailbox_tx(tx, smart_mailbox, false))
-    }
-
-    fn update_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError> {
-        validate_smart_mailbox(smart_mailbox)?;
-        self.write_transaction(|tx| upsert_smart_mailbox_tx(tx, smart_mailbox, true))
-    }
-
-    fn delete_smart_mailbox(&self, smart_mailbox_id: &SmartMailboxId) -> Result<(), StoreError> {
-        self.write_transaction(|tx| {
-            let changed = tx
-                .execute(
-                    "DELETE FROM smart_mailbox WHERE id = ?1",
-                    params![smart_mailbox_id.as_str()],
-                )
-                .map_err(sql_to_store_error)?;
-            if changed == 0 {
-                return Err(StoreError::NotFound(format!(
-                    "smart_mailbox:{}",
-                    smart_mailbox_id.as_str()
-                )));
-            }
-            Ok(())
-        })
-    }
-
-    fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError> {
-        self.write_transaction(|tx| {
-            upsert_default_smart_mailboxes_tx(tx)?;
-            Ok(())
-        })?;
-        self.list_smart_mailboxes()
-    }
-
-    fn list_smart_mailbox_messages(
-        &self,
-        smart_mailbox_id: &SmartMailboxId,
+        rule: &SmartMailboxRule,
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
-        let smart_mailbox = query_smart_mailbox(&connection, smart_mailbox_id)?.ok_or_else(|| {
-            StoreError::NotFound(format!("smart_mailbox:{}", smart_mailbox_id.as_str()))
-        })?;
-        query_messages_by_rule(&connection, &smart_mailbox.rule)
+        query_messages_by_rule(&connection, rule)
+    }
+
+    fn query_smart_mailbox_counts(
+        &self,
+        rule: &SmartMailboxRule,
+    ) -> Result<(i64, i64), StoreError> {
+        let connection = self.read_connection()?;
+        count_smart_mailbox_messages(&connection, rule)
+    }
+
+    fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM mailbox WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_mailbox WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_keyword WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_body WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM conversation_message WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM thread_view WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM sync_cursor WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM event_log WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            cleanup_orphan_conversations_tx(tx)?;
+            Ok(())
+        })
     }
 
     fn get_message_detail(
@@ -692,8 +466,8 @@ impl MailStore for DatabaseStore {
                         m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                         m.is_read, m.is_flagged
                  FROM message m
-                 JOIN account_config a
-                   ON a.account_id = m.account_id
+                 JOIN source_projection a
+                   ON a.source_id = m.account_id
                  WHERE m.account_id = ?1 AND m.id = ?2",
             )
             .map_err(sql_to_store_error)?;
@@ -1554,21 +1328,6 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn row_to_account_settings(row: &rusqlite::Row<'_>) -> Result<AccountSettings, rusqlite::Error> {
-    let transport_json: String = row.get(4)?;
-    let transport = serde_json::from_str::<AccountTransportSettings>(&transport_json)
-        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-    Ok(AccountSettings {
-        id: AccountId(row.get(0)?),
-        name: row.get(1)?,
-        driver: parse_account_driver(&row.get::<_, String>(2)?)?,
-        enabled: row.get::<_, i64>(3)? != 0,
-        transport,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
-    })
-}
-
 fn ensure_projection_columns(connection: &Connection) -> Result<(), StoreError> {
     ensure_column(
         connection,
@@ -1613,278 +1372,6 @@ fn backfill_source_projection(connection: &Connection) -> Result<(), StoreError>
     Ok(())
 }
 
-fn seed_default_smart_mailboxes(connection: &Connection) -> Result<(), StoreError> {
-    let initialized = connection
-        .query_row(
-            "SELECT initialized_at FROM smart_mailbox_state WHERE singleton = 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(sql_to_store_error)?
-        .is_some();
-    if initialized {
-        return Ok(());
-    }
-
-    let tx = connection.unchecked_transaction().map_err(sql_to_store_error)?;
-    upsert_default_smart_mailboxes_tx(&tx)?;
-    tx.execute(
-        "INSERT INTO smart_mailbox_state (singleton, initialized_at) VALUES (1, ?1)
-         ON CONFLICT(singleton) DO UPDATE SET initialized_at = initialized_at",
-        params![now_iso8601()?],
-    )
-    .map_err(sql_to_store_error)?;
-    tx.commit().map_err(sql_to_store_error)?;
-    Ok(())
-}
-
-fn default_smart_mailboxes() -> Vec<SmartMailbox> {
-    let timestamp = "1970-01-01T00:00:00Z".to_string();
-    vec![
-        default_smart_mailbox("default-inbox", "Inbox", 0, "inbox", Some("inbox")),
-        default_smart_mailbox("default-archive", "Archive", 1, "archive", Some("archive")),
-        default_smart_mailbox("default-drafts", "Drafts", 2, "drafts", Some("drafts")),
-        default_smart_mailbox("default-sent", "Sent", 3, "sent", Some("sent")),
-        default_smart_mailbox("default-junk", "Junk", 4, "junk", Some("junk")),
-        default_smart_mailbox("default-trash", "Trash", 5, "trash", Some("trash")),
-        SmartMailbox {
-            id: SmartMailboxId::from("default-all-mail"),
-            name: "All Mail".to_string(),
-            position: 6,
-            kind: SmartMailboxKind::Default,
-            default_key: Some("all-mail".to_string()),
-            parent_id: None,
-            rule: SmartMailboxRule {
-                root: SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::All,
-                    negated: false,
-                    nodes: Vec::new(),
-                },
-            },
-            created_at: timestamp.clone(),
-            updated_at: timestamp,
-        },
-    ]
-}
-
-fn default_smart_mailbox(
-    id: &str,
-    name: &str,
-    position: i64,
-    default_key: &str,
-    role: Option<&str>,
-) -> SmartMailbox {
-    let timestamp = "1970-01-01T00:00:00Z".to_string();
-    let nodes = role
-        .map(|value| {
-            vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxRole,
-                operator: SmartMailboxOperator::Equals,
-                negated: false,
-                value: SmartMailboxValue::String(value.to_string()),
-            })]
-        })
-        .unwrap_or_default();
-    SmartMailbox {
-        id: SmartMailboxId::from(id),
-        name: name.to_string(),
-        position,
-        kind: SmartMailboxKind::Default,
-        default_key: Some(default_key.to_string()),
-        parent_id: None,
-        rule: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
-                negated: false,
-                nodes,
-            },
-        },
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    }
-}
-
-fn upsert_default_smart_mailboxes_tx(tx: &Transaction<'_>) -> Result<(), StoreError> {
-    let timestamp = now_iso8601()?;
-    for mailbox in default_smart_mailboxes() {
-        tx.execute(
-            "INSERT INTO smart_mailbox (
-                id, name, position, kind, default_key, parent_id, rule_json, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                position = excluded.position,
-                kind = excluded.kind,
-                default_key = excluded.default_key,
-                parent_id = excluded.parent_id,
-                rule_json = excluded.rule_json,
-                updated_at = excluded.updated_at",
-            params![
-                mailbox.id.as_str(),
-                mailbox.name,
-                mailbox.position,
-                smart_mailbox_kind_to_str(&mailbox.kind),
-                mailbox.default_key,
-                mailbox.parent_id.as_ref().map(SmartMailboxId::as_str),
-                serde_json::to_string(&mailbox.rule).map_err(json_to_store_error)?,
-                mailbox.created_at,
-                timestamp,
-            ],
-        )
-        .map_err(sql_to_store_error)?;
-    }
-    Ok(())
-}
-
-fn smart_mailbox_kind_to_str(kind: &SmartMailboxKind) -> &'static str {
-    match kind {
-        SmartMailboxKind::Default => "default",
-        SmartMailboxKind::User => "user",
-    }
-}
-
-fn parse_smart_mailbox_kind(value: &str) -> Result<SmartMailboxKind, rusqlite::Error> {
-    match value {
-        "default" => Ok(SmartMailboxKind::Default),
-        "user" => Ok(SmartMailboxKind::User),
-        _ => Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-            StoreError::Failure(format!("unsupported smart mailbox kind: {value}")),
-        ))),
-    }
-}
-
-fn load_smart_mailboxes(connection: &Connection) -> Result<Vec<SmartMailbox>, StoreError> {
-    let mut statement = connection
-        .prepare(
-            "SELECT id, name, position, kind, default_key, parent_id, rule_json, created_at, updated_at
-             FROM smart_mailbox
-             ORDER BY position ASC, name ASC, id ASC",
-        )
-        .map_err(sql_to_store_error)?;
-    let rows = statement
-        .query_map([], row_to_smart_mailbox)
-        .map_err(sql_to_store_error)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(sql_to_store_error)
-}
-
-fn row_to_smart_mailbox(row: &rusqlite::Row<'_>) -> Result<SmartMailbox, rusqlite::Error> {
-    let rule_json: String = row.get(6)?;
-    let rule = serde_json::from_str::<SmartMailboxRule>(&rule_json)
-        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
-    Ok(SmartMailbox {
-        id: SmartMailboxId(row.get(0)?),
-        name: row.get(1)?,
-        position: row.get(2)?,
-        kind: parse_smart_mailbox_kind(&row.get::<_, String>(3)?)?,
-        default_key: row.get(4)?,
-        parent_id: row.get::<_, Option<String>>(5)?.map(SmartMailboxId),
-        rule,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-    })
-}
-
-fn query_smart_mailbox(
-    connection: &Connection,
-    smart_mailbox_id: &SmartMailboxId,
-) -> Result<Option<SmartMailbox>, StoreError> {
-    connection
-        .query_row(
-            "SELECT id, name, position, kind, default_key, parent_id, rule_json, created_at, updated_at
-             FROM smart_mailbox
-             WHERE id = ?1",
-            params![smart_mailbox_id.as_str()],
-            row_to_smart_mailbox,
-        )
-        .optional()
-        .map_err(sql_to_store_error)
-}
-
-fn validate_smart_mailbox(smart_mailbox: &SmartMailbox) -> Result<(), StoreError> {
-    if smart_mailbox.id.as_str().trim().is_empty() {
-        return Err(StoreError::Failure("smart mailbox id is required".to_string()));
-    }
-    if smart_mailbox.name.trim().is_empty() {
-        return Err(StoreError::Failure("smart mailbox name is required".to_string()));
-    }
-    if matches!(smart_mailbox.kind, SmartMailboxKind::Default) && smart_mailbox.default_key.is_none()
-    {
-        return Err(StoreError::Failure(
-            "default smart mailboxes must include default_key".to_string(),
-        ));
-    }
-    validate_smart_mailbox_group(&smart_mailbox.rule.root)
-}
-
-fn validate_smart_mailbox_group(group: &SmartMailboxGroup) -> Result<(), StoreError> {
-    for node in &group.nodes {
-        match node {
-            SmartMailboxRuleNode::Group(child) => validate_smart_mailbox_group(child)?,
-            SmartMailboxRuleNode::Condition(condition) => validate_smart_mailbox_condition(condition)?,
-        }
-    }
-    Ok(())
-}
-
-fn validate_smart_mailbox_condition(condition: &SmartMailboxCondition) -> Result<(), StoreError> {
-    use SmartMailboxField as Field;
-    use SmartMailboxOperator as Op;
-    match condition.field {
-        Field::SourceId | Field::SourceName | Field::MailboxId | Field::MailboxRole | Field::Keyword => {
-            match condition.operator {
-                Op::Equals => {
-                    expect_string_value(&condition.value)?;
-                }
-                Op::In => {
-                    expect_strings_value(&condition.value)?;
-                }
-                _ => return Err(StoreError::Failure(format!(
-                    "unsupported operator {:?} for field {:?}",
-                    condition.operator, condition.field
-                ))),
-            }
-        }
-        Field::IsRead | Field::IsFlagged | Field::HasAttachment => match condition.operator {
-            Op::Equals => {
-                expect_bool_value(&condition.value)?;
-            }
-            _ => {
-                return Err(StoreError::Failure(format!(
-                    "unsupported operator {:?} for field {:?}",
-                    condition.operator, condition.field
-                )))
-            }
-        },
-        Field::FromName | Field::FromEmail | Field::Subject | Field::Preview => match condition.operator {
-            Op::Equals | Op::Contains => {
-                expect_string_value(&condition.value)?;
-            }
-            Op::In => {
-                expect_strings_value(&condition.value)?;
-            }
-            _ => {
-                return Err(StoreError::Failure(format!(
-                    "unsupported operator {:?} for field {:?}",
-                    condition.operator, condition.field
-                )))
-            }
-        },
-        Field::ReceivedAt => match condition.operator {
-            Op::Before | Op::After | Op::OnOrBefore | Op::OnOrAfter => {
-                expect_string_value(&condition.value)?;
-            }
-            _ => {
-                return Err(StoreError::Failure(format!(
-                    "unsupported operator {:?} for field {:?}",
-                    condition.operator, condition.field
-                )))
-            }
-        },
-    }
-    Ok(())
-}
-
 fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
     match value {
         SmartMailboxValue::String(value) => Ok(value.as_str()),
@@ -1906,64 +1393,6 @@ fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
     }
 }
 
-fn upsert_smart_mailbox_tx(
-    tx: &Transaction<'_>,
-    smart_mailbox: &SmartMailbox,
-    update_existing: bool,
-) -> Result<(), StoreError> {
-    let rule_json = serde_json::to_string(&smart_mailbox.rule).map_err(json_to_store_error)?;
-    if update_existing {
-        let changed = tx
-            .execute(
-                "UPDATE smart_mailbox
-                 SET name = ?2,
-                     position = ?3,
-                     kind = ?4,
-                     default_key = ?5,
-                     parent_id = ?6,
-                     rule_json = ?7,
-                     updated_at = ?8
-                 WHERE id = ?1",
-                params![
-                    smart_mailbox.id.as_str(),
-                    smart_mailbox.name,
-                    smart_mailbox.position,
-                    smart_mailbox_kind_to_str(&smart_mailbox.kind),
-                    smart_mailbox.default_key,
-                    smart_mailbox.parent_id.as_ref().map(SmartMailboxId::as_str),
-                    rule_json,
-                    smart_mailbox.updated_at,
-                ],
-            )
-            .map_err(sql_to_store_error)?;
-        if changed == 0 {
-            return Err(StoreError::NotFound(format!(
-                "smart_mailbox:{}",
-                smart_mailbox.id.as_str()
-            )));
-        }
-    } else {
-        tx.execute(
-            "INSERT INTO smart_mailbox (
-                id, name, position, kind, default_key, parent_id, rule_json, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                smart_mailbox.id.as_str(),
-                smart_mailbox.name,
-                smart_mailbox.position,
-                smart_mailbox_kind_to_str(&smart_mailbox.kind),
-                smart_mailbox.default_key,
-                smart_mailbox.parent_id.as_ref().map(SmartMailboxId::as_str),
-                rule_json,
-                smart_mailbox.created_at,
-                smart_mailbox.updated_at,
-            ],
-        )
-        .map_err(sql_to_store_error)?;
-    }
-    Ok(())
-}
-
 fn count_smart_mailbox_messages(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -1973,15 +1402,14 @@ fn count_smart_mailbox_messages(
     let sql = format!(
         "SELECT COUNT(*), SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END)
          FROM message m
-         JOIN account_config a ON a.account_id = m.account_id
-         WHERE a.enabled = 1 AND ({where_clause})"
+         JOIN source_projection a ON a.source_id = m.account_id
+         WHERE ({where_clause})"
     );
     connection
         .query_row(&sql, params_from_iter(params), |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-            ))
+            let total: i64 = row.get(0)?;
+            let unread: i64 = row.get::<_, Option<i64>>(1)?.unwrap_or(0);
+            Ok((unread, total))
         })
         .map_err(sql_to_store_error)
 }
@@ -1997,8 +1425,8 @@ fn query_messages_by_rule(
                 m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                 m.is_read, m.is_flagged
          FROM message m
-         JOIN account_config a ON a.account_id = m.account_id
-         WHERE a.enabled = 1 AND ({where_clause})
+         JOIN source_projection a ON a.source_id = m.account_id
+         WHERE ({where_clause})
          ORDER BY m.received_at DESC"
     );
     let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
@@ -2409,8 +1837,8 @@ fn query_message_detail_tx(
                     m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
-             JOIN account_config a
-               ON a.account_id = m.account_id
+             JOIN source_projection a
+               ON a.source_id = m.account_id
              WHERE m.account_id = ?1 AND m.id = ?2",
         )
         .map_err(sql_to_store_error)?;
@@ -2957,20 +2385,6 @@ fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
             0,
             rusqlite::types::Type::Text,
             Box::new(StoreError::Failure(format!("unknown sync object {other}"))),
-        )),
-    }
-}
-
-fn parse_account_driver(value: &str) -> Result<AccountDriver, rusqlite::Error> {
-    match value {
-        "jmap" => Ok(AccountDriver::Jmap),
-        "mock" => Ok(AccountDriver::Mock),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::new(StoreError::Failure(format!(
-                "unknown account driver {other}"
-            ))),
         )),
     }
 }

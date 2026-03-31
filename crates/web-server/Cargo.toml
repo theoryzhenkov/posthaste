@@ -15,6 +15,7 @@ dirs = { workspace = true }
 dotenvy = { workspace = true }
 futures-util = { workspace = true }
 keyring = { workspace = true }
+mail-config = { path = "../mail-config" }
 mail-domain = { path = "../jmap-core" }
 mail-jmap = { path = "../mail-engine" }
 mail-store = { path = "../mail-store" }
