@@ -139,15 +139,17 @@ impl SourceToml {
             transport: TransportToml {
                 base_url: settings.transport.base_url.clone(),
                 username: settings.transport.username.clone(),
-                secret_ref: settings.transport.secret_ref.as_ref().map(|sr| {
-                    SecretRefToml {
+                secret_ref: settings
+                    .transport
+                    .secret_ref
+                    .as_ref()
+                    .map(|sr| SecretRefToml {
                         kind: match sr.kind {
                             SecretKind::Env => SecretKindToml::Env,
                             SecretKind::Os => SecretKindToml::Os,
                         },
                         key: sr.key.clone(),
-                    }
-                }),
+                    }),
             },
             created_at: Some(settings.created_at.clone()),
             updated_at: Some(settings.updated_at.clone()),
@@ -307,12 +309,10 @@ fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGroup, String
 
 fn convert_rule_node(node: &RuleNodeToml) -> Result<SmartMailboxRuleNode, String> {
     match node {
-        RuleNodeToml::Condition(condition) => {
-            Ok(SmartMailboxRuleNode::Condition(convert_condition(condition)?))
-        }
-        RuleNodeToml::Group(group) => {
-            Ok(SmartMailboxRuleNode::Group(convert_rule_group(group)?))
-        }
+        RuleNodeToml::Condition(condition) => Ok(SmartMailboxRuleNode::Condition(
+            convert_condition(condition)?,
+        )),
+        RuleNodeToml::Group(group) => Ok(SmartMailboxRuleNode::Group(convert_rule_group(group)?)),
     }
 }
 
@@ -386,9 +386,7 @@ fn convert_node_to_toml(node: &SmartMailboxRuleNode) -> RuleNodeToml {
         SmartMailboxRuleNode::Condition(condition) => {
             RuleNodeToml::Condition(convert_condition_to_toml(condition))
         }
-        SmartMailboxRuleNode::Group(group) => {
-            RuleNodeToml::Group(convert_group_to_toml(group))
-        }
+        SmartMailboxRuleNode::Group(group) => RuleNodeToml::Group(convert_group_to_toml(group)),
     }
 }
 

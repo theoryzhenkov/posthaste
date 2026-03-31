@@ -43,10 +43,7 @@ pub trait ConfigRepository: Send + Sync {
     fn delete_source(&self, id: &AccountId) -> Result<(), ConfigError>;
 
     fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError>;
-    fn get_smart_mailbox(
-        &self,
-        id: &SmartMailboxId,
-    ) -> Result<Option<SmartMailbox>, ConfigError>;
+    fn get_smart_mailbox(&self, id: &SmartMailboxId) -> Result<Option<SmartMailbox>, ConfigError>;
     fn save_smart_mailbox(&self, mailbox: &SmartMailbox) -> Result<(), ConfigError>;
     fn delete_smart_mailbox(&self, id: &SmartMailboxId) -> Result<(), ConfigError>;
     fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError>;

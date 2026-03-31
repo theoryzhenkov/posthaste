@@ -556,12 +556,54 @@ impl MailStore for DatabaseStore {
             let mut affected_threads = BTreeSet::new();
             let mut affected_conversations = BTreeSet::new();
 
+            if batch.replace_all_mailboxes {
+                let remote_mailbox_ids: BTreeSet<_> =
+                    batch.mailboxes.iter().map(|mailbox| mailbox.id.clone()).collect();
+                let mut statement = tx
+                    .prepare("SELECT id FROM mailbox WHERE account_id = ?1")
+                    .map_err(sql_to_store_error)?;
+                let local_mailbox_ids = statement
+                    .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
+                    .map_err(sql_to_store_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_to_store_error)?
+                    .into_iter()
+                    .map(MailboxId)
+                    .collect::<BTreeSet<_>>();
+
+                for mailbox_id in local_mailbox_ids.difference(&remote_mailbox_ids) {
+                    tx.execute(
+                        "DELETE FROM mailbox WHERE account_id = ?1 AND id = ?2",
+                        params![account_id.as_str(), mailbox_id.as_str()],
+                    )
+                    .map_err(sql_to_store_error)?;
+                    affected_mailboxes.insert(mailbox_id.clone());
+                    events.push(insert_event_tx(
+                        tx,
+                        account_id,
+                        "mailbox.updated",
+                        Some(mailbox_id),
+                        None,
+                        json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
+                    )?);
+                }
+            }
+
             for mailbox_id in &batch.deleted_mailbox_ids {
                 tx.execute(
                     "DELETE FROM mailbox WHERE account_id = ?1 AND id = ?2",
                     params![account_id.as_str(), mailbox_id.as_str()],
                 )
                 .map_err(sql_to_store_error)?;
+                affected_mailboxes.insert(mailbox_id.clone());
+                events.push(insert_event_tx(
+                    tx,
+                    account_id,
+                    "mailbox.updated",
+                    Some(mailbox_id),
+                    None,
+                    json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
+                )?);
             }
 
             for message_id in &batch.deleted_message_ids {
@@ -2517,6 +2559,7 @@ mod tests {
                 messages: vec![sample_message("shared-id", "inbox", Some("mime-a"))],
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "a".to_string(),
@@ -2537,6 +2580,7 @@ mod tests {
                 messages: vec![sample_message("shared-id", "inbox", Some("mime-b"))],
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "b".to_string(),
@@ -2580,6 +2624,7 @@ mod tests {
                 }],
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state".to_string(),
@@ -2641,6 +2686,7 @@ mod tests {
                     )],
                     deleted_mailbox_ids: Vec::new(),
                     deleted_message_ids: Vec::new(),
+                    replace_all_mailboxes: false,
                     cursors: vec![SyncCursor {
                         object_type: SyncObject::Message,
                         state: "state".to_string(),
@@ -2701,6 +2747,7 @@ mod tests {
             messages: vec![sample_message("message-1", "inbox", Some("mime"))],
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
             cursors: vec![SyncCursor {
                 object_type: SyncObject::Message,
                 state: "state-1".to_string(),
@@ -2715,6 +2762,7 @@ mod tests {
             }],
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
             cursors: vec![SyncCursor {
                 object_type: SyncObject::Message,
                 state: "state-2".to_string(),
@@ -2759,6 +2807,72 @@ mod tests {
         let second = store.store_raw_message(&account, "same mime")?;
         assert_eq!(first.path, second.path);
         assert_eq!(first.sha256, second.sha256);
+        Ok(())
+    }
+
+    #[test]
+    fn full_mailbox_snapshot_removes_stale_local_mailboxes() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![
+                    mail_domain::MailboxRecord {
+                        id: MailboxId::from("inbox"),
+                        name: "Inbox".to_string(),
+                        role: Some("inbox".to_string()),
+                        unread_emails: 0,
+                        total_emails: 0,
+                    },
+                    mail_domain::MailboxRecord {
+                        id: MailboxId::from("all-mail"),
+                        name: "All Mail".to_string(),
+                        role: None,
+                        unread_emails: 0,
+                        total_emails: 0,
+                    },
+                ],
+                messages: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: true,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Mailbox,
+                    state: "mailbox-1".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )?;
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![mail_domain::MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: true,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Mailbox,
+                    state: "mailbox-2".to_string(),
+                    updated_at: "2026-03-31T10:05:00Z".to_string(),
+                }],
+            },
+        )?;
+
+        let mailboxes = store.list_mailboxes(&account)?;
+        assert_eq!(mailboxes.len(), 1);
+        assert_eq!(mailboxes[0].id, MailboxId::from("inbox"));
         Ok(())
     }
 }
