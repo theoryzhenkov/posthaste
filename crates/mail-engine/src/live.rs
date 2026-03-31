@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::{email, identity, mailbox};
 use mail_domain::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, Recipient, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncCursor, SyncObject,
+    MessageId, MessageRecord, PushNotification, PushStream, Recipient, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
 };
 use pulldown_cmark::{html, Options, Parser};
 use time::format_description::well_known::Rfc3339;
@@ -303,6 +304,58 @@ impl MailGateway for LiveJmapGateway {
         submission.identity_id(identity.id.as_str());
         request.send().await.map_err(map_gateway_error)?;
         Ok(())
+    }
+
+    async fn open_push_stream(
+        &self,
+        account_id: &AccountId,
+        last_event_id: Option<&str>,
+    ) -> Result<Option<PushStream>, GatewayError> {
+        let stream = self
+            .client
+            .event_source(
+                [
+                    jmap_client::DataType::Email,
+                    jmap_client::DataType::Mailbox,
+                    jmap_client::DataType::EmailDelivery,
+                    jmap_client::DataType::EmailSubmission,
+                ]
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .into(),
+                false,
+                Some(60),
+                last_event_id,
+            )
+            .await
+            .map_err(map_gateway_error)?;
+        let account_id = account_id.clone();
+        Ok(Some(Box::pin(stream.filter_map(move |event| {
+            let account_id = account_id.clone();
+            async move {
+                match event {
+                    Ok(jmap_client::event_source::PushNotification::StateChange(changes)) => {
+                        let changed = changes
+                            .changes(account_id.as_str())
+                            .map(|entries| {
+                                entries
+                                    .map(|(data_type, _)| data_type.to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        Some(Ok(PushNotification {
+                            account_id,
+                            changed,
+                            received_at: now_iso8601().ok()?,
+                            checkpoint: changes.id().map(str::to_string),
+                        }))
+                    }
+                    Ok(jmap_client::event_source::PushNotification::CalendarAlert(_)) => None,
+                    Err(error) => Some(Err(map_gateway_error(error))),
+                }
+            }
+        }))))
     }
 }
 

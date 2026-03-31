@@ -3,9 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, CommandResult, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, ReplaceMailboxesCommand, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, ThreadId, ThreadView,
+    AccountId, AccountSettings, AppSettings, CommandResult, EventFilter, FetchedBody, Identity,
+    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, PushStream,
+    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -52,6 +53,11 @@ pub trait MailGateway: Send + Sync {
         account_id: &AccountId,
         request: &SendMessageRequest,
     ) -> Result<(), GatewayError>;
+    async fn open_push_stream(
+        &self,
+        account_id: &AccountId,
+        last_event_id: Option<&str>,
+    ) -> Result<Option<PushStream>, GatewayError>;
 }
 
 #[async_trait]
@@ -76,7 +82,7 @@ pub trait MailStore: Send + Sync {
     fn get_cursor(
         &self,
         account_id: &AccountId,
-        object_type: crate::SyncObject,
+        object_type: SyncObject,
     ) -> Result<Option<SyncCursor>, StoreError>;
     fn get_message_mailboxes(
         &self,
@@ -120,10 +126,39 @@ pub trait MailStore: Send + Sync {
         message_id: Option<&MessageId>,
         payload: serde_json::Value,
     ) -> Result<DomainEvent, StoreError>;
+    fn get_app_settings(&self) -> Result<AppSettings, StoreError> {
+        Ok(AppSettings::default())
+    }
+    fn put_app_settings(&self, _settings: &AppSettings) -> Result<(), StoreError> {
+        Err(StoreError::Failure("settings not supported".to_string()))
+    }
+    fn list_accounts(&self) -> Result<Vec<AccountSettings>, StoreError> {
+        Ok(Vec::new())
+    }
+    fn get_account(&self, _account_id: &AccountId) -> Result<Option<AccountSettings>, StoreError> {
+        Ok(None)
+    }
+    fn create_account(&self, _account: &AccountSettings) -> Result<(), StoreError> {
+        Err(StoreError::Failure("accounts not supported".to_string()))
+    }
+    fn update_account(&self, _account: &AccountSettings) -> Result<(), StoreError> {
+        Err(StoreError::Failure("accounts not supported".to_string()))
+    }
+    fn delete_account(&self, _account_id: &AccountId) -> Result<(), StoreError> {
+        Err(StoreError::Failure("accounts not supported".to_string()))
+    }
+}
+
+pub trait SecretStore: Send + Sync {
+    fn resolve(&self, secret_ref: &SecretRef) -> Result<String, SecretStoreError>;
+    fn save(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError>;
+    fn update(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError>;
+    fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError>;
 }
 
 pub type SharedStore = Arc<dyn MailStore>;
 pub type SharedGateway = Arc<dyn MailGateway>;
+pub type SharedSecretStore = Arc<dyn SecretStore>;
 
 pub trait ServiceResultExt<T> {
     fn not_found(self, kind: &str, id: &str) -> Result<T, ServiceError>;

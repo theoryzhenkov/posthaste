@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
+use std::pin::Pin;
 
+use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -41,6 +43,150 @@ string_id!(MailboxId);
 string_id!(MessageId);
 string_id!(ThreadId);
 string_id!(BlobId);
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub default_account_id: Option<AccountId>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            default_account_id: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountDriver {
+    Jmap,
+    Mock,
+}
+
+impl AccountDriver {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Jmap => "jmap",
+            Self::Mock => "mock",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretKind {
+    Env,
+    Os,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretRef {
+    pub kind: SecretKind,
+    pub key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretStorage {
+    Env,
+    Os,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretStatus {
+    pub storage: SecretStorage,
+    pub configured: bool,
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountTransportSettings {
+    pub base_url: Option<String>,
+    pub username: Option<String>,
+    pub secret_ref: Option<SecretRef>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSettings {
+    pub id: AccountId,
+    pub name: String,
+    pub driver: AccountDriver,
+    pub enabled: bool,
+    pub transport: AccountTransportSettings,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountTransportOverview {
+    pub base_url: Option<String>,
+    pub username: Option<String>,
+    pub secret: SecretStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountStatus {
+    Ready,
+    Syncing,
+    Degraded,
+    AuthError,
+    Offline,
+    Disabled,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PushStatus {
+    Connected,
+    Reconnecting,
+    Unsupported,
+    Disabled,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRuntimeOverview {
+    pub status: AccountStatus,
+    pub push: PushStatus,
+    pub last_sync_at: Option<String>,
+    pub last_sync_error: Option<String>,
+    pub last_sync_error_code: Option<String>,
+}
+
+impl Default for AccountRuntimeOverview {
+    fn default() -> Self {
+        Self {
+            status: AccountStatus::Offline,
+            push: PushStatus::Disabled,
+            last_sync_at: None,
+            last_sync_error: None,
+            last_sync_error_code: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountOverview {
+    pub id: AccountId,
+    pub name: String,
+    pub driver: AccountDriver,
+    pub enabled: bool,
+    pub transport: AccountTransportOverview,
+    pub created_at: String,
+    pub updated_at: String,
+    pub is_default: bool,
+    #[serde(flatten)]
+    pub runtime: AccountRuntimeOverview,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -182,11 +328,42 @@ pub struct DomainEvent {
 
 #[derive(Clone, Debug)]
 pub struct EventFilter {
-    pub account_id: AccountId,
+    pub account_id: Option<AccountId>,
     pub topic: Option<String>,
     pub mailbox_id: Option<MailboxId>,
     pub after_seq: Option<i64>,
 }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncTrigger {
+    Startup,
+    Poll,
+    Push,
+    Manual,
+}
+
+impl SyncTrigger {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Startup => "startup",
+            Self::Poll => "poll",
+            Self::Push => "push",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushNotification {
+    pub account_id: AccountId,
+    pub changed: Vec<String>,
+    pub received_at: String,
+    pub checkpoint: Option<String>,
+}
+
+pub type PushStream = Pin<Box<dyn Stream<Item = Result<PushNotification, GatewayError>> + Send>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,6 +467,8 @@ pub enum ServiceError {
     #[error(transparent)]
     Gateway(#[from] GatewayError),
     #[error(transparent)]
+    Secret(#[from] SecretStoreError),
+    #[error(transparent)]
     Store(#[from] StoreError),
 }
 
@@ -302,9 +481,19 @@ impl ServiceError {
             Self::Gateway(GatewayError::StateMismatch) => "state_mismatch",
             Self::Gateway(GatewayError::CannotCalculateChanges) => "cannot_calculate_changes",
             Self::Gateway(GatewayError::Rejected(_)) => "gateway_rejected",
+            Self::Secret(SecretStoreError::Unavailable(_)) => "secret_unavailable",
+            Self::Secret(SecretStoreError::Unsupported(_)) => "secret_unsupported",
             Self::Store(StoreError::NotFound(_)) => "not_found",
             Self::Store(StoreError::Conflict(_)) => "conflict",
             Self::Store(StoreError::Failure(_)) => "storage_failure",
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum SecretStoreError {
+    #[error("secret unavailable: {0}")]
+    Unavailable(String),
+    #[error("secret store does not support operation: {0}")]
+    Unsupported(String),
 }

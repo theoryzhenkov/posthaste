@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use mail_domain::{
     AccountId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, Recipient, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncCursor, SyncObject,
+    MessageId, MessageRecord, PushStream, Recipient, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
 };
 
 pub struct MockJmapGateway {
@@ -193,6 +193,14 @@ impl MailGateway for MockJmapGateway {
         _request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
         Ok(())
+    }
+
+    async fn open_push_stream(
+        &self,
+        _account_id: &AccountId,
+        _last_event_id: Option<&str>,
+    ) -> Result<Option<PushStream>, GatewayError> {
+        Ok(None)
     }
 }
 

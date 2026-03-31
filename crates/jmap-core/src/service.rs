@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde_json::json;
 
@@ -7,26 +7,43 @@ use crate::{
     AccountId, AddToMailboxCommand, CommandResult, Identity, MailGateway, MailStore, MailboxId,
     MailboxSummary, MessageId, MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SharedStore,
-    SyncObject, ThreadId, ThreadView,
+    SyncObject, SyncTrigger, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
 pub struct MailService {
     store: SharedStore,
-    gateways: HashMap<String, SharedGateway>,
+    gateways: RwLock<HashMap<String, SharedGateway>>,
 }
 
 impl MailService {
     pub fn new(store: Arc<dyn MailStore>) -> Self {
         Self {
             store,
-            gateways: HashMap::new(),
+            gateways: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn with_gateway(mut self, account_id: &AccountId, gateway: Arc<dyn MailGateway>) -> Self {
-        self.gateways.insert(account_id.to_string(), gateway);
+        self.gateways
+            .get_mut()
+            .expect("gateway registry lock poisoned")
+            .insert(account_id.to_string(), gateway);
         self
+    }
+
+    pub fn set_gateway(&self, account_id: &AccountId, gateway: SharedGateway) {
+        self.gateways
+            .write()
+            .expect("gateway registry lock poisoned")
+            .insert(account_id.to_string(), gateway);
+    }
+
+    pub fn remove_gateway(&self, account_id: &AccountId) {
+        self.gateways
+            .write()
+            .expect("gateway registry lock poisoned")
+            .remove(account_id.as_str());
     }
 
     pub fn list_mailboxes(
@@ -89,6 +106,7 @@ impl MailService {
     pub async fn sync_account(
         &self,
         account_id: &AccountId,
+        trigger: SyncTrigger,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let gateway = self.required_gateway(account_id)?;
         let cursors = self.store.get_sync_cursors(account_id)?;
@@ -103,6 +121,7 @@ impl MailService {
                 "mailboxCount": batch.mailboxes.len(),
                 "messageCount": batch.messages.len(),
                 "deletedMessageCount": batch.deleted_message_ids.len(),
+                "trigger": trigger.as_str(),
             }),
         )?;
         events.push(sync_event);
@@ -114,6 +133,8 @@ impl MailService {
         account_id: &AccountId,
         code: &str,
         message: &str,
+        trigger: SyncTrigger,
+        stage: &str,
     ) -> Result<DomainEvent, ServiceError> {
         self.store
             .append_event(
@@ -121,7 +142,12 @@ impl MailService {
                 "sync.failed",
                 None,
                 None,
-                json!({ "code": code, "message": message }),
+                json!({
+                    "code": code,
+                    "message": message,
+                    "trigger": trigger.as_str(),
+                    "stage": stage,
+                }),
             )
             .map_err(Into::into)
     }
@@ -267,12 +293,20 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    fn gateway(&self, account_id: &AccountId) -> Option<&SharedGateway> {
-        self.gateways.get(account_id.as_str())
+    fn gateway(&self, account_id: &AccountId) -> Option<SharedGateway> {
+        self.gateways
+            .read()
+            .expect("gateway registry lock poisoned")
+            .get(account_id.as_str())
+            .cloned()
     }
 
-    fn required_gateway(&self, account_id: &AccountId) -> Result<&SharedGateway, ServiceError> {
-        self.gateway(account_id)
+    fn required_gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
+        self.gateways
+            .read()
+            .expect("gateway registry lock poisoned")
+            .get(account_id.as_str())
+            .cloned()
             .ok_or_else(|| crate::GatewayError::Unavailable(account_id.to_string()).into())
     }
 }
@@ -520,6 +554,14 @@ mod tests {
         ) -> Result<(), GatewayError> {
             Err(GatewayError::Rejected("unused".to_string()))
         }
+
+        async fn open_push_stream(
+            &self,
+            _account_id: &AccountId,
+            _last_event_id: Option<&str>,
+        ) -> Result<Option<crate::PushStream>, GatewayError> {
+            Ok(None)
+        }
     }
 
     struct StateMismatchGateway;
@@ -592,6 +634,14 @@ mod tests {
             _request: &crate::SendMessageRequest,
         ) -> Result<(), GatewayError> {
             Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn open_push_stream(
+            &self,
+            _account_id: &AccountId,
+            _last_event_id: Option<&str>,
+        ) -> Result<Option<crate::PushStream>, GatewayError> {
+            Ok(None)
         }
     }
 
