@@ -8,7 +8,6 @@ use mail_domain::{
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::repository::TomlConfigRepository;
-use crate::schema::AppToml;
 
 pub fn export_from_sqlite(
     db_path: &Path,
@@ -30,22 +29,7 @@ pub fn export_from_sqlite(
     let accounts = read_legacy_accounts(&connection)?;
     let smart_mailboxes = read_legacy_smart_mailboxes(&connection)?;
 
-    // Write app.toml
-    let app_toml = AppToml {
-        schema_version: 1,
-        default_source_id: app_settings
-            .default_account_id
-            .as_ref()
-            .map(|id| id.to_string()),
-        daemon: Default::default(),
-    };
     config_repo.put_app_settings(&app_settings)?;
-
-    // Write app.toml with daemon defaults preserved
-    let existing = config_repo.read_app_toml()?;
-    let _ = app_toml; // app_toml was used for the structure, but put_app_settings already wrote it
-    // Re-read to make sure daemon section wasn't lost
-    let _ = existing;
 
     // Write sources
     for account in &accounts {

@@ -137,6 +137,7 @@ impl ConfigRepository for TomlConfigRepository {
     }
 
     fn save_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
+        validate_safe_id(source.id.as_str())?;
         let source_toml = SourceToml::from_account_settings(source);
         let toml_str =
             toml::to_string_pretty(&source_toml).map_err(|e| ConfigError::Parse(e.to_string()))?;
@@ -195,6 +196,7 @@ impl ConfigRepository for TomlConfigRepository {
     }
 
     fn save_smart_mailbox(&self, mailbox: &SmartMailbox) -> Result<(), ConfigError> {
+        validate_safe_id(mailbox.id.as_str())?;
         write_smart_mailbox_toml(&self.config_root, mailbox)?;
 
         let mut snapshot = self.snapshot.write().map_err(lock_error)?;
@@ -350,6 +352,20 @@ fn write_smart_mailbox_toml(
         .join("smart-mailboxes")
         .join(format!("{}.toml", mailbox.id));
     atomic_write(&path, content.as_bytes())
+}
+
+fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
+    if id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || id.contains("..")
+        || id.contains('\0')
+    {
+        return Err(ConfigError::Validation(format!(
+            "id '{id}' contains unsafe characters"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError> {
