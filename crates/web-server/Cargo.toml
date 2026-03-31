@@ -20,4 +20,5 @@ jmap-client = { workspace = true }
 dotenvy = { workspace = true }
 reqwest = { workspace = true }
 thiserror = { workspace = true }
+pulldown-cmark = { workspace = true }
 url = "2.5.8"

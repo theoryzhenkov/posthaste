@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
-use crate::{db, jmap, sanitize};
+use crate::{compose, db, jmap, sanitize};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -356,4 +356,181 @@ pub async fn post_email_action(
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+}
+
+// --- Compose & Send ---
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendEmailRequest {
+    pub to: Vec<RecipientRequest>,
+    #[serde(default)]
+    pub cc: Vec<RecipientRequest>,
+    #[serde(default)]
+    pub bcc: Vec<RecipientRequest>,
+    pub subject: String,
+    pub body: String, // Markdown
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RecipientRequest {
+    pub name: Option<String>,
+    pub email: String,
+}
+
+#[derive(Deserialize)]
+pub struct PreviewRequest {
+    pub body: String,
+}
+
+#[derive(Serialize)]
+pub struct PreviewResponse {
+    pub html: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityResponse {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyDataResponse {
+    pub to: Vec<RecipientResponse>,
+    pub cc: Vec<RecipientResponse>,
+    pub reply_subject: String,
+    pub forward_subject: String,
+    pub quoted_body: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RecipientResponse {
+    pub name: Option<String>,
+    pub email: String,
+}
+
+pub async fn preview_markdown(Json(req): Json<PreviewRequest>) -> Json<PreviewResponse> {
+    Json(PreviewResponse {
+        html: compose::render_markdown(&req.body),
+    })
+}
+
+pub async fn get_identity(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<IdentityResponse>, StatusCode> {
+    let client = state
+        .jmap_client
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let data = compose::get_identity(client).await.map_err(|e| {
+        eprintln!("Failed to get identity: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    Ok(Json(IdentityResponse {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+    }))
+}
+
+pub async fn send_email(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SendEmailRequest>,
+) -> Result<StatusCode, StatusCode> {
+    let client = state
+        .jmap_client
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    // Look up the sender identity
+    let identity = compose::get_identity(client).await.map_err(|e| {
+        eprintln!("Failed to get identity: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    let to: Vec<(Option<String>, String)> = req
+        .to
+        .into_iter()
+        .map(|r| (r.name, r.email))
+        .collect();
+    let cc: Vec<(Option<String>, String)> = req
+        .cc
+        .into_iter()
+        .map(|r| (r.name, r.email))
+        .collect();
+    let bcc: Vec<(Option<String>, String)> = req
+        .bcc
+        .into_iter()
+        .map(|r| (r.name, r.email))
+        .collect();
+
+    compose::send_email(
+        client,
+        &identity.id,
+        &identity.name,
+        &identity.email,
+        &to,
+        &cc,
+        &bcc,
+        &req.subject,
+        &req.body,
+        req.in_reply_to.as_deref(),
+        req.references.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("Failed to send email: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn get_reply_data(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ReplyDataResponse>, StatusCode> {
+    let client = state
+        .jmap_client
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let data = compose::get_reply_data(client, &id).await.map_err(|e| {
+        eprintln!("Failed to get reply data: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    // For simple reply: to = [original from], cc = []
+    // The frontend can decide between reply and reply-all.
+    let to: Vec<RecipientResponse> = data
+        .from
+        .into_iter()
+        .map(|(name, email)| RecipientResponse { name, email })
+        .collect();
+
+    let cc: Vec<RecipientResponse> = data
+        .cc_all
+        .into_iter()
+        .chain(data.to_all.into_iter())
+        .map(|(name, email)| RecipientResponse { name, email })
+        .collect();
+
+    Ok(Json(ReplyDataResponse {
+        to,
+        cc,
+        reply_subject: data.reply_subject,
+        forward_subject: data.forward_subject,
+        quoted_body: data.quoted_body,
+        in_reply_to: data.in_reply_to,
+        references: data.references,
+    }))
 }
