@@ -48,37 +48,7 @@ async fn main() {
 
     // Startup flow: initialize config if empty
     if config_repo.is_empty() {
-        let db_path = roots.state_root.join("mail.sqlite");
-        if db_path.exists() {
-            // Try to migrate from legacy SQLite config
-            match mail_config::export_from_sqlite(&db_path, &config_repo) {
-                Ok(true) => {
-                    println!("migrated legacy config from SQLite to TOML");
-                }
-                Ok(false) => {
-                    // No legacy data, check for bootstrap template
-                    if let Some(bootstrap_path) = &roots.bootstrap_path {
-                        config::import_bootstrap(bootstrap_path, &config_repo)
-                            .expect("failed to import bootstrap template");
-                        println!(
-                            "imported bootstrap template from {}",
-                            bootstrap_path.display()
-                        );
-                    } else {
-                        config_repo
-                            .initialize_defaults()
-                            .expect("failed to initialize default config");
-                        println!("initialized default config");
-                    }
-                }
-                Err(err) => {
-                    eprintln!("warning: failed to migrate legacy config: {err}");
-                    config_repo
-                        .initialize_defaults()
-                        .expect("failed to initialize default config");
-                }
-            }
-        } else if let Some(bootstrap_path) = &roots.bootstrap_path {
+        if let Some(bootstrap_path) = &roots.bootstrap_path {
             config::import_bootstrap(bootstrap_path, &config_repo)
                 .expect("failed to import bootstrap template");
             println!(
