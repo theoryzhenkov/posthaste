@@ -130,7 +130,7 @@ fn strip_tracking_pixels(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     let mut remaining = html;
 
-    while let Some(start) = remaining.find("<img ").or_else(|| remaining.find("<img>")) {
+    while let Some(start) = find_img_tag_start(remaining) {
         result.push_str(&remaining[..start]);
 
         // Find the end of this tag
@@ -150,6 +150,24 @@ fn strip_tracking_pixels(html: &str) -> String {
 
     result.push_str(remaining);
     result
+}
+
+fn find_img_tag_start(html: &str) -> Option<usize> {
+    let bytes = html.as_bytes();
+    let last_start = bytes.len().saturating_sub(4);
+    for index in 0..last_start {
+        let candidate = &bytes[index..index + 4];
+        if candidate.eq_ignore_ascii_case(b"<img") {
+            let next = bytes.get(index + 4).copied();
+            if matches!(
+                next,
+                Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+            ) {
+                return Some(index);
+            }
+        }
+    }
+    None
 }
 
 /// Determine if an <img> tag should be kept.
@@ -252,6 +270,23 @@ mod tests {
         let input =
             r#"<img src="https://example.com/photo.jpg" alt="photo" width="200" height="150">"#;
         let result = sanitize_email_html(input);
+        assert!(result.contains("https://example.com/photo.jpg"));
+    }
+
+    #[test]
+    fn strips_uppercase_tracking_pixel() {
+        let input =
+            r#"<p>Hello</p><IMG SRC="https://track.example.com/pixel.gif" WIDTH="1" HEIGHT="1">"#;
+        let result = sanitize_email_html(input);
+        assert!(!result.to_ascii_lowercase().contains("<img"));
+    }
+
+    #[test]
+    fn keeps_mixed_case_https_img() {
+        let input =
+            r#"<Img Src="https://example.com/photo.jpg" Alt="photo" Width="200" Height="150">"#;
+        let result = sanitize_email_html(input);
+        assert!(result.to_ascii_lowercase().contains("<img"));
         assert!(result.contains("https://example.com/photo.jpg"));
     }
 

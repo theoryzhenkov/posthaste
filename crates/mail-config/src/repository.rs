@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use mail_domain::{
-    AccountId, AccountSettings, AppSettings, ConfigDiff, ConfigError, ConfigRepository,
-    ConfigSnapshot, SmartMailbox, SmartMailboxId,
+    now_iso8601 as domain_now_iso8601, AccountId, AccountSettings, AppSettings, ConfigDiff,
+    ConfigError, ConfigRepository, ConfigSnapshot, SmartMailbox, SmartMailboxId, RFC3339_EPOCH,
 };
 
 use crate::atomic::atomic_write;
@@ -371,9 +371,8 @@ fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError
 }
 
 fn now_iso8601() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    domain_now_iso8601()
+        .unwrap_or_else(|_| RFC3339_EPOCH.to_string())
 }
 
 fn io_error(err: std::io::Error) -> ConfigError {

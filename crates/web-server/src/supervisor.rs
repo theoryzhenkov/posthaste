@@ -6,12 +6,16 @@ use futures_util::{future::pending, StreamExt};
 use mail_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
     GatewayError, Identity, MailService, MailStore, PushStatus, PushStream, SecretStore,
-    ServiceError, SharedGateway, SyncTrigger,
+    ServiceError, SharedGateway, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
+    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use mail_jmap::{LiveJmapGateway, MockJmapGateway};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
+
+const PUSH_RETRY_DELAY: Duration = Duration::from_secs(15);
+const PUSH_UNSUPPORTED_RETRY_DELAY: Duration = Duration::from_secs(3600);
 
 pub struct AccountSupervisor {
     shared: Arc<SupervisorShared>,
@@ -204,11 +208,11 @@ async fn run_account_runtime(
                     shared
                         .set_push_status(&account_id, PushStatus::Unsupported)
                         .await;
-                    next_push_retry = tokio::time::Instant::now() + Duration::from_secs(3600);
+                    next_push_retry = tokio::time::Instant::now() + PUSH_UNSUPPORTED_RETRY_DELAY;
                 }
                 Err(error) => {
                     push_stream = None;
-                    next_push_retry = tokio::time::Instant::now() + Duration::from_secs(15);
+                    next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
                     shared
                         .handle_push_disconnect(&account_id, &error.to_string())
                         .await;
@@ -269,12 +273,12 @@ async fn run_account_runtime(
                     }
                     Some(Err(error)) => {
                         push_stream = None;
-                        next_push_retry = tokio::time::Instant::now() + Duration::from_secs(15);
+                        next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
                         shared.handle_push_disconnect(&account_id, &error.to_string()).await;
                     }
                     None => {
                         push_stream = None;
-                        next_push_retry = tokio::time::Instant::now() + Duration::from_secs(15);
+                        next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
                         shared.handle_push_disconnect(&account_id, "push stream ended").await;
                     }
                 }
@@ -323,7 +327,7 @@ async fn process_sync_trigger(
             *gateway = None;
             *push_stream = None;
             *push_checkpoint = None;
-            *next_push_retry = tokio::time::Instant::now() + Duration::from_secs(15);
+            *next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
             let stage = if matches!(
                 error,
                 ServiceError::Gateway(GatewayError::Unavailable(_))
@@ -458,7 +462,7 @@ impl SupervisorShared {
             .store
             .append_event(
                 account_id,
-                "push.disconnected",
+                EVENT_TOPIC_PUSH_DISCONNECTED,
                 None,
                 None,
                 json!({ "message": message }),
@@ -482,7 +486,7 @@ impl SupervisorShared {
         if previous.as_ref().map(|item| &item.status) != Some(&overview.status) {
             if let Ok(event) = self.store.append_event(
                 account_id,
-                "account.status_changed",
+                EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
                 None,
                 None,
                 json!({
@@ -502,7 +506,7 @@ impl SupervisorShared {
             (_, PushStatus::Connected) => {
                 if let Ok(event) =
                     self.store
-                        .append_event(account_id, "push.connected", None, None, json!({}))
+                        .append_event(account_id, EVENT_TOPIC_PUSH_CONNECTED, None, None, json!({}))
                 {
                     side_effects.push(event);
                 }
@@ -510,7 +514,7 @@ impl SupervisorShared {
             (Some(PushStatus::Connected), _) => {
                 if let Ok(event) =
                     self.store
-                        .append_event(account_id, "push.disconnected", None, None, json!({}))
+                        .append_event(account_id, EVENT_TOPIC_PUSH_DISCONNECTED, None, None, json!({}))
                 {
                     side_effects.push(event);
                 }

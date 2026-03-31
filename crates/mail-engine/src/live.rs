@@ -4,9 +4,10 @@ use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::{email, identity, mailbox};
 use mail_domain::{
-    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, PushNotification, PushStream, Recipient, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
+    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
+    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord, MessageId,
+    MessageRecord, PushNotification, PushStream, Recipient, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
 };
 use pulldown_cmark::{html, Options, Parser};
 use time::format_description::well_known::Rfc3339;
@@ -30,6 +31,13 @@ impl LiveJmapGateway {
             .map_err(map_gateway_error)?;
         Ok(Self { client })
     }
+}
+
+async fn fetch_send_identity(
+    gateway: &impl MailGateway,
+    account_id: &AccountId,
+) -> Result<Identity, GatewayError> {
+    gateway.fetch_identity(account_id).await
 }
 
 #[async_trait]
@@ -101,14 +109,14 @@ impl MailGateway for LiveJmapGateway {
                 .and_then(|part_id| email.body_value(part_id))
                 .map(|value| value.value().to_string())
         });
-        let raw_mime = synthesize_raw_mime(
+        let from_header = email
+            .from()
+            .and_then(|addresses| addresses.first())
+            .map(|address| address.email().to_string())
+            .unwrap_or_else(|| "unknown@example.invalid".to_string());
+        let raw_mime = synthesize_plain_text_raw_mime(
+            from_header.as_str(),
             email.subject().unwrap_or("(no subject)"),
-            email
-                .from()
-                .and_then(|addresses| addresses.first())
-                .map(|address| address.email().to_string())
-                .unwrap_or_else(|| "unknown@example.invalid".to_string())
-                .as_str(),
             body_text.as_deref(),
         );
 
@@ -262,10 +270,10 @@ impl MailGateway for LiveJmapGateway {
 
     async fn send_message(
         &self,
-        _account_id: &AccountId,
+        account_id: &AccountId,
         request_data: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        let identity = self.fetch_identity(&AccountId::from("primary")).await?;
+        let identity = fetch_send_identity(self, account_id).await?;
         let html_body = render_markdown(&request_data.body);
 
         let mut request = self.client.build();
@@ -348,7 +356,7 @@ impl MailGateway for LiveJmapGateway {
                         Some(Ok(PushNotification {
                             account_id,
                             changed,
-                            received_at: now_iso8601().ok()?,
+                            received_at: domain_now_iso8601().ok()?,
                             checkpoint: changes.id().map(str::to_string),
                         }))
                     }
@@ -357,6 +365,123 @@ impl MailGateway for LiveJmapGateway {
                 }
             }
         }))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    struct RecordingGateway {
+        seen_account_ids: Mutex<Vec<AccountId>>,
+    }
+
+    #[async_trait]
+    impl MailGateway for RecordingGateway {
+        async fn sync(
+            &self,
+            _account_id: &AccountId,
+            _cursors: &[SyncCursor],
+        ) -> Result<SyncBatch, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn fetch_message_body(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+        ) -> Result<FetchedBody, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn set_keywords(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            _expected_state: Option<&str>,
+            _command: &SetKeywordsCommand,
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn replace_mailboxes(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            _expected_state: Option<&str>,
+            _mailbox_ids: &[MailboxId],
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn destroy_message(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            _expected_state: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError> {
+            self.seen_account_ids
+                .lock()
+                .expect("recording lock poisoned")
+                .push(account_id.clone());
+            Ok(Identity {
+                id: "identity-1".to_string(),
+                name: "Alice".to_string(),
+                email: "alice@example.com".to_string(),
+            })
+        }
+
+        async fn fetch_reply_context(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+        ) -> Result<ReplyContext, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn send_message(
+            &self,
+            _account_id: &AccountId,
+            _request: &SendMessageRequest,
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn open_push_stream(
+            &self,
+            _account_id: &AccountId,
+            _last_event_id: Option<&str>,
+        ) -> Result<Option<PushStream>, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn send_identity_lookup_uses_requested_account_id() {
+        let gateway = RecordingGateway {
+            seen_account_ids: Mutex::new(Vec::new()),
+        };
+        let requested_account_id = AccountId::from("secondary");
+
+        let identity = fetch_send_identity(&gateway, &requested_account_id)
+            .await
+            .expect("identity lookup should succeed");
+
+        assert_eq!(identity.email, "alice@example.com");
+        assert_eq!(
+            gateway
+                .seen_account_ids
+                .lock()
+                .expect("recording lock poisoned")
+                .as_slice(),
+            &[requested_account_id]
+        );
     }
 }
 
@@ -450,7 +575,7 @@ async fn fetch_mailbox_delta(
         cursor: SyncCursor {
             object_type: SyncObject::Mailbox,
             state: current_state,
-            updated_at: now_iso8601()?,
+            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
 }
@@ -512,7 +637,7 @@ async fn fetch_email_delta(
         cursor: SyncCursor {
             object_type: SyncObject::Message,
             state: current_state,
-            updated_at: now_iso8601()?,
+            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
 }
@@ -546,7 +671,7 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
         cursor: SyncCursor {
             object_type: SyncObject::Mailbox,
             state,
-            updated_at: now_iso8601()?,
+            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
 }
@@ -595,7 +720,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
         cursor: SyncCursor {
             object_type: SyncObject::Message,
             state: state.unwrap_or_default(),
-            updated_at: now_iso8601()?,
+            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
 }
@@ -642,7 +767,7 @@ fn to_message_record(email: &jmap_client::email::Email) -> MessageRecord {
         received_at: email
             .received_at()
             .and_then(timestamp_to_iso8601)
-            .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string()),
+            .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
         has_attachment: email.has_attachment(),
         size: email.size() as i64,
         mailbox_ids: email
@@ -708,19 +833,6 @@ fn timestamp_to_iso8601(timestamp: i64) -> Option<String> {
     OffsetDateTime::from_unix_timestamp(timestamp)
         .ok()
         .and_then(|value| value.format(&Rfc3339).ok())
-}
-
-fn now_iso8601() -> Result<String, GatewayError> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|err| GatewayError::Rejected(err.to_string()))
-}
-
-fn synthesize_raw_mime(subject: &str, from_email: &str, body_text: Option<&str>) -> String {
-    format!(
-        "From: {from_email}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",
-        body_text.unwrap_or("")
-    )
 }
 
 fn map_gateway_error(error: jmap_client::Error) -> GatewayError {

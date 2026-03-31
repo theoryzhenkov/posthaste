@@ -5,6 +5,8 @@ use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::ConfigError;
 
@@ -47,6 +49,18 @@ string_id!(ThreadId);
 string_id!(BlobId);
 string_id!(ConversationId);
 string_id!(SmartMailboxId);
+
+pub const RFC3339_EPOCH: &str = "1970-01-01T00:00:00Z";
+pub const EVENT_TOPIC_SYNC_COMPLETED: &str = "sync.completed";
+pub const EVENT_TOPIC_SYNC_FAILED: &str = "sync.failed";
+pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
+pub const EVENT_TOPIC_MESSAGE_ARRIVED: &str = "message.arrived";
+pub const EVENT_TOPIC_ACCOUNT_UPDATED: &str = "account.updated";
+pub const EVENT_TOPIC_ACCOUNT_CREATED: &str = "account.created";
+pub const EVENT_TOPIC_ACCOUNT_DELETED: &str = "account.deleted";
+pub const EVENT_TOPIC_ACCOUNT_STATUS_CHANGED: &str = "account.status_changed";
+pub const EVENT_TOPIC_PUSH_CONNECTED: &str = "push.connected";
+pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,12 +106,7 @@ pub struct SecretRef {
     pub key: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SecretStorage {
-    Env,
-    Os,
-}
+pub type SecretStorage = SecretKind;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -487,6 +496,23 @@ pub struct MessageRecord {
     pub rfc_message_id: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
+}
+
+pub fn synthesize_plain_text_raw_mime(
+    from_header: &str,
+    subject: &str,
+    body_text: Option<&str>,
+) -> String {
+    format!(
+        "From: {from_header}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",
+        body_text.unwrap_or("")
+    )
+}
+
+pub fn now_iso8601() -> Result<String, String> {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(|err| err.to_string())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
