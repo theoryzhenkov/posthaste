@@ -8,10 +8,11 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use mail_domain::{
     AccountDriver, AccountId, AccountOverview, AccountSettings, AccountTransportOverview,
-    AddToMailboxCommand, AppSettings, CommandResult, DomainEvent, EventFilter, GatewayError,
-    MailboxId, MailboxSummary, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand,
-    ThreadId,
+    AddToMailboxCommand, AppSettings, CommandResult, DomainEvent, EventFilter,
+    ConversationId, ConversationSummary, ConversationView, MailboxId, MailboxSummary,
+    MessageDetail, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind,
+    SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse,
+    SmartMailbox, SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,7 +24,14 @@ use crate::{sanitize, AppState};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListMessagesQuery {
+pub struct ListConversationsQuery {
+    pub source_id: Option<String>,
+    pub mailbox_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSourceMessagesQuery {
     pub mailbox_id: Option<String>,
 }
 
@@ -87,6 +95,22 @@ pub struct PatchAccountRequest {
     pub enabled: Option<bool>,
     pub transport: Option<AccountTransportRequest>,
     pub secret: Option<SecretWriteRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSmartMailboxRequest {
+    pub name: String,
+    pub position: Option<i64>,
+    pub rule: SmartMailboxRule,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchSmartMailboxRequest {
+    pub name: Option<String>,
+    pub position: Option<i64>,
+    pub rule: Option<SmartMailboxRule>,
 }
 
 #[derive(Debug, Serialize)]
@@ -386,35 +410,172 @@ pub async fn delete_account(
 
 pub async fn list_mailboxes(
     State(state): State<Arc<AppState>>,
-    Path(account_id): Path<String>,
+    Path(source_id): Path<String>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
     state
         .service
-        .list_mailboxes(&AccountId(account_id))
+        .list_mailboxes(&AccountId(source_id))
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
 
-pub async fn list_messages(
+pub async fn list_source_messages(
     State(state): State<Arc<AppState>>,
-    Path(account_id): Path<String>,
-    Query(query): Query<ListMessagesQuery>,
+    Path(source_id): Path<String>,
+    Query(query): Query<ListSourceMessagesQuery>,
 ) -> Result<Json<Vec<mail_domain::MessageSummary>>, ApiError> {
     let mailbox_id = query.mailbox_id.map(MailboxId);
     state
         .service
-        .list_messages(&AccountId(account_id), mailbox_id.as_ref())
+        .list_messages(&AccountId(source_id), mailbox_id.as_ref())
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn get_sidebar(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SidebarResponse>, ApiError> {
+    state
+        .service
+        .get_sidebar()
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn list_smart_mailboxes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
+    state
+        .service
+        .list_smart_mailboxes()
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn create_smart_mailbox(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<CreateSmartMailboxRequest>,
+) -> Result<Json<SmartMailbox>, ApiError> {
+    let timestamp = now_iso8601().map_err(internal_error)?;
+    let smart_mailbox = SmartMailbox {
+        id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
+        name: request.name,
+        position: request.position.unwrap_or(0),
+        kind: SmartMailboxKind::User,
+        default_key: None,
+        parent_id: None,
+        rule: request.rule,
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    };
+    state
+        .service
+        .create_smart_mailbox(&smart_mailbox)
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(smart_mailbox))
+}
+
+pub async fn get_smart_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path(smart_mailbox_id): Path<String>,
+) -> Result<Json<SmartMailbox>, ApiError> {
+    state
+        .service
+        .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn patch_smart_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path(smart_mailbox_id): Path<String>,
+    Json(request): Json<PatchSmartMailboxRequest>,
+) -> Result<Json<SmartMailbox>, ApiError> {
+    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
+    let mut smart_mailbox = state
+        .service
+        .get_smart_mailbox(&smart_mailbox_id)
+        .map_err(ApiError::from_service_error)?;
+    if let Some(name) = request.name {
+        smart_mailbox.name = name;
+    }
+    if let Some(position) = request.position {
+        smart_mailbox.position = position;
+    }
+    if let Some(rule) = request.rule {
+        smart_mailbox.rule = rule;
+    }
+    smart_mailbox.updated_at = now_iso8601().map_err(internal_error)?;
+    state
+        .service
+        .update_smart_mailbox(&smart_mailbox)
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(smart_mailbox))
+}
+
+pub async fn delete_smart_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path(smart_mailbox_id): Path<String>,
+) -> Result<Json<OkResponse>, ApiError> {
+    state
+        .service
+        .delete_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+pub async fn reset_default_smart_mailboxes(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
+    state
+        .service
+        .reset_default_smart_mailboxes()
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn list_smart_mailbox_messages(
+    State(state): State<Arc<AppState>>,
+    Path(smart_mailbox_id): Path<String>,
+) -> Result<Json<Vec<mail_domain::MessageSummary>>, ApiError> {
+    state
+        .service
+        .list_smart_mailbox_messages(&SmartMailboxId::from(smart_mailbox_id))
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn list_conversations(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ListConversationsQuery>,
+) -> Result<Json<Vec<ConversationSummary>>, ApiError> {
+    let source_id = query.source_id.as_deref().map(AccountId::from);
+    let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
+    state
+        .service
+        .list_conversations(source_id.as_ref(), mailbox_id.as_ref())
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+pub async fn get_conversation(
+    State(state): State<Arc<AppState>>,
+    Path(conversation_id): Path<String>,
+) -> Result<Json<ConversationView>, ApiError> {
+    state
+        .service
+        .get_conversation(&ConversationId::from(conversation_id))
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
 
 pub async fn get_message(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
-) -> Result<Json<mail_domain::MessageDetail>, ApiError> {
+    Path((source_id, message_id)): Path<(String, String)>,
+) -> Result<Json<MessageDetail>, ApiError> {
     let result = state
         .service
-        .get_message_detail(&AccountId(account_id), &MessageId(message_id))
+        .get_message_detail(&AccountId(source_id), &MessageId(message_id))
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -432,25 +593,14 @@ pub async fn get_message(
     Ok(Json(detail))
 }
 
-pub async fn get_thread(
-    State(state): State<Arc<AppState>>,
-    Path((account_id, thread_id)): Path<(String, String)>,
-) -> Result<Json<mail_domain::ThreadView>, ApiError> {
-    state
-        .service
-        .get_thread(&AccountId(account_id), &ThreadId(thread_id))
-        .map(Json)
-        .map_err(ApiError::from_service_error)
-}
-
 pub async fn set_keywords(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
+    Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<SetKeywordsCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
     let result = state
         .service
-        .set_keywords(&AccountId(account_id), &MessageId(message_id), &command)
+        .set_keywords(&AccountId(source_id), &MessageId(message_id), &command)
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -459,12 +609,12 @@ pub async fn set_keywords(
 
 pub async fn add_to_mailbox(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
+    Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<AddToMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
     let result = state
         .service
-        .add_to_mailbox(&AccountId(account_id), &MessageId(message_id), &command)
+        .add_to_mailbox(&AccountId(source_id), &MessageId(message_id), &command)
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -473,12 +623,12 @@ pub async fn add_to_mailbox(
 
 pub async fn remove_from_mailbox(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
+    Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<RemoveFromMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
     let result = state
         .service
-        .remove_from_mailbox(&AccountId(account_id), &MessageId(message_id), &command)
+        .remove_from_mailbox(&AccountId(source_id), &MessageId(message_id), &command)
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -487,12 +637,12 @@ pub async fn remove_from_mailbox(
 
 pub async fn replace_mailboxes(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
+    Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<ReplaceMailboxesCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
     let result = state
         .service
-        .replace_mailboxes(&AccountId(account_id), &MessageId(message_id), &command)
+        .replace_mailboxes(&AccountId(source_id), &MessageId(message_id), &command)
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -501,11 +651,11 @@ pub async fn replace_mailboxes(
 
 pub async fn destroy_message(
     State(state): State<Arc<AppState>>,
-    Path((account_id, message_id)): Path<(String, String)>,
+    Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<CommandResult>, ApiError> {
     let result = state
         .service
-        .destroy_message(&AccountId(account_id), &MessageId(message_id))
+        .destroy_message(&AccountId(source_id), &MessageId(message_id))
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -514,9 +664,9 @@ pub async fn destroy_message(
 
 pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
-    Path(account_id): Path<String>,
+    Path(source_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let account_id = AccountId(account_id);
+    let account_id = AccountId(source_id);
     let event_count = state
         .supervisor
         .sync_account(&account_id)
@@ -887,9 +1037,26 @@ fn now_iso8601() -> Result<String, String> {
         .map_err(|err| err.to_string())
 }
 
+fn generate_smart_mailbox_id(name: &str) -> String {
+    let slug = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|char| if char.is_ascii_alphanumeric() { char } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    format!(
+        "sm-{}-{}",
+        if slug.is_empty() { "mailbox" } else { slug.as_str() },
+        OffsetDateTime::now_utc().unix_timestamp_nanos()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mail_domain::GatewayError;
 
     #[test]
     fn matches_event_applies_all_filters() {

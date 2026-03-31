@@ -3,10 +3,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, AccountSettings, AppSettings, CommandResult, EventFilter, FetchedBody, Identity,
-    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, PushStream,
-    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    AccountId, AccountSettings, AppSettings, CommandResult, ConversationId, ConversationSummary,
+    ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, PushStream, ReplaceMailboxesCommand, ReplyContext,
+    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SidebarResponse,
+    SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncBatch, SyncCursor, SyncObject,
+    ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -68,6 +70,29 @@ pub trait MailStore: Send + Sync {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError>;
+    fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError>;
+    fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<Option<SmartMailbox>, StoreError>;
+    fn create_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError>;
+    fn update_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError>;
+    fn delete_smart_mailbox(&self, smart_mailbox_id: &SmartMailboxId) -> Result<(), StoreError>;
+    fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError>;
+    fn list_smart_mailbox_messages(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<Vec<MessageSummary>, StoreError>;
+    fn list_conversations(
+        &self,
+        account_id: Option<&AccountId>,
+        mailbox_id: Option<&MailboxId>,
+    ) -> Result<Vec<ConversationSummary>, StoreError>;
+    fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<ConversationView>, StoreError>;
+    fn get_sidebar(&self) -> Result<SidebarResponse, StoreError>;
     fn get_message_detail(
         &self,
         account_id: &AccountId,

@@ -251,7 +251,7 @@ fn sample_messages() -> Vec<MessageRecord> {
     vec![
         MessageRecord {
             id: MessageId::from("em-001"),
-            thread_id: mail_domain::ThreadId::from("th-roadmap"),
+            source_thread_id: mail_domain::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
             subject: Some("Q2 planning priorities".to_string()),
             from_name: Some("Alice Chen".to_string()),
@@ -265,10 +265,13 @@ fn sample_messages() -> Vec<MessageRecord> {
             body_html: Some("<p>Roadmap draft attached.</p>".to_string()),
             body_text: Some("Roadmap draft attached.".to_string()),
             raw_mime: Some("From: Alice <alice@example.com>\r\nSubject: Q2 planning priorities\r\n\r\nRoadmap draft attached.\r\n".to_string()),
+            rfc_message_id: Some("<em-001@mock>".to_string()),
+            in_reply_to: None,
+            references: Vec::new(),
         },
         MessageRecord {
             id: MessageId::from("em-002"),
-            thread_id: mail_domain::ThreadId::from("th-roadmap"),
+            source_thread_id: mail_domain::ThreadId::from("th-roadmap"),
             remote_blob_id: None,
             subject: Some("Re: Q2 planning priorities".to_string()),
             from_name: Some("Marcus Johnson".to_string()),
@@ -282,10 +285,13 @@ fn sample_messages() -> Vec<MessageRecord> {
             body_html: Some("<p>Looks good; one question on staffing.</p>".to_string()),
             body_text: Some("Looks good; one question on staffing.".to_string()),
             raw_mime: Some("From: Marcus <marcus@example.com>\r\nSubject: Re: Q2 planning priorities\r\n\r\nLooks good; one question on staffing.\r\n".to_string()),
+            rfc_message_id: Some("<em-002@mock>".to_string()),
+            in_reply_to: Some("<em-001@mock>".to_string()),
+            references: vec!["<em-001@mock>".to_string()],
         },
         MessageRecord {
             id: MessageId::from("em-003"),
-            thread_id: mail_domain::ThreadId::from("th-invoice"),
+            source_thread_id: mail_domain::ThreadId::from("th-invoice"),
             remote_blob_id: None,
             subject: Some("Invoice #2026-0312".to_string()),
             from_name: Some("Cloudflare Billing".to_string()),
@@ -299,6 +305,9 @@ fn sample_messages() -> Vec<MessageRecord> {
             body_html: Some("<p>Your March invoice is ready.</p>".to_string()),
             body_text: Some("Your March invoice is ready.".to_string()),
             raw_mime: Some("From: Cloudflare Billing <billing@cloudflare.com>\r\nSubject: Invoice #2026-0312\r\n\r\nYour March invoice is ready.\r\n".to_string()),
+            rfc_message_id: Some("<em-003@mock>".to_string()),
+            in_reply_to: None,
+            references: Vec::new(),
         },
     ]
 }

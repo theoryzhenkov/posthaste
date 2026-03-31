@@ -108,43 +108,69 @@ async fn main() {
             post(api::disable_account),
         )
         .route(
-            "/v1/accounts/{account_id}/mailboxes",
+            "/v1/sidebar",
+            get(api::get_sidebar),
+        )
+        .route(
+            "/v1/smart-mailboxes",
+            get(api::list_smart_mailboxes).post(api::create_smart_mailbox),
+        )
+        .route(
+            "/v1/smart-mailboxes/{smart_mailbox_id}",
+            get(api::get_smart_mailbox)
+                .patch(api::patch_smart_mailbox)
+                .delete(api::delete_smart_mailbox),
+        )
+        .route(
+            "/v1/smart-mailboxes:reset-defaults",
+            post(api::reset_default_smart_mailboxes),
+        )
+        .route(
+            "/v1/smart-mailboxes/{smart_mailbox_id}/messages",
+            get(api::list_smart_mailbox_messages),
+        )
+        .route(
+            "/v1/views/conversations",
+            get(api::list_conversations),
+        )
+        .route(
+            "/v1/views/conversations/{conversation_id}",
+            get(api::get_conversation),
+        )
+        .route(
+            "/v1/sources/{source_id}/mailboxes",
             get(api::list_mailboxes),
         )
         .route(
-            "/v1/accounts/{account_id}/messages",
-            get(api::list_messages),
+            "/v1/sources/{source_id}/messages",
+            get(api::list_source_messages),
         )
         .route(
-            "/v1/accounts/{account_id}/messages/{message_id}",
+            "/v1/sources/{source_id}/messages/{message_id}",
             get(api::get_message),
         )
         .route(
-            "/v1/accounts/{account_id}/threads/{thread_id}",
-            get(api::get_thread),
-        )
-        .route(
-            "/v1/accounts/{account_id}/commands/messages/{message_id}/set-keywords",
+            "/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),
         )
         .route(
-            "/v1/accounts/{account_id}/commands/messages/{message_id}/add-to-mailbox",
+            "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox",
             post(api::add_to_mailbox),
         )
         .route(
-            "/v1/accounts/{account_id}/commands/messages/{message_id}/remove-from-mailbox",
+            "/v1/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox",
             post(api::remove_from_mailbox),
         )
         .route(
-            "/v1/accounts/{account_id}/commands/messages/{message_id}/replace-mailboxes",
+            "/v1/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes",
             post(api::replace_mailboxes),
         )
         .route(
-            "/v1/accounts/{account_id}/commands/messages/{message_id}/destroy",
+            "/v1/sources/{source_id}/commands/messages/{message_id}/destroy",
             post(api::destroy_message),
         )
         .route(
-            "/v1/accounts/{account_id}/commands/sync",
+            "/v1/sources/{source_id}/commands/sync",
             post(api::trigger_sync),
         )
         .route("/v1/events", get(api::stream_events))

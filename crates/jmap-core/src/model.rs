@@ -43,6 +43,8 @@ string_id!(MailboxId);
 string_id!(MessageId);
 string_id!(ThreadId);
 string_id!(BlobId);
+string_id!(ConversationId);
+string_id!(SmartMailboxId);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -236,7 +238,10 @@ pub struct MailboxSummary {
 #[serde(rename_all = "camelCase")]
 pub struct MessageSummary {
     pub id: MessageId,
-    pub thread_id: ThreadId,
+    pub source_id: AccountId,
+    pub source_name: String,
+    pub source_thread_id: ThreadId,
+    pub conversation_id: ConversationId,
     pub subject: Option<String>,
     pub from_name: Option<String>,
     pub from_email: Option<String>,
@@ -268,6 +273,175 @@ pub struct ThreadView {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SourceMessageRef {
+    pub source_id: AccountId,
+    pub message_id: MessageId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub id: ConversationId,
+    pub subject: Option<String>,
+    pub preview: Option<String>,
+    pub from_name: Option<String>,
+    pub from_email: Option<String>,
+    pub latest_received_at: String,
+    pub unread_count: i64,
+    pub message_count: i64,
+    pub source_ids: Vec<AccountId>,
+    pub source_names: Vec<String>,
+    pub latest_message: SourceMessageRef,
+    pub latest_source_name: String,
+    pub has_attachment: bool,
+    pub is_flagged: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationView {
+    pub id: ConversationId,
+    pub subject: Option<String>,
+    pub messages: Vec<MessageSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarSource {
+    pub id: AccountId,
+    pub name: String,
+    pub mailboxes: Vec<MailboxSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SmartMailboxKind {
+    Default,
+    User,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarSmartMailbox {
+    pub id: SmartMailboxId,
+    pub name: String,
+    pub unread_messages: i64,
+    pub total_messages: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarResponse {
+    pub smart_mailboxes: Vec<SidebarSmartMailbox>,
+    pub sources: Vec<SidebarSource>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SmartMailboxGroupOperator {
+    All,
+    Any,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SmartMailboxField {
+    SourceId,
+    SourceName,
+    MailboxId,
+    MailboxRole,
+    IsRead,
+    IsFlagged,
+    HasAttachment,
+    Keyword,
+    FromName,
+    FromEmail,
+    Subject,
+    Preview,
+    ReceivedAt,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SmartMailboxOperator {
+    Equals,
+    In,
+    Contains,
+    Before,
+    After,
+    OnOrBefore,
+    OnOrAfter,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum SmartMailboxValue {
+    String(String),
+    Strings(Vec<String>),
+    Bool(bool),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartMailboxGroup {
+    pub operator: SmartMailboxGroupOperator,
+    pub negated: bool,
+    pub nodes: Vec<SmartMailboxRuleNode>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartMailboxCondition {
+    pub field: SmartMailboxField,
+    pub operator: SmartMailboxOperator,
+    pub negated: bool,
+    pub value: SmartMailboxValue,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SmartMailboxRuleNode {
+    Group(SmartMailboxGroup),
+    Condition(SmartMailboxCondition),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartMailboxRule {
+    pub root: SmartMailboxGroup,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartMailbox {
+    pub id: SmartMailboxId,
+    pub name: String,
+    pub position: i64,
+    pub kind: SmartMailboxKind,
+    pub default_key: Option<String>,
+    pub parent_id: Option<SmartMailboxId>,
+    pub rule: SmartMailboxRule,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartMailboxSummary {
+    pub id: SmartMailboxId,
+    pub name: String,
+    pub position: i64,
+    pub kind: SmartMailboxKind,
+    pub default_key: Option<String>,
+    pub parent_id: Option<SmartMailboxId>,
+    pub unread_messages: i64,
+    pub total_messages: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MailboxRecord {
     pub id: MailboxId,
     pub name: String,
@@ -280,7 +454,7 @@ pub struct MailboxRecord {
 #[serde(rename_all = "camelCase")]
 pub struct MessageRecord {
     pub id: MessageId,
-    pub thread_id: ThreadId,
+    pub source_thread_id: ThreadId,
     pub remote_blob_id: Option<BlobId>,
     pub subject: Option<String>,
     pub from_name: Option<String>,
@@ -294,6 +468,9 @@ pub struct MessageRecord {
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub raw_mime: Option<String>,
+    pub rfc_message_id: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
