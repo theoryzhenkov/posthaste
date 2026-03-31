@@ -301,6 +301,20 @@ pub struct ConversationSummary {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConversationCursor {
+    pub latest_received_at: String,
+    pub conversation_id: ConversationId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub items: Vec<ConversationSummary>,
+    pub next_cursor: Option<ConversationCursor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConversationView {
     pub id: ConversationId,
     pub subject: Option<String>,

@@ -8,11 +8,12 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use mail_domain::{
     AccountDriver, AccountId, AccountOverview, AccountSettings, AccountTransportOverview,
-    AddToMailboxCommand, AppSettings, CommandResult, ConversationId, ConversationSummary,
-    ConversationView, DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageDetail,
-    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef,
-    SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox,
-    SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary,
+    AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSummary, ConversationView, DomainEvent, EventFilter, MailboxId,
+    MailboxSummary, MessageDetail, MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand,
+    SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmartMailboxRule,
+    SmartMailboxSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,6 +28,8 @@ use crate::{sanitize, AppState};
 pub struct ListConversationsQuery {
     pub source_id: Option<String>,
     pub mailbox_id: Option<String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +141,13 @@ pub struct VerificationResponse {
     pub ok: bool,
     pub identity_email: Option<String>,
     pub push_supported: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPageResponse {
+    pub items: Vec<ConversationSummary>,
+    pub next_cursor: Option<String>,
 }
 
 impl ApiError {
@@ -589,10 +599,18 @@ pub async fn list_smart_mailbox_messages(
 pub async fn list_smart_mailbox_conversations(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
-) -> Result<Json<Vec<ConversationSummary>>, ApiError> {
+    Query(query): Query<ListConversationsQuery>,
+) -> Result<Json<ConversationPageResponse>, ApiError> {
+    let limit = conversation_limit(query.limit)?;
+    let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
     state
         .service
-        .list_smart_mailbox_conversations(&SmartMailboxId::from(smart_mailbox_id))
+        .list_smart_mailbox_conversations(
+            &SmartMailboxId::from(smart_mailbox_id),
+            limit,
+            cursor.as_ref(),
+        )
+        .map(conversation_page_response)
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
@@ -600,12 +618,20 @@ pub async fn list_smart_mailbox_conversations(
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListConversationsQuery>,
-) -> Result<Json<Vec<ConversationSummary>>, ApiError> {
+) -> Result<Json<ConversationPageResponse>, ApiError> {
     let source_id = query.source_id.as_deref().map(AccountId::from);
     let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
+    let limit = conversation_limit(query.limit)?;
+    let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
     state
         .service
-        .list_conversations(source_id.as_ref(), mailbox_id.as_ref())
+        .list_conversations(
+            source_id.as_ref(),
+            mailbox_id.as_ref(),
+            limit,
+            cursor.as_ref(),
+        )
+        .map(conversation_page_response)
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
@@ -1116,10 +1142,87 @@ fn generate_smart_mailbox_id(name: &str) -> String {
     )
 }
 
+const DEFAULT_CONVERSATION_LIMIT: usize = 100;
+const MAX_CONVERSATION_LIMIT: usize = 250;
+
+fn conversation_limit(limit: Option<usize>) -> Result<usize, ApiError> {
+    let limit = limit.unwrap_or(DEFAULT_CONVERSATION_LIMIT);
+    if limit == 0 || limit > MAX_CONVERSATION_LIMIT {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_limit",
+            format!("limit must be between 1 and {MAX_CONVERSATION_LIMIT} conversations"),
+        ));
+    }
+    Ok(limit)
+}
+
+fn parse_conversation_cursor(cursor: Option<&str>) -> Result<Option<ConversationCursor>, ApiError> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    let Some((latest_received_at, conversation_id)) = cursor.split_once('\t') else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor must include a timestamp and conversation id",
+        ));
+    };
+    if latest_received_at.is_empty() || conversation_id.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor must include a timestamp and conversation id",
+        ));
+    }
+    Ok(Some(ConversationCursor {
+        latest_received_at: latest_received_at.to_string(),
+        conversation_id: ConversationId::from(conversation_id),
+    }))
+}
+
+fn encode_conversation_cursor(cursor: &ConversationCursor) -> String {
+    format!(
+        "{}\t{}",
+        cursor.latest_received_at,
+        cursor.conversation_id.as_str()
+    )
+}
+
+fn conversation_page_response(page: ConversationPage) -> ConversationPageResponse {
+    ConversationPageResponse {
+        items: page.items,
+        next_cursor: page.next_cursor.as_ref().map(encode_conversation_cursor),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mail_domain::GatewayError;
+
+    #[test]
+    fn conversation_cursor_round_trips() {
+        let cursor = ConversationCursor {
+            latest_received_at: "2026-04-01T10:11:12Z".to_string(),
+            conversation_id: ConversationId::from("conv-42"),
+        };
+
+        let encoded = encode_conversation_cursor(&cursor);
+        let decoded = parse_conversation_cursor(Some(&encoded))
+            .unwrap_or_else(|_| panic!("cursor should parse"))
+            .unwrap_or_else(|| panic!("cursor should be present"));
+
+        assert_eq!(decoded.latest_received_at, cursor.latest_received_at);
+        assert_eq!(decoded.conversation_id, cursor.conversation_id);
+    }
+
+    #[test]
+    fn malformed_conversation_cursor_is_rejected() {
+        let error = parse_conversation_cursor(Some("broken-cursor")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_cursor");
+    }
 
     #[test]
     fn matches_event_applies_all_filters() {
