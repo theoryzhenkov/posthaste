@@ -19,6 +19,56 @@ impl From<rusqlite::Error> for SyncError {
     }
 }
 
+// --- Intermediate data types for fetch/apply split ---
+
+pub struct MailboxData {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub role: Option<String>,
+    pub sort_order: i64,
+    pub total_emails: i64,
+    pub unread_emails: i64,
+}
+
+pub struct MailboxSyncResult {
+    pub clear_all: bool,
+    pub upsert: Vec<MailboxData>,
+    pub delete_ids: Vec<String>,
+    pub new_state: String,
+    pub created_count: usize,
+    pub updated_count: usize,
+    pub destroyed_count: usize,
+}
+
+pub struct EmailSyncResult {
+    pub clear_all: bool,
+    pub upsert: Vec<EmailData>,
+    pub delete_ids: Vec<String>,
+    pub new_state: String,
+    pub created_count: usize,
+    pub updated_count: usize,
+    pub destroyed_count: usize,
+}
+
+pub struct EmailData {
+    pub id: String,
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub from_name: Option<String>,
+    pub from_email: Option<String>,
+    pub preview: Option<String>,
+    pub received_at: i64,
+    pub has_attachment: bool,
+    pub size: i64,
+    pub is_read: bool,
+    pub is_flagged: bool,
+    pub mailbox_ids: Vec<String>,
+    pub keywords: Vec<String>,
+}
+
+// --- Connection ---
+
 pub async fn connect(url: &str, username: &str, password: &str) -> Result<Client, jmap_client::Error> {
     let host = url::Url::parse(url)
         .ok()
@@ -32,69 +82,168 @@ pub async fn connect(url: &str, username: &str, password: &str) -> Result<Client
         .await
 }
 
+// --- Public combined wrappers (used at startup) ---
+
 /// Returns true if delta sync was used (state existed).
 pub async fn sync_mailboxes(client: &Client, conn: &Connection) -> Result<bool, SyncError> {
-    let existing_state = db::get_sync_state(conn, "mailbox")?;
-
-    match existing_state {
-        Some(state) => {
-            match delta_sync_mailboxes(client, conn, &state).await {
-                Ok(()) => Ok(true),
-                Err(e) if is_cannot_calculate_changes(&e) => {
-                    eprintln!("  Mailbox delta sync failed (cannotCalculateChanges), falling back to full sync");
-                    full_sync_mailboxes(client, conn).await?;
-                    Ok(false)
-                }
-                Err(e) => Err(e),
-            }
-        }
-        None => {
-            full_sync_mailboxes(client, conn).await?;
-            Ok(false)
-        }
+    let since_state = db::get_sync_state(conn, "mailbox")?;
+    let result = fetch_mailbox_sync(client, since_state.as_deref()).await?;
+    let was_delta = !result.clear_all;
+    let count = result.upsert.len();
+    apply_mailbox_sync(conn, &result)?;
+    if was_delta {
+        println!(
+            "  Mailbox changes: {} created, {} updated, {} destroyed",
+            result.created_count, result.updated_count, result.destroyed_count,
+        );
+    } else {
+        println!("  Synced {} mailboxes", count);
     }
+    Ok(was_delta)
 }
 
 /// Returns true if delta sync was used (state existed).
 pub async fn sync_emails(client: &Client, conn: &Connection) -> Result<bool, SyncError> {
-    let existing_state = db::get_sync_state(conn, "email")?;
+    let since_state = db::get_sync_state(conn, "email")?;
+    let result = fetch_email_sync(client, since_state.as_deref()).await?;
+    let was_delta = !result.clear_all;
+    let count = result.upsert.len();
+    apply_email_sync(conn, &result)?;
+    if was_delta {
+        println!(
+            "  Email changes: {} created, {} updated, {} destroyed",
+            result.created_count, result.updated_count, result.destroyed_count,
+        );
+    } else {
+        println!("  Synced {} emails", count);
+    }
+    Ok(was_delta)
+}
 
-    match existing_state {
-        Some(state) => {
-            match delta_sync_emails(client, conn, &state).await {
-                Ok(()) => Ok(true),
-                Err(e) if is_cannot_calculate_changes(&e) => {
-                    eprintln!("  Email delta sync failed (cannotCalculateChanges), falling back to full sync");
-                    full_sync_emails(client, conn).await?;
-                    Ok(false)
-                }
-                Err(e) => Err(e),
+// --- Fetch functions (async, no DB) ---
+
+pub async fn fetch_mailbox_sync(
+    client: &Client,
+    since_state: Option<&str>,
+) -> Result<MailboxSyncResult, SyncError> {
+    match since_state {
+        Some(state) => match fetch_mailbox_delta(client, state).await {
+            Ok(result) => Ok(result),
+            Err(e) if is_cannot_calculate_changes(&e) => {
+                eprintln!("  Mailbox delta sync failed (cannotCalculateChanges), falling back to full sync");
+                fetch_mailbox_full(client).await
             }
-        }
-        None => {
-            full_sync_emails(client, conn).await?;
-            Ok(false)
-        }
+            Err(e) => Err(e),
+        },
+        None => fetch_mailbox_full(client).await,
     }
 }
 
-fn is_cannot_calculate_changes(err: &SyncError) -> bool {
-    match err {
-        SyncError::Jmap(jmap_client::Error::Method(me)) => {
-            me.p_type == MethodErrorType::CannotCalculateChanges
-        }
-        _ => false,
+pub async fn fetch_email_sync(
+    client: &Client,
+    since_state: Option<&str>,
+) -> Result<EmailSyncResult, SyncError> {
+    match since_state {
+        Some(state) => match fetch_email_delta(client, state).await {
+            Ok(result) => Ok(result),
+            Err(e) if is_cannot_calculate_changes(&e) => {
+                eprintln!("  Email delta sync failed (cannotCalculateChanges), falling back to full sync");
+                fetch_email_full(client).await
+            }
+            Err(e) => Err(e),
+        },
+        None => fetch_email_full(client).await,
     }
 }
 
-// --- Mailbox delta sync ---
+// --- Apply functions (sync, DB only) ---
 
-async fn delta_sync_mailboxes(client: &Client, conn: &Connection, since_state: &str) -> Result<(), SyncError> {
-    let state_preview = &since_state[..8.min(since_state.len())];
-    println!("  Mailbox delta sync from state {state_preview}...");
+pub fn apply_mailbox_sync(conn: &Connection, result: &MailboxSyncResult) -> Result<(), SyncError> {
+    if result.clear_all {
+        conn.execute("DELETE FROM mailbox", [])?;
+    }
 
-    // Loop to handle has_more_changes
+    for id in &result.delete_ids {
+        conn.execute(
+            "DELETE FROM mailbox WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+    }
+
+    for mb in &result.upsert {
+        conn.execute(
+            "INSERT OR REPLACE INTO mailbox (id, name, parent_id, role, sort_order, total_emails, unread_emails) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![mb.id, mb.name, mb.parent_id, mb.role, mb.sort_order, mb.total_emails, mb.unread_emails],
+        )?;
+    }
+
+    db::save_sync_state(conn, "mailbox", &result.new_state)?;
+    Ok(())
+}
+
+pub fn apply_email_sync(conn: &Connection, result: &EmailSyncResult) -> Result<(), SyncError> {
+    if result.clear_all {
+        conn.execute("DELETE FROM email", [])?;
+        conn.execute("DELETE FROM email_mailbox", [])?;
+        conn.execute("DELETE FROM email_keyword", [])?;
+    }
+
+    if !result.delete_ids.is_empty() {
+        db::delete_emails_by_ids(conn, &result.delete_ids)?;
+    }
+
+    // For delta updates, clear old junction rows before re-inserting
+    if !result.clear_all {
+        for em in &result.upsert {
+            conn.execute(
+                "DELETE FROM email_mailbox WHERE email_id = ?1",
+                rusqlite::params![em.id],
+            )?;
+            conn.execute(
+                "DELETE FROM email_keyword WHERE email_id = ?1",
+                rusqlite::params![em.id],
+            )?;
+        }
+    }
+
+    for em in &result.upsert {
+        conn.execute(
+            "INSERT OR REPLACE INTO email (id, thread_id, subject, from_name, from_email, preview, received_at, has_attachment, size, is_read, is_flagged) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                em.id, em.thread_id, em.subject, em.from_name, em.from_email, em.preview,
+                em.received_at, em.has_attachment as i32, em.size,
+                em.is_read as i32, em.is_flagged as i32,
+            ],
+        )?;
+
+        for mailbox_id in &em.mailbox_ids {
+            conn.execute(
+                "INSERT OR REPLACE INTO email_mailbox (email_id, mailbox_id) VALUES (?1, ?2)",
+                rusqlite::params![em.id, mailbox_id],
+            )?;
+        }
+
+        for keyword in &em.keywords {
+            conn.execute(
+                "INSERT OR REPLACE INTO email_keyword (email_id, keyword) VALUES (?1, ?2)",
+                rusqlite::params![em.id, keyword],
+            )?;
+        }
+    }
+
+    db::save_sync_state(conn, "email", &result.new_state)?;
+    Ok(())
+}
+
+// --- Delta fetch (async, no DB) ---
+
+async fn fetch_mailbox_delta(
+    client: &Client,
+    since_state: &str,
+) -> Result<MailboxSyncResult, SyncError> {
     let mut current_state = since_state.to_string();
+    let mut all_upsert = Vec::new();
+    let mut all_delete_ids = Vec::new();
     let mut total_created = 0usize;
     let mut total_updated = 0usize;
     let mut total_destroyed = 0usize;
@@ -111,12 +260,9 @@ async fn delta_sync_mailboxes(client: &Client, conn: &Connection, since_state: &
         total_updated += updated.len();
         total_destroyed += destroyed.len();
 
-        // Delete destroyed mailboxes
-        for id in destroyed {
-            conn.execute("DELETE FROM mailbox WHERE id = ?1", rusqlite::params![id])?;
-        }
+        all_delete_ids.extend(destroyed.iter().cloned());
 
-        // Fetch and upsert created + updated
+        // Fetch created + updated mailbox data
         let fetch_ids: Vec<&str> = created.iter().chain(updated.iter()).map(String::as_str).collect();
         if !fetch_ids.is_empty() {
             let mut request = client.build();
@@ -132,9 +278,9 @@ async fn delta_sync_mailboxes(client: &Client, conn: &Connection, since_state: &
                     mailbox::Property::TotalEmails,
                     mailbox::Property::UnreadEmails,
                 ]);
-            let mailbox_data = request.send_get_mailbox().await?.take_list();
-            for mb in mailbox_data {
-                insert_mailbox(conn, &mb)?;
+            let mailbox_list = request.send_get_mailbox().await?.take_list();
+            for mb in mailbox_list {
+                all_upsert.push(jmap_mailbox_to_data(&mb));
             }
         }
 
@@ -145,21 +291,24 @@ async fn delta_sync_mailboxes(client: &Client, conn: &Connection, since_state: &
         }
     }
 
-    println!(
-        "  Mailbox changes: {} created, {} updated, {} destroyed",
-        total_created, total_updated, total_destroyed
-    );
-    db::save_sync_state(conn, "mailbox", &current_state)?;
-    Ok(())
+    Ok(MailboxSyncResult {
+        clear_all: false,
+        upsert: all_upsert,
+        delete_ids: all_delete_ids,
+        new_state: current_state,
+        created_count: total_created,
+        updated_count: total_updated,
+        destroyed_count: total_destroyed,
+    })
 }
 
-// --- Email delta sync ---
-
-async fn delta_sync_emails(client: &Client, conn: &Connection, since_state: &str) -> Result<(), SyncError> {
-    let state_preview = &since_state[..8.min(since_state.len())];
-    println!("  Email delta sync from state {state_preview}...");
-
+async fn fetch_email_delta(
+    client: &Client,
+    since_state: &str,
+) -> Result<EmailSyncResult, SyncError> {
     let mut current_state = since_state.to_string();
+    let mut all_upsert = Vec::new();
+    let mut all_delete_ids = Vec::new();
     let mut total_created = 0usize;
     let mut total_updated = 0usize;
     let mut total_destroyed = 0usize;
@@ -176,12 +325,9 @@ async fn delta_sync_emails(client: &Client, conn: &Connection, since_state: &str
         total_updated += updated.len();
         total_destroyed += destroyed.len();
 
-        // Delete destroyed emails (with junction tables)
-        if !destroyed.is_empty() {
-            db::delete_emails_by_ids(conn, destroyed)?;
-        }
+        all_delete_ids.extend(destroyed.iter().cloned());
 
-        // Fetch and upsert created + updated in batches
+        // Fetch created + updated emails in batches
         let fetch_ids: Vec<String> = created.iter().chain(updated.iter()).cloned().collect();
         if !fetch_ids.is_empty() {
             for chunk in fetch_ids.chunks(100) {
@@ -202,14 +348,9 @@ async fn delta_sync_emails(client: &Client, conn: &Connection, since_state: &str
                         email::Property::Size,
                     ]);
                 let emails = request.send_get_email().await?.take_list();
-
-                // For updated emails, clear old junction rows before re-inserting
-                for id in chunk {
-                    conn.execute("DELETE FROM email_mailbox WHERE email_id = ?1", rusqlite::params![id])?;
-                    conn.execute("DELETE FROM email_keyword WHERE email_id = ?1", rusqlite::params![id])?;
+                for em in &emails {
+                    all_upsert.push(jmap_email_to_data(em));
                 }
-
-                insert_emails(conn, &emails)?;
             }
         }
 
@@ -220,31 +361,35 @@ async fn delta_sync_emails(client: &Client, conn: &Connection, since_state: &str
         }
     }
 
-    println!(
-        "  Email changes: {} created, {} updated, {} destroyed",
-        total_created, total_updated, total_destroyed
-    );
-    db::save_sync_state(conn, "email", &current_state)?;
-    Ok(())
+    Ok(EmailSyncResult {
+        clear_all: false,
+        upsert: all_upsert,
+        delete_ids: all_delete_ids,
+        new_state: current_state,
+        created_count: total_created,
+        updated_count: total_updated,
+        destroyed_count: total_destroyed,
+    })
 }
 
-// --- Full sync (first run or fallback) ---
+// --- Full fetch (async, no DB) ---
 
-async fn full_sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), SyncError> {
-    println!("  Full mailbox sync...");
-
+async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSyncResult, SyncError> {
     let mailbox_ids = client
-        .mailbox_query(
-            None::<mailbox::query::Filter>,
-            None::<Vec<_>>,
-        )
+        .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
         .await?
         .take_ids();
 
     if mailbox_ids.is_empty() {
-        conn.execute("DELETE FROM mailbox", [])?;
-        db::save_sync_state(conn, "mailbox", "")?;
-        return Ok(());
+        return Ok(MailboxSyncResult {
+            clear_all: true,
+            upsert: Vec::new(),
+            delete_ids: Vec::new(),
+            new_state: String::new(),
+            created_count: 0,
+            updated_count: 0,
+            destroyed_count: 0,
+        });
     }
 
     let mut request = client.build();
@@ -262,22 +407,22 @@ async fn full_sync_mailboxes(client: &Client, conn: &Connection) -> Result<(), S
         ]);
     let mut response = request.send_get_mailbox().await?;
     let state = response.take_state();
-    let mailbox_data = response.take_list();
+    let mailbox_list = response.take_list();
 
-    // Clear and re-insert
-    conn.execute("DELETE FROM mailbox", [])?;
-    for mb in &mailbox_data {
-        insert_mailbox(conn, mb)?;
-    }
+    let upsert: Vec<MailboxData> = mailbox_list.iter().map(jmap_mailbox_to_data).collect();
 
-    println!("  Synced {} mailboxes", mailbox_data.len());
-    db::save_sync_state(conn, "mailbox", &state)?;
-    Ok(())
+    Ok(MailboxSyncResult {
+        clear_all: true,
+        upsert,
+        delete_ids: Vec::new(),
+        new_state: state,
+        created_count: 0,
+        updated_count: 0,
+        destroyed_count: 0,
+    })
 }
 
-async fn full_sync_emails(client: &Client, conn: &Connection) -> Result<(), SyncError> {
-    println!("  Full email sync...");
-
+async fn fetch_email_full(client: &Client) -> Result<EmailSyncResult, SyncError> {
     let email_ids = client
         .email_query(
             None::<email::query::Filter>,
@@ -287,25 +432,21 @@ async fn full_sync_emails(client: &Client, conn: &Connection) -> Result<(), Sync
         .take_ids();
 
     if email_ids.is_empty() {
-        conn.execute("DELETE FROM email", [])?;
-        conn.execute("DELETE FROM email_mailbox", [])?;
-        conn.execute("DELETE FROM email_keyword", [])?;
-        db::save_sync_state(conn, "email", "")?;
-        return Ok(());
+        return Ok(EmailSyncResult {
+            clear_all: true,
+            upsert: Vec::new(),
+            delete_ids: Vec::new(),
+            new_state: String::new(),
+            created_count: 0,
+            updated_count: 0,
+            destroyed_count: 0,
+        });
     }
 
-    println!("  Fetching {} emails in batches...", email_ids.len());
-
-    // Clear tables before re-inserting
-    conn.execute("DELETE FROM email", [])?;
-    conn.execute("DELETE FROM email_mailbox", [])?;
-    conn.execute("DELETE FROM email_keyword", [])?;
-
-    // Capture state from the first batch response
+    let mut all_upsert = Vec::new();
     let mut saved_state: Option<String> = None;
-    let batch_size = 100;
 
-    for (i, chunk) in email_ids.chunks(batch_size).enumerate() {
+    for chunk in email_ids.chunks(100) {
         let mut request = client.build();
         request
             .get_email()
@@ -329,15 +470,20 @@ async fn full_sync_emails(client: &Client, conn: &Connection) -> Result<(), Sync
         }
 
         let emails = response.take_list();
-        println!("  Batch {}: {} emails fetched", i + 1, emails.len());
-        insert_emails(conn, &emails)?;
+        for em in &emails {
+            all_upsert.push(jmap_email_to_data(em));
+        }
     }
 
-    if let Some(state) = saved_state {
-        db::save_sync_state(conn, "email", &state)?;
-    }
-
-    Ok(())
+    Ok(EmailSyncResult {
+        clear_all: true,
+        upsert: all_upsert,
+        delete_ids: Vec::new(),
+        new_state: saved_state.unwrap_or_default(),
+        created_count: 0,
+        updated_count: 0,
+        destroyed_count: 0,
+    })
 }
 
 // --- Email mutation helpers ---
@@ -368,36 +514,6 @@ pub async fn move_email_to_mailbox(
 /// Permanently destroy an email.
 pub async fn destroy_email(client: &Client, email_id: &str) -> Result<(), SyncError> {
     client.email_destroy(email_id).await?;
-    Ok(())
-}
-
-// --- Shared helpers ---
-
-fn insert_mailbox(conn: &Connection, mb: &jmap_client::mailbox::Mailbox) -> Result<(), SyncError> {
-    let id = mb.id().unwrap_or_default();
-    let name = mb.name().unwrap_or("(unnamed)");
-    let parent_id = mb.parent_id();
-    let role = mb.role();
-    let sort_order = mb.sort_order();
-    let total_emails = mb.total_emails();
-    let unread_emails = mb.unread_emails();
-
-    let role_str: Option<String> = match role {
-        mailbox::Role::Inbox => Some("inbox".into()),
-        mailbox::Role::Drafts => Some("drafts".into()),
-        mailbox::Role::Sent => Some("sent".into()),
-        mailbox::Role::Trash => Some("trash".into()),
-        mailbox::Role::Junk => Some("junk".into()),
-        mailbox::Role::Archive => Some("archive".into()),
-        mailbox::Role::None => None,
-        other => Some(format!("{:?}", other).to_lowercase()),
-    };
-
-    conn.execute(
-        "INSERT OR REPLACE INTO mailbox (id, name, parent_id, role, sort_order, total_emails, unread_emails) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![id, name, parent_id, role_str, sort_order as i64, total_emails as i64, unread_emails as i64],
-    )?;
-
     Ok(())
 }
 
@@ -441,49 +557,64 @@ pub async fn fetch_email_body(
     Ok((html, text))
 }
 
-fn insert_emails(conn: &Connection, emails: &[jmap_client::email::Email]) -> Result<(), SyncError> {
-    for em in emails {
-        let id = em.id().unwrap_or_default();
-        let thread_id = em.thread_id().unwrap_or_default();
-        let subject = em.subject();
-        let preview = em.preview();
-        let received_at = em.received_at().unwrap_or(0);
-        let has_attachment = em.has_attachment();
-        let size = em.size();
+// --- Shared helpers ---
 
-        let (from_name, from_email) = em
-            .from()
-            .and_then(|addrs| addrs.first())
-            .map(|addr| (addr.name(), Some(addr.email())))
-            .unwrap_or((None, None));
-
-        let keywords = em.keywords();
-        let is_read = keywords.contains(&"$seen");
-        let is_flagged = keywords.contains(&"$flagged");
-
-        conn.execute(
-            "INSERT OR REPLACE INTO email (id, thread_id, subject, from_name, from_email, preview, received_at, has_attachment, size, is_read, is_flagged) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            rusqlite::params![
-                id, thread_id, subject, from_name, from_email, preview,
-                received_at, has_attachment as i32, size as i64,
-                is_read as i32, is_flagged as i32,
-            ],
-        )?;
-
-        for mailbox_id in em.mailbox_ids() {
-            conn.execute(
-                "INSERT OR REPLACE INTO email_mailbox (email_id, mailbox_id) VALUES (?1, ?2)",
-                rusqlite::params![id, mailbox_id],
-            )?;
+fn is_cannot_calculate_changes(err: &SyncError) -> bool {
+    match err {
+        SyncError::Jmap(jmap_client::Error::Method(me)) => {
+            me.p_type == MethodErrorType::CannotCalculateChanges
         }
-
-        for keyword in &keywords {
-            conn.execute(
-                "INSERT OR REPLACE INTO email_keyword (email_id, keyword) VALUES (?1, ?2)",
-                rusqlite::params![id, keyword],
-            )?;
-        }
+        _ => false,
     }
+}
 
-    Ok(())
+fn jmap_mailbox_to_data(mb: &jmap_client::mailbox::Mailbox) -> MailboxData {
+    let role_str: Option<String> = match mb.role() {
+        mailbox::Role::Inbox => Some("inbox".into()),
+        mailbox::Role::Drafts => Some("drafts".into()),
+        mailbox::Role::Sent => Some("sent".into()),
+        mailbox::Role::Trash => Some("trash".into()),
+        mailbox::Role::Junk => Some("junk".into()),
+        mailbox::Role::Archive => Some("archive".into()),
+        mailbox::Role::None => None,
+        other => Some(format!("{:?}", other).to_lowercase()),
+    };
+
+    MailboxData {
+        id: mb.id().unwrap_or_default().to_string(),
+        name: mb.name().unwrap_or("(unnamed)").to_string(),
+        parent_id: mb.parent_id().map(String::from),
+        role: role_str,
+        sort_order: mb.sort_order() as i64,
+        total_emails: mb.total_emails() as i64,
+        unread_emails: mb.unread_emails() as i64,
+    }
+}
+
+fn jmap_email_to_data(em: &jmap_client::email::Email) -> EmailData {
+    let keywords = em.keywords();
+    let is_read = keywords.contains(&"$seen");
+    let is_flagged = keywords.contains(&"$flagged");
+
+    let (from_name, from_email) = em
+        .from()
+        .and_then(|addrs| addrs.first())
+        .map(|addr| (addr.name().map(String::from), Some(addr.email().to_string())))
+        .unwrap_or((None, None));
+
+    EmailData {
+        id: em.id().unwrap_or_default().to_string(),
+        thread_id: em.thread_id().unwrap_or_default().to_string(),
+        subject: em.subject().map(String::from),
+        from_name,
+        from_email,
+        preview: em.preview().map(String::from),
+        received_at: em.received_at().unwrap_or(0),
+        has_attachment: em.has_attachment(),
+        size: em.size() as i64,
+        is_read,
+        is_flagged,
+        mailbox_ids: em.mailbox_ids().into_iter().map(String::from).collect(),
+        keywords: keywords.into_iter().map(String::from).collect(),
+    }
 }

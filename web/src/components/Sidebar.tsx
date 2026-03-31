@@ -51,6 +51,7 @@ export function Sidebar({ selectedMailboxId, onSelectMailbox }: SidebarProps) {
   const { data: mailboxes, isLoading, error } = useQuery({
     queryKey: ["mailboxes"],
     queryFn: fetchMailboxes,
+    refetchInterval: 30_000,
   });
 
   return (
