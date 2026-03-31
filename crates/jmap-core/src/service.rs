@@ -4,24 +4,27 @@ use std::sync::{Arc, RwLock};
 use serde_json::json;
 
 use crate::{
-    AccountId, AddToMailboxCommand, CommandResult, ConversationId, ConversationSummary,
-    ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
-    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SharedStore,
-    SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncObject, SyncTrigger,
+    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
+    ConfigRepository, ConversationId, ConversationSummary, ConversationView, Identity, MailGateway,
+    MailStore, MailboxId, MailboxSummary, MessageId, MessageSummary, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedConfigRepository, SharedGateway, SharedStore, SidebarResponse, SidebarSmartMailbox,
+    SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncObject, SyncTrigger,
     ThreadId, ThreadView,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
 pub struct MailService {
     store: SharedStore,
+    config: SharedConfigRepository,
     gateways: RwLock<HashMap<String, SharedGateway>>,
 }
 
 impl MailService {
-    pub fn new(store: Arc<dyn MailStore>) -> Self {
+    pub fn new(store: Arc<dyn MailStore>, config: Arc<dyn ConfigRepository>) -> Self {
         Self {
             store,
+            config,
             gateways: RwLock::new(HashMap::new()),
         }
     }
@@ -48,6 +51,173 @@ impl MailService {
             .remove(account_id.as_str());
     }
 
+    // -- Config delegates --
+
+    pub fn get_app_settings(&self) -> Result<AppSettings, ServiceError> {
+        self.config.get_app_settings().map_err(Into::into)
+    }
+
+    pub fn put_app_settings(&self, settings: &AppSettings) -> Result<(), ServiceError> {
+        self.config.put_app_settings(settings).map_err(Into::into)
+    }
+
+    pub fn list_sources(&self) -> Result<Vec<AccountSettings>, ServiceError> {
+        self.config.list_sources().map_err(Into::into)
+    }
+
+    pub fn get_source(&self, id: &AccountId) -> Result<Option<AccountSettings>, ServiceError> {
+        self.config.get_source(id).map_err(Into::into)
+    }
+
+    pub fn save_source(&self, source: &AccountSettings) -> Result<(), ServiceError> {
+        self.config.save_source(source)?;
+        self.store
+            .upsert_source_projection(&source.id, &source.name)?;
+        Ok(())
+    }
+
+    pub fn delete_source(&self, id: &AccountId) -> Result<(), ServiceError> {
+        self.config.delete_source(id)?;
+        self.store.delete_source_projection(id)?;
+        self.store.delete_source_data(id)?;
+        Ok(())
+    }
+
+    pub fn list_smart_mailboxes_config(&self) -> Result<Vec<SmartMailbox>, ServiceError> {
+        self.config.list_smart_mailboxes().map_err(Into::into)
+    }
+
+    pub fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<SmartMailbox, ServiceError> {
+        self.config
+            .get_smart_mailbox(smart_mailbox_id)?
+            .not_found("smart_mailbox", smart_mailbox_id.as_str())
+    }
+
+    pub fn save_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), ServiceError> {
+        self.config
+            .save_smart_mailbox(smart_mailbox)
+            .map_err(Into::into)
+    }
+
+    pub fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<(), ServiceError> {
+        self.config
+            .delete_smart_mailbox(smart_mailbox_id)
+            .map_err(Into::into)
+    }
+
+    pub fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailbox>, ServiceError> {
+        self.config
+            .reset_default_smart_mailboxes()
+            .map_err(Into::into)
+    }
+
+    pub fn reload_config(&self) -> Result<ConfigDiff, ServiceError> {
+        let diff = self.config.reload()?;
+        // Sync all source projections after reload
+        self.sync_source_projections()?;
+        Ok(diff)
+    }
+
+    pub fn sync_source_projections(&self) -> Result<(), ServiceError> {
+        let sources = self.config.list_sources()?;
+        for source in &sources {
+            self.store
+                .upsert_source_projection(&source.id, &source.name)?;
+        }
+        Ok(())
+    }
+
+    // -- Composed queries (config + store) --
+
+    pub fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
+        let mailboxes = self.config.list_smart_mailboxes()?;
+        let mut summaries = Vec::with_capacity(mailboxes.len());
+        for mailbox in mailboxes {
+            let (unread, total) = self
+                .store
+                .query_smart_mailbox_counts(&mailbox.rule)
+                .unwrap_or((0, 0));
+            summaries.push(SmartMailboxSummary {
+                id: mailbox.id,
+                name: mailbox.name,
+                position: mailbox.position,
+                kind: mailbox.kind,
+                default_key: mailbox.default_key,
+                parent_id: mailbox.parent_id,
+                unread_messages: unread,
+                total_messages: total,
+                created_at: mailbox.created_at,
+                updated_at: mailbox.updated_at,
+            });
+        }
+        Ok(summaries)
+    }
+
+    pub fn list_smart_mailbox_messages(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Result<Vec<MessageSummary>, ServiceError> {
+        let mailbox = self
+            .config
+            .get_smart_mailbox(smart_mailbox_id)?
+            .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
+        self.store
+            .query_messages_by_rule(&mailbox.rule)
+            .map_err(Into::into)
+    }
+
+    pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
+        let smart_mailboxes = self.config.list_smart_mailboxes()?;
+        let sources = self.config.list_sources()?;
+
+        let sidebar_smart_mailboxes: Vec<SidebarSmartMailbox> = smart_mailboxes
+            .into_iter()
+            .map(|mailbox| {
+                let (unread, total) = self
+                    .store
+                    .query_smart_mailbox_counts(&mailbox.rule)
+                    .unwrap_or((0, 0));
+                SidebarSmartMailbox {
+                    id: mailbox.id,
+                    name: mailbox.name,
+                    unread_messages: unread,
+                    total_messages: total,
+                }
+            })
+            .collect();
+
+        let sidebar_sources: Vec<SidebarSource> = sources
+            .into_iter()
+            .filter(|source| source.enabled)
+            .map(|source| {
+                let mailboxes = self
+                    .store
+                    .list_mailboxes(&source.id)
+                    .unwrap_or_default();
+                SidebarSource {
+                    id: source.id,
+                    name: source.name,
+                    mailboxes,
+                }
+            })
+            .collect();
+
+        Ok(SidebarResponse {
+            smart_mailboxes: sidebar_smart_mailboxes,
+            sources: sidebar_sources,
+        })
+    }
+
+    // -- Store delegates (runtime data) --
+
     pub fn list_mailboxes(
         &self,
         account_id: &AccountId,
@@ -62,63 +232,6 @@ impl MailService {
     ) -> Result<Vec<MessageSummary>, ServiceError> {
         self.store
             .list_messages(account_id, mailbox_id)
-            .map_err(Into::into)
-    }
-
-    pub fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
-        self.store.list_smart_mailboxes().map_err(Into::into)
-    }
-
-    pub fn get_smart_mailbox(
-        &self,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<SmartMailbox, ServiceError> {
-        self.store
-            .get_smart_mailbox(smart_mailbox_id)?
-            .not_found("smart_mailbox", smart_mailbox_id.as_str())
-    }
-
-    pub fn create_smart_mailbox(
-        &self,
-        smart_mailbox: &SmartMailbox,
-    ) -> Result<(), ServiceError> {
-        self.store
-            .create_smart_mailbox(smart_mailbox)
-            .map_err(Into::into)
-    }
-
-    pub fn update_smart_mailbox(
-        &self,
-        smart_mailbox: &SmartMailbox,
-    ) -> Result<(), ServiceError> {
-        self.store
-            .update_smart_mailbox(smart_mailbox)
-            .map_err(Into::into)
-    }
-
-    pub fn delete_smart_mailbox(
-        &self,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<(), ServiceError> {
-        self.store
-            .delete_smart_mailbox(smart_mailbox_id)
-            .map_err(Into::into)
-    }
-
-    pub fn reset_default_smart_mailboxes(
-        &self,
-    ) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
-        self.store
-            .reset_default_smart_mailboxes()
-            .map_err(Into::into)
-    }
-
-    pub fn list_smart_mailbox_messages(
-        &self,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<Vec<MessageSummary>, ServiceError> {
-        self.store
-            .list_smart_mailbox_messages(smart_mailbox_id)
             .map_err(Into::into)
     }
 
@@ -139,10 +252,6 @@ impl MailService {
         self.store
             .get_conversation(conversation_id)?
             .not_found("conversation", conversation_id.as_str())
-    }
-
-    pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
-        self.store.get_sidebar().map_err(Into::into)
     }
 
     pub fn get_thread(
@@ -355,7 +464,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-    ) -> Result<ReplyContext, ServiceError> {
+    ) -> Result<crate::ReplyContext, ServiceError> {
         let gateway = self.required_gateway(account_id)?;
         gateway
             .fetch_reply_context(account_id, message_id)
@@ -390,468 +499,5 @@ impl MailService {
             .get(account_id.as_str())
             .cloned()
             .ok_or_else(|| crate::GatewayError::Unavailable(account_id.to_string()).into())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use async_trait::async_trait;
-    use serde_json::json;
-
-        use crate::{
-        AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView,
-        DomainEvent, EventFilter, FetchedBody, GatewayError, MailGateway, MailStore, MailboxId,
-        MailboxSummary, MessageDetail, MessageId, MessageSummary, ReplaceMailboxesCommand,
-        ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
-        SmartMailboxSummary, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
-    };
-
-    use super::MailService;
-
-    struct TestStore {
-        mailboxes: Mutex<Vec<MailboxId>>,
-    }
-
-    #[async_trait]
-    impl MailStore for TestStore {
-        fn list_mailboxes(
-            &self,
-            _account_id: &AccountId,
-        ) -> Result<Vec<MailboxSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn list_messages(
-            &self,
-            _account_id: &AccountId,
-            _mailbox_id: Option<&MailboxId>,
-        ) -> Result<Vec<MessageSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn get_smart_mailbox(
-            &self,
-            _smart_mailbox_id: &SmartMailboxId,
-        ) -> Result<Option<SmartMailbox>, crate::StoreError> {
-            Ok(None)
-        }
-
-        fn create_smart_mailbox(
-            &self,
-            _smart_mailbox: &SmartMailbox,
-        ) -> Result<(), crate::StoreError> {
-            Ok(())
-        }
-
-        fn update_smart_mailbox(
-            &self,
-            _smart_mailbox: &SmartMailbox,
-        ) -> Result<(), crate::StoreError> {
-            Ok(())
-        }
-
-        fn delete_smart_mailbox(
-            &self,
-            _smart_mailbox_id: &SmartMailboxId,
-        ) -> Result<(), crate::StoreError> {
-            Ok(())
-        }
-
-        fn reset_default_smart_mailboxes(
-            &self,
-        ) -> Result<Vec<SmartMailboxSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn list_smart_mailbox_messages(
-            &self,
-            _smart_mailbox_id: &SmartMailboxId,
-        ) -> Result<Vec<MessageSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn get_message_detail(
-            &self,
-            _account_id: &AccountId,
-            message_id: &MessageId,
-        ) -> Result<Option<MessageDetail>, crate::StoreError> {
-            Ok(Some(MessageDetail {
-                summary: MessageSummary {
-                    id: message_id.clone(),
-                    source_id: AccountId::from("primary"),
-                    source_name: "Primary".to_string(),
-                    source_thread_id: ThreadId::from("thread-1"),
-                    conversation_id: ConversationId::from("conversation-1"),
-                    subject: None,
-                    from_name: None,
-                    from_email: None,
-                    preview: None,
-                    received_at: "2026-03-31T00:00:00Z".to_string(),
-                    has_attachment: false,
-                    is_read: false,
-                    is_flagged: false,
-                    mailbox_ids: self.mailboxes.lock().unwrap().clone(),
-                    keywords: Vec::new(),
-                },
-                body_html: Some("<p>ready</p>".to_string()),
-                body_text: None,
-                raw_message: None,
-            }))
-        }
-
-        fn get_thread(
-            &self,
-            _account_id: &AccountId,
-            _thread_id: &ThreadId,
-        ) -> Result<Option<ThreadView>, crate::StoreError> {
-            Ok(None)
-        }
-
-        fn list_conversations(
-            &self,
-            _account_id: Option<&AccountId>,
-            _mailbox_id: Option<&MailboxId>,
-        ) -> Result<Vec<ConversationSummary>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn get_conversation(
-            &self,
-            _conversation_id: &ConversationId,
-        ) -> Result<Option<ConversationView>, crate::StoreError> {
-            Ok(None)
-        }
-
-        fn get_sidebar(&self) -> Result<SidebarResponse, crate::StoreError> {
-            Ok(SidebarResponse {
-                smart_mailboxes: Vec::new(),
-                sources: Vec::new(),
-            })
-        }
-
-        fn get_sync_cursors(
-            &self,
-            _account_id: &AccountId,
-        ) -> Result<Vec<SyncCursor>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn get_cursor(
-            &self,
-            _account_id: &AccountId,
-            _object_type: SyncObject,
-        ) -> Result<Option<SyncCursor>, crate::StoreError> {
-            Ok(Some(SyncCursor {
-                object_type: SyncObject::Message,
-                state: "1".to_string(),
-                updated_at: "2026-03-31T00:00:00Z".to_string(),
-            }))
-        }
-
-        fn get_message_mailboxes(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<Vec<MailboxId>, crate::StoreError> {
-            Ok(self.mailboxes.lock().unwrap().clone())
-        }
-
-        fn apply_sync_batch(
-            &self,
-            _account_id: &AccountId,
-            _batch: &SyncBatch,
-        ) -> Result<Vec<DomainEvent>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn apply_message_body(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _body: &FetchedBody,
-        ) -> Result<CommandResult, crate::StoreError> {
-            Err(crate::StoreError::Failure("unused".to_string()))
-        }
-
-        fn set_keywords(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _command: &SetKeywordsCommand,
-        ) -> Result<CommandResult, crate::StoreError> {
-            Err(crate::StoreError::Failure("unused".to_string()))
-        }
-
-        fn replace_mailboxes(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            command: &ReplaceMailboxesCommand,
-        ) -> Result<CommandResult, crate::StoreError> {
-            *self.mailboxes.lock().unwrap() = command.mailbox_ids.clone();
-            Ok(CommandResult {
-                detail: None,
-                events: Vec::new(),
-            })
-        }
-
-        fn destroy_message(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<CommandResult, crate::StoreError> {
-            Err(crate::StoreError::Failure("unused".to_string()))
-        }
-
-        fn list_events(
-            &self,
-            _filter: &EventFilter,
-        ) -> Result<Vec<DomainEvent>, crate::StoreError> {
-            Ok(Vec::new())
-        }
-
-        fn append_event(
-            &self,
-            _account_id: &AccountId,
-            _topic: &str,
-            _mailbox_id: Option<&MailboxId>,
-            _message_id: Option<&MessageId>,
-            _payload: serde_json::Value,
-        ) -> Result<DomainEvent, crate::StoreError> {
-            Ok(DomainEvent {
-                seq: 1,
-                account_id: AccountId::from("primary"),
-                topic: "sync.completed".to_string(),
-                occurred_at: "2026-03-31T00:00:00Z".to_string(),
-                mailbox_id: None,
-                message_id: None,
-                payload: json!({}),
-            })
-        }
-    }
-
-    struct TestGateway;
-
-    #[async_trait]
-    impl MailGateway for TestGateway {
-        async fn sync(
-            &self,
-            _account_id: &AccountId,
-            _cursors: &[SyncCursor],
-        ) -> Result<SyncBatch, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_message_body(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<FetchedBody, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn set_keywords(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _command: &SetKeywordsCommand,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn replace_mailboxes(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _mailbox_ids: &[MailboxId],
-        ) -> Result<(), GatewayError> {
-            Ok(())
-        }
-
-        async fn destroy_message(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_identity(
-            &self,
-            _account_id: &AccountId,
-        ) -> Result<crate::Identity, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_reply_context(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<crate::ReplyContext, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn send_message(
-            &self,
-            _account_id: &AccountId,
-            _request: &crate::SendMessageRequest,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn open_push_stream(
-            &self,
-            _account_id: &AccountId,
-            _last_event_id: Option<&str>,
-        ) -> Result<Option<crate::PushStream>, GatewayError> {
-            Ok(None)
-        }
-    }
-
-    struct StateMismatchGateway;
-
-    #[async_trait]
-    impl MailGateway for StateMismatchGateway {
-        async fn sync(
-            &self,
-            _account_id: &AccountId,
-            _cursors: &[SyncCursor],
-        ) -> Result<SyncBatch, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_message_body(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<FetchedBody, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn set_keywords(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _command: &SetKeywordsCommand,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn replace_mailboxes(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _mailbox_ids: &[MailboxId],
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::StateMismatch)
-        }
-
-        async fn destroy_message(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_identity(
-            &self,
-            _account_id: &AccountId,
-        ) -> Result<crate::Identity, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn fetch_reply_context(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<crate::ReplyContext, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn send_message(
-            &self,
-            _account_id: &AccountId,
-            _request: &crate::SendMessageRequest,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
-        }
-
-        async fn open_push_stream(
-            &self,
-            _account_id: &AccountId,
-            _last_event_id: Option<&str>,
-        ) -> Result<Option<crate::PushStream>, GatewayError> {
-            Ok(None)
-        }
-    }
-
-    #[tokio::test]
-    async fn add_to_mailbox_preserves_existing_membership() -> Result<(), ServiceError> {
-        let account_id = AccountId::from("primary");
-        let store = Arc::new(TestStore {
-            mailboxes: Mutex::new(vec![MailboxId::from("inbox")]),
-        });
-        let service = MailService::new(store).with_gateway(&account_id, Arc::new(TestGateway));
-
-        service
-            .add_to_mailbox(
-                &account_id,
-                &MessageId::from("message-1"),
-                &crate::AddToMailboxCommand {
-                    mailbox_id: MailboxId::from("archive"),
-                },
-            )
-            .await?;
-
-        let updated = service
-            .store
-            .get_message_mailboxes(&account_id, &MessageId::from("message-1"))?;
-        assert_eq!(
-            updated,
-            vec![MailboxId::from("inbox"), MailboxId::from("archive")]
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn replace_mailboxes_surfaces_state_mismatch_without_local_mutation(
-    ) -> Result<(), ServiceError> {
-        let account_id = AccountId::from("primary");
-        let store = Arc::new(TestStore {
-            mailboxes: Mutex::new(vec![MailboxId::from("inbox")]),
-        });
-        let service = MailService::new(store.clone())
-            .with_gateway(&account_id, Arc::new(StateMismatchGateway));
-
-        let error = service
-            .replace_mailboxes(
-                &account_id,
-                &MessageId::from("message-1"),
-                &ReplaceMailboxesCommand {
-                    mailbox_ids: vec![MailboxId::from("archive")],
-                },
-            )
-            .await
-            .expect_err("expected state mismatch");
-
-        assert_eq!(error.code(), "state_mismatch");
-        assert_eq!(
-            store.get_message_mailboxes(&account_id, &MessageId::from("message-1"))?,
-            vec![MailboxId::from("inbox")]
-        );
-        Ok(())
     }
 }

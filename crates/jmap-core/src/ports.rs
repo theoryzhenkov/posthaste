@@ -3,11 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, AccountSettings, AppSettings, CommandResult, ConversationId, ConversationSummary,
-    ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, PushStream, ReplaceMailboxesCommand, ReplyContext,
-    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SidebarResponse,
-    SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncBatch, SyncCursor, SyncObject,
+    AccountId, CommandResult, ConversationId, ConversationSummary, ConversationView, EventFilter,
+    FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
+    PushStream, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
+    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SyncBatch, SyncCursor, SyncObject,
     ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
@@ -62,7 +61,6 @@ pub trait MailGateway: Send + Sync {
     ) -> Result<Option<PushStream>, GatewayError>;
 }
 
-#[async_trait]
 pub trait MailStore: Send + Sync {
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError>;
     fn list_messages(
@@ -70,19 +68,14 @@ pub trait MailStore: Send + Sync {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError>;
-    fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError>;
-    fn get_smart_mailbox(
+    fn query_messages_by_rule(
         &self,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Result<Option<SmartMailbox>, StoreError>;
-    fn create_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError>;
-    fn update_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), StoreError>;
-    fn delete_smart_mailbox(&self, smart_mailbox_id: &SmartMailboxId) -> Result<(), StoreError>;
-    fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, StoreError>;
-    fn list_smart_mailbox_messages(
-        &self,
-        smart_mailbox_id: &SmartMailboxId,
+        rule: &SmartMailboxRule,
     ) -> Result<Vec<MessageSummary>, StoreError>;
+    fn query_smart_mailbox_counts(
+        &self,
+        rule: &SmartMailboxRule,
+    ) -> Result<(i64, i64), StoreError>;
     fn list_conversations(
         &self,
         account_id: Option<&AccountId>,
@@ -92,7 +85,6 @@ pub trait MailStore: Send + Sync {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<Option<ConversationView>, StoreError>;
-    fn get_sidebar(&self) -> Result<SidebarResponse, StoreError>;
     fn get_message_detail(
         &self,
         account_id: &AccountId,
@@ -151,27 +143,6 @@ pub trait MailStore: Send + Sync {
         message_id: Option<&MessageId>,
         payload: serde_json::Value,
     ) -> Result<DomainEvent, StoreError>;
-    fn get_app_settings(&self) -> Result<AppSettings, StoreError> {
-        Ok(AppSettings::default())
-    }
-    fn put_app_settings(&self, _settings: &AppSettings) -> Result<(), StoreError> {
-        Err(StoreError::Failure("settings not supported".to_string()))
-    }
-    fn list_accounts(&self) -> Result<Vec<AccountSettings>, StoreError> {
-        Ok(Vec::new())
-    }
-    fn get_account(&self, _account_id: &AccountId) -> Result<Option<AccountSettings>, StoreError> {
-        Ok(None)
-    }
-    fn create_account(&self, _account: &AccountSettings) -> Result<(), StoreError> {
-        Err(StoreError::Failure("accounts not supported".to_string()))
-    }
-    fn update_account(&self, _account: &AccountSettings) -> Result<(), StoreError> {
-        Err(StoreError::Failure("accounts not supported".to_string()))
-    }
-    fn delete_account(&self, _account_id: &AccountId) -> Result<(), StoreError> {
-        Err(StoreError::Failure("accounts not supported".to_string()))
-    }
     fn upsert_source_projection(
         &self,
         _source_id: &AccountId,
@@ -180,6 +151,9 @@ pub trait MailStore: Send + Sync {
         Ok(())
     }
     fn delete_source_projection(&self, _source_id: &AccountId) -> Result<(), StoreError> {
+        Ok(())
+    }
+    fn delete_source_data(&self, _account_id: &AccountId) -> Result<(), StoreError> {
         Ok(())
     }
 }

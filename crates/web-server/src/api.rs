@@ -151,6 +151,8 @@ impl ApiError {
             "gateway_rejected" | "secret_unavailable" | "secret_unsupported" => {
                 StatusCode::BAD_REQUEST
             }
+            "config_validation" | "config_parse" => StatusCode::BAD_REQUEST,
+            "config_io" => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self {
@@ -185,10 +187,10 @@ pub async fn get_settings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AppSettings>, ApiError> {
     state
-        .store
+        .service
         .get_app_settings()
         .map(Json)
-        .map_err(store_error_to_api)
+        .map_err(ApiError::from_service_error)
 }
 
 pub async fn patch_settings(
@@ -197,9 +199,9 @@ pub async fn patch_settings(
 ) -> Result<Json<AppSettings>, ApiError> {
     if let Some(default_account_id) = &request.default_account_id {
         let account = state
-            .store
-            .get_account(&AccountId::from(default_account_id.as_str()))
-            .map_err(store_error_to_api)?;
+            .service
+            .get_source(&AccountId::from(default_account_id.as_str()))
+            .map_err(ApiError::from_service_error)?;
         if account.is_none() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -213,17 +215,17 @@ pub async fn patch_settings(
         default_account_id: request.default_account_id.map(AccountId),
     };
     state
-        .store
+        .service
         .put_app_settings(&settings)
-        .map_err(store_error_to_api)?;
+        .map_err(ApiError::from_service_error)?;
     Ok(Json(settings))
 }
 
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AccountOverview>>, ApiError> {
-    let settings = state.store.get_app_settings().map_err(store_error_to_api)?;
-    let accounts = state.store.list_accounts().map_err(store_error_to_api)?;
+    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
+    let accounts = state.service.list_sources().map_err(ApiError::from_service_error)?;
     let mut response = Vec::with_capacity(accounts.len());
     for account in accounts {
         response.push(account_overview(&state, &settings, account).await);
@@ -235,11 +237,11 @@ pub async fn get_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
 ) -> Result<Json<AccountOverview>, ApiError> {
-    let settings = state.store.get_app_settings().map_err(store_error_to_api)?;
+    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
     let account = state
-        .store
-        .get_account(&AccountId::from(account_id.as_str()))
-        .map_err(store_error_to_api)?
+        .service
+        .get_source(&AccountId::from(account_id.as_str()))
+        .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
@@ -258,9 +260,9 @@ pub async fn create_account(
     } = request;
     let account_id = AccountId::from(id.as_str());
     if state
-        .store
-        .get_account(&account_id)
-        .map_err(store_error_to_api)?
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
         .is_some()
     {
         return Err(ApiError::new(
@@ -288,14 +290,14 @@ pub async fn create_account(
     )?;
     validate_account_settings(&account)?;
     state
-        .store
-        .create_account(&account)
-        .map_err(store_error_to_api)?;
+        .service
+        .save_source(&account)
+        .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
     append_and_publish_account_event(&state, &account_id, "account.created")
         .map_err(store_error_to_api)?;
 
-    let settings = state.store.get_app_settings().map_err(store_error_to_api)?;
+    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
 
@@ -306,9 +308,9 @@ pub async fn patch_account(
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
     let mut account = state
-        .store
-        .get_account(&account_id)
-        .map_err(store_error_to_api)?
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
     if let Some(name) = request.name {
         account.name = name;
@@ -335,14 +337,14 @@ pub async fn patch_account(
     validate_account_settings(&account)?;
 
     state
-        .store
-        .update_account(&account)
-        .map_err(store_error_to_api)?;
+        .service
+        .save_source(&account)
+        .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
     append_and_publish_account_event(&state, &account_id, "account.updated")
         .map_err(store_error_to_api)?;
 
-    let settings = state.store.get_app_settings().map_err(store_error_to_api)?;
+    let settings = state.service.get_app_settings().map_err(ApiError::from_service_error)?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
 
@@ -351,9 +353,9 @@ pub async fn verify_account(
     Path(account_id): Path<String>,
 ) -> Result<Json<VerificationResponse>, ApiError> {
     let account = state
-        .store
-        .get_account(&AccountId::from(account_id.as_str()))
-        .map_err(store_error_to_api)?
+        .service
+        .get_source(&AccountId::from(account_id.as_str()))
+        .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
     let result = state
         .supervisor
@@ -387,9 +389,9 @@ pub async fn delete_account(
 ) -> Result<Json<OkResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
     let account = state
-        .store
-        .get_account(&account_id)
-        .map_err(store_error_to_api)?;
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?;
     let Some(account) = account else {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
@@ -400,11 +402,36 @@ pub async fn delete_account(
     delete_managed_secret(state.as_ref(), account.transport.secret_ref.as_ref())?;
     state.supervisor.remove_account(&account_id).await;
     state
-        .store
-        .delete_account(&account_id)
-        .map_err(store_error_to_api)?;
+        .service
+        .delete_source(&account_id)
+        .map_err(ApiError::from_service_error)?;
     append_and_publish_account_event(&state, &account_id, "account.deleted")
         .map_err(store_error_to_api)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
+pub async fn reload_config(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<OkResponse>, ApiError> {
+    let diff = state
+        .service
+        .reload_config()
+        .map_err(ApiError::from_service_error)?;
+
+    // Apply diff to supervisor
+    for id in &diff.removed_sources {
+        state.supervisor.remove_account(id).await;
+    }
+    for id in diff.added_sources.iter().chain(diff.changed_sources.iter()) {
+        let source = state
+            .service
+            .get_source(id)
+            .map_err(ApiError::from_service_error)?;
+        if let Some(source) = source {
+            state.supervisor.start_account(&source).await;
+        }
+    }
+
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -470,7 +497,7 @@ pub async fn create_smart_mailbox(
     };
     state
         .service
-        .create_smart_mailbox(&smart_mailbox)
+        .save_smart_mailbox(&smart_mailbox)
         .map_err(ApiError::from_service_error)?;
     Ok(Json(smart_mailbox))
 }
@@ -508,7 +535,7 @@ pub async fn patch_smart_mailbox(
     smart_mailbox.updated_at = now_iso8601().map_err(internal_error)?;
     state
         .service
-        .update_smart_mailbox(&smart_mailbox)
+        .save_smart_mailbox(&smart_mailbox)
         .map_err(ApiError::from_service_error)?;
     Ok(Json(smart_mailbox))
 }
@@ -530,6 +557,10 @@ pub async fn reset_default_smart_mailboxes(
     state
         .service
         .reset_default_smart_mailboxes()
+        .map_err(ApiError::from_service_error)?;
+    state
+        .service
+        .list_smart_mailboxes()
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
@@ -983,16 +1014,16 @@ async fn set_account_enabled(
 ) -> Result<Json<OkResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
     let mut account = state
-        .store
-        .get_account(&account_id)
-        .map_err(store_error_to_api)?
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
     account.enabled = enabled;
     account.updated_at = now_iso8601().map_err(internal_error)?;
     state
-        .store
-        .update_account(&account)
-        .map_err(store_error_to_api)?;
+        .service
+        .save_source(&account)
+        .map_err(ApiError::from_service_error)?;
     state.supervisor.start_account(&account).await;
     append_and_publish_account_event(
         &state,
