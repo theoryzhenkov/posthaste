@@ -1997,7 +1997,7 @@ fn query_message_detail_tx(
 
     let detail = statement
         .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
-            let summary = MessageSummary {
+            Ok(MessageSummary {
                 id: MessageId(row.get(0)?),
                 source_id: AccountId(row.get(1)?),
                 source_name: row.get(2)?,
@@ -2011,19 +2011,19 @@ fn query_message_detail_tx(
                 has_attachment: row.get::<_, i64>(10)? != 0,
                 is_read: row.get::<_, i64>(11)? != 0,
                 is_flagged: row.get::<_, i64>(12)? != 0,
-                mailbox_ids: fetch_mailbox_ids_tx(tx, account_id, message_id)
-                    .map_err(store_to_sqlite_error)?,
-                keywords: fetch_keywords_tx(tx, account_id, message_id)
-                    .map_err(store_to_sqlite_error)?,
-            };
-            Ok(summary)
+                mailbox_ids: Vec::new(),
+                keywords: Vec::new(),
+            })
         })
         .optional()
         .map_err(sql_to_store_error)?;
 
-    let Some(summary) = detail else {
+    let Some(mut summary) = detail else {
         return Ok(None);
     };
+
+    summary.mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
+    summary.keywords = fetch_keywords_tx(tx, account_id, message_id)?;
 
     let body = tx
         .query_row(
