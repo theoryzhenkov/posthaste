@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = { workspace = true }
+futures-util = { workspace = true }
 jmap-client = { workspace = true }
 mail-domain = { path = "../jmap-core" }
 pulldown-cmark = { workspace = true }

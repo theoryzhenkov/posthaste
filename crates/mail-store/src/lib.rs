@@ -7,10 +7,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hex::encode as hex_encode;
 use mail_domain::{
-    AccountId, CommandResult, DomainEvent, EventFilter, FetchedBody, MailStore, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, RawMessageRef,
-    ReplaceMailboxesCommand, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncObject,
-    ThreadId, ThreadView,
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
+    CommandResult, DomainEvent, EventFilter, FetchedBody, MailStore, MailboxId, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, RawMessageRef, ReplaceMailboxesCommand,
+    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
@@ -130,6 +130,184 @@ impl DatabaseStore {
 
 #[async_trait]
 impl MailStore for DatabaseStore {
+    fn get_app_settings(&self) -> Result<AppSettings, StoreError> {
+        let connection = self.read_connection()?;
+        let json: Option<String> = connection
+            .query_row(
+                "SELECT settings_json FROM app_settings WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_to_store_error)?;
+        match json {
+            Some(json) => serde_json::from_str(&json).map_err(json_to_store_error),
+            None => Ok(AppSettings::default()),
+        }
+    }
+
+    fn put_app_settings(&self, settings: &AppSettings) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO app_settings (singleton, settings_json)
+                 VALUES (1, ?1)
+                 ON CONFLICT(singleton) DO UPDATE SET settings_json = excluded.settings_json",
+                params![serde_json::to_string(settings).map_err(json_to_store_error)?],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn list_accounts(&self) -> Result<Vec<AccountSettings>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT account_id, name, driver, enabled, transport_json, created_at, updated_at
+                 FROM account_config
+                 ORDER BY name, account_id",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map([], row_to_account_settings)
+            .map_err(sql_to_store_error)?;
+        let accounts = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?;
+        Ok(accounts)
+    }
+
+    fn get_account(&self, account_id: &AccountId) -> Result<Option<AccountSettings>, StoreError> {
+        let connection = self.read_connection()?;
+        connection
+            .query_row(
+                "SELECT account_id, name, driver, enabled, transport_json, created_at, updated_at
+                 FROM account_config
+                 WHERE account_id = ?1",
+                params![account_id.as_str()],
+                row_to_account_settings,
+            )
+            .optional()
+            .map_err(sql_to_store_error)
+    }
+
+    fn create_account(&self, account: &AccountSettings) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            let changed = tx
+                .execute(
+                    "INSERT INTO account_config (
+                        account_id, name, driver, enabled, transport_json, created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        account.id.as_str(),
+                        account.name,
+                        account.driver.as_str(),
+                        bool_to_i64(account.enabled),
+                        serde_json::to_string(&account.transport).map_err(json_to_store_error)?,
+                        account.created_at,
+                        account.updated_at,
+                    ],
+                )
+                .map_err(sql_to_store_error)?;
+            if changed != 1 {
+                return Err(StoreError::Conflict(format!(
+                    "account:{}",
+                    account.id.as_str()
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    fn update_account(&self, account: &AccountSettings) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE account_config
+                     SET name = ?2,
+                         driver = ?3,
+                         enabled = ?4,
+                         transport_json = ?5,
+                         updated_at = ?6
+                     WHERE account_id = ?1",
+                    params![
+                        account.id.as_str(),
+                        account.name,
+                        account.driver.as_str(),
+                        bool_to_i64(account.enabled),
+                        serde_json::to_string(&account.transport).map_err(json_to_store_error)?,
+                        account.updated_at,
+                    ],
+                )
+                .map_err(sql_to_store_error)?;
+            if changed == 0 {
+                return Err(StoreError::NotFound(format!(
+                    "account:{}",
+                    account.id.as_str()
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    fn delete_account(&self, account_id: &AccountId) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM app_settings
+                 WHERE singleton = 1
+                   AND json_extract(settings_json, '$.defaultAccountId') = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM account_config WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM mailbox WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_mailbox WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_keyword WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM message_body WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM thread_view WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM sync_cursor WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM event_log WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
@@ -792,9 +970,15 @@ impl MailStore for DatabaseStore {
         let connection = self.read_connection()?;
         let mut sql = "SELECT seq, account_id, topic, occurred_at, mailbox_id, message_id, payload
              FROM event_log
-             WHERE account_id = ?1"
+             WHERE 1 = 1"
             .to_string();
-        let mut bindings: Vec<String> = vec![filter.account_id.to_string()];
+        let mut bindings: Vec<String> = Vec::new();
+
+        if let Some(account_id) = &filter.account_id {
+            sql.push_str(" AND account_id = ?");
+            sql.push_str(&(bindings.len() + 1).to_string());
+            bindings.push(account_id.to_string());
+        }
 
         if let Some(after_seq) = filter.after_seq {
             sql.push_str(" AND seq > ?");
@@ -842,6 +1026,21 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(
             "
+            CREATE TABLE IF NOT EXISTS app_settings (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                settings_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS account_config (
+                account_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                driver TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                transport_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS mailbox (
                 account_id TEXT NOT NULL,
                 id TEXT NOT NULL,
@@ -932,6 +1131,21 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
             ",
         )
         .map_err(sql_to_store_error)
+}
+
+fn row_to_account_settings(row: &rusqlite::Row<'_>) -> Result<AccountSettings, rusqlite::Error> {
+    let transport_json: String = row.get(4)?;
+    let transport = serde_json::from_str::<AccountTransportSettings>(&transport_json)
+        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+    Ok(AccountSettings {
+        id: AccountId(row.get(0)?),
+        name: row.get(1)?,
+        driver: parse_account_driver(&row.get::<_, String>(2)?)?,
+        enabled: row.get::<_, i64>(3)? != 0,
+        transport,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -1363,6 +1577,20 @@ fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
     }
 }
 
+fn parse_account_driver(value: &str) -> Result<AccountDriver, rusqlite::Error> {
+    match value {
+        "jmap" => Ok(AccountDriver::Jmap),
+        "mock" => Ok(AccountDriver::Mock),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(StoreError::Failure(format!(
+                "unknown account driver {other}"
+            ))),
+        )),
+    }
+}
+
 fn now_iso8601() -> Result<String, StoreError> {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -1386,6 +1614,10 @@ fn store_to_sqlite_error(err: StoreError) -> rusqlite::Error {
 }
 
 fn io_to_store_error(err: std::io::Error) -> StoreError {
+    StoreError::Failure(err.to_string())
+}
+
+fn json_to_store_error(err: impl std::error::Error) -> StoreError {
     StoreError::Failure(err.to_string())
 }
 
@@ -1539,7 +1771,7 @@ mod tests {
             store.append_event(&account, "message.updated", None, None, json!({"n": 2}))?;
 
         let events = store.list_events(&EventFilter {
-            account_id: account,
+            account_id: Some(account),
             topic: Some("message.updated".to_string()),
             mailbox_id: None,
             after_seq: Some(first.seq),
