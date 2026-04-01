@@ -618,6 +618,12 @@ pub struct CommandResult {
     pub events: Vec<DomainEvent>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationOutcome {
+    pub cursor: Option<SyncCursor>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {

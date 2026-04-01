@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use mail_domain::{
     AccountId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, PushStream, Recipient, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
+    MessageId, MessageRecord, MutationOutcome, PushStream, Recipient, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
 };
 
 pub struct MockJmapGateway {
@@ -26,6 +26,16 @@ impl Default for MockJmapGateway {
                 messages: sample_messages(),
             }),
         }
+    }
+}
+
+fn mutation_outcome(state: &MockState) -> MutationOutcome {
+    MutationOutcome {
+        cursor: Some(SyncCursor {
+            object_type: SyncObject::Message,
+            state: format!("message-{}", state.revision),
+            updated_at: "2026-03-31T10:00:00Z".to_string(),
+        }),
     }
 }
 
@@ -88,7 +98,7 @@ impl MailGateway for MockJmapGateway {
         message_id: &MessageId,
         expected_state: Option<&str>,
         command: &SetKeywordsCommand,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut state = self
             .state
             .lock()
@@ -108,7 +118,7 @@ impl MailGateway for MockJmapGateway {
             .keywords
             .retain(|keyword| !command.remove.contains(keyword));
         bump_revision(&mut state);
-        Ok(())
+        Ok(mutation_outcome(&state))
     }
 
     async fn replace_mailboxes(
@@ -117,7 +127,7 @@ impl MailGateway for MockJmapGateway {
         message_id: &MessageId,
         expected_state: Option<&str>,
         mailbox_ids: &[MailboxId],
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut state = self
             .state
             .lock()
@@ -130,7 +140,7 @@ impl MailGateway for MockJmapGateway {
             .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
         message.mailbox_ids = mailbox_ids.to_vec();
         bump_revision(&mut state);
-        Ok(())
+        Ok(mutation_outcome(&state))
     }
 
     async fn destroy_message(
@@ -138,7 +148,7 @@ impl MailGateway for MockJmapGateway {
         _account_id: &AccountId,
         message_id: &MessageId,
         expected_state: Option<&str>,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut state = self
             .state
             .lock()
@@ -146,7 +156,7 @@ impl MailGateway for MockJmapGateway {
         ensure_expected_state(&state, expected_state)?;
         state.messages.retain(|message| &message.id != message_id);
         bump_revision(&mut state);
-        Ok(())
+        Ok(mutation_outcome(&state))
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
@@ -311,4 +321,30 @@ fn sample_messages() -> Vec<MessageRecord> {
             references: Vec::new(),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn set_keywords_returns_updated_message_cursor() {
+        let gateway = MockJmapGateway::default();
+        let outcome = gateway
+            .set_keywords(
+                &AccountId::from("primary"),
+                &MessageId::from("em-001"),
+                Some("message-1"),
+                &SetKeywordsCommand {
+                    add: vec!["$flagged".to_string()],
+                    remove: Vec::new(),
+                },
+            )
+            .await
+            .expect("mutation should succeed");
+
+        let cursor = outcome.cursor.expect("cursor should be present");
+        assert_eq!(cursor.object_type, SyncObject::Message);
+        assert_eq!(cursor.state, "message-2");
+    }
 }

@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use crate::{
     AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail,
-    MessageId, MessageSummary, PushStream, ReplaceMailboxesCommand, ReplyContext, SecretRef,
-    SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SyncBatch,
-    SyncCursor, SyncObject, ThreadId, ThreadView,
+    MessageId, MessageSummary, MutationOutcome, PushStream, ReplaceMailboxesCommand, ReplyContext,
+    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule,
+    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -29,20 +29,20 @@ pub trait MailGateway: Send + Sync {
         message_id: &MessageId,
         expected_state: Option<&str>,
         command: &SetKeywordsCommand,
-    ) -> Result<(), GatewayError>;
+    ) -> Result<MutationOutcome, GatewayError>;
     async fn replace_mailboxes(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         expected_state: Option<&str>,
         mailbox_ids: &[MailboxId],
-    ) -> Result<(), GatewayError>;
+    ) -> Result<MutationOutcome, GatewayError>;
     async fn destroy_message(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         expected_state: Option<&str>,
-    ) -> Result<(), GatewayError>;
+    ) -> Result<MutationOutcome, GatewayError>;
     async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError>;
     async fn fetch_reply_context(
         &self,
@@ -127,18 +127,21 @@ pub trait MailStore: Send + Sync {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        cursor: Option<&SyncCursor>,
         command: &SetKeywordsCommand,
     ) -> Result<CommandResult, StoreError>;
     fn replace_mailboxes(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        cursor: Option<&SyncCursor>,
         command: &ReplaceMailboxesCommand,
     ) -> Result<CommandResult, StoreError>;
     fn destroy_message(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        cursor: Option<&SyncCursor>,
     ) -> Result<CommandResult, StoreError>;
     fn list_events(&self, filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError>;
     fn append_event(
