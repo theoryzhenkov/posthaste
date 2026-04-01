@@ -64,7 +64,8 @@ async fn main() {
     }
 
     // Read daemon settings from config
-    let daemon = config::read_daemon_settings(&config_repo, &roots);
+    let daemon =
+        config::read_daemon_settings(&config_repo).expect("failed to read daemon settings");
 
     // Open SQLite store (state only)
     let db_path = roots.state_root.join("mail.sqlite");

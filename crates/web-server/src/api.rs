@@ -18,8 +18,8 @@ use mail_domain::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::OffsetDateTime;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use uuid::Uuid;
 
 use crate::{sanitize, AppState};
 
@@ -184,6 +184,12 @@ impl ApiError {
                 details: json!({}),
             },
         }
+    }
+}
+
+impl From<ServiceError> for ApiError {
+    fn from(error: ServiceError) -> Self {
+        Self::from_service_error(error)
     }
 }
 
@@ -879,18 +885,7 @@ fn apply_secret_instruction(
             }
         }
         SecretWriteMode::Replace => {
-            let password = secret
-                .password
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ApiError::new(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_secret",
-                        "secret.password is required when secret.mode is replace",
-                    )
-                })?;
+            let password = required_secret_password(secret)?;
             let secret_ref = previous_secret_ref
                 .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
                 .cloned()
@@ -899,11 +894,13 @@ fn apply_secret_instruction(
                 Some(existing) if existing == &secret_ref => state
                     .secret_store
                     .update(&secret_ref, password)
-                    .map_err(|error| ApiError::from_service_error(ServiceError::from(error)))?,
+                    .map_err(ServiceError::from)
+                    .map_err(ApiError::from)?,
                 _ => state
                     .secret_store
                     .save(&secret_ref, password)
-                    .map_err(|error| ApiError::from_service_error(ServiceError::from(error)))?,
+                    .map_err(ServiceError::from)
+                    .map_err(ApiError::from)?,
             }
             account.transport.secret_ref = Some(secret_ref);
         }
@@ -928,19 +925,7 @@ fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(), ApiError> 
             }
         }
         SecretWriteMode::Replace => {
-            if secret
-                .password
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .is_none()
-            {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_secret",
-                    "secret.password is required when secret.mode is replace",
-                ));
-            }
+            required_secret_password(secret)?;
         }
         SecretWriteMode::Clear => {
             if secret.password.is_some() {
@@ -953,6 +938,21 @@ fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(), ApiError> 
         }
     }
     Ok(())
+}
+
+fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiError> {
+    secret
+        .password
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_secret",
+                "secret.password is required when secret.mode is replace",
+            )
+        })
 }
 
 fn validate_account_settings(account: &AccountSettings) -> Result<(), ApiError> {
@@ -1023,7 +1023,8 @@ fn delete_managed_secret(state: &AppState, secret_ref: Option<&SecretRef>) -> Re
             state
                 .secret_store
                 .delete(secret_ref)
-                .map_err(|error| ApiError::from_service_error(ServiceError::from(error)))?;
+                .map_err(ServiceError::from)
+                .map_err(ApiError::from)?;
         }
     }
     Ok(())
@@ -1129,7 +1130,7 @@ fn generate_smart_mailbox_id(name: &str) -> String {
         } else {
             slug.as_str()
         },
-        OffsetDateTime::now_utc().unix_timestamp_nanos()
+        Uuid::new_v4()
     )
 }
 
@@ -1153,45 +1154,31 @@ fn parse_conversation_cursor(cursor: Option<&str>) -> Result<Option<Conversation
         return Ok(None);
     };
     let Some((len_prefix, remainder)) = cursor.split_once(':') else {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cursor",
-            "cursor must include a timestamp and conversation id",
-        ));
+        return Err(invalid_cursor());
     };
-    let timestamp_len = len_prefix.parse::<usize>().map_err(|_| {
-        ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cursor",
-            "cursor must include a timestamp and conversation id",
-        )
-    })?;
+    let timestamp_len = len_prefix.parse::<usize>().map_err(|_| invalid_cursor())?;
     if timestamp_len == 0 || remainder.len() <= timestamp_len {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cursor",
-            "cursor must include a timestamp and conversation id",
-        ));
+        return Err(invalid_cursor());
     }
     let (latest_received_at, conversation_id) = remainder.split_at(timestamp_len);
     let Some(conversation_id) = conversation_id.strip_prefix(':') else {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cursor",
-            "cursor must include a timestamp and conversation id",
-        ));
+        return Err(invalid_cursor());
     };
     if latest_received_at.is_empty() || conversation_id.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cursor",
-            "cursor must include a timestamp and conversation id",
-        ));
+        return Err(invalid_cursor());
     }
     Ok(Some(ConversationCursor {
         latest_received_at: latest_received_at.to_string(),
         conversation_id: ConversationId::from(conversation_id),
     }))
+}
+
+fn invalid_cursor() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "invalid_cursor",
+        "cursor must include a timestamp and conversation id",
+    )
 }
 
 fn encode_conversation_cursor(cursor: &ConversationCursor) -> String {

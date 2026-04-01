@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use mail_config::TomlConfigRepository;
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountSettings, AccountTransportSettings,
-    AppSettings, ConfigRepository, SecretRef,
+    AppSettings, ConfigError, ConfigRepository, SecretRef,
 };
 use serde::Deserialize;
 
@@ -54,9 +54,8 @@ pub fn resolve_roots() -> ResolvedRoots {
 
 pub fn read_daemon_settings(
     config_repo: &TomlConfigRepository,
-    _roots: &ResolvedRoots,
-) -> DaemonSettings {
-    let app_toml = config_repo.read_app_toml().unwrap_or_default();
+) -> Result<DaemonSettings, ConfigError> {
+    let app_toml = config_repo.read_app_toml()?;
 
     // Also check env vars that may override
     let bind = std::env::var("MAIL_BIND")
@@ -75,11 +74,11 @@ pub fn read_daemon_settings(
         .or(app_toml.daemon.poll_interval_seconds)
         .unwrap_or(60);
 
-    DaemonSettings {
+    Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
         poll_interval_seconds,
-    }
+    })
 }
 
 pub fn import_bootstrap(

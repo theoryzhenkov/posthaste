@@ -55,6 +55,7 @@ pub const EVENT_TOPIC_SYNC_COMPLETED: &str = "sync.completed";
 pub const EVENT_TOPIC_SYNC_FAILED: &str = "sync.failed";
 pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
 pub const EVENT_TOPIC_MESSAGE_ARRIVED: &str = "message.arrived";
+pub const EVENT_TOPIC_MAILBOX_UPDATED: &str = "mailbox.updated";
 pub const EVENT_TOPIC_ACCOUNT_UPDATED: &str = "account.updated";
 pub const EVENT_TOPIC_ACCOUNT_CREATED: &str = "account.created";
 pub const EVENT_TOPIC_ACCOUNT_DELETED: &str = "account.deleted";
