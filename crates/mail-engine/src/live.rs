@@ -6,8 +6,8 @@ use jmap_client::{email, identity, mailbox};
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
     FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, PushNotification, PushStream, Recipient, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
+    MessageRecord, MutationOutcome, PushNotification, PushStream, Recipient, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
 };
 use pulldown_cmark::{html, Options, Parser};
 use time::format_description::well_known::Rfc3339;
@@ -31,6 +31,16 @@ impl LiveJmapGateway {
             .map_err(map_gateway_error)?;
         Ok(Self { client })
     }
+}
+
+fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayError> {
+    Ok(MutationOutcome {
+        cursor: Some(SyncCursor {
+            object_type: SyncObject::Message,
+            state,
+            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
+        }),
+    })
 }
 
 async fn fetch_send_identity(
@@ -133,7 +143,7 @@ impl MailGateway for LiveJmapGateway {
         message_id: &MessageId,
         expected_state: Option<&str>,
         command: &SetKeywordsCommand,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut request = self.client.build();
         let set = request.set_email();
         if let Some(expected_state) = expected_state {
@@ -146,8 +156,8 @@ impl MailGateway for LiveJmapGateway {
         for keyword in &command.remove {
             update.keyword(keyword.as_str(), false);
         }
-        request.send_set_email().await.map_err(map_gateway_error)?;
-        Ok(())
+        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        message_mutation_outcome(response.new_state().to_string())
     }
 
     async fn replace_mailboxes(
@@ -156,7 +166,7 @@ impl MailGateway for LiveJmapGateway {
         message_id: &MessageId,
         expected_state: Option<&str>,
         mailbox_ids: &[MailboxId],
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut request = self.client.build();
         let set = request.set_email();
         if let Some(expected_state) = expected_state {
@@ -164,8 +174,8 @@ impl MailGateway for LiveJmapGateway {
         }
         set.update(message_id.as_str())
             .mailbox_ids(mailbox_ids.iter().map(MailboxId::as_str));
-        request.send_set_email().await.map_err(map_gateway_error)?;
-        Ok(())
+        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        message_mutation_outcome(response.new_state().to_string())
     }
 
     async fn destroy_message(
@@ -173,15 +183,15 @@ impl MailGateway for LiveJmapGateway {
         _account_id: &AccountId,
         message_id: &MessageId,
         expected_state: Option<&str>,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<MutationOutcome, GatewayError> {
         let mut request = self.client.build();
         let set = request.set_email();
         if let Some(expected_state) = expected_state {
             set.if_in_state(expected_state);
         }
         set.destroy([message_id.as_str()]);
-        request.send_set_email().await.map_err(map_gateway_error)?;
-        Ok(())
+        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        message_mutation_outcome(response.new_state().to_string())
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
@@ -406,7 +416,7 @@ mod tests {
             _message_id: &MessageId,
             _expected_state: Option<&str>,
             _command: &SetKeywordsCommand,
-        ) -> Result<(), GatewayError> {
+        ) -> Result<MutationOutcome, GatewayError> {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
@@ -416,7 +426,7 @@ mod tests {
             _message_id: &MessageId,
             _expected_state: Option<&str>,
             _mailbox_ids: &[MailboxId],
-        ) -> Result<(), GatewayError> {
+        ) -> Result<MutationOutcome, GatewayError> {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
@@ -425,7 +435,7 @@ mod tests {
             _account_id: &AccountId,
             _message_id: &MessageId,
             _expected_state: Option<&str>,
-        ) -> Result<(), GatewayError> {
+        ) -> Result<MutationOutcome, GatewayError> {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
@@ -486,6 +496,16 @@ mod tests {
                 .as_slice(),
             &[requested_account_id]
         );
+    }
+
+    #[test]
+    fn message_mutation_outcome_wraps_message_cursor() {
+        let outcome =
+            super::message_mutation_outcome("message-9".to_string()).expect("cursor should build");
+        let cursor = outcome.cursor.expect("cursor should be present");
+        assert_eq!(cursor.object_type, SyncObject::Message);
+        assert_eq!(cursor.state, "message-9");
+        assert!(!cursor.updated_at.is_empty());
     }
 }
 

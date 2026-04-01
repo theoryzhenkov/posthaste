@@ -7,13 +7,20 @@ use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
     ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationView,
     Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId, MessageSummary,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest, ServiceError,
-    SetKeywordsCommand, SharedConfigRepository, SharedGateway, SharedStore, SidebarResponse,
-    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    SyncObject, SyncTrigger, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
+    MutationOutcome, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway, SharedStore,
+    SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, SyncObject, SyncTrigger, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
     EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
+
+#[derive(Clone, Copy)]
+enum MessageMutation<'a> {
+    SetKeywords(&'a SetKeywordsCommand),
+    ReplaceMailboxes(&'a ReplaceMailboxesCommand),
+    Destroy,
+}
 
 pub struct MailService {
     store: SharedStore,
@@ -350,26 +357,80 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    async fn apply_message_mutation(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        mutation: MessageMutation<'_>,
+    ) -> Result<CommandResult, ServiceError> {
+        let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
+        let outcome = if let Some(gateway) = self.gateway(account_id) {
+            match mutation {
+                MessageMutation::SetKeywords(command) => {
+                    gateway
+                        .set_keywords(
+                            account_id,
+                            message_id,
+                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                            command,
+                        )
+                        .await?
+                }
+                MessageMutation::ReplaceMailboxes(command) => {
+                    gateway
+                        .replace_mailboxes(
+                            account_id,
+                            message_id,
+                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                            &command.mailbox_ids,
+                        )
+                        .await?
+                }
+                MessageMutation::Destroy => {
+                    gateway
+                        .destroy_message(
+                            account_id,
+                            message_id,
+                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                        )
+                        .await?
+                }
+            }
+        } else {
+            MutationOutcome::default()
+        };
+
+        match mutation {
+            MessageMutation::SetKeywords(command) => {
+                self.store
+                    .set_keywords(account_id, message_id, outcome.cursor.as_ref(), command)
+            }
+            MessageMutation::ReplaceMailboxes(command) => self.store.replace_mailboxes(
+                account_id,
+                message_id,
+                outcome.cursor.as_ref(),
+                command,
+            ),
+            MessageMutation::Destroy => {
+                self.store
+                    .destroy_message(account_id, message_id, outcome.cursor.as_ref())
+            }
+        }
+        .map_err(Into::into)
+    }
+
     pub async fn set_keywords(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         command: &SetKeywordsCommand,
     ) -> Result<CommandResult, ServiceError> {
-        let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
-        if let Some(gateway) = self.gateway(account_id) {
-            gateway
-                .set_keywords(
-                    account_id,
-                    message_id,
-                    expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                    command,
-                )
-                .await?;
-        }
-        self.store
-            .set_keywords(account_id, message_id, command)
-            .map_err(Into::into)
+        self.apply_message_mutation(
+            account_id,
+            message_id,
+            MessageMutation::SetKeywords(command),
+        )
+        .await
     }
 
     pub async fn replace_mailboxes(
@@ -378,20 +439,12 @@ impl MailService {
         message_id: &MessageId,
         command: &ReplaceMailboxesCommand,
     ) -> Result<CommandResult, ServiceError> {
-        let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
-        if let Some(gateway) = self.gateway(account_id) {
-            gateway
-                .replace_mailboxes(
-                    account_id,
-                    message_id,
-                    expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                    &command.mailbox_ids,
-                )
-                .await?;
-        }
-        self.store
-            .replace_mailboxes(account_id, message_id, command)
-            .map_err(Into::into)
+        self.apply_message_mutation(
+            account_id,
+            message_id,
+            MessageMutation::ReplaceMailboxes(command),
+        )
+        .await
     }
 
     pub async fn add_to_mailbox(
@@ -440,19 +493,8 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<CommandResult, ServiceError> {
-        let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
-        if let Some(gateway) = self.gateway(account_id) {
-            gateway
-                .destroy_message(
-                    account_id,
-                    message_id,
-                    expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                )
-                .await?;
-        }
-        self.store
-            .destroy_message(account_id, message_id)
-            .map_err(Into::into)
+        self.apply_message_mutation(account_id, message_id, MessageMutation::Destroy)
+            .await
     }
 
     pub fn list_events(
@@ -513,12 +555,15 @@ impl MailService {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use async_trait::async_trait;
+
     use super::*;
     use crate::{
-        ConfigError, ConfigSnapshot, DomainEvent, EventFilter, FetchedBody, MessageDetail,
-        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-        SmartMailboxValue, StoreError, SyncBatch, SyncCursor,
+        ConfigError, ConfigSnapshot, DomainEvent, EventFilter, FetchedBody, GatewayError,
+        MessageDetail, MutationOutcome, PushStream, SmartMailboxCondition, SmartMailboxField,
+        SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator,
+        SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError, SyncBatch,
+        SyncCursor,
     };
 
     #[derive(Default)]
@@ -600,6 +645,7 @@ mod tests {
         smart_mailbox_counts_error: Option<String>,
         list_mailboxes_error: Option<String>,
         projection_calls: Mutex<Vec<String>>,
+        mutation_state: Mutex<MutationStoreState>,
     }
 
     impl Default for TestStore {
@@ -608,6 +654,29 @@ mod tests {
                 smart_mailbox_counts_error: None,
                 list_mailboxes_error: None,
                 projection_calls: Mutex::new(Vec::new()),
+                mutation_state: Mutex::new(MutationStoreState::default()),
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct MutationStoreState {
+        cursor: Option<SyncCursor>,
+        mailbox_ids: Vec<MailboxId>,
+    }
+
+    impl TestStore {
+        fn with_message_state(cursor_state: &str, mailbox_ids: &[&str]) -> Self {
+            Self {
+                mutation_state: Mutex::new(MutationStoreState {
+                    cursor: Some(SyncCursor {
+                        object_type: SyncObject::Message,
+                        state: cursor_state.to_string(),
+                        updated_at: crate::RFC3339_EPOCH.to_string(),
+                    }),
+                    mailbox_ids: mailbox_ids.iter().map(|id| MailboxId::from(*id)).collect(),
+                }),
+                ..Default::default()
             }
         }
     }
@@ -703,8 +772,16 @@ mod tests {
         fn get_cursor(
             &self,
             _account_id: &AccountId,
-            _object_type: SyncObject,
+            object_type: SyncObject,
         ) -> Result<Option<SyncCursor>, StoreError> {
+            if object_type == SyncObject::Message {
+                return Ok(self
+                    .mutation_state
+                    .lock()
+                    .expect("mutation state lock poisoned")
+                    .cursor
+                    .clone());
+            }
             Ok(None)
         }
 
@@ -713,7 +790,12 @@ mod tests {
             _account_id: &AccountId,
             _message_id: &MessageId,
         ) -> Result<Vec<MailboxId>, StoreError> {
-            Ok(Vec::new())
+            Ok(self
+                .mutation_state
+                .lock()
+                .expect("mutation state lock poisoned")
+                .mailbox_ids
+                .clone())
         }
 
         fn apply_sync_batch(
@@ -737,26 +819,60 @@ mod tests {
             &self,
             _account_id: &AccountId,
             _message_id: &MessageId,
+            cursor: Option<&SyncCursor>,
             _command: &SetKeywordsCommand,
         ) -> Result<CommandResult, StoreError> {
-            Err(StoreError::Failure("unused".to_string()))
+            if let Some(cursor) = cursor {
+                self.mutation_state
+                    .lock()
+                    .expect("mutation state lock poisoned")
+                    .cursor = Some(cursor.clone());
+            }
+            Ok(CommandResult {
+                detail: None,
+                events: Vec::new(),
+            })
         }
 
         fn replace_mailboxes(
             &self,
             _account_id: &AccountId,
             _message_id: &MessageId,
-            _command: &ReplaceMailboxesCommand,
+            cursor: Option<&SyncCursor>,
+            command: &ReplaceMailboxesCommand,
         ) -> Result<CommandResult, StoreError> {
-            Err(StoreError::Failure("unused".to_string()))
+            let mut state = self
+                .mutation_state
+                .lock()
+                .expect("mutation state lock poisoned");
+            state.mailbox_ids = command.mailbox_ids.clone();
+            if let Some(cursor) = cursor {
+                state.cursor = Some(cursor.clone());
+            }
+            Ok(CommandResult {
+                detail: None,
+                events: Vec::new(),
+            })
         }
 
         fn destroy_message(
             &self,
             _account_id: &AccountId,
             _message_id: &MessageId,
+            cursor: Option<&SyncCursor>,
         ) -> Result<CommandResult, StoreError> {
-            Err(StoreError::Failure("unused".to_string()))
+            let mut state = self
+                .mutation_state
+                .lock()
+                .expect("mutation state lock poisoned");
+            state.mailbox_ids.clear();
+            if let Some(cursor) = cursor {
+                state.cursor = Some(cursor.clone());
+            }
+            Ok(CommandResult {
+                detail: None,
+                events: Vec::new(),
+            })
         }
 
         fn list_events(&self, _filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError> {
@@ -832,6 +948,112 @@ mod tests {
         }
     }
 
+    struct MutationGateway {
+        revision: Mutex<u64>,
+    }
+
+    impl MutationGateway {
+        fn with_revision(revision: u64) -> Self {
+            Self {
+                revision: Mutex::new(revision),
+            }
+        }
+
+        fn apply(&self, expected_state: Option<&str>) -> Result<MutationOutcome, GatewayError> {
+            let mut revision = self.revision.lock().expect("revision lock poisoned");
+            if let Some(expected_state) = expected_state {
+                let current = format!("message-{}", *revision);
+                if expected_state != current {
+                    return Err(GatewayError::StateMismatch);
+                }
+            }
+            *revision += 1;
+            Ok(MutationOutcome {
+                cursor: Some(SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: format!("message-{}", *revision),
+                    updated_at: crate::RFC3339_EPOCH.to_string(),
+                }),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl MailGateway for MutationGateway {
+        async fn sync(
+            &self,
+            _account_id: &AccountId,
+            _cursors: &[SyncCursor],
+        ) -> Result<SyncBatch, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn fetch_message_body(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+        ) -> Result<FetchedBody, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn set_keywords(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            expected_state: Option<&str>,
+            _command: &SetKeywordsCommand,
+        ) -> Result<MutationOutcome, GatewayError> {
+            self.apply(expected_state)
+        }
+
+        async fn replace_mailboxes(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            expected_state: Option<&str>,
+            _mailbox_ids: &[MailboxId],
+        ) -> Result<MutationOutcome, GatewayError> {
+            self.apply(expected_state)
+        }
+
+        async fn destroy_message(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            expected_state: Option<&str>,
+        ) -> Result<MutationOutcome, GatewayError> {
+            self.apply(expected_state)
+        }
+
+        async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn fetch_reply_context(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+        ) -> Result<crate::ReplyContext, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn send_message(
+            &self,
+            _account_id: &AccountId,
+            _request: &SendMessageRequest,
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn open_push_stream(
+            &self,
+            _account_id: &AccountId,
+            _last_event_id: Option<&str>,
+        ) -> Result<Option<PushStream>, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+    }
+
     #[test]
     fn list_smart_mailboxes_propagates_store_count_errors() {
         let store = Arc::new(TestStore {
@@ -868,5 +1090,131 @@ mod tests {
             .expect_err("mailbox failures should not be swallowed");
 
         assert_eq!(error.code(), "storage_failure");
+    }
+
+    #[tokio::test]
+    async fn consecutive_keyword_mutations_advance_message_cursor() {
+        let account = AccountId::from("primary");
+        let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config)
+            .with_gateway(&account, Arc::new(MutationGateway::with_revision(1)));
+
+        service
+            .set_keywords(
+                &account,
+                &MessageId::from("message-1"),
+                &SetKeywordsCommand {
+                    add: vec!["$flagged".to_string()],
+                    remove: Vec::new(),
+                },
+            )
+            .await
+            .expect("flagging should succeed");
+        assert_eq!(
+            store
+                .get_cursor(&account, SyncObject::Message)
+                .expect("cursor lookup should succeed")
+                .expect("cursor should exist")
+                .state,
+            "message-2"
+        );
+
+        service
+            .set_keywords(
+                &account,
+                &MessageId::from("message-1"),
+                &SetKeywordsCommand {
+                    add: Vec::new(),
+                    remove: vec!["$flagged".to_string()],
+                },
+            )
+            .await
+            .expect("unflagging should succeed");
+        assert_eq!(
+            store
+                .get_cursor(&account, SyncObject::Message)
+                .expect("cursor lookup should succeed")
+                .expect("cursor should exist")
+                .state,
+            "message-3"
+        );
+    }
+
+    #[tokio::test]
+    async fn mixed_message_mutations_reuse_advanced_cursor() {
+        let account = AccountId::from("primary");
+        let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config)
+            .with_gateway(&account, Arc::new(MutationGateway::with_revision(1)));
+
+        service
+            .set_keywords(
+                &account,
+                &MessageId::from("message-1"),
+                &SetKeywordsCommand {
+                    add: vec!["$flagged".to_string()],
+                    remove: Vec::new(),
+                },
+            )
+            .await
+            .expect("first mutation should succeed");
+        service
+            .replace_mailboxes(
+                &account,
+                &MessageId::from("message-1"),
+                &ReplaceMailboxesCommand {
+                    mailbox_ids: vec![MailboxId::from("archive")],
+                },
+            )
+            .await
+            .expect("second mutation should succeed");
+
+        assert_eq!(
+            store
+                .get_cursor(&account, SyncObject::Message)
+                .expect("cursor lookup should succeed")
+                .expect("cursor should exist")
+                .state,
+            "message-3"
+        );
+        assert_eq!(
+            store
+                .get_message_mailboxes(&account, &MessageId::from("message-1"))
+                .expect("mailbox lookup should succeed"),
+            vec![MailboxId::from("archive")]
+        );
+    }
+
+    #[tokio::test]
+    async fn genuine_state_mismatch_is_not_retried() {
+        let account = AccountId::from("primary");
+        let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config)
+            .with_gateway(&account, Arc::new(MutationGateway::with_revision(2)));
+
+        let error = service
+            .set_keywords(
+                &account,
+                &MessageId::from("message-1"),
+                &SetKeywordsCommand {
+                    add: vec!["$flagged".to_string()],
+                    remove: Vec::new(),
+                },
+            )
+            .await
+            .expect_err("mismatch should be returned to the caller");
+
+        assert_eq!(error.code(), "state_mismatch");
+        assert_eq!(
+            store
+                .get_cursor(&account, SyncObject::Message)
+                .expect("cursor lookup should succeed")
+                .expect("cursor should exist")
+                .state,
+            "message-1"
+        );
     }
 }
