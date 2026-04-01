@@ -353,10 +353,14 @@ impl MailGateway for LiveJmapGateway {
                                     .collect::<Vec<_>>()
                             })
                             .unwrap_or_default();
+                        let received_at = match domain_now_iso8601() {
+                            Ok(value) => value,
+                            Err(error) => return Some(Err(GatewayError::Rejected(error))),
+                        };
                         Some(Ok(PushNotification {
                             account_id,
                             changed,
-                            received_at: domain_now_iso8601().ok()?,
+                            received_at,
                             checkpoint: changes.id().map(str::to_string),
                         }))
                     }

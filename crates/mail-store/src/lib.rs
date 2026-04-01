@@ -12,8 +12,8 @@ use mail_domain::{
     MessageId, MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError,
-    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MESSAGE_ARRIVED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -575,7 +575,7 @@ impl MailStore for DatabaseStore {
                     events.push(insert_event_tx(
                         tx,
                         account_id,
-                        "mailbox.updated",
+                        EVENT_TOPIC_MAILBOX_UPDATED,
                         Some(mailbox_id),
                         None,
                         json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
@@ -593,7 +593,7 @@ impl MailStore for DatabaseStore {
                 events.push(insert_event_tx(
                     tx,
                     account_id,
-                    "mailbox.updated",
+                    EVENT_TOPIC_MAILBOX_UPDATED,
                     Some(mailbox_id),
                     None,
                     json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
@@ -655,7 +655,7 @@ impl MailStore for DatabaseStore {
                 events.push(insert_event_tx(
                     tx,
                     account_id,
-                    "mailbox.updated",
+                    EVENT_TOPIC_MAILBOX_UPDATED,
                     Some(&mailbox.id),
                     None,
                     json!({ "mailboxId": mailbox.id.as_str() }),
@@ -2535,7 +2535,10 @@ fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
         other => Err(rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
-            Box::new(StoreError::Failure(format!("unknown sync object {other}"))),
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown sync object {other}"),
+            )),
         )),
     }
 }

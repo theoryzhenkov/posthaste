@@ -259,9 +259,7 @@ impl ConfigRepository for TomlConfigRepository {
 // -- File I/O helpers --
 
 fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigError> {
-    let app_settings = read_app_toml(config_root)
-        .map(|app| app.to_app_settings())
-        .unwrap_or_default();
+    let app_settings = read_app_toml(config_root)?.to_app_settings();
 
     let sources = load_sources(config_root)?;
     let smart_mailboxes = load_smart_mailboxes(config_root)?;
@@ -496,6 +494,19 @@ enabled = true
         assert_eq!(diff.added_sources, vec![AccountId::from("new-source")]);
         assert!(diff.removed_sources.is_empty());
         assert!(diff.changed_sources.is_empty());
+    }
+
+    #[test]
+    fn malformed_app_toml_is_rejected() {
+        let root = temp_root();
+        fs::write(root.join("app.toml"), "not = [valid").unwrap();
+
+        let err = match TomlConfigRepository::open(&root) {
+            Ok(_) => panic!("repository open should fail for malformed app.toml"),
+            Err(err) => err.to_string(),
+        };
+
+        assert!(err.contains("app.toml"), "error should mention file: {err}");
     }
 
     #[test]
