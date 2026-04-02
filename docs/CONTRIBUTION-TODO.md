@@ -5,8 +5,8 @@ modified: 2026-04-02
 reviewed: 2026-04-02
 depends:
   - path: README
-  - path: spec/L0-ui
-  - path: spec/L0-api
+  - path: docs/L0-ui
+  - path: docs/L0-api
 ---
 
 # Contribution TODO

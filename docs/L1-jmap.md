@@ -4,10 +4,10 @@ summary: "JMAP session, method calls, type system, push, error model"
 modified: 2026-03-29
 reviewed: 2026-03-29
 depends:
-  - path: spec/L0-jmap
+  - path: docs/L0-jmap
 dependents:
-  - path: spec/L1-sync
-  - path: spec/L1-compose
+  - path: docs/L1-sync
+  - path: docs/L1-compose
 ---
 
 # JMAP domain -- L1

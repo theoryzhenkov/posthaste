@@ -54,17 +54,17 @@ nav:
   - Home: index.md
   - Contributing: CONTRIBUTION-TODO.md
   - Architecture (L0):
-      - JMAP: spec/L0-jmap.md
-      - Sync: spec/L0-sync.md
-      - Search: spec/L0-search.md
-      - Compose: spec/L0-compose.md
-      - UI: spec/L0-ui.md
-      - API: spec/L0-api.md
-      - Accounts: spec/L0-accounts.md
-      - Branding: spec/L0-branding.md
+      - JMAP: L0-jmap.md
+      - Sync: L0-sync.md
+      - Search: L0-search.md
+      - Compose: L0-compose.md
+      - UI: L0-ui.md
+      - API: L0-api.md
+      - Accounts: L0-accounts.md
+      - Branding: L0-branding.md
   - Design (L1):
-      - JMAP: spec/L1-jmap.md
-      - Sync: spec/L1-sync.md
-      - Search: spec/L1-search.md
-      - Compose: spec/L1-compose.md
-      - UI: spec/L1-ui.md
+      - JMAP: L1-jmap.md
+      - Sync: L1-sync.md
+      - Search: L1-search.md
+      - Compose: L1-compose.md
+      - UI: L1-ui.md

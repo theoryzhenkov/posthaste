@@ -4,13 +4,13 @@ summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, ev
 modified: 2026-04-01
 reviewed: 2026-04-01
 depends:
-  - path: spec/L0-sync
-  - path: spec/L1-jmap
-  - path: spec/L0-api
+  - path: docs/L0-sync
+  - path: docs/L1-jmap
+  - path: docs/L0-api
 dependents:
-  - path: spec/L1-search
-  - path: spec/L1-compose
-  - path: spec/L1-ui
+  - path: docs/L1-search
+  - path: docs/L1-compose
+  - path: docs/L1-ui
 ---
 
 # Sync domain -- L1

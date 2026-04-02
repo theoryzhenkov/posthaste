@@ -5,9 +5,9 @@ modified: 2026-03-31
 reviewed: 2026-03-31
 depends:
   - path: README
-  - path: spec/L0-sync
+  - path: docs/L0-sync
 dependents:
-  - path: spec/L1-search
+  - path: docs/L1-search
 ---
 
 # Search domain -- L0

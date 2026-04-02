@@ -4,11 +4,11 @@ summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward 
 modified: 2026-03-31
 reviewed: 2026-03-31
 depends:
-  - path: spec/L0-compose
-  - path: spec/L1-jmap
-  - path: spec/L1-sync
+  - path: docs/L0-compose
+  - path: docs/L1-jmap
+  - path: docs/L1-sync
 dependents:
-  - path: spec/L1-ui
+  - path: docs/L1-ui
 ---
 
 # Compose domain -- L1

@@ -6,11 +6,11 @@ reviewed: 2026-03-29
 depends:
   - path: README
 dependents:
-  - path: spec/L1-jmap
-  - path: spec/L0-api
-  - path: spec/L0-sync
-  - path: spec/L0-accounts
-  - path: spec/L0-compose
+  - path: docs/L1-jmap
+  - path: docs/L0-api
+  - path: docs/L0-sync
+  - path: docs/L0-accounts
+  - path: docs/L0-compose
 ---
 
 # JMAP domain -- L0

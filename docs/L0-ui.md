@@ -5,10 +5,10 @@ modified: 2026-04-01
 reviewed: 2026-04-01
 depends:
   - path: README
-  - path: spec/L0-api
-  - path: spec/L0-branding
+  - path: docs/L0-api
+  - path: docs/L0-branding
 dependents:
-  - path: spec/L1-ui
+  - path: docs/L1-ui
 ---
 
 # UI domain -- L0

@@ -5,10 +5,10 @@ modified: 2026-03-29
 reviewed: 2026-03-29
 depends:
   - path: README
-  - path: spec/L0-jmap
-  - path: spec/L0-sync
+  - path: docs/L0-jmap
+  - path: docs/L0-sync
 dependents:
-  - path: spec/L1-compose
+  - path: docs/L1-compose
 ---
 
 # Compose domain -- L0
