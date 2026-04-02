@@ -5,8 +5,8 @@ modified: 2026-03-31
 reviewed: 2026-03-31
 depends:
   - path: README
-  - path: spec/L0-jmap
-  - path: spec/L0-sync
+  - path: docs/L0-jmap
+  - path: docs/L0-sync
 dependents: []
 ---
 

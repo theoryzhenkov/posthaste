@@ -4,11 +4,11 @@ summary: "React component hierarchy, conversation list behavior, live updates, H
 modified: 2026-04-01
 reviewed: 2026-04-01
 depends:
-  - path: spec/L0-ui
-  - path: spec/L0-api
-  - path: spec/L1-sync
-  - path: spec/L1-search
-  - path: spec/L1-compose
+  - path: docs/L0-ui
+  - path: docs/L0-api
+  - path: docs/L1-sync
+  - path: docs/L1-search
+  - path: docs/L1-compose
 dependents: []
 ---
 

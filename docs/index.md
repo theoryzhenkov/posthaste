@@ -45,14 +45,14 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 
 ## Domains
 
-- **[Branding](spec/L0-branding.md)** -- Name, identity, palette, typography, logo
-- **[JMAP](spec/L0-jmap.md)** -- JMAP protocol types, session, method calls, push
-- **[Sync](spec/L0-sync.md)** -- Bidirectional sync engine, local SQLite replica, state tokens
-- **[Search](spec/L0-search.md)** -- Query language, smart mailboxes, search execution
-- **[Compose](spec/L0-compose.md)** -- Markdown composition, MIME assembly, send/draft lifecycle
-- **[UI](spec/L0-ui.md)** -- Web UI, React components, conversation list, HTML rendering, keyboard model
-- **[Accounts](spec/L0-accounts.md)** -- Multi-account scoping (deferred, L0-only)
-- **[API](spec/L0-api.md)** -- REST API + SSE boundary, Axum handlers, pagination, error mapping
+- **[Branding](L0-branding.md)** -- Name, identity, palette, typography, logo
+- **[JMAP](L0-jmap.md)** -- JMAP protocol types, session, method calls, push
+- **[Sync](L0-sync.md)** -- Bidirectional sync engine, local SQLite replica, state tokens
+- **[Search](L0-search.md)** -- Query language, smart mailboxes, search execution
+- **[Compose](L0-compose.md)** -- Markdown composition, MIME assembly, send/draft lifecycle
+- **[UI](L0-ui.md)** -- Web UI, React components, conversation list, HTML rendering, keyboard model
+- **[Accounts](L0-accounts.md)** -- Multi-account scoping (deferred, L0-only)
+- **[API](L0-api.md)** -- REST API + SSE boundary, Axum handlers, pagination, error mapping
 
 ## MVP acceptance criteria
 

@@ -5,13 +5,13 @@ modified: 2026-04-01
 reviewed: 2026-04-01
 depends:
   - path: README
-  - path: spec/L0-jmap
-  - path: spec/L0-api
+  - path: docs/L0-jmap
+  - path: docs/L0-api
 dependents:
-  - path: spec/L1-sync
-  - path: spec/L0-search
-  - path: spec/L0-compose
-  - path: spec/L0-accounts
+  - path: docs/L1-sync
+  - path: docs/L0-search
+  - path: docs/L0-compose
+  - path: docs/L0-accounts
 ---
 
 # Sync domain -- L0

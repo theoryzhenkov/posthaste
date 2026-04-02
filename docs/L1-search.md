@@ -4,10 +4,10 @@ summary: "Query grammar, filter compilation, smart mailbox model, thread arcs, s
 modified: 2026-03-31
 reviewed: 2026-03-31
 depends:
-  - path: spec/L0-search
-  - path: spec/L1-sync
+  - path: docs/L0-search
+  - path: docs/L1-sync
 dependents:
-  - path: spec/L1-ui
+  - path: docs/L1-ui
 ---
 
 # Search domain -- L1

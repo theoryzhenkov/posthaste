@@ -6,8 +6,8 @@ reviewed: 2026-04-01
 depends:
   - path: README
 dependents:
-  - path: spec/L0-ui
-  - path: spec/L1-ui
+  - path: docs/L0-ui
+  - path: docs/L1-ui
 ---
 
 # Branding -- L0
