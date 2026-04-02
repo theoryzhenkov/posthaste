@@ -1,29 +1,38 @@
-name: Deploy docs to GitHub Pages
+name: Deploy docs
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
+      - "docs/**"
+      - "mkdocs.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
         with:
-          python-version: '3.12'
+          path: site
 
-      - name: Install dependencies
-        run: pip install -r docs/requirements.txt
-
-      - name: Build and deploy
-        run: mkdocs gh-deploy --force
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
