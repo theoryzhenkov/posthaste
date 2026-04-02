@@ -1,0 +1,194 @@
+import type { UseMutationResult } from "@tanstack/react-query";
+import type { AccountOverview } from "../../api/types";
+import { cn } from "../../lib/utils";
+import { formatRelativeTime } from "../../utils/relativeTime";
+import { statusTone } from "./helpers";
+import { MetaStat, SummaryCard } from "./shared";
+import { Button } from "../ui/button";
+
+export function AccountListPane({
+  accounts,
+  selectedAccountId,
+  defaultAccountId,
+  accountSummary,
+  onDefaultAccountChange,
+  onCreateAccount,
+  onSelectAccount,
+  onCommand,
+  defaultMutation,
+}: {
+  accounts: AccountOverview[];
+  selectedAccountId: string | "new";
+  defaultAccountId: string | null | undefined;
+  accountSummary: {
+    total: number;
+    readyCount: number;
+    degradedCount: number;
+    enabledCount: number;
+  };
+  onDefaultAccountChange: (accountId: string | null) => void;
+  onCreateAccount: () => void;
+  onSelectAccount: (accountId: string) => void;
+  onCommand: (
+    action: "enable" | "disable" | "delete" | "sync",
+    account: AccountOverview,
+  ) => void;
+  defaultMutation: UseMutationResult<unknown, Error, string | null, unknown>;
+}) {
+  return (
+    <>
+      <section className="border-b border-border px-4 py-4">
+        <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
+          application
+        </p>
+        <div className="mt-3 grid gap-3">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-muted-foreground">Default account</span>
+            <select
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+              value={defaultAccountId ?? ""}
+              onChange={(event) => onDefaultAccountChange(event.target.value || null)}
+            >
+              <option value="">No default</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grid grid-cols-2 gap-2">
+            <SummaryCard label="Accounts" value={String(accountSummary.total)} />
+            <SummaryCard label="Ready" value={String(accountSummary.readyCount)} />
+            <SummaryCard
+              label="Needs attention"
+              value={String(accountSummary.degradedCount)}
+            />
+            <SummaryCard label="Enabled" value={String(accountSummary.enabledCount)} />
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
+            configured accounts
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={onCreateAccount}
+            disabled={defaultMutation.isPending}
+          >
+            New account
+          </Button>
+        </div>
+        <div className="mt-3 space-y-3">
+          {accounts.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+              No accounts configured yet. Create one on the right and save it to the daemon.
+            </div>
+          )}
+          {accounts.map((account) => (
+            <article
+              key={account.id}
+              className={cn(
+                "rounded-lg border border-border bg-background/60 px-3 py-3",
+                selectedAccountId === account.id &&
+                  "border-primary/60 shadow-[0_0_0_1px_rgba(37,99,235,0.25)]",
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <button
+                  type="button"
+                  className="min-w-0 text-left"
+                  onClick={() => onSelectAccount(account.id)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{account.name}</span>
+                    {account.isDefault && (
+                      <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-primary">
+                        default
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {account.transport.username ?? "No username"} ·{" "}
+                    {account.driver.toUpperCase()}
+                  </p>
+                </button>
+
+                <span
+                  className={cn(
+                    "rounded border px-2 py-1 text-[10px] font-mono uppercase tracking-wider",
+                    statusTone(account.status),
+                  )}
+                >
+                  {account.status}
+                </span>
+              </div>
+
+              <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                <MetaStat label="Push" value={account.push} />
+                <MetaStat
+                  label="Password"
+                  value={account.transport.secret.configured ? "configured" : "missing"}
+                />
+                <MetaStat
+                  label="Last sync"
+                  value={account.lastSyncAt ? formatRelativeTime(account.lastSyncAt) : "never"}
+                />
+                <MetaStat label="Enabled" value={account.enabled ? "yes" : "no"} />
+              </dl>
+
+              {account.lastSyncError && (
+                <p className="mt-3 rounded border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
+                  {account.lastSyncError}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  type="button"
+                  onClick={() => onSelectAccount(account.id)}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  type="button"
+                  onClick={() => onCommand("sync", account)}
+                >
+                  Sync
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  type="button"
+                  onClick={() =>
+                    onCommand(account.enabled ? "disable" : "enable", account)
+                  }
+                >
+                  {account.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  size="xs"
+                  variant="destructive"
+                  type="button"
+                  onClick={() => onCommand("delete", account)}
+                >
+                  Delete
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}

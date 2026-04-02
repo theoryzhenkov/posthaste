@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="#141618" stroke-width="2.2" stroke-linecap="round">
+  <!-- Three flowing wind lines: staggered left-to-right, gentle upward arc -->
+  <!-- Top line: shortest, starts furthest right -->
+  <path d="M 16 8 Q 22 5, 28 8" />
+  <!-- Middle line: longest, starts furthest left -->
+  <path d="M 4 16 Q 16 20, 28 16" />
+  <!-- Bottom line: medium, between the others -->
+  <path d="M 10 24 Q 19 20, 28 24" />
+</svg>

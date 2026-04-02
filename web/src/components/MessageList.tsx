@@ -1,0 +1,450 @@
+import {
+  useInfiniteQuery,
+  useQueryClient,
+  useQueries,
+  type InfiniteData,
+} from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchConversations,
+  fetchSmartMailboxConversations,
+} from "../api/client";
+import type {
+  ConversationSummary,
+  DomainEvent,
+} from "../api/types";
+import type { EmailActions } from "../hooks/useEmailActions";
+import { MAIL_DOMAIN_EVENT_NAME } from "../hooks/useDaemonEvents";
+import {
+  getConversationSummary,
+  mailKeys,
+  normalizeConversationPage,
+  readConversationIds,
+  type ConversationPageSlice,
+  type MailSelection,
+} from "../mailState";
+import type { SidebarSelection } from "./Sidebar";
+import { MessageRow } from "./MessageRow";
+
+interface MessageListProps {
+  selectedView: SidebarSelection | null;
+  selection: MailSelection | null;
+  onSelectMessage: (message: MailSelection) => void;
+  actions: EmailActions;
+}
+
+const PAGE_SIZE = 100;
+const ROW_HEIGHT = 78;
+const OVERSCAN_ROWS = 6;
+const LOAD_MORE_THRESHOLD_PX = 800;
+const TOP_REFRESH_THRESHOLD_PX = 24;
+const scrollOffsetByView = new Map<string, number>();
+
+function fetchConversationPageForView(
+  selectedView: SidebarSelection,
+  cursor: string | null,
+) {
+  if (selectedView.kind === "smart-mailbox") {
+    return fetchSmartMailboxConversations(selectedView.id, {
+      limit: PAGE_SIZE,
+      cursor,
+    });
+  }
+  return fetchConversations({
+    sourceId: selectedView.sourceId,
+    mailboxId: selectedView.mailboxId,
+    limit: PAGE_SIZE,
+    cursor,
+  });
+}
+
+function conversationViewKey(selectedView: SidebarSelection | null): string {
+  if (!selectedView) {
+    return "none";
+  }
+  if (selectedView.kind === "smart-mailbox") {
+    return `smart:${selectedView.id}`;
+  }
+  return `source:${selectedView.sourceId}:${selectedView.mailboxId}`;
+}
+
+function eventMayAffectView(
+  payload: DomainEvent,
+  selectedView: SidebarSelection | null,
+): boolean {
+  if (!selectedView) {
+    return false;
+  }
+  if (selectedView.kind === "smart-mailbox") {
+    return true;
+  }
+  if (payload.accountId !== selectedView.sourceId) {
+    return false;
+  }
+  return payload.mailboxId === null || payload.mailboxId === selectedView.mailboxId;
+}
+
+export function MessageList({
+  selectedView,
+  selection,
+  onSelectMessage,
+  actions,
+}: MessageListProps) {
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(
+    () => mailKeys.view(selectedView),
+    [selectedView],
+  );
+  const viewKey = useMemo(() => conversationViewKey(selectedView), [selectedView]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const restoredViewKeyRef = useRef<string | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [isRefreshingTop, setIsRefreshingTop] = useState(false);
+
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    error,
+  } = useInfiniteQuery({
+    queryKey,
+    queryFn: async ({ pageParam }) =>
+      normalizeConversationPage(
+        queryClient,
+        await fetchConversationPageForView(selectedView!, pageParam),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: selectedView !== null,
+  });
+
+  const conversationIds = useMemo(() => readConversationIds(data), [data]);
+
+  const refreshFirstPage = useCallback(async () => {
+    if (!selectedView) {
+      return;
+    }
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    setIsRefreshingTop(true);
+    try {
+      const fetchedPage = await fetchConversationPageForView(selectedView, null);
+      const firstPage = normalizeConversationPage(queryClient, fetchedPage);
+      let insertedCount = 0;
+      queryClient.setQueryData<InfiniteData<ConversationPageSlice, string | null>>(queryKey, (current) => {
+        if (!current || current.pages.length === 0) {
+          insertedCount = firstPage.itemIds.length;
+          return {
+            pages: [firstPage],
+            pageParams: [null],
+          };
+        }
+
+        const loadedIds = current.pages.flatMap((page) => page.itemIds);
+        const currentTopConversationId = loadedIds[0] ?? null;
+        const prependedIds: string[] = [];
+        for (const itemId of firstPage.itemIds) {
+          if (currentTopConversationId !== null && itemId === currentTopConversationId) {
+            break;
+          }
+          prependedIds.push(itemId);
+        }
+        insertedCount = prependedIds.length;
+
+        const prependedIdSet = new Set(prependedIds);
+        const pages = current.pages.map((page, index) => {
+          const retainedIds = page.itemIds.filter((itemId) => !prependedIdSet.has(itemId));
+
+          if (index === 0) {
+            return {
+              ...page,
+              itemIds: [...prependedIds, ...retainedIds],
+              nextCursor: firstPage.nextCursor,
+            };
+          }
+
+          return {
+            ...page,
+            itemIds: retainedIds,
+          };
+        });
+
+        return {
+          ...current,
+          pages,
+        };
+      });
+
+      if (insertedCount > 0 && scrollTop > TOP_REFRESH_THRESHOLD_PX && scrollContainerRef.current) {
+        const nextScrollTop = scrollContainerRef.current.scrollTop + insertedCount * ROW_HEIGHT;
+        scrollContainerRef.current.scrollTop = nextScrollTop;
+        scrollOffsetByView.set(viewKey, nextScrollTop);
+        setScrollTop(nextScrollTop);
+      }
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsRefreshingTop(false);
+      if (refreshQueuedRef.current) {
+        refreshQueuedRef.current = false;
+        void refreshFirstPage();
+      }
+    }
+  }, [queryClient, queryKey, scrollTop, selectedView, viewKey]);
+
+  const navigateMessage = useCallback(
+    (direction: 1 | -1) => {
+      if (conversationIds.length === 0) return;
+
+      const currentIndex = conversationIds.findIndex(
+        (conversationId) => conversationId === selection?.conversationId,
+      );
+      const nextIndex =
+        currentIndex === -1
+          ? direction === 1
+            ? 0
+            : conversationIds.length - 1
+          : currentIndex + direction;
+
+      if (nextIndex < 0) {
+        return;
+      }
+      if (nextIndex >= conversationIds.length) {
+        if (direction === 1 && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+        return;
+      }
+
+      const nextConversationId = conversationIds[nextIndex];
+      const nextConversation = getConversationSummary(queryClient, nextConversationId);
+      if (!nextConversation) {
+        return;
+      }
+      onSelectMessage({
+        conversationId: nextConversation.id,
+        sourceId: nextConversation.latestMessage.sourceId,
+        messageId: nextConversation.latestMessage.messageId,
+      });
+    },
+    [
+      conversationIds,
+      queryClient,
+      fetchNextPage,
+      hasNextPage,
+      isFetchingNextPage,
+      onSelectMessage,
+      selection?.conversationId,
+    ],
+  );
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
+      switch (event.key) {
+        case "j":
+        case "ArrowDown":
+          event.preventDefault();
+          navigateMessage(1);
+          break;
+        case "k":
+        case "ArrowUp":
+          event.preventDefault();
+          navigateMessage(-1);
+          break;
+        case "e":
+          if (selection) {
+            actions.archive({ sourceId: selection.sourceId, messageId: selection.messageId });
+          }
+          break;
+        case "#":
+        case "Backspace":
+          if (selection) {
+            actions.trash({ sourceId: selection.sourceId, messageId: selection.messageId });
+          }
+          break;
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [actions, navigateMessage, selection]);
+
+  useEffect(() => {
+    restoredViewKeyRef.current = null;
+  }, [viewKey]);
+
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node || restoredViewKeyRef.current === viewKey) {
+      return;
+    }
+    const savedOffset = scrollOffsetByView.get(viewKey) ?? 0;
+    restoredViewKeyRef.current = viewKey;
+    node.scrollTop = savedOffset;
+    setScrollTop(savedOffset);
+  }, [viewKey, conversationIds.length]);
+
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateViewportHeight = () => setViewportHeight(node.clientHeight);
+    updateViewportHeight();
+
+    const resizeObserver = new ResizeObserver(updateViewportHeight);
+    resizeObserver.observe(node);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const node = scrollContainerRef.current;
+    if (!node || !hasNextPage || isFetchingNextPage) {
+      return;
+    }
+
+    const remaining = node.scrollHeight - (node.scrollTop + node.clientHeight);
+    if (remaining <= LOAD_MORE_THRESHOLD_PX) {
+      void fetchNextPage();
+    }
+  }, [
+    conversationIds.length,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    scrollTop,
+    viewportHeight,
+  ]);
+
+  useEffect(() => {
+    function handleDomainEvent(event: Event) {
+      const payload = (event as CustomEvent<DomainEvent>).detail;
+      if (!eventMayAffectView(payload, selectedView)) {
+        return;
+      }
+      void refreshFirstPage();
+    }
+
+    window.addEventListener(MAIL_DOMAIN_EVENT_NAME, handleDomainEvent as EventListener);
+    return () =>
+      window.removeEventListener(MAIL_DOMAIN_EVENT_NAME, handleDomainEvent as EventListener);
+  }, [refreshFirstPage, scrollTop, selectedView]);
+
+  const handleScroll = useCallback(() => {
+    const node = scrollContainerRef.current;
+    if (!node) {
+      return;
+    }
+    setScrollTop(node.scrollTop);
+    scrollOffsetByView.set(viewKey, node.scrollTop);
+  }, [viewKey]);
+
+  const totalRows = conversationIds.length;
+  const safeViewportHeight = viewportHeight || ROW_HEIGHT * 8;
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS,
+  );
+  const endIndex = Math.min(
+    totalRows,
+    Math.ceil((scrollTop + safeViewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
+  );
+  const topSpacerHeight = startIndex * ROW_HEIGHT;
+  const bottomSpacerHeight = (totalRows - endIndex) * ROW_HEIGHT;
+  const visibleConversationIds = conversationIds.slice(startIndex, endIndex);
+  const visibleConversations = useQueries({
+    queries: visibleConversationIds.map((conversationId) => ({
+      queryKey: mailKeys.conversationSummary(conversationId),
+    })),
+    combine: (results) =>
+      results
+        .map((result) => result.data)
+        .filter((conversation): conversation is ConversationSummary => !!conversation),
+  });
+  const countLabel = hasNextPage ? `${totalRows} loaded` : `${totalRows} threads`;
+
+  if (!selectedView) {
+    return (
+      <div className="flex items-center justify-center border-r border-border bg-background p-6">
+        <p className="text-sm text-muted-foreground">No mailbox selected</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-background">
+      <div className="border-b border-border px-3 pb-2 pt-3">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-sm font-semibold tracking-tight">{selectedView.name}</h2>
+          <span className="text-xs text-muted-foreground">{countLabel}</span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-[minmax(140px,0.8fr)_minmax(0,2fr)_80px] gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <span>From</span>
+          <span>Subject</span>
+          <span className="text-right">Date</span>
+        </div>
+      </div>
+
+      <div
+        ref={scrollContainerRef}
+        className="min-h-0 flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
+        {isLoading && (
+          <p className="px-3 py-4 text-sm text-muted-foreground">Loading threads...</p>
+        )}
+        {error && (
+          <p className="px-3 py-4 text-sm text-destructive">Failed to load threads</p>
+        )}
+        {!isLoading && !error && conversationIds.length === 0 && (
+          <p className="px-3 py-4 text-sm text-muted-foreground">
+            No threads in this view.
+          </p>
+        )}
+        {conversationIds.length > 0 && (
+          <>
+            <div style={{ height: topSpacerHeight }} />
+            {visibleConversations.map((conversation) => (
+              <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
+                <MessageRow
+                  message={conversation}
+                  isSelected={conversation.id === selection?.conversationId}
+                  onSelect={() =>
+                    onSelectMessage({
+                      conversationId: conversation.id,
+                      sourceId: conversation.latestMessage.sourceId,
+                      messageId: conversation.latestMessage.messageId,
+                    })
+                  }
+                />
+              </div>
+            ))}
+            <div style={{ height: bottomSpacerHeight }} />
+          </>
+        )}
+        {(isFetchingNextPage || isRefreshingTop) && (
+          <p className="px-3 py-3 text-xs text-muted-foreground">
+            {isRefreshingTop ? "Refreshing threads..." : "Loading more threads..."}
+          </p>
+        )}
+        {!hasNextPage && conversationIds.length > 0 && !isFetching && (
+          <p className="px-3 py-3 text-xs text-muted-foreground">End of thread list</p>
+        )}
+      </div>
+    </div>
+  );
+}
