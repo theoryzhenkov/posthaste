@@ -1,23 +1,69 @@
-site_name: Project Name
-site_description: Project documentation
+site_name: PostHaste
+site_description: JMAP mail client with MailMate-grade search and conversation-first web UI
 docs_dir: docs
 site_dir: site
+repo_url: https://github.com/user/posthaste
+repo_name: posthaste
 
 theme:
   name: material
+  palette:
+    scheme: default
+    primary: custom
+    accent: custom
+  font:
+    text: Geist
+    code: Geist Mono
   features:
     - navigation.instant
+    - navigation.tabs
     - navigation.sections
+    - navigation.expand
     - navigation.top
+    - navigation.indexes
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
     - content.code.copy
 
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
-  - admonition
-  - attr_list
   - meta
-  - md_in_html
   - tables
   - toc:
       permalink: true
+  - admonition
+  - attr_list
+  - md_in_html
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - def_list
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Architecture (L0):
+      - JMAP: spec/L0-jmap.md
+      - Sync: spec/L0-sync.md
+      - Search: spec/L0-search.md
+      - Compose: spec/L0-compose.md
+      - UI: spec/L0-ui.md
+      - API: spec/L0-api.md
+      - Accounts: spec/L0-accounts.md
+      - Branding: spec/L0-branding.md
+  - Design (L1):
+      - JMAP: spec/L1-jmap.md
+      - Sync: spec/L1-sync.md
+      - Search: spec/L1-search.md
+      - Compose: spec/L1-compose.md
+      - UI: spec/L1-ui.md
