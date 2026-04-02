@@ -52,6 +52,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Contributing: CONTRIBUTION-TODO.md
   - Architecture (L0):
       - JMAP: spec/L0-jmap.md
       - Sync: spec/L0-sync.md
