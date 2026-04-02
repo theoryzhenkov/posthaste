@@ -1,0 +1,1673 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="JMAP mail client with MailMate-grade search and conversation-first web UI">
+      
+      
+      
+      
+        <link rel="prev" href="../L1-sync/">
+      
+      
+        <link rel="next" href="../L1-compose/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Search - PostHaste</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Geist:300,300i,400,400i,700,700i%7CGeist+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Geist";--md-code-font:"Geist Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#search-domain-l1" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PostHaste" class="md-header__button md-logo" aria-label="PostHaste" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PostHaste
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Search
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/user/posthaste" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    posthaste
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CONTRIBUTION-TODO/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../L0-jmap/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architecture (L0)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../L1-jmap/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Design (L1)
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PostHaste" class="md-nav__button md-logo" aria-label="PostHaste" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    PostHaste
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/user/posthaste" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    posthaste
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTION-TODO/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (L0)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture (L0)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-jmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JMAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-sync/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sync
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Search
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-branding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Branding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (L1)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (L1)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-jmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JMAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-sync/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sync
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Search
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Search
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#query-grammar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query grammar
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prefix-to-jmap-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prefix-to-JMAP mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-compilation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filter compilation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smart-mailbox-data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smart mailbox data model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-submailbox-grouping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-submailbox grouping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#search-ux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search UX
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Search UX">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toolbar-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolbar search
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clickable-drill-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clickable drill-down
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#save-as-smart-mailbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Save as smart mailbox
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thread-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thread view
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Thread view">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation view
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#message-list-threading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message list threading
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thread-arcs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thread Arcs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Thread Arcs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-model_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#visual-encoding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Visual encoding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rendering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="search-domain-l1">Search domain -- L1<a class="headerlink" href="#search-domain-l1" title="Permanent link">&para;</a></h1>
+<h2 id="query-grammar">Query grammar<a class="headerlink" href="#query-grammar" title="Permanent link">&para;</a></h2>
+<p>The query language uses a PEG grammar parsed in Rust. Free text without a prefix searches across from, to, subject, and body (compiled to JMAP's <code>text</code> filter). Prefixed terms restrict the search to a specific field. Boolean logic follows standard precedence: NOT binds tightest, then AND (implicit on whitespace), then OR. Parentheses override precedence.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nc">Query</span>       <span class="o">&lt;-</span> <span class="nc">OrExpr</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nc">OrExpr</span>      <span class="o">&lt;-</span> <span class="nc">AndExpr</span> <span class="p">(</span><span class="s1">&#39;OR&#39;</span> <span class="nc">AndExpr</span><span class="p">)</span><span class="o">*</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nc">AndExpr</span>     <span class="o">&lt;-</span> <span class="nc">NotExpr</span> <span class="p">(</span><span class="nc">NotExpr</span><span class="p">)</span><span class="o">*</span>          <span class="c1"># implicit AND on whitespace</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nc">NotExpr</span>     <span class="o">&lt;-</span> <span class="s1">&#39;-&#39;</span> <span class="nc">Atom</span> <span class="o">/</span> <span class="s1">&#39;NOT&#39;</span> <span class="nc">Atom</span> <span class="o">/</span> <span class="nc">Atom</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nc">Atom</span>        <span class="o">&lt;-</span> <span class="s1">&#39;(&#39;</span> <span class="nc">OrExpr</span> <span class="s1">&#39;)&#39;</span> <span class="o">/</span> <span class="nc">Prefix</span> <span class="o">/</span> <span class="nc">FreeText</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nc">Prefix</span>      <span class="o">&lt;-</span> <span class="nc">PrefixName</span> <span class="s1">&#39;:&#39;</span> <span class="nc">Value</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nc">PrefixName</span>  <span class="o">&lt;-</span> <span class="s1">&#39;from&#39;</span> <span class="o">/</span> <span class="s1">&#39;to&#39;</span> <span class="o">/</span> <span class="s1">&#39;cc&#39;</span> <span class="o">/</span> <span class="s1">&#39;bcc&#39;</span> <span class="o">/</span> <span class="s1">&#39;subject&#39;</span> <span class="o">/</span> <span class="s1">&#39;body&#39;</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>             <span class="o">/</span> <span class="s1">&#39;participant&#39;</span>               <span class="c1"># desugars to OR(from, to, cc)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>             <span class="o">/</span> <span class="s1">&#39;is&#39;</span> <span class="o">/</span> <span class="s1">&#39;has&#39;</span> <span class="o">/</span> <span class="s1">&#39;in&#39;</span> <span class="o">/</span> <span class="s1">&#39;tag&#39;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>             <span class="o">/</span> <span class="s1">&#39;before&#39;</span> <span class="o">/</span> <span class="s1">&#39;after&#39;</span> <span class="o">/</span> <span class="s1">&#39;date&#39;</span> <span class="o">/</span> <span class="s1">&#39;during&#39;</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>             <span class="o">/</span> <span class="s1">&#39;newer&#39;</span> <span class="o">/</span> <span class="s1">&#39;older&#39;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>             <span class="o">/</span> <span class="s1">&#39;size&#39;</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>             <span class="o">/</span> <span class="s1">&#39;header&#39;</span>                    <span class="c1"># client-only, v2</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>             <span class="o">/</span> <span class="s1">&#39;id&#39;</span> <span class="o">/</span> <span class="s1">&#39;threadid&#39;</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nc">Value</span>       <span class="o">&lt;-</span> <span class="nc">QuotedString</span> <span class="o">/</span> <span class="nc">DateRange</span> <span class="o">/</span> <span class="nc">DateExpr</span> <span class="o">/</span> <span class="nc">SizeExpr</span> <span class="o">/</span> <span class="nc">Word</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="nc">QuotedString</span> <span class="o">&lt;-</span> <span class="s1">&#39;&quot;&#39;</span> <span class="p">[</span><span class="s">^&quot;</span><span class="p">]</span><span class="o">*</span> <span class="s1">&#39;&quot;&#39;</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="nc">Word</span>        <span class="o">&lt;-</span> <span class="p">[</span><span class="s">^\s()</span><span class="p">]</span><span class="o">+</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="nc">DateExpr</span>    <span class="o">&lt;-</span> <span class="nc">RelativeDate</span> <span class="o">/</span> <span class="nc">AbsoluteDate</span> <span class="o">/</span> <span class="nc">NamedDate</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="nc">RelativeDate</span> <span class="o">&lt;-</span> <span class="p">[</span><span class="s">0-9</span><span class="p">]</span><span class="o">+</span> <span class="p">[</span><span class="s">dwmy</span><span class="p">]</span>             <span class="c1"># 2d, 3w, 1m, 1y</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="nc">AbsoluteDate</span> <span class="o">&lt;-</span> <span class="p">[</span><span class="s">0-9</span><span class="p">]</span><span class="nc">{4}</span> <span class="s1">&#39;-&#39;</span> <span class="p">[</span><span class="s">0-9</span><span class="p">]</span><span class="nc">{2}</span> <span class="s1">&#39;-&#39;</span> <span class="p">[</span><span class="s">0-9</span><span class="p">]</span><span class="nc">{2}</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="nc">NamedDate</span>   <span class="o">&lt;-</span> <span class="s1">&#39;today&#39;</span> <span class="o">/</span> <span class="s1">&#39;yesterday&#39;</span> <span class="o">/</span> <span class="s1">&#39;thisweek&#39;</span> <span class="o">/</span> <span class="s1">&#39;thismonth&#39;</span> <span class="o">/</span> <span class="s1">&#39;thisyear&#39;</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="nc">DateRange</span>   <span class="o">&lt;-</span> <span class="nc">DateExpr</span> <span class="s1">&#39;..&#39;</span> <span class="nc">DateExpr</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="nc">SizeExpr</span>    <span class="o">&lt;-</span> <span class="p">[</span><span class="s">0-9</span><span class="p">]</span><span class="o">+</span> <span class="p">(</span><span class="s1">&#39;k&#39;</span> <span class="o">/</span> <span class="s1">&#39;K&#39;</span> <span class="o">/</span> <span class="s1">&#39;m&#39;</span> <span class="o">/</span> <span class="s1">&#39;M&#39;</span><span class="p">)</span>   <span class="c1"># kilobytes or megabytes</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="nc">FreeText</span>    <span class="o">&lt;-</span> <span class="nc">QuotedString</span> <span class="o">/</span> <span class="nc">Word</span>         <span class="c1"># searches subject + body + from</span>
+</code></pre></div>
+<p>A query like <code>from:alice subject:"weekly report" newer:2w</code> parses into three AND-ed atoms: a from prefix, a quoted subject prefix, and a relative date prefix.</p>
+<h2 id="prefix-to-jmap-mapping">Prefix-to-JMAP mapping<a class="headerlink" href="#prefix-to-jmap-mapping" title="Permanent link">&para;</a></h2>
+<p>Each prefix compiles to a specific JMAP FilterCondition property. The mapping is fixed at compile time except for <code>in:</code>, which requires resolving mailbox names to IDs against the local cache.</p>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>JMAP FilterCondition property</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>from:</code></td>
+<td><code>from</code></td>
+<td>Matches address or display name</td>
+</tr>
+<tr>
+<td><code>to:</code></td>
+<td><code>to</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>cc:</code></td>
+<td><code>cc</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>bcc:</code></td>
+<td><code>bcc</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>subject:</code></td>
+<td><code>subject</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>body:</code></td>
+<td><code>body</code></td>
+<td>Full-text body search</td>
+</tr>
+<tr>
+<td><code>participant:</code></td>
+<td>OR(from, to, cc)</td>
+<td>Desugars at compilation</td>
+</tr>
+<tr>
+<td><code>is:unread</code></td>
+<td><code>hasKeyword: { "$seen": false }</code></td>
+<td>Inverted: unread = NOT $seen</td>
+</tr>
+<tr>
+<td><code>is:flagged</code></td>
+<td><code>hasKeyword: { "$flagged": true }</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>is:draft</code></td>
+<td><code>hasKeyword: { "$draft": true }</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>is:answered</code></td>
+<td><code>hasKeyword: { "$answered": true }</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>has:attachment</code></td>
+<td><code>hasAttachment: true</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>in:</code></td>
+<td><code>inMailbox</code></td>
+<td>Matches mailbox name or role (inbox, drafts, sent, trash, archive)</td>
+</tr>
+<tr>
+<td><code>-in:</code></td>
+<td><code>inMailboxOtherThan</code></td>
+<td>Negated mailbox membership</td>
+</tr>
+<tr>
+<td><code>tag:</code></td>
+<td><code>hasKeyword</code></td>
+<td>Custom JMAP keywords (Fastmail labels)</td>
+</tr>
+<tr>
+<td><code>before:</code></td>
+<td><code>before</code></td>
+<td>Exclusive upper bound</td>
+</tr>
+<tr>
+<td><code>after:</code></td>
+<td><code>after</code></td>
+<td>Inclusive lower bound</td>
+</tr>
+<tr>
+<td><code>date:</code></td>
+<td><code>after</code> + <code>before</code></td>
+<td>Single date = that day (after 00:00, before 23:59:59)</td>
+</tr>
+<tr>
+<td><code>during:</code></td>
+<td><code>after</code> + <code>before</code></td>
+<td>Date range: <code>during:3m..1m</code></td>
+</tr>
+<tr>
+<td><code>newer:</code></td>
+<td><code>after</code></td>
+<td>Relative: <code>newer:2w</code> = after (now - 2 weeks)</td>
+</tr>
+<tr>
+<td><code>older:</code></td>
+<td><code>before</code></td>
+<td>Relative: <code>older:1y</code> = before (now - 1 year)</td>
+</tr>
+<tr>
+<td><code>size:</code></td>
+<td><code>size</code></td>
+<td><code>size:&gt;1M</code>, <code>size:&lt;100k</code> with comparison operators</td>
+</tr>
+<tr>
+<td><code>header:</code></td>
+<td>N/A (client-only, v2)</td>
+<td>Arbitrary header match, requires local index</td>
+</tr>
+<tr>
+<td><code>id:</code></td>
+<td><code>Email/get</code> by ID</td>
+<td>Direct lookup, not a query</td>
+</tr>
+<tr>
+<td><code>threadid:</code></td>
+<td><code>threadId</code> filter</td>
+<td>All emails in a thread</td>
+</tr>
+<tr>
+<td>Free text</td>
+<td><code>text</code> (JMAP's combined field)</td>
+<td>Searches from + to + subject + body</td>
+</tr>
+</tbody>
+</table>
+<h2 id="filter-compilation">Filter compilation<a class="headerlink" href="#filter-compilation" title="Permanent link">&para;</a></h2>
+<p>The compiler takes a parsed query AST and produces a <code>JmapFilter</code> for server execution and an optional <code>LocalPredicate</code> for client-side post-filtering. For MVP, all supported prefixes compile to JMAP FilterCondition. The <code>header:</code> prefix is the only client-only predicate and is deferred to v2.</p>
+<p>Compilation rules:</p>
+<ul>
+<li><code>AND</code> nodes become <code>FilterOperator { operator: "AND", conditions: [...] }</code></li>
+<li><code>OR</code> nodes become <code>FilterOperator { operator: "OR", conditions: [...] }</code></li>
+<li><code>NOT</code> / <code>-</code> becomes <code>FilterOperator { operator: "NOT", conditions: [inner] }</code></li>
+<li><code>participant:X</code> desugars to <code>OR(from:X, to:X, cc:X)</code></li>
+<li><code>is:unread</code> compiles to <code>NOT hasKeyword("$seen")</code> because JMAP tracks "seen", not "unread"</li>
+<li><code>in:inbox</code> resolves the mailbox name or role to a mailbox ID via the local cache before compilation</li>
+<li>Date prefixes convert relative expressions to absolute ISO 8601 timestamps at compilation time</li>
+<li>Free text (no prefix) compiles to JMAP's <code>text</code> filter, which searches across all text fields</li>
+</ul>
+<p>The mailbox resolution step uses an in-memory map of mailbox names and roles to IDs, maintained by the Rust sync engine (updated on each <code>Mailbox/changes</code> cycle). The compiler does not query SQLite at runtime for this; the in-memory map is cheaper and avoids contention. If a mailbox name cannot be resolved, the compiler returns a typed error rather than silently dropping the filter.</p>
+<h2 id="smart-mailbox-data-model">Smart mailbox data model<a class="headerlink" href="#smart-mailbox-data-model" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SmartMailbox {
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    id: UUID
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    account_id: String
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    name: String
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    query_text: String          # authoritative source
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    icon: String?               # SF Symbol name
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    color: String?              # hex color
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    sort_field: SortField       # receivedAt, from, subject
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    sort_order: SortOrder       # ascending, descending
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    sub_grouping: SubGrouping?  # optional auto-submailbox
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    position: Int               # display order in sidebar
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    notify: Bool                # show unread badge
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    created_at: Timestamp
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    updated_at: Timestamp
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>}
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>enum SubGrouping {
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    BySender          # group results by from address
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    ByYear            # group by receivedAt year
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    ByMonth           # group by receivedAt year-month
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    ByMailingList     # group by List-Id header (requires local header access)
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    ByTag             # group by first keyword/tag
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    ByMailbox         # group by mailbox membership
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>}
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>enum SortField { receivedAt, from, subject, size }
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>enum SortOrder { ascending, descending }
+</code></pre></div>
+<p>Persisted in SQLite:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">smart_mailbox</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="n">account_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="n">name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="n">query_text</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="n">icon</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="n">color</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="n">sort_field</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;receivedAt&#39;</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="n">sort_order</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;descending&#39;</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="n">sub_grouping</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="k">position</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span><span class="k">notify</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="n">created_at</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="n">updated_at</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="p">(</span><span class="n">account_id</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">)</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">);</span>
+</code></pre></div>
+<p>The <code>query_text</code> column stores the raw query string as typed by the user. No compiled or parsed representation is persisted. This allows grammar changes to take effect on existing smart mailboxes without migration.</p>
+<h2 id="auto-submailbox-grouping">Auto-submailbox grouping<a class="headerlink" href="#auto-submailbox-grouping" title="Permanent link">&para;</a></h2>
+<p>When a smart mailbox has a <code>sub_grouping</code>, the UI displays it as an expandable node in the sidebar. Expanding it shows dynamically generated child entries based on the grouping field. Each child is the parent query ANDed with an additional filter for the group value.</p>
+<p>A smart mailbox "Newsletters" with query <code>tag:newsletter</code> and sub_grouping <code>BySender</code> shows:</p>
+<ul>
+<li>Newsletters (parent)</li>
+<li>alice@example.com (query: <code>tag:newsletter from:alice@example.com</code>)</li>
+<li>bob@list.org (query: <code>tag:newsletter from:bob@list.org</code>)</li>
+</ul>
+<p>Group values are computed by executing the parent query and extracting distinct values of the grouping field from the results. The distinct values are cached in SQLite and refreshed on each sync cycle. This avoids re-executing the parent query every time the sidebar renders.</p>
+<p><code>ByMailingList</code> requires access to the <code>List-Id</code> header, which is not part of the synced email metadata. This grouping mode depends on locally cached headers from fetched email bodies. It will only produce groups for emails whose bodies have been fetched, which is an acceptable limitation since mailing list emails are typically read and thus already cached.</p>
+<h2 id="search-ux">Search UX<a class="headerlink" href="#search-ux" title="Permanent link">&para;</a></h2>
+<h3 id="toolbar-search">Toolbar search<a class="headerlink" href="#toolbar-search" title="Permanent link">&para;</a></h3>
+<p>The toolbar search field accepts the full query language. As the user types, the input provides contextual autocompletion:</p>
+<ul>
+<li>Prefix names: typing <code>fr</code> suggests <code>from:</code></li>
+<li>Mailbox names: after <code>in:</code>, suggest mailbox names from the local cache</li>
+<li>Contact names: after <code>from:</code>, <code>to:</code>, or <code>cc:</code>, suggest addresses from locally cached email participants</li>
+<li>Keywords: after <code>tag:</code>, suggest known JMAP keywords</li>
+<li>Named dates: after <code>before:</code>, <code>after:</code>, or <code>date:</code>, suggest <code>today</code>, <code>yesterday</code>, <code>thisweek</code>, <code>thismonth</code>, <code>thisyear</code></li>
+</ul>
+<p>Completion is local-only, drawing from the SQLite cache. No network requests during typing.</p>
+<h3 id="execution-pipeline">Execution pipeline<a class="headerlink" href="#execution-pipeline" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Parse query text into AST</li>
+<li>Compile AST to JMAP FilterCondition (plus optional local predicate for v2)</li>
+<li>Execute <code>Email/query</code> with the filter, using <code>collapseThreads: true</code> in threaded mode</li>
+<li>Fetch <code>SearchSnippet/get</code> for the matching email IDs to get highlighted previews</li>
+<li>Apply local predicate if present (v2)</li>
+<li>Display results in the message list with mailbox badges and highlighted snippets</li>
+</ol>
+<p>Search results default to flat mode (individual messages, not collapsed by thread). Mailbox views default to threaded mode. The user can toggle between modes via a toolbar button.</p>
+<h3 id="clickable-drill-down">Clickable drill-down<a class="headerlink" href="#clickable-drill-down" title="Permanent link">&para;</a></h3>
+<p>Clicking a structured field in the message detail view populates the search bar with the corresponding query. Clicking "alice@example.com" in the From header produces <code>from:alice@example.com</code>. Clicking a date produces <code>date:2026-03-29</code>. Clicking an attachment icon produces <code>has:attachment</code>. Clicking a tag badge produces <code>tag:tagname</code>.</p>
+<p>Shift+click refines the current query by appending with AND. If the search bar contains <code>subject:meeting</code> and the user shift+clicks "alice@example.com" in the From header, the search bar becomes <code>subject:meeting from:alice@example.com</code>.</p>
+<h3 id="search-history">Search history<a class="headerlink" href="#search-history" title="Permanent link">&para;</a></h3>
+<p>The last 50 queries are stored in SQLite with timestamps. Cmd+[ and Cmd+] navigate back and forward through search history. Each history entry stores: query text, result scroll position, and the mailbox context (which mailbox was selected when the search ran). This allows the user to return to a previous search and pick up where they left off.</p>
+<h3 id="save-as-smart-mailbox">Save as smart mailbox<a class="headerlink" href="#save-as-smart-mailbox" title="Permanent link">&para;</a></h3>
+<p>A button in the search results toolbar creates a new SmartMailbox from the current query text. The user provides a name; the rest of the SmartMailbox fields get sensible defaults (default icon, no color, sort by receivedAt descending, no sub_grouping, append to end of sidebar, notifications on).</p>
+<h2 id="thread-view">Thread view<a class="headerlink" href="#thread-view" title="Permanent link">&para;</a></h2>
+<h3 id="data-model">Data model<a class="headerlink" href="#data-model" title="Permanent link">&para;</a></h3>
+<p>JMAP provides <code>threadId</code> on every Email and <code>Thread/get</code> returns ordered <code>emailIds</code>. The client builds a tree structure from <code>Message-ID</code>, <code>In-Reply-To</code>, and <code>References</code> headers (available when email body is fetched). For the flat conversation view (chronological list of messages in a thread), the JMAP-provided order is sufficient. The tree structure is needed only for Thread Arcs.</p>
+<h3 id="conversation-view">Conversation view<a class="headerlink" href="#conversation-view" title="Permanent link">&para;</a></h3>
+<p>The conversation view shows all emails in a thread, ordered by <code>receivedAt</code>. Threads are cross-mailbox: a thread spanning Inbox and Sent shows all messages with visual distinction (sent messages right-aligned or tinted differently). On opening a thread, the view auto-expands the selected message, all unread messages, and the newest message. All other messages are collapsed to a single-line summary showing sender and date.</p>
+<p>Each expanded message shows sender, date, rendered HTML body, and attachment list. Reply and forward actions are available per-message within the thread.</p>
+<h3 id="message-list-threading">Message list threading<a class="headerlink" href="#message-list-threading" title="Permanent link">&para;</a></h3>
+<p>Mailbox views default to threaded mode: messages are grouped by <code>threadId</code>, each thread shows a count, and a disclosure triangle expands inline. Sort is by the newest message in each thread. Search results default to flat mode (individual messages). A toolbar toggle switches between modes.</p>
+<p>Keyboard navigation: up/down moves between threads (or messages in flat mode), right arrow expands a thread, left arrow collapses it.</p>
+<h2 id="thread-arcs">Thread Arcs<a class="headerlink" href="#thread-arcs" title="Permanent link">&para;</a></h2>
+<p>Thread Arcs (Kerr, 2003) display thread structure as a horizontal baseline with semicircular arcs connecting reply pairs. They provide a compact visual overview of conversation structure, reply depth, participant distribution, and read state.</p>
+<h3 id="data-model_1">Data model<a class="headerlink" href="#data-model_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ThreadArc {
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    nodes: [ThreadArcNode]    # one per email in thread, ordered by date
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    arcs: [ThreadArcEdge]     # one per reply relationship
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>}
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>ThreadArcNode {
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    email_id: String
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    sender: String            # for color assignment
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    is_read: Bool             # filled vs hollow
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    is_in_current_mailbox: Bool  # solid vs dashed outline
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>}
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>ThreadArcEdge {
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    from_index: usize         # parent node index
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    to_index: usize           # reply node index
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>}
+</code></pre></div>
+<h3 id="visual-encoding">Visual encoding<a class="headerlink" href="#visual-encoding" title="Permanent link">&para;</a></h3>
+<p>Nodes are circles on a horizontal baseline. Filled circle means read, hollow means unread. Node color is assigned per sender (consistent color from a palette per sender address within a thread). Dashed outline indicates the message is in a different mailbox than the current view.</p>
+<p>Arcs are semicircles drawn above the baseline connecting a parent node to its reply. Arc height is proportional to the distance between connected nodes, which avoids overlapping arcs for adjacent replies while making long-range replies visually distinct. The currently selected message's node is highlighted with a larger size and ring outline.</p>
+<h3 id="rendering">Rendering<a class="headerlink" href="#rendering" title="Permanent link">&para;</a></h3>
+<p>Rendered as an SVG element (or HTML Canvas) at the top of the thread detail panel. The target is 60fps for threads up to 500 messages. For threads over 500 messages, the view shows a simplified version with arcs only for messages near the current selection. The arc data is computed in Rust and served via the API as a flat array of nodes and edges.</p>
+<h2 id="assertions">Assertions<a class="headerlink" href="#assertions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Sev.</th>
+<th>Assertion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>grammar-parse</td>
+<td>MUST</td>
+<td>Every query that conforms to the PEG grammar parses without error</td>
+</tr>
+<tr>
+<td>grammar-roundtrip</td>
+<td>SHOULD</td>
+<td>Parsing then serializing a query produces an equivalent (not necessarily identical) string</td>
+</tr>
+<tr>
+<td>compile-jmap</td>
+<td>MUST</td>
+<td>Queries using only standard prefixes compile to valid JMAP FilterCondition</td>
+</tr>
+<tr>
+<td>compile-participant</td>
+<td>MUST</td>
+<td><code>participant:X</code> compiles to <code>OR(from:X, to:X, cc:X)</code></td>
+</tr>
+<tr>
+<td>compile-unread</td>
+<td>MUST</td>
+<td><code>is:unread</code> compiles to <code>NOT hasKeyword("$seen")</code></td>
+</tr>
+<tr>
+<td>compile-mailbox</td>
+<td>MUST</td>
+<td><code>in:inbox</code> resolves to the Inbox mailbox ID before compilation</td>
+</tr>
+<tr>
+<td>compile-date</td>
+<td>MUST</td>
+<td>Relative dates resolve to absolute timestamps at compilation time</td>
+</tr>
+<tr>
+<td>smartmailbox-persist</td>
+<td>MUST</td>
+<td>Smart mailbox query_text is persisted and parseable across grammar versions</td>
+</tr>
+<tr>
+<td>smartmailbox-refresh</td>
+<td>SHOULD</td>
+<td>Smart mailbox results refresh on each sync cycle</td>
+</tr>
+<tr>
+<td>search-snippet</td>
+<td>SHOULD</td>
+<td>Search results include highlighted snippets from SearchSnippet/get</td>
+</tr>
+<tr>
+<td>drilldown-click</td>
+<td>MUST</td>
+<td>Clicking a header field populates the search bar with the corresponding prefix query</td>
+</tr>
+<tr>
+<td>drilldown-shift</td>
+<td>MUST</td>
+<td>Shift+clicking a header field appends to the current query with AND</td>
+</tr>
+<tr>
+<td>thread-order</td>
+<td>MUST</td>
+<td>Thread conversation view orders messages by receivedAt</td>
+</tr>
+<tr>
+<td>thread-crossmailbox</td>
+<td>MUST</td>
+<td>Thread view shows all messages in a thread regardless of mailbox</td>
+</tr>
+<tr>
+<td>threadarc-render</td>
+<td>SHOULD</td>
+<td>Thread arcs render at 60fps for threads up to 500 messages</td>
+</tr>
+<tr>
+<td>threadarc-color</td>
+<td>MUST</td>
+<td>Thread arc node colors are consistent per sender within a thread</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "toc.integrate", "search.suggest", "search.highlight", "content.tabs.link", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

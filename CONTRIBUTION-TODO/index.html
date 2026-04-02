@@ -1,0 +1,1749 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="JMAP mail client with MailMate-grade search and conversation-first web UI">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../L0-jmap/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Contributing - PostHaste</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Geist:300,300i,400,400i,700,700i%7CGeist+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Geist";--md-code-font:"Geist Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contribution-todo" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="PostHaste" class="md-header__button md-logo" aria-label="PostHaste" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PostHaste
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/user/posthaste" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    posthaste
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../L0-jmap/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architecture (L0)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../L1-jmap/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Design (L1)
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PostHaste" class="md-nav__button md-logo" aria-label="PostHaste" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    PostHaste
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/user/posthaste" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    posthaste
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#frontend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frontend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frontend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-add-loading-skeletons-to-message-detail-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Add loading skeletons to message detail panel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-add-aria-labels-and-keyboard-shortcut-hints-to-toolbar-buttons" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Add aria-labels and keyboard shortcut hints to toolbar buttons
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-create-error-boundary-component" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Create error boundary component
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-add-empty-state-illustrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Add empty state illustrations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-add-copy-to-clipboard-for-email-addresses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Add copy-to-clipboard for email addresses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-add-unread-count-to-browser-tab-title" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Add unread count to browser tab title
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-improve-message-row-typography-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Improve message row typography hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-add-confirmation-dialog-for-destructive-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Add confirmation dialog for destructive actions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-polish-search-bar-clear-button-and-focus-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Polish search bar clear button and focus management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-create-formatbytes-utility-with-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Create formatBytes() utility with tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#11-add-focus-visible-styles-to-all-interactive-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Add focus-visible styles to all interactive elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-add-loading-skeleton-to-settings-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Add loading skeleton to settings panel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-add-tooltip-to-unread-indicator-dot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Add tooltip to unread indicator dot
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#14-extract-message-list-virtualization-constants-to-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Extract message list virtualization constants to config
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#15-extract-error-code-constants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Extract error code constants
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#16-add-requestresponse-logging-middleware" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Add request/response logging middleware
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#17-add-health-check-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. Add health check endpoint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#18-add-rate-limiting-to-api-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Add rate limiting to API routes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#19-document-api-error-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Document API error responses
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#20-add-validation-tests-for-account-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. Add validation tests for account settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#21-document-mail-config-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        21. Document mail-config schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-document-database-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        22. Document database schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-extract-sql-constants-from-mail-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        23. Extract SQL constants from mail-store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-add-doc-comments-to-public-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        24. Add doc comments to public functions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project Infrastructure
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Project Infrastructure">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#25-set-up-frontend-testing-framework-vitest-rtl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        25. Set up frontend testing framework (Vitest + RTL)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#26-add-pre-commit-hook-for-linting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        26. Add pre-commit hook for linting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#27-document-development-setup-in-readme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        27. Document development setup in README
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#28-create-contributingmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        28. Create CONTRIBUTING.md
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#29-add-ci-workflow-github-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        29. Add CI workflow (GitHub Actions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#30-create-issue-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        30. Create issue templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onboarding-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Onboarding Plan
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Onboarding Plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#week-1-high-impact-quick-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Week 1 (high-impact quick wins)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#week-2-expanding-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Week 2 (expanding skills)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#week-3-polish-and-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Week 3+ (polish and infrastructure)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#milestones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Milestones
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture (L0)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture (L0)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-jmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JMAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-sync/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sync
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Search
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Accounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L0-branding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Branding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design (L1)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design (L1)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-jmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JMAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-sync/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sync
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-search/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Search
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../L1-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="contribution-todo">Contribution TODO<a class="headerlink" href="#contribution-todo" title="Permanent link">&para;</a></h1>
+<p>Concrete, well-scoped tasks for new contributors. Each task is completable in 1--5 hours. Frontend tasks require basic React/TypeScript. Backend tasks require zero prior Rust experience.</p>
+<p>Two junior developers are joining. They have <strong>no Rust experience</strong> and <strong>some frontend experience</strong>.</p>
+<hr />
+<h2 id="frontend">Frontend<a class="headerlink" href="#frontend" title="Permanent link">&para;</a></h2>
+<h3 id="1-add-loading-skeletons-to-message-detail-panel">1. Add loading skeletons to message detail panel<a class="headerlink" href="#1-add-loading-skeletons-to-message-detail-panel" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p><code>MessageDetail.tsx</code> shows plain "Loading..." text while fetching. Replace with skeleton loaders using Tailwind <code>animate-pulse</code> that match the layout structure (subject, from/date, tags, body frame).</p>
+<p><strong>Files</strong>: <code>web/src/components/MessageDetail.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: React Query loading states, Tailwind animations, component composition</p>
+<hr />
+<h3 id="2-add-aria-labels-and-keyboard-shortcut-hints-to-toolbar-buttons">2. Add aria-labels and keyboard shortcut hints to toolbar buttons<a class="headerlink" href="#2-add-aria-labels-and-keyboard-shortcut-hints-to-toolbar-buttons" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Toolbar buttons (Archive, Trash, Flag) in <code>App.tsx</code> have <code>title</code> attributes but lack <code>aria-label</code> for screen readers. Update titles to show keyboard shortcuts (e.g. "Archive (e)", "Trash (#)").</p>
+<p><strong>Files</strong>: <code>web/src/App.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Web accessibility (ARIA), semantic HTML</p>
+<hr />
+<h3 id="3-create-error-boundary-component">3. Create error boundary component<a class="headerlink" href="#3-create-error-boundary-component" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>No top-level error boundary exists. Create <code>ErrorBoundary.tsx</code> that catches React rendering errors, shows a user-friendly UI with error details in dev mode only, and provides a "Reload" button.</p>
+<p><strong>Files</strong>: new <code>web/src/components/ErrorBoundary.tsx</code>, <code>web/src/App.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: React error boundaries, error recovery UX</p>
+<hr />
+<h3 id="4-add-empty-state-illustrations">4. Add empty state illustrations<a class="headerlink" href="#4-add-empty-state-illustrations" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Several components show plain text for empty states ("No threads in this view", "Select a message"). Replace with lucide-react icons + descriptive message + next-step hints.</p>
+<p><strong>Files</strong>: <code>web/src/components/MessageList.tsx</code>, <code>web/src/components/MessageDetail.tsx</code>, <code>web/src/components/Sidebar.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: UI/UX polish, icon usage</p>
+<hr />
+<h3 id="5-add-copy-to-clipboard-for-email-addresses">5. Add copy-to-clipboard for email addresses<a class="headerlink" href="#5-add-copy-to-clipboard-for-email-addresses" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>In MessageDetail, the sender email is displayed but not copyable. Add a small copy icon button with tooltip and brief "Copied!" feedback using <code>navigator.clipboard.writeText()</code>.</p>
+<p><strong>Files</strong>: <code>web/src/components/MessageDetail.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Clipboard API, micro-interactions</p>
+<hr />
+<h3 id="6-add-unread-count-to-browser-tab-title">6. Add unread count to browser tab title<a class="headerlink" href="#6-add-unread-count-to-browser-tab-title" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Browser tab just says "PostHaste". Create a <code>useDocumentTitle()</code> hook that computes total unread from sidebar data and updates <code>document.title</code> (e.g. "PostHaste (3)").</p>
+<p><strong>Files</strong>: new <code>web/src/hooks/useDocumentTitle.ts</code>, <code>web/src/App.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Document API, custom hooks, side effects</p>
+<hr />
+<h3 id="7-improve-message-row-typography-hierarchy">7. Improve message row typography hierarchy<a class="headerlink" href="#7-improve-message-row-typography-hierarchy" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p><code>MessageRow</code> uses <code>font-semibold</code> for unread but overall hierarchy (sender, subject, preview) could be sharper. Review font weights, padding, and gap for better readability.</p>
+<p><strong>Files</strong>: <code>web/src/components/MessageRow.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Typography, Tailwind, visual hierarchy</p>
+<hr />
+<h3 id="8-add-confirmation-dialog-for-destructive-actions">8. Add confirmation dialog for destructive actions<a class="headerlink" href="#8-add-confirmation-dialog-for-destructive-actions" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>Trashing messages via keyboard shortcut (#) has no confirmation. Create a reusable <code>ConfirmDialog.tsx</code> with Escape-to-cancel and message preview.</p>
+<p><strong>Files</strong>: new <code>web/src/components/ConfirmDialog.tsx</code>, <code>web/src/hooks/useEmailActions.ts</code>, <code>web/src/components/MessageList.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Dialog patterns, keyboard handling, state management</p>
+<hr />
+<h3 id="9-polish-search-bar-clear-button-and-focus-management">9. Polish search bar clear button and focus management<a class="headerlink" href="#9-polish-search-bar-clear-button-and-focus-management" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Search bar in <code>App.tsx</code> expands on focus but the clear button is subtle. Improve hover state, add "Escape to clear" hint, and consider input debounce.</p>
+<p><strong>Files</strong>: <code>web/src/App.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: UX polish, keyboard shortcuts, input handling</p>
+<hr />
+<h3 id="10-create-formatbytes-utility-with-tests">10. Create <code>formatBytes()</code> utility with tests<a class="headerlink" href="#10-create-formatbytes-utility-with-tests" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Messages have size info but it is never displayed. Create <code>web/src/utils/formatBytes.ts</code> with proper unit formatting (B, KB, MB, GB) and write Vitest tests for it.</p>
+<p><strong>Files</strong>: new <code>web/src/utils/formatBytes.ts</code>, new <code>web/src/utils/__tests__/formatBytes.test.ts</code>
+<strong>Depends on</strong>: Task 25 (testing framework)
+<strong>Skills learned</strong>: Utility functions, testing patterns</p>
+<hr />
+<h3 id="11-add-focus-visible-styles-to-all-interactive-elements">11. Add focus-visible styles to all interactive elements<a class="headerlink" href="#11-add-focus-visible-styles-to-all-interactive-elements" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>Keyboard navigation needs visible focus indicators. Add <code>focus-visible:ring-1 focus-visible:ring-ring</code> to all buttons and clickable elements. Test tab order (sidebar -&gt; list -&gt; detail).</p>
+<p><strong>Files</strong>: <code>web/src/App.tsx</code>, <code>web/src/components/Sidebar.tsx</code>, <code>web/src/components/MessageList.tsx</code>, others
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Accessibility, Tailwind focus states, keyboard navigation</p>
+<hr />
+<h3 id="12-add-loading-skeleton-to-settings-panel">12. Add loading skeleton to settings panel<a class="headerlink" href="#12-add-loading-skeleton-to-settings-panel" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p><code>SettingsPanel</code> loads settings and smart mailboxes but has no skeleton. Add progressive loading UI to avoid flash of empty state.</p>
+<p><strong>Files</strong>: <code>web/src/components/SettingsPanel.tsx</code>
+<strong>Depends on</strong>: Task 1 (pattern established)
+<strong>Skills learned</strong>: React Query states, progressive loading</p>
+<hr />
+<h3 id="13-add-tooltip-to-unread-indicator-dot">13. Add tooltip to unread indicator dot<a class="headerlink" href="#13-add-tooltip-to-unread-indicator-dot" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>The small blue dot in <code>MessageRow</code> for unread status is not immediately obvious. Add a hover tooltip "Unread message".</p>
+<p><strong>Files</strong>: <code>web/src/components/MessageRow.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Tooltips, hover states</p>
+<hr />
+<h3 id="14-extract-message-list-virtualization-constants-to-config">14. Extract message list virtualization constants to config<a class="headerlink" href="#14-extract-message-list-virtualization-constants-to-config" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p><code>MessageList.tsx</code> has magic numbers (PAGE_SIZE, ROW_HEIGHT, OVERSCAN_ROWS). Extract to <code>web/src/config/messageListConfig.ts</code> with comments explaining each.</p>
+<p><strong>Files</strong>: new <code>web/src/config/messageListConfig.ts</code>, <code>web/src/components/MessageList.tsx</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Code organization, configuration management</p>
+<hr />
+<h2 id="backend">Backend<a class="headerlink" href="#backend" title="Permanent link">&para;</a></h2>
+<h3 id="15-extract-error-code-constants">15. Extract error code constants<a class="headerlink" href="#15-extract-error-code-constants" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>API error codes ("NOT_FOUND", "INVALID_REQUEST") are scattered as string literals in <code>account_support.rs</code> and <code>cursor_support.rs</code>. Create <code>error_codes.rs</code> with named constants and update handlers.</p>
+<p><strong>Files</strong>: new <code>crates/web-server/src/error_codes.rs</code>, <code>crates/web-server/src/api/account_support.rs</code>, <code>crates/web-server/src/api/cursor_support.rs</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust modules, constants, DRY principle</p>
+<hr />
+<h3 id="16-add-requestresponse-logging-middleware">16. Add request/response logging middleware<a class="headerlink" href="#16-add-requestresponse-logging-middleware" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>The API has no structured logging. Add tracing middleware that logs HTTP method, path, status code, and duration for every request.</p>
+<p><strong>Files</strong>: new <code>crates/web-server/src/logging.rs</code>, <code>crates/web-server/src/main.rs</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust logging (tracing), middleware, observability</p>
+<hr />
+<h3 id="17-add-health-check-endpoint">17. Add health check endpoint<a class="headerlink" href="#17-add-health-check-endpoint" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Add <code>GET /v1/health</code> that returns <code>{"status":"ok"}</code> (200) or 503 if the database is unavailable. Useful for monitoring and deployment.</p>
+<p><strong>Files</strong>: <code>crates/web-server/src/api.rs</code>, <code>crates/web-server/src/main.rs</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Axum routing, async functions, HTTP status codes</p>
+<hr />
+<h3 id="18-add-rate-limiting-to-api-routes">18. Add rate limiting to API routes<a class="headerlink" href="#18-add-rate-limiting-to-api-routes" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>The API has no rate limiting. Add <code>tower-governor</code> or similar middleware with 429 responses when limits are exceeded.</p>
+<p><strong>Files</strong>: <code>crates/web-server/src/main.rs</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust middleware, rate limiting, security</p>
+<hr />
+<h3 id="19-document-api-error-responses">19. Document API error responses<a class="headerlink" href="#19-document-api-error-responses" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Create a reference document listing all error codes with HTTP status, example JSON, cause, and fix guidance.</p>
+<p><strong>Files</strong>: new <code>docs/api-errors.md</code>
+<strong>Depends on</strong>: Task 15 (error constants)
+<strong>Skills learned</strong>: Technical documentation, API design</p>
+<hr />
+<h3 id="20-add-validation-tests-for-account-settings">20. Add validation tests for account settings<a class="headerlink" href="#20-add-validation-tests-for-account-settings" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>Account validation logic in <code>account_support.rs</code> has no unit tests. Write tests for valid configs, invalid URLs, missing fields, and edge cases.</p>
+<p><strong>Files</strong>: <code>crates/web-server/src/api/account_support.rs</code> (add <code>#[cfg(test)]</code> module)
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust unit testing, validation logic</p>
+<hr />
+<h3 id="21-document-mail-config-schema">21. Document mail-config schema<a class="headerlink" href="#21-document-mail-config-schema" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Config uses TOML but the schema is undocumented. Create <code>docs/config-schema.md</code> with field types, defaults, constraints, and a complete example.</p>
+<p><strong>Files</strong>: new <code>docs/config-schema.md</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Configuration documentation, TOML</p>
+<hr />
+<h3 id="22-document-database-schema">22. Document database schema<a class="headerlink" href="#22-document-database-schema" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>SQLite schema is defined in code but not documented. Create <code>docs/database-schema.md</code> with tables, columns, keys, indexes, and a text-based ER diagram.</p>
+<p><strong>Files</strong>: new <code>docs/database-schema.md</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Database documentation, data modeling</p>
+<hr />
+<h3 id="23-extract-sql-constants-from-mail-store">23. Extract SQL constants from mail-store<a class="headerlink" href="#23-extract-sql-constants-from-mail-store" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Various Rust files have hardcoded table/column name strings. Create <code>crates/mail-store/src/db/constants.rs</code> and update imports.</p>
+<p><strong>Files</strong>: new <code>crates/mail-store/src/db/constants.rs</code>, <code>crates/mail-store/src/db.rs</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust modules, constants, maintainability</p>
+<hr />
+<h3 id="24-add-doc-comments-to-public-functions">24. Add doc comments to public functions<a class="headerlink" href="#24-add-doc-comments-to-public-functions" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Public functions in web-server and mail-store lack <code>///</code> doc comments. Add them and verify with <code>cargo doc --open</code>.</p>
+<p><strong>Files</strong>: multiple files in <code>crates/web-server/src/api/</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Rust doc comments, <code>cargo doc</code></p>
+<hr />
+<h2 id="project-infrastructure">Project Infrastructure<a class="headerlink" href="#project-infrastructure" title="Permanent link">&para;</a></h2>
+<h3 id="25-set-up-frontend-testing-framework-vitest-rtl">25. Set up frontend testing framework (Vitest + RTL)<a class="headerlink" href="#25-set-up-frontend-testing-framework-vitest-rtl" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>Zero frontend tests exist. Add <code>vitest</code>, <code>@testing-library/react</code>, and <code>@testing-library/user-event</code>. Create <code>vitest.config.ts</code>, a test script, and one example test for <code>formatRelativeTime</code>.</p>
+<p><strong>Files</strong>: <code>web/package.json</code>, new <code>web/vitest.config.ts</code>, new <code>web/src/utils/formatRelativeTime.test.ts</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Test framework setup, npm tooling</p>
+<hr />
+<h3 id="26-add-pre-commit-hook-for-linting">26. Add pre-commit hook for linting<a class="headerlink" href="#26-add-pre-commit-hook-for-linting" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>Add a hook that runs <code>npm run lint</code> in web/ and <code>cargo clippy</code> in crates/ before each commit.</p>
+<p><strong>Files</strong>: hook script, <code>README.md</code> update
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Git hooks, shell scripting, CI/CD</p>
+<hr />
+<h3 id="27-document-development-setup-in-readme">27. Document development setup in README<a class="headerlink" href="#27-document-development-setup-in-readme" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>README lacks step-by-step setup instructions. Add prerequisites, clone-and-run steps, how to start both dev servers, env var examples, and troubleshooting.</p>
+<p><strong>Files</strong>: <code>README.md</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Technical writing, developer onboarding</p>
+<hr />
+<h3 id="28-create-contributingmd">28. Create CONTRIBUTING.md<a class="headerlink" href="#28-create-contributingmd" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Add contribution guidelines: branch/commit conventions, where to find tasks (this file), code style, how to run tests, PR process.</p>
+<p><strong>Files</strong>: new <code>CONTRIBUTING.md</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Open source practices, documentation</p>
+<hr />
+<h3 id="29-add-ci-workflow-github-actions">29. Add CI workflow (GitHub Actions)<a class="headerlink" href="#29-add-ci-workflow-github-actions" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Medium</p>
+<p>No CI pipeline. Create <code>.github/workflows/test.yml</code> that runs frontend lint+test and backend <code>cargo test</code>+<code>cargo clippy</code> on every push and PR. Add status badge to README.</p>
+<p><strong>Files</strong>: new <code>.github/workflows/test.yml</code>, <code>README.md</code>
+<strong>Depends on</strong>: Task 25 (frontend tests)
+<strong>Skills learned</strong>: GitHub Actions, CI/CD pipelines</p>
+<hr />
+<h3 id="30-create-issue-templates">30. Create issue templates<a class="headerlink" href="#30-create-issue-templates" title="Permanent link">&para;</a></h3>
+<p><strong>Difficulty</strong>: Easy</p>
+<p>Add <code>.github/ISSUE_TEMPLATE/bug_report.md</code> and <code>feature_request.md</code> with structured sections (description, repro steps, environment, screenshots).</p>
+<p><strong>Files</strong>: new <code>.github/ISSUE_TEMPLATE/bug_report.md</code>, new <code>.github/ISSUE_TEMPLATE/feature_request.md</code>
+<strong>Depends on</strong>: nothing
+<strong>Skills learned</strong>: Issue management, community guidelines</p>
+<hr />
+<h2 id="onboarding-plan">Onboarding Plan<a class="headerlink" href="#onboarding-plan" title="Permanent link">&para;</a></h2>
+<h3 id="week-1-high-impact-quick-wins">Week 1 (high-impact quick wins)<a class="headerlink" href="#week-1-high-impact-quick-wins" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Why first</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>27 — Dev setup docs</td>
+<td>Forces them to set up the project and document gaps</td>
+</tr>
+<tr>
+<td>25 — Testing framework</td>
+<td>Unblocks all future frontend tests</td>
+</tr>
+<tr>
+<td>1 — Loading skeletons</td>
+<td>Teaches React Query + Tailwind patterns</td>
+</tr>
+<tr>
+<td>2 — Accessibility labels</td>
+<td>Quick win, immediate UX improvement</td>
+</tr>
+</tbody>
+</table>
+<h3 id="week-2-expanding-skills">Week 2 (expanding skills)<a class="headerlink" href="#week-2-expanding-skills" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Why next</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 — Error boundary</td>
+<td>Advanced React pattern</td>
+</tr>
+<tr>
+<td>10 — formatBytes + tests</td>
+<td>First test-writing exercise</td>
+</tr>
+<tr>
+<td>15 — Error code constants</td>
+<td>Intro to Rust, minimal domain knowledge</td>
+</tr>
+<tr>
+<td>24 — Doc comments</td>
+<td>Reading and understanding Rust code</td>
+</tr>
+</tbody>
+</table>
+<h3 id="week-3-polish-and-infrastructure">Week 3+ (polish and infrastructure)<a class="headerlink" href="#week-3-polish-and-infrastructure" title="Permanent link">&para;</a></h3>
+<p>Pick from remaining tasks based on interest. Frontend-leaning devs: 4--14. Backend-curious devs: 16--23. Infra-minded: 26, 28--30.</p>
+<h3 id="milestones">Milestones<a class="headerlink" href="#milestones" title="Permanent link">&para;</a></h3>
+<p><strong>End of Week 1</strong>: Can run both dev servers, made 1--2 merged contributions, understands component architecture.</p>
+<p><strong>End of Week 2</strong>: Comfortable with testing patterns, familiar with Rust module structure, understands API boundary.</p>
+<p><strong>End of Month 1</strong>: Can implement a full React component with error handling, can write basic Rust following project patterns, understands frontend-backend communication.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "toc.integrate", "search.suggest", "search.highlight", "content.tabs.link", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
