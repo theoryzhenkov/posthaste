@@ -11,6 +11,7 @@ dependents:
   - path: spec/L1-search
   - path: spec/L1-compose
   - path: spec/L1-ui
+  - path: spec/L2-transport
 ---
 
 # Sync domain -- L1
