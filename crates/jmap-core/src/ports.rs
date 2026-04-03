@@ -4,10 +4,11 @@ use async_trait::async_trait;
 
 use crate::{
     AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
-    ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail,
-    MessageId, MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand,
-    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity, MailboxId,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, MutationOutcome, PushTransport,
+    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
+    SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -135,6 +136,8 @@ pub trait MailStore: Send + Sync {
         rule: &SmartMailboxRule,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, StoreError>;
 
     /// Return (unread, total) counts for a smart mailbox rule.
@@ -152,6 +155,8 @@ pub trait MailStore: Send + Sync {
         mailbox_id: Option<&MailboxId>,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, StoreError>;
 
     /// Fetch a single conversation with all its messages.

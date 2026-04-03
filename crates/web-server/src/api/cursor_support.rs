@@ -69,7 +69,7 @@ pub(super) fn conversation_limit(limit: Option<usize>) -> Result<usize, ApiError
 }
 
 /// Decode an opaque cursor string into a [`ConversationCursor`].
-/// Format: `{timestamp_len}:{latest_received_at}:{conversation_id}`.
+/// Format: `{value_len}:{sort_value}:{conversation_id}`.
 ///
 /// @spec spec/L1-api#cursor-pagination
 pub(super) fn parse_conversation_cursor(
@@ -81,19 +81,19 @@ pub(super) fn parse_conversation_cursor(
     let Some((len_prefix, remainder)) = cursor.split_once(':') else {
         return Err(invalid_cursor());
     };
-    let timestamp_len = len_prefix.parse::<usize>().map_err(|_| invalid_cursor())?;
-    if timestamp_len == 0 || remainder.len() <= timestamp_len {
+    let value_len = len_prefix.parse::<usize>().map_err(|_| invalid_cursor())?;
+    if value_len == 0 || remainder.len() <= value_len {
         return Err(invalid_cursor());
     }
-    let (latest_received_at, conversation_id) = remainder.split_at(timestamp_len);
+    let (sort_value, conversation_id) = remainder.split_at(value_len);
     let Some(conversation_id) = conversation_id.strip_prefix(':') else {
         return Err(invalid_cursor());
     };
-    if latest_received_at.is_empty() || conversation_id.is_empty() {
+    if sort_value.is_empty() || conversation_id.is_empty() {
         return Err(invalid_cursor());
     }
     Ok(Some(ConversationCursor {
-        latest_received_at: latest_received_at.to_string(),
+        sort_value: sort_value.to_string(),
         conversation_id: ConversationId::from(conversation_id),
     }))
 }
@@ -103,7 +103,7 @@ pub(super) fn invalid_cursor() -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
         "invalid_cursor",
-        "cursor must include a timestamp and conversation id",
+        "cursor must include a sort value and conversation id",
     )
 }
 
@@ -113,8 +113,8 @@ pub(super) fn invalid_cursor() -> ApiError {
 pub(super) fn encode_conversation_cursor(cursor: &ConversationCursor) -> String {
     format!(
         "{}:{}:{}",
-        cursor.latest_received_at.len(),
-        cursor.latest_received_at,
+        cursor.sort_value.len(),
+        cursor.sort_value,
         cursor.conversation_id.as_str()
     )
 }
