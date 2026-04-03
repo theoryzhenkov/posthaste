@@ -9,12 +9,12 @@ use axum::Json;
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
     AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
-    ConversationId, ConversationPage, ConversationSummary, ConversationView, DomainEvent,
-    EventFilter, MailboxId, MailboxSummary, MessageDetail, MessageId, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError,
-    SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxRule, SmartMailboxSummary, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
+    DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageDetail, MessageId,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef, SecretStatus,
+    SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
+    SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
+    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -45,6 +45,8 @@ pub struct ListConversationsQuery {
     pub mailbox_id: Option<String>,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
+    pub sort: Option<ConversationSortField>,
+    pub sort_dir: Option<SortDirection>,
 }
 
 /// Query parameters for source-scoped message listing.
@@ -754,12 +756,16 @@ pub async fn list_smart_mailbox_conversations(
 ) -> Result<Json<ConversationPageResponse>, ApiError> {
     let limit = conversation_limit(query.limit)?;
     let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
+    let sort_field = query.sort.unwrap_or_default();
+    let sort_direction = query.sort_dir.unwrap_or_default();
     state
         .service
         .list_smart_mailbox_conversations(
             &SmartMailboxId::from(smart_mailbox_id),
             limit,
             cursor.as_ref(),
+            sort_field,
+            sort_direction,
         )
         .map(conversation_page_response)
         .map(Json)
@@ -778,6 +784,8 @@ pub async fn list_conversations(
     let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
     let limit = conversation_limit(query.limit)?;
     let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
+    let sort_field = query.sort.unwrap_or_default();
+    let sort_direction = query.sort_dir.unwrap_or_default();
     state
         .service
         .list_conversations(
@@ -785,6 +793,8 @@ pub async fn list_conversations(
             mailbox_id.as_ref(),
             limit,
             cursor.as_ref(),
+            sort_field,
+            sort_direction,
         )
         .map(conversation_page_response)
         .map(Json)
@@ -1010,12 +1020,14 @@ async fn set_account_enabled(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mail_domain::GatewayError;
+    use account_support::{secret_status, validate_secret_request};
+    use cursor_support::encode_conversation_cursor;
+    use mail_domain::{GatewayError, EVENT_TOPIC_MESSAGE_ARRIVED};
 
     #[test]
     fn conversation_cursor_round_trips() {
         let cursor = ConversationCursor {
-            latest_received_at: "2026-04-01T10:11:12Z".to_string(),
+            sort_value: "2026-04-01T10:11:12Z".to_string(),
             conversation_id: ConversationId::from("conv-42"),
         };
 
@@ -1024,7 +1036,7 @@ mod tests {
             .unwrap_or_else(|_| panic!("cursor should parse"))
             .unwrap_or_else(|| panic!("cursor should be present"));
 
-        assert_eq!(decoded.latest_received_at, cursor.latest_received_at);
+        assert_eq!(decoded.sort_value, cursor.sort_value);
         assert_eq!(decoded.conversation_id, cursor.conversation_id);
     }
 

@@ -57,19 +57,24 @@ export const mailKeys = {
     ["conversation", conversationId] as const,
   conversationSummary: (conversationId: string) =>
     ["conversation-summary", conversationId] as const,
-  view: (selection: MailViewSelection) => {
-    if (!selection) {
-      return ["conversations", "none"] as const;
+  view: (
+    selection: MailViewSelection,
+    sort?: { columnId: string; direction: string },
+  ) => {
+    const base = !selection
+      ? (["conversations", "none"] as const)
+      : selection.kind === "smart-mailbox"
+        ? (["conversations", "smart-mailbox", selection.id] as const)
+        : ([
+            "conversations",
+            "source-mailbox",
+            selection.sourceId,
+            selection.mailboxId,
+          ] as const);
+    if (sort) {
+      return [...base, sort.columnId, sort.direction] as const;
     }
-    if (selection.kind === "smart-mailbox") {
-      return ["conversations", "smart-mailbox", selection.id] as const;
-    }
-    return [
-      "conversations",
-      "source-mailbox",
-      selection.sourceId,
-      selection.mailboxId,
-    ] as const;
+    return base;
   },
 };
 

@@ -56,6 +56,8 @@ pub(crate) fn query_conversations_by_rule(
     rule: &SmartMailboxRule,
     limit: usize,
     cursor: Option<&ConversationCursor>,
+    sort_field: ConversationSortField,
+    sort_direction: SortDirection,
 ) -> Result<ConversationPage, StoreError> {
     let mut params = Vec::new();
     let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
@@ -65,12 +67,51 @@ pub(crate) fn query_conversations_by_rule(
         params,
         limit,
         cursor,
+        sort_field,
+        sort_direction,
     )
+}
+
+/// SQL expression for the sort key computed in the `latest` CTE.
+///
+/// Uses the `ranked.` prefix for column references because the expression is
+/// evaluated inside the `latest` CTE SELECT (not the final SELECT), so it must
+/// reference `ranked` columns directly rather than aliases defined in the same
+/// SELECT clause.
+fn sort_key_expr(sort_field: ConversationSortField) -> &'static str {
+    match sort_field {
+        ConversationSortField::Date => "ranked.received_at",
+        ConversationSortField::From => "LOWER(COALESCE(ranked.from_name, ranked.from_email, ''))",
+        ConversationSortField::Subject => "LOWER(COALESCE(ranked.subject, ''))",
+        ConversationSortField::Source => "LOWER(ranked.account_name)",
+        ConversationSortField::ThreadSize => "ranked.message_count",
+        ConversationSortField::Flagged => "ranked.is_flagged",
+        ConversationSortField::Attachment => "ranked.has_attachment",
+    }
+}
+
+/// Whether the sort field stores an integer value (affects cursor binding type).
+fn is_numeric_sort(sort_field: ConversationSortField) -> bool {
+    matches!(
+        sort_field,
+        ConversationSortField::ThreadSize
+            | ConversationSortField::Flagged
+            | ConversationSortField::Attachment
+    )
+}
+
+/// Bind a cursor's sort_value as the correct SQL type for the sort field.
+fn cursor_sort_sql_value(sort_field: ConversationSortField, raw: &str) -> SqlValue {
+    if is_numeric_sort(sort_field) {
+        SqlValue::Integer(raw.parse::<i64>().unwrap_or(0))
+    } else {
+        SqlValue::Text(raw.to_string())
+    }
 }
 
 /// Core conversation pagination query using CTEs: filters messages, ranks by
 /// recency within each conversation, groups sources, and applies seek-based
-/// cursor pagination (`latest_received_at DESC, conversation_id DESC`).
+/// cursor pagination with configurable sort field and direction.
 ///
 /// @spec spec/L1-sync#conversation-pagination
 pub(crate) fn query_conversations(
@@ -79,16 +120,29 @@ pub(crate) fn query_conversations(
     mut params: Vec<SqlValue>,
     limit: usize,
     cursor: Option<&ConversationCursor>,
+    sort_field: ConversationSortField,
+    sort_direction: SortDirection,
 ) -> Result<ConversationPage, StoreError> {
     let page_limit = limit.max(1);
+    let seek_op = match sort_direction {
+        SortDirection::Desc => "<",
+        SortDirection::Asc => ">",
+    };
+    let dir = match sort_direction {
+        SortDirection::Desc => "DESC",
+        SortDirection::Asc => "ASC",
+    };
+    let sort_key = sort_key_expr(sort_field);
     let page_filter = if let Some(cursor) = cursor {
-        params.push(SqlValue::Text(cursor.latest_received_at.clone()));
-        params.push(SqlValue::Text(cursor.latest_received_at.clone()));
+        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value));
+        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value));
         params.push(SqlValue::Text(cursor.conversation_id.as_str().to_string()));
-        "WHERE latest_received_at < ?
-           OR (latest_received_at = ? AND conversation_id < ?)"
+        format!(
+            "WHERE sort_key {seek_op} ?
+               OR (sort_key = ? AND conversation_id {seek_op} ?)"
+        )
     } else {
-        ""
+        String::new()
     };
     params.push(SqlValue::Integer((page_limit + 1) as i64));
     let sql = format!(
@@ -154,7 +208,8 @@ pub(crate) fn query_conversations(
                 ranked.account_name,
                 ranked.id,
                 ranked.has_attachment,
-                ranked.is_flagged
+                ranked.is_flagged,
+                {sort_key} AS sort_key
             FROM ranked
             JOIN source_groups
               ON source_groups.conversation_id = ranked.conversation_id
@@ -175,37 +230,42 @@ pub(crate) fn query_conversations(
             latest.account_name,
             latest.id,
             latest.has_attachment,
-            latest.is_flagged
+            latest.is_flagged,
+            latest.sort_key
         FROM latest
         {page_filter}
-        ORDER BY latest.latest_received_at DESC, latest.conversation_id DESC
+        ORDER BY latest.sort_key {dir}, latest.conversation_id {dir}
         LIMIT ?"
     );
     let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
     let rows = statement
         .query_map(params_from_iter(params), |row| {
-            Ok(ConversationSummary {
-                id: ConversationId(row.get(0)?),
-                subject: row.get(1)?,
-                preview: row.get(2)?,
-                from_name: row.get(3)?,
-                from_email: row.get(4)?,
-                latest_received_at: row.get(5)?,
-                unread_count: row.get(6)?,
-                message_count: row.get(7)?,
-                source_ids: split_group_concat_ids(row.get::<_, Option<String>>(8)?),
-                source_names: split_group_concat_strings(row.get::<_, Option<String>>(9)?),
-                latest_message: mail_domain::SourceMessageRef {
-                    source_id: AccountId(row.get(10)?),
-                    message_id: MessageId(row.get(12)?),
+            let sort_key_value: rusqlite::types::Value = row.get(15)?;
+            Ok((
+                ConversationSummary {
+                    id: ConversationId(row.get(0)?),
+                    subject: row.get(1)?,
+                    preview: row.get(2)?,
+                    from_name: row.get(3)?,
+                    from_email: row.get(4)?,
+                    latest_received_at: row.get(5)?,
+                    unread_count: row.get(6)?,
+                    message_count: row.get(7)?,
+                    source_ids: split_group_concat_ids(row.get::<_, Option<String>>(8)?),
+                    source_names: split_group_concat_strings(row.get::<_, Option<String>>(9)?),
+                    latest_message: mail_domain::SourceMessageRef {
+                        source_id: AccountId(row.get(10)?),
+                        message_id: MessageId(row.get(12)?),
+                    },
+                    latest_source_name: row.get(11)?,
+                    has_attachment: row.get::<_, i64>(13)? != 0,
+                    is_flagged: row.get::<_, i64>(14)? != 0,
                 },
-                latest_source_name: row.get(11)?,
-                has_attachment: row.get::<_, i64>(13)? != 0,
-                is_flagged: row.get::<_, i64>(14)? != 0,
-            })
+                sort_key_value,
+            ))
         })
         .map_err(sql_to_store_error)?;
-    let mut items = rows
+    let mut items: Vec<(ConversationSummary, rusqlite::types::Value)> = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_to_store_error)?;
     let has_more = items.len() > page_limit;
@@ -213,13 +273,22 @@ pub(crate) fn query_conversations(
         items.truncate(page_limit);
     }
     let next_cursor = if has_more {
-        items.last().map(|item| ConversationCursor {
-            latest_received_at: item.latest_received_at.clone(),
-            conversation_id: item.id.clone(),
+        items.last().map(|(item, sort_key_val)| {
+            let sort_value = match sort_key_val {
+                rusqlite::types::Value::Integer(n) => n.to_string(),
+                rusqlite::types::Value::Text(s) => s.clone(),
+                rusqlite::types::Value::Real(f) => f.to_string(),
+                _ => String::new(),
+            };
+            ConversationCursor {
+                sort_value,
+                conversation_id: item.id.clone(),
+            }
         })
     } else {
         None
     };
+    let items = items.into_iter().map(|(summary, _)| summary).collect();
     Ok(ConversationPage { items, next_cursor })
 }
 

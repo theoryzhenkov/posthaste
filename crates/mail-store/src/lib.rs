@@ -17,13 +17,14 @@ use std::sync::Mutex;
 use hex::encode as hex_encode;
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, CommandResult,
-    ConversationCursor, ConversationId, ConversationPage, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, FetchedBody, MailStore, MailboxId, MailboxSummary, MessageDetail,
-    MessageId, MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError,
-    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
-    EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
+    ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, FetchedBody, MailStore,
+    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, RawMessageRef,
+    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError, SyncBatch, SyncCursor,
+    SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -272,6 +273,8 @@ impl MailStore for DatabaseStore {
         mailbox_id: Option<&MailboxId>,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, StoreError> {
         let connection = self.read_connection()?;
         query_conversations(
@@ -296,6 +299,8 @@ impl MailStore for DatabaseStore {
             ],
             limit,
             cursor,
+            sort_field,
+            sort_direction,
         )
     }
 
@@ -401,9 +406,11 @@ impl MailStore for DatabaseStore {
         rule: &SmartMailboxRule,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, StoreError> {
         let connection = self.read_connection()?;
-        query_conversations_by_rule(&connection, rule, limit, cursor)
+        query_conversations_by_rule(&connection, rule, limit, cursor, sort_field, sort_direction)
     }
 
     /// Returns (unread, total) message counts for a smart mailbox rule.
@@ -1207,7 +1214,14 @@ mod tests {
             },
         )?;
 
-        let page = store.list_conversations(Some(&account), None, 10, None)?;
+        let page = store.list_conversations(
+            Some(&account),
+            None,
+            10,
+            None,
+            ConversationSortField::default(),
+            SortDirection::default(),
+        )?;
 
         assert_eq!(page.items.len(), 1);
         assert_eq!(

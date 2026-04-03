@@ -51,8 +51,8 @@ import { ColumnPickerMenu } from "./thread-list/ColumnPickerMenu";
 import { SortableColumnHeader } from "./thread-list/SortableColumnHeader";
 import {
   type ColumnId,
+  type SortConfig,
   buildGridTemplate,
-  compareConversations,
   getColumnDef,
 } from "./thread-list/columns";
 import { useColumnConfig } from "./thread-list/useColumnConfig";
@@ -83,11 +83,14 @@ const scrollOffsetByView = new Map<string, number>();
 function fetchConversationPageForView(
   selectedView: SidebarSelection,
   cursor: string | null,
+  sort: SortConfig,
 ) {
+  const sortParams = { sort: sort.columnId, sortDir: sort.direction };
   if (selectedView.kind === "smart-mailbox") {
     return fetchSmartMailboxConversations(selectedView.id, {
       limit: PAGE_SIZE,
       cursor,
+      ...sortParams,
     });
   }
   return fetchConversations({
@@ -95,6 +98,7 @@ function fetchConversationPageForView(
     mailboxId: selectedView.mailboxId,
     limit: PAGE_SIZE,
     cursor,
+    ...sortParams,
   });
 }
 
@@ -149,8 +153,8 @@ export function MessageList({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
   const queryKey = useMemo(
-    () => mailKeys.view(selectedView),
-    [selectedView],
+    () => mailKeys.view(selectedView, sort),
+    [selectedView, sort],
   );
   const viewKey = useMemo(() => conversationViewKey(selectedView), [selectedView]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -174,22 +178,14 @@ export function MessageList({
     queryFn: async ({ pageParam }) =>
       normalizeConversationPage(
         queryClient,
-        await fetchConversationPageForView(selectedView!, pageParam),
+        await fetchConversationPageForView(selectedView!, pageParam, sort),
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: selectedView !== null,
   });
 
-  const rawConversationIds = useMemo(() => readConversationIds(data), [data]);
-
-  const conversationIds = useMemo(() => {
-    const conversations = rawConversationIds
-      .map((id) => getConversationSummary(queryClient, id))
-      .filter((c): c is ConversationSummary => c !== undefined);
-    conversations.sort((a, b) => compareConversations(sort, a, b));
-    return conversations.map((c) => c.id);
-  }, [rawConversationIds, sort, queryClient]);
+  const conversationIds = useMemo(() => readConversationIds(data), [data]);
 
   function handleColumnDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -217,7 +213,7 @@ export function MessageList({
     refreshInFlightRef.current = true;
     setIsRefreshingTop(true);
     try {
-      const fetchedPage = await fetchConversationPageForView(selectedView, null);
+      const fetchedPage = await fetchConversationPageForView(selectedView, null, sort);
       const firstPage = normalizeConversationPage(queryClient, fetchedPage);
       let insertedCount = 0;
       queryClient.setQueryData<InfiniteData<ConversationPageSlice, string | null>>(queryKey, (current) => {
@@ -278,7 +274,7 @@ export function MessageList({
         void refreshFirstPage();
       }
     }
-  }, [queryClient, queryKey, scrollTop, selectedView, viewKey]);
+  }, [queryClient, queryKey, scrollTop, selectedView, sort, viewKey]);
 
   /** Move selection to the next or previous conversation. */
   const navigateMessage = useCallback(

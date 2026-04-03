@@ -5,13 +5,13 @@ use serde_json::json;
 
 use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
-    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationView,
-    Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId, MessageSummary,
-    MutationOutcome, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway, SharedStore,
-    SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, SyncObject, SyncTrigger, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
-    EVENT_TOPIC_SYNC_FAILED,
+    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
+    MessageSummary, MutationOutcome, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway,
+    SharedStore, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId, ThreadView,
+    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -231,13 +231,15 @@ impl MailService {
         smart_mailbox_id: &SmartMailboxId,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, ServiceError> {
         let mailbox = self
             .config
             .get_smart_mailbox(smart_mailbox_id)?
             .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
         self.store
-            .query_conversations_by_rule(&mailbox.rule, limit, cursor)
+            .query_conversations_by_rule(&mailbox.rule, limit, cursor, sort_field, sort_direction)
             .map_err(Into::into)
     }
 
@@ -310,9 +312,11 @@ impl MailService {
         mailbox_id: Option<&MailboxId>,
         limit: usize,
         cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
     ) -> Result<ConversationPage, ServiceError> {
         self.store
-            .list_conversations(account_id, mailbox_id, limit, cursor)
+            .list_conversations(account_id, mailbox_id, limit, cursor, sort_field, sort_direction)
             .map_err(Into::into)
     }
 
@@ -812,6 +816,8 @@ mod tests {
             _rule: &SmartMailboxRule,
             _limit: usize,
             _cursor: Option<&ConversationCursor>,
+            _sort_field: ConversationSortField,
+            _sort_direction: SortDirection,
         ) -> Result<ConversationPage, StoreError> {
             Ok(ConversationPage {
                 items: Vec::new(),
@@ -834,6 +840,8 @@ mod tests {
             _mailbox_id: Option<&MailboxId>,
             _limit: usize,
             _cursor: Option<&ConversationCursor>,
+            _sort_field: ConversationSortField,
+            _sort_direction: SortDirection,
         ) -> Result<ConversationPage, StoreError> {
             Ok(ConversationPage {
                 items: Vec::new(),

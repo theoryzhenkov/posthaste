@@ -467,13 +467,40 @@ pub struct ConversationSummary {
     pub is_flagged: bool,
 }
 
+/// Column by which conversation lists can be sorted.
+///
+/// @spec spec/L1-api#cursor-pagination
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConversationSortField {
+    #[default]
+    Date,
+    From,
+    Subject,
+    Source,
+    ThreadSize,
+    Flagged,
+    Attachment,
+}
+
+/// Sort direction for conversation lists.
+///
+/// @spec spec/L1-api#cursor-pagination
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
 /// Opaque seek-pagination cursor for conversation lists.
 ///
 /// @spec spec/L1-api#cursor-pagination
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationCursor {
-    pub latest_received_at: String,
+    pub sort_value: String,
     pub conversation_id: ConversationId,
 }
 
