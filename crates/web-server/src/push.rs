@@ -98,6 +98,8 @@ pub fn resilient_push_stream(
                             // Fallback also exhausted, cycle back to primary
                             active = ActiveTransport::Primary;
                             consecutive_failures = 0;
+                            current_delay = config.initial_retry_delay;
+                            continue;
                         }
                     }
                 }

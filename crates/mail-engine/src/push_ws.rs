@@ -41,12 +41,7 @@ impl PushTransport for WsPushTransport {
             .map_err(map_gateway_error)?;
 
         ws.enable_push_ws(
-            Some([
-                jmap_client::DataType::Email,
-                jmap_client::DataType::Mailbox,
-                jmap_client::DataType::EmailDelivery,
-                jmap_client::DataType::EmailSubmission,
-            ]),
+            Some(crate::WATCHED_DATA_TYPES),
             checkpoint.map(String::from),
         )
         .await
@@ -59,8 +54,9 @@ impl PushTransport for WsPushTransport {
                 match ws.next_push().await {
                     Some(Ok(push)) => {
                         match convert_push_object(&account_id, push) {
-                            Some(notification) => yield Ok(notification),
-                            None => continue,
+                            Ok(Some(notification)) => yield Ok(notification),
+                            Ok(None) => continue,
+                            Err(error) => yield Err(error),
                         }
                     }
                     Some(Err(error)) => {
@@ -77,21 +73,27 @@ impl PushTransport for WsPushTransport {
 fn convert_push_object(
     account_id: &AccountId,
     push: jmap_client::PushObject,
-) -> Option<PushNotification> {
+) -> Result<Option<PushNotification>, GatewayError> {
     match push {
         jmap_client::PushObject::StateChange { mut changed } => {
             let changed_types = changed
                 .remove(account_id.as_str())
                 .map(|entries| entries.into_keys().map(|dt| dt.to_string()).collect())
                 .unwrap_or_default();
-            let received_at = domain_now_iso8601().ok()?;
-            Some(PushNotification {
+            let received_at =
+                domain_now_iso8601().map_err(GatewayError::Rejected)?;
+            Ok(Some(PushNotification {
                 account_id: account_id.clone(),
                 changed: changed_types,
                 received_at,
+                // WS push notifications don't carry SSE-style event IDs.
+                // The ResilientPushStream will pass the last SSE checkpoint
+                // (if any) on reconnect, but WS connections cannot resume
+                // from a checkpoint. A full delta sync after WS reconnect
+                // handles this correctly.
                 checkpoint: None,
-            })
+            }))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }

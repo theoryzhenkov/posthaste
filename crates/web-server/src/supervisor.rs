@@ -210,9 +210,8 @@ async fn run_account_runtime(
                             &shared, &account, SyncTrigger::Push, &mut connection, None,
                         ).await;
                     }
-                    PushStreamEvent::Connected { transport } => {
+                    PushStreamEvent::Connected { .. } => {
                         shared.set_push_status(&account_id, PushStatus::Connected).await;
-                        tracing_connected(&shared, &account_id, transport);
                     }
                     PushStreamEvent::Disconnected { transport, reason } => {
                         shared.handle_push_disconnect(&account_id, &format!("{transport}: {reason}")).await;
@@ -226,18 +225,6 @@ async fn run_account_runtime(
                 }
             }
         }
-    }
-}
-
-fn tracing_connected(shared: &SupervisorShared, account_id: &AccountId, transport: &str) {
-    if let Ok(event) = shared.store.append_event(
-        account_id,
-        EVENT_TOPIC_PUSH_CONNECTED,
-        None,
-        None,
-        json!({ "transport": transport }),
-    ) {
-        shared.publish_events(&[event]);
     }
 }
 
