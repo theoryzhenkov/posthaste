@@ -8,8 +8,8 @@ use jmap_client::{email, identity, mailbox};
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
     FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, MutationOutcome, PushNotification, PushStream, Recipient, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
+    MessageRecord, MutationOutcome, PushTransport, Recipient, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
 };
 use pulldown_cmark::{html, Options, Parser};
 use time::format_description::well_known::Rfc3339;
@@ -344,60 +344,11 @@ impl MailGateway for LiveJmapGateway {
         Ok(())
     }
 
-    async fn open_push_stream(
-        &self,
-        account_id: &AccountId,
-        last_event_id: Option<&str>,
-    ) -> Result<Option<PushStream>, GatewayError> {
-        let stream = self
-            .client
-            .event_source(
-                [
-                    jmap_client::DataType::Email,
-                    jmap_client::DataType::Mailbox,
-                    jmap_client::DataType::EmailDelivery,
-                    jmap_client::DataType::EmailSubmission,
-                ]
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .into(),
-                false,
-                Some(60),
-                last_event_id,
-            )
-            .await
-            .map_err(map_gateway_error)?;
-        let account_id = account_id.clone();
-        Ok(Some(Box::pin(stream.filter_map(move |event| {
-            let account_id = account_id.clone();
-            async move {
-                match event {
-                    Ok(jmap_client::event_source::PushNotification::StateChange(changes)) => {
-                        let changed = changes
-                            .changes(account_id.as_str())
-                            .map(|entries| {
-                                entries
-                                    .map(|(data_type, _)| data_type.to_string())
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        let received_at = match domain_now_iso8601() {
-                            Ok(value) => value,
-                            Err(error) => return Some(Err(GatewayError::Rejected(error))),
-                        };
-                        Some(Ok(PushNotification {
-                            account_id,
-                            changed,
-                            received_at,
-                            checkpoint: changes.id().map(str::to_string),
-                        }))
-                    }
-                    Ok(jmap_client::event_source::PushNotification::CalendarAlert(_)) => None,
-                    Err(error) => Some(Err(map_gateway_error(error))),
-                }
-            }
-        }))))
+    fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
+        vec![
+            Box::new(crate::push_ws::WsPushTransport::new(self.client.clone())),
+            Box::new(crate::push_sse::SsePushTransport::new(self.client.clone())),
+        ]
     }
 }
 
@@ -486,12 +437,8 @@ mod tests {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
-        async fn open_push_stream(
-            &self,
-            _account_id: &AccountId,
-            _last_event_id: Option<&str>,
-        ) -> Result<Option<PushStream>, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
+        fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
+            vec![]
         }
     }
 

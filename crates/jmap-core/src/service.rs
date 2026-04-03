@@ -560,7 +560,7 @@ mod tests {
     use super::*;
     use crate::{
         ConfigError, ConfigSnapshot, DomainEvent, EventFilter, FetchedBody, GatewayError,
-        MessageDetail, MutationOutcome, PushStream, SmartMailboxCondition, SmartMailboxField,
+        MessageDetail, MutationOutcome, PushTransport, SmartMailboxCondition, SmartMailboxField,
         SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator,
         SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError, SyncBatch,
         SyncCursor,
@@ -1045,12 +1045,8 @@ mod tests {
             Err(GatewayError::Rejected("unused".to_string()))
         }
 
-        async fn open_push_stream(
-            &self,
-            _account_id: &AccountId,
-            _last_event_id: Option<&str>,
-        ) -> Result<Option<PushStream>, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
+        fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
+            vec![]
         }
     }
 

@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use crate::{
     AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationView, EventFilter, FetchedBody, Identity, MailboxId, MailboxSummary, MessageDetail,
-    MessageId, MessageSummary, MutationOutcome, PushStream, ReplaceMailboxesCommand, ReplyContext,
-    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule,
-    SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    MessageId, MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand,
+    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
+    SmartMailboxRule, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -54,11 +54,7 @@ pub trait MailGateway: Send + Sync {
         account_id: &AccountId,
         request: &SendMessageRequest,
     ) -> Result<(), GatewayError>;
-    async fn open_push_stream(
-        &self,
-        account_id: &AccountId,
-        last_event_id: Option<&str>,
-    ) -> Result<Option<PushStream>, GatewayError>;
+    fn push_transports(&self) -> Vec<Box<dyn PushTransport>>;
 }
 
 pub trait MailStore: Send + Sync {
