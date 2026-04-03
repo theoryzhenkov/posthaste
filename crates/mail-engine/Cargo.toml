@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-stream = "0.3"
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 jmap-client = { workspace = true }

@@ -866,7 +866,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jmap-client"
 version = "0.4.0"
-source = "git+https://github.com/theoryzhenkov/jmap-client.git?branch=feat%2Fws-correlation#1fcb2c0d7552e4dd6bab467ec694437708900574"
+source = "git+https://github.com/theoryzhenkov/jmap-client.git?branch=feat%2Fws-correlation#26414bbdab94133e75d41f46d0c27533857584bf"
 dependencies = [
  "ahash",
  "async-stream",
@@ -1004,6 +1004,7 @@ name = "mail-daemon"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "async-stream",
  "async-trait",
  "axum",
  "dirs",
@@ -1042,6 +1043,7 @@ dependencies = [
 name = "mail-jmap"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "async-trait",
  "futures-util",
  "jmap-client",
