@@ -8,7 +8,7 @@ use mail_domain::{
     PushTransport,
 };
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::live::map_gateway_error;
 
@@ -48,7 +48,8 @@ impl PushTransport for SsePushTransport {
         account_id: &AccountId,
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
-        debug!(account_id = %account_id, checkpoint, "opening SSE push stream");
+        let target_url = self.client.session().event_source_url().to_string();
+        debug!(account_id = %account_id, target_url = %target_url, checkpoint, "opening SSE push stream");
         let stream = self
             .client
             .event_source(
@@ -58,7 +59,11 @@ impl PushTransport for SsePushTransport {
                 checkpoint,
             )
             .await
-            .map_err(map_gateway_error)?;
+            .map_err(|error| {
+                let mapped = map_gateway_error(error);
+                warn!(account_id = %account_id, target_url = %target_url, error = %mapped, "SSE connection failed");
+                mapped
+            })?;
 
         let account_id = account_id.clone();
         Ok(Some(Box::pin(stream.filter_map(move |event| {

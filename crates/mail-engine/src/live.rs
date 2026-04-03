@@ -40,7 +40,21 @@ pub async fn connect_jmap_client(
         .connect(url)
         .await
         .map_err(map_gateway_error)?;
-    info!("JMAP session established");
+    let session = client.session();
+    let ws_url = session
+        .websocket_capabilities()
+        .map(|caps| caps.url().to_string());
+    let ws_push = session
+        .websocket_capabilities()
+        .map(|caps| caps.supports_push())
+        .unwrap_or(false);
+    info!(
+        api_url = session.api_url(),
+        event_source_url = session.event_source_url(),
+        ws_url = ws_url.as_deref(),
+        ws_push,
+        "JMAP session established"
+    );
     Ok(Arc::new(client))
 }
 
@@ -63,10 +77,12 @@ impl LiveJmapGateway {
     /// @spec spec/L2-transport#transport-negotiation
     pub fn from_client(client: Arc<Client>) -> Self {
         let ws = if client.session().websocket_capabilities().is_some() {
+            debug!("WebSocket capability available, creating shared connection");
             Some(Arc::new(crate::ws_connection::SharedWsConnection::new(
                 client.clone(),
             )))
         } else {
+            debug!("WebSocket capability not advertised, WS transport disabled");
             None
         };
         Self { client, ws }
