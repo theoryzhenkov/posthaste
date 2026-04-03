@@ -8,6 +8,8 @@ use crate::{AccountId, GatewayError, PushNotification, PushStream};
 
 /// A raw push transport that opens a single connection and returns a stream.
 /// Stateless, does not reconnect. Implementations: SSE, WebSocket.
+///
+/// @spec spec/L2-transport#push-transport
 #[async_trait]
 pub trait PushTransport: Send + Sync {
     /// Human-readable name for logging (e.g. "ws", "sse").
@@ -23,16 +25,22 @@ pub trait PushTransport: Send + Sync {
 }
 
 /// Events emitted by a resilient push stream alongside push notifications.
+///
+/// @spec spec/L2-transport#resilient-push-stream
 #[derive(Clone, Debug)]
 pub enum PushStreamEvent {
+    /// A JMAP state-change notification.
     Notification(PushNotification),
+    /// Transport connected successfully.
     Connected {
         transport: &'static str,
     },
+    /// Transport disconnected or errored.
     Disconnected {
         transport: &'static str,
         reason: String,
     },
+    /// Automatic transport fallback (e.g. WS to SSE).
     Fallback {
         from: &'static str,
         to: &'static str,
@@ -40,6 +48,8 @@ pub enum PushStreamEvent {
 }
 
 /// Configuration for resilient push stream backoff and fallback behavior.
+///
+/// @spec spec/L2-transport#resilient-push-stream
 pub struct ResilientPushConfig {
     pub initial_retry_delay: Duration,
     pub max_retry_delay: Duration,
@@ -57,4 +67,7 @@ impl Default for ResilientPushConfig {
     }
 }
 
+/// Async stream of [`PushStreamEvent`]s consumed by the supervisor.
+///
+/// @spec spec/L2-transport#resilient-push-stream
 pub type PushEventStream = Pin<Box<dyn Stream<Item = PushStreamEvent> + Send>>;

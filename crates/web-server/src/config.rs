@@ -8,8 +8,12 @@ use mail_domain::{
 };
 use serde::Deserialize;
 
+/// Application directory name used under XDG paths.
 const APP_DIR_NAME: &str = "mail";
 
+/// Resolved filesystem paths for config, state, and optional bootstrap template.
+///
+/// @spec spec/L1-accounts#config-directory-layout
 #[derive(Clone, Debug)]
 pub struct ResolvedRoots {
     pub config_root: PathBuf,
@@ -17,6 +21,10 @@ pub struct ResolvedRoots {
     pub bootstrap_path: Option<PathBuf>,
 }
 
+/// Runtime settings for the daemon process, read from `app.toml` `[daemon]`
+/// section with environment variable overrides.
+///
+/// @spec spec/L1-accounts#apptoml
 #[derive(Clone, Debug)]
 pub struct DaemonSettings {
     pub bind_address: String,
@@ -24,6 +32,10 @@ pub struct DaemonSettings {
     pub poll_interval_seconds: u64,
 }
 
+/// Resolve config, state, and bootstrap paths from environment variables
+/// or XDG defaults.
+///
+/// @spec spec/L1-accounts#config-directory-layout
 pub fn resolve_roots() -> ResolvedRoots {
     let config_root = std::env::var("MAIL_CONFIG_ROOT")
         .map(PathBuf::from)
@@ -52,6 +64,10 @@ pub fn resolve_roots() -> ResolvedRoots {
     }
 }
 
+/// Read daemon settings from `app.toml` `[daemon]` section, with env var
+/// overrides for bind address, CORS origin, and poll interval.
+///
+/// @spec spec/L1-accounts#apptoml
 pub fn read_daemon_settings(
     config_repo: &TomlConfigRepository,
 ) -> Result<DaemonSettings, ConfigError> {
@@ -81,6 +97,10 @@ pub fn read_daemon_settings(
     })
 }
 
+/// Import a bootstrap TOML file: initialize defaults, then apply seed
+/// app settings and account definitions.
+///
+/// @spec spec/L1-accounts#initialization
 pub fn import_bootstrap(
     bootstrap_path: &Path,
     config_repo: &TomlConfigRepository,
@@ -131,6 +151,7 @@ pub fn import_bootstrap(
 
 // -- Bootstrap TOML types (for import only) --
 
+/// Top-level bootstrap config file structure.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapConfig {
@@ -138,6 +159,7 @@ struct BootstrapConfig {
     seed: BootstrapSeedConfig,
 }
 
+/// Seed data section: app settings and initial accounts.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapSeedConfig {
@@ -146,12 +168,14 @@ struct BootstrapSeedConfig {
     accounts: Vec<BootstrapAccountConfig>,
 }
 
+/// Bootstrap app-level overrides.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapAppSettings {
     default_account_id: Option<String>,
 }
 
+/// A seed account definition in the bootstrap file.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapAccountConfig {
@@ -163,6 +187,7 @@ struct BootstrapAccountConfig {
     transport: BootstrapAccountTransportConfig,
 }
 
+/// Transport section of a seed account.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapAccountTransportConfig {
@@ -173,14 +198,17 @@ struct BootstrapAccountTransportConfig {
 
 // -- Helpers --
 
+/// Default config root: `$XDG_CONFIG_HOME/mail` or `~/.config/mail`.
 fn default_config_root() -> PathBuf {
     xdg_dir("XDG_CONFIG_HOME", ".config").join(APP_DIR_NAME)
 }
 
+/// Default state root: `$XDG_DATA_HOME/mail` or `~/.local/share/mail`.
 fn default_state_root() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR_NAME)
 }
 
+/// Resolve an XDG directory from an env var or fall back to `$HOME/{suffix}`.
 fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
     std::env::var(env_var)
         .map(PathBuf::from)
@@ -191,6 +219,7 @@ fn xdg_dir(env_var: &str, fallback_suffix: &str) -> PathBuf {
         })
 }
 
+/// Default bootstrap file location: `$XDG_CONFIG_HOME/mail/bootstrap.toml`.
 fn default_bootstrap_path() -> PathBuf {
     xdg_dir("XDG_CONFIG_HOME", ".config")
         .join(APP_DIR_NAME)

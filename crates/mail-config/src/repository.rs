@@ -11,12 +11,21 @@ use crate::atomic::atomic_write;
 use crate::defaults::default_smart_mailboxes;
 use crate::schema::{AppToml, SmartMailboxToml, SourceToml};
 
+/// File-system-backed `ConfigRepository` that persists config as TOML files.
+/// Keeps an in-memory `ConfigSnapshot` behind an `RwLock` so reads never hit
+/// disk after initialization.
+///
+/// @spec spec/L1-accounts#configrepository-trait
 pub struct TomlConfigRepository {
     config_root: PathBuf,
     snapshot: RwLock<ConfigSnapshot>,
 }
 
 impl TomlConfigRepository {
+    /// Opens (or creates) the config directory and loads the initial snapshot
+    /// from disk.
+    ///
+    /// @spec spec/L1-accounts#initialization
     pub fn open(config_root: impl Into<PathBuf>) -> Result<Self, ConfigError> {
         let config_root = config_root.into();
         fs::create_dir_all(&config_root).map_err(io_error)?;
@@ -30,14 +39,23 @@ impl TomlConfigRepository {
         })
     }
 
+    /// Returns the root directory path for this config repository.
     pub fn config_root(&self) -> &Path {
         &self.config_root
     }
 
+    /// Returns `true` if `app.toml` does not exist, indicating the repository
+    /// has not been initialized.
+    ///
+    /// @spec spec/L1-accounts#initialization
     pub fn is_empty(&self) -> bool {
         !self.config_root.join("app.toml").exists()
     }
 
+    /// Creates `app.toml` and writes the default smart mailboxes. Called on
+    /// first launch when no config exists.
+    ///
+    /// @spec spec/L1-accounts#initialization
     pub fn initialize_defaults(&self) -> Result<(), ConfigError> {
         let app = AppToml {
             schema_version: 1,
@@ -55,16 +73,26 @@ impl TomlConfigRepository {
         Ok(())
     }
 
+    /// Reads and parses `app.toml` directly from disk (bypasses snapshot).
+    /// Used at startup to access daemon-only settings.
     pub fn read_app_toml(&self) -> Result<AppToml, ConfigError> {
         read_app_toml(&self.config_root)
     }
 }
 
+/// @spec spec/L1-accounts#configrepository-trait
 impl ConfigRepository for TomlConfigRepository {
+    /// Returns a clone of the cached in-memory snapshot (no disk I/O).
+    ///
+    /// @spec spec/L1-accounts#configsnapshot
     fn load_snapshot(&self) -> Result<ConfigSnapshot, ConfigError> {
         Ok(self.snapshot.read().map_err(lock_error)?.clone())
     }
 
+    /// Re-reads all files from disk, diffs against the cached snapshot, and
+    /// returns `ConfigDiff` listing added/changed/removed sources.
+    ///
+    /// @spec spec/L1-accounts#configdiff
     fn reload(&self) -> Result<ConfigDiff, ConfigError> {
         let old = self.snapshot.read().map_err(lock_error)?.clone();
         let new = load_snapshot_from_disk(&self.config_root)?;
@@ -104,6 +132,7 @@ impl ConfigRepository for TomlConfigRepository {
         })
     }
 
+    /// Returns global app settings from the cached snapshot.
     fn get_app_settings(&self) -> Result<AppSettings, ConfigError> {
         Ok(self
             .snapshot
@@ -113,6 +142,7 @@ impl ConfigRepository for TomlConfigRepository {
             .clone())
     }
 
+    /// Persists global app settings via atomic write and updates the snapshot.
     fn put_app_settings(&self, settings: &AppSettings) -> Result<(), ConfigError> {
         let existing = read_app_toml(&self.config_root)?;
         let app_toml = AppToml::from_app_settings(settings, &existing);
@@ -121,10 +151,12 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
+    /// Lists all account sources from the cached snapshot.
     fn list_sources(&self) -> Result<Vec<AccountSettings>, ConfigError> {
         Ok(self.snapshot.read().map_err(lock_error)?.sources.clone())
     }
 
+    /// Looks up a single account source by ID from the cached snapshot.
     fn get_source(&self, id: &AccountId) -> Result<Option<AccountSettings>, ConfigError> {
         Ok(self
             .snapshot
@@ -136,6 +168,10 @@ impl ConfigRepository for TomlConfigRepository {
             .cloned())
     }
 
+    /// Creates or updates an account source file via atomic write and updates
+    /// the snapshot.
+    ///
+    /// @spec spec/L1-accounts#id-validation
     fn save_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
         validate_safe_id(source.id.as_str())?;
         let source_toml = SourceToml::from_account_settings(source);
@@ -156,6 +192,7 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
+    /// Deletes the source TOML file and removes the source from the snapshot.
     fn delete_source(&self, id: &AccountId) -> Result<(), ConfigError> {
         let path = self.config_root.join("sources").join(format!("{id}.toml"));
         if path.exists() {
@@ -169,6 +206,7 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
+    /// Lists all smart mailboxes from the cached snapshot.
     fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError> {
         Ok(self
             .snapshot
@@ -178,6 +216,7 @@ impl ConfigRepository for TomlConfigRepository {
             .clone())
     }
 
+    /// Looks up a single smart mailbox by ID from the cached snapshot.
     fn get_smart_mailbox(&self, id: &SmartMailboxId) -> Result<Option<SmartMailbox>, ConfigError> {
         Ok(self
             .snapshot
@@ -189,6 +228,9 @@ impl ConfigRepository for TomlConfigRepository {
             .cloned())
     }
 
+    /// Creates or updates a smart mailbox TOML file and updates the snapshot.
+    ///
+    /// @spec spec/L1-accounts#id-validation
     fn save_smart_mailbox(&self, mailbox: &SmartMailbox) -> Result<(), ConfigError> {
         validate_safe_id(mailbox.id.as_str())?;
         write_smart_mailbox_toml(&self.config_root, mailbox)?;
@@ -206,6 +248,7 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
+    /// Deletes the smart mailbox TOML file and removes it from the snapshot.
     fn delete_smart_mailbox(&self, id: &SmartMailboxId) -> Result<(), ConfigError> {
         let path = self
             .config_root
@@ -222,6 +265,10 @@ impl ConfigRepository for TomlConfigRepository {
         Ok(())
     }
 
+    /// Restores built-in default smart mailboxes by upserting them. Existing
+    /// user-created mailboxes are preserved.
+    ///
+    /// @spec spec/L1-accounts#smart-mailbox-defaults
     fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError> {
         let defaults = default_smart_mailboxes();
         let now = now_iso8601();
@@ -258,6 +305,9 @@ impl ConfigRepository for TomlConfigRepository {
 
 // -- File I/O helpers --
 
+/// Reads all TOML files from disk and assembles a full `ConfigSnapshot`.
+///
+/// @spec spec/L1-accounts#configsnapshot
 fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigError> {
     let app_settings = read_app_toml(config_root)?.to_app_settings();
 
@@ -271,6 +321,7 @@ fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigE
     })
 }
 
+/// Reads and parses `app.toml`, returning defaults if the file does not exist.
 fn read_app_toml(config_root: &Path) -> Result<AppToml, ConfigError> {
     let path = config_root.join("app.toml");
     if !path.exists() {
@@ -280,11 +331,16 @@ fn read_app_toml(config_root: &Path) -> Result<AppToml, ConfigError> {
     toml::from_str(&content).map_err(|e| ConfigError::Parse(format!("app.toml: {e}")))
 }
 
+/// Serializes and atomically writes `app.toml`.
 fn write_app_toml(config_root: &Path, app: &AppToml) -> Result<(), ConfigError> {
     let content = toml::to_string_pretty(app).map_err(|e| ConfigError::Parse(e.to_string()))?;
     atomic_write(&config_root.join("app.toml"), content.as_bytes())
 }
 
+/// Reads all `sources/*.toml` files, validates filename-ID match, and returns
+/// sorted account settings.
+///
+/// @spec spec/L1-accounts#config-directory-layout
 fn load_sources(config_root: &Path) -> Result<Vec<AccountSettings>, ConfigError> {
     let dir = config_root.join("sources");
     if !dir.exists() {
@@ -307,6 +363,10 @@ fn load_sources(config_root: &Path) -> Result<Vec<AccountSettings>, ConfigError>
     Ok(sources)
 }
 
+/// Reads all `smart-mailboxes/*.toml` files, validates filename-ID match, and
+/// returns mailboxes sorted by position then name.
+///
+/// @spec spec/L1-accounts#config-directory-layout
 fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbox>, ConfigError> {
     let dir = config_root.join("smart-mailboxes");
     if !dir.exists() {
@@ -332,6 +392,7 @@ fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbox>, ConfigE
     Ok(mailboxes)
 }
 
+/// Serializes and atomically writes a smart mailbox TOML file.
 fn write_smart_mailbox_toml(config_root: &Path, mailbox: &SmartMailbox) -> Result<(), ConfigError> {
     let toml_struct = SmartMailboxToml::from_smart_mailbox(mailbox);
     let content =
@@ -342,6 +403,10 @@ fn write_smart_mailbox_toml(config_root: &Path, mailbox: &SmartMailbox) -> Resul
     atomic_write(&path, content.as_bytes())
 }
 
+/// Rejects IDs containing path separators, parent traversal, or null bytes to
+/// prevent path injection.
+///
+/// @spec spec/L1-accounts#id-validation
 fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
     if id.is_empty()
         || id.contains('/')
@@ -356,6 +421,9 @@ fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Enforces that the TOML filename stem matches the `id` field inside the file.
+///
+/// @spec spec/L1-accounts#assertions
 fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError> {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     if stem != id {
@@ -368,14 +436,17 @@ fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError
     Ok(())
 }
 
+/// Returns the current time as an ISO 8601 string, falling back to epoch.
 fn now_iso8601() -> String {
     domain_now_iso8601().unwrap_or_else(|_| RFC3339_EPOCH.to_string())
 }
 
+/// Wraps an I/O error into `ConfigError::Io`.
 fn io_error(err: std::io::Error) -> ConfigError {
     ConfigError::Io(err.to_string())
 }
 
+/// Wraps a lock-poisoned error into `ConfigError::Io`.
 fn lock_error<T>(_: T) -> ConfigError {
     ConfigError::Io("config lock poisoned".to_string())
 }

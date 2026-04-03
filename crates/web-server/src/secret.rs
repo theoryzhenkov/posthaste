@@ -1,11 +1,17 @@
 use keyring::Entry;
 use mail_domain::{SecretKind, SecretRef, SecretStore, SecretStoreError};
 
+/// Keyring service name used for all OS-managed secrets.
 const KEYRING_SERVICE_NAME: &str = "mail-daemon";
 
+/// [`SecretStore`] implementation backed by the OS keyring (via the `keyring` crate)
+/// for OS-type secrets and environment variables for env-type secrets.
+///
+/// @spec spec/L1-api#secret-management
 pub struct SystemSecretStore;
 
 impl SystemSecretStore {
+    /// Create a keyring entry handle for the given secret reference.
     fn entry(secret_ref: &SecretRef) -> Result<Entry, SecretStoreError> {
         Entry::new(KEYRING_SERVICE_NAME, &secret_ref.key)
             .map_err(|err| SecretStoreError::Unavailable(err.to_string()))

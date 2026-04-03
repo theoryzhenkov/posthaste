@@ -1,3 +1,12 @@
+/**
+ * Paginated, virtualized conversation list with live prepend and keyboard navigation.
+ *
+ * Uses manual fixed-row virtualization (no library), seek-based cursor pagination,
+ * and anchored scroll adjustment on live prepends.
+ *
+ * @spec spec/L1-ui#messagelist
+ * @spec spec/L1-ui#keyboard-shortcuts
+ */
 import {
   DndContext,
   PointerSensor,
@@ -48,6 +57,7 @@ import {
 } from "./thread-list/columns";
 import { useColumnConfig } from "./thread-list/useColumnConfig";
 
+/** @spec spec/L1-ui#messagelist */
 interface MessageListProps {
   selectedView: SidebarSelection | null;
   selection: MailSelection | null;
@@ -55,13 +65,21 @@ interface MessageListProps {
   actions: EmailActions;
 }
 
+/** @spec spec/L1-ui#messagelist */
 const PAGE_SIZE = 100;
+/** @spec spec/L1-ui#messagelist */
 const ROW_HEIGHT = 78;
 const OVERSCAN_ROWS = 6;
 const LOAD_MORE_THRESHOLD_PX = 800;
 const TOP_REFRESH_THRESHOLD_PX = 24;
+/** Per-view scroll offset cache to restore position on view switch. */
 const scrollOffsetByView = new Map<string, number>();
 
+/**
+ * Fetch a conversation page for the currently selected sidebar view,
+ * routing to the appropriate API endpoint.
+ * @spec spec/L1-api#cursor-pagination
+ */
 function fetchConversationPageForView(
   selectedView: SidebarSelection,
   cursor: string | null,
@@ -80,6 +98,7 @@ function fetchConversationPageForView(
   });
 }
 
+/** Stable string key for a sidebar selection, used for scroll-offset caching. */
 function conversationViewKey(selectedView: SidebarSelection | null): string {
   if (!selectedView) {
     return "none";
@@ -90,6 +109,7 @@ function conversationViewKey(selectedView: SidebarSelection | null): string {
   return `source:${selectedView.sourceId}:${selectedView.mailboxId}`;
 }
 
+/** Check whether an SSE event could affect the currently displayed view. */
 function eventMayAffectView(
   payload: DomainEvent,
   selectedView: SidebarSelection | null,
@@ -106,6 +126,16 @@ function eventMayAffectView(
   return payload.mailboxId === null || payload.mailboxId === selectedView.mailboxId;
 }
 
+/**
+ * Conversation list panel: the middle column of the three-column layout.
+ *
+ * Handles pagination, manual virtualization, live prepend on domain events,
+ * per-view scroll restoration, and keyboard shortcuts (j/k, arrows, archive, trash).
+ *
+ * @spec spec/L1-ui#messagelist
+ * @spec spec/L1-ui#live-prepend-behavior
+ * @spec spec/L1-ui#keyboard-shortcuts
+ */
 export function MessageList({
   selectedView,
   selection,
@@ -170,6 +200,11 @@ export function MessageList({
     }
   }
 
+  /**
+   * Refetch the first page and prepend any new conversations, adjusting
+   * `scrollTop` to keep the visible viewport anchored.
+   * @spec spec/L1-ui#live-prepend-behavior
+   */
   const refreshFirstPage = useCallback(async () => {
     if (!selectedView) {
       return;
@@ -245,6 +280,7 @@ export function MessageList({
     }
   }, [queryClient, queryKey, scrollTop, selectedView, viewKey]);
 
+  /** Move selection to the next or previous conversation. */
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
       if (conversationIds.length === 0) return;
@@ -291,6 +327,7 @@ export function MessageList({
     ],
   );
 
+  // Keyboard shortcuts -- suppressed when an input has focus.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
@@ -325,10 +362,12 @@ export function MessageList({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [actions, navigateMessage, selection]);
 
+  // Reset scroll-restore tracking on view change.
   useEffect(() => {
     restoredViewKeyRef.current = null;
   }, [viewKey]);
 
+  // Restore scroll position when switching views.
   useEffect(() => {
     const node = scrollContainerRef.current;
     if (!node || restoredViewKeyRef.current === viewKey) {
@@ -340,6 +379,7 @@ export function MessageList({
     setScrollTop(savedOffset);
   }, [viewKey, conversationIds.length]);
 
+  // Track viewport height for virtualization.
   useEffect(() => {
     const node = scrollContainerRef.current;
     if (!node) {
@@ -354,6 +394,7 @@ export function MessageList({
     return () => resizeObserver.disconnect();
   }, []);
 
+  // Fetch next page when near the bottom.
   useEffect(() => {
     const node = scrollContainerRef.current;
     if (!node || !hasNextPage || isFetchingNextPage) {
@@ -373,6 +414,7 @@ export function MessageList({
     viewportHeight,
   ]);
 
+  // Listen for domain events and refresh the first page.
   useEffect(() => {
     function handleDomainEvent(event: Event) {
       const payload = (event as CustomEvent<DomainEvent>).detail;

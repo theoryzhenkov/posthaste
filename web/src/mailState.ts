@@ -1,3 +1,11 @@
+/**
+ * Client-side React Query cache helpers for conversations, messages, and keyword mutations.
+ *
+ * This module owns the cache key schema, optimistic update logic,
+ * local-echo suppression, and conversation-summary derivation.
+ *
+ * @spec spec/L1-ui#data-fetching
+ */
 import type {
   InfiniteData,
   QueryClient,
@@ -13,18 +21,35 @@ import type {
   SourceMessageRef,
 } from "./api/types";
 
+/**
+ * Selected message reference used by list and detail views.
+ * @spec spec/L1-ui#messagelist
+ */
 export type MailSelection = SourceMessageRef & { conversationId: string };
 
+/**
+ * Current sidebar selection -- either a smart mailbox or a source+mailbox pair.
+ * @spec spec/L0-ui#navigation-model
+ */
 export type MailViewSelection =
   | { kind: "smart-mailbox"; id: string }
   | { kind: "source-mailbox"; sourceId: string; mailboxId: string }
   | null;
 
+/**
+ * Normalized conversation page stored in the infinite query cache.
+ * Summaries are extracted into per-ID cache entries; only IDs remain here.
+ * @spec spec/L1-api#cursor-pagination
+ */
 export type ConversationPageSlice = {
   itemIds: string[];
   nextCursor: string | null;
 };
 
+/**
+ * Canonical React Query key builders for mail-related data.
+ * @spec spec/L1-ui#data-fetching
+ */
 export const mailKeys = {
   message: (sourceId: string, messageId: string) =>
     ["message", sourceId, messageId] as const,
@@ -48,14 +73,17 @@ export const mailKeys = {
   },
 };
 
+/** Snapshot of a single query entry for optimistic rollback. */
 export type QuerySnapshot = {
   data: unknown;
   existed: boolean;
   queryKey: QueryKey;
 };
 
+/** Derived boolean flags from raw JMAP keyword strings. */
 export type KeywordState = Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">;
 
+/** Before/after pair for an optimistic keyword mutation. */
 export type KeywordPatch = {
   next: KeywordState;
   previous: KeywordState;
@@ -65,6 +93,7 @@ type ReconcileOptions = {
   allowHeuristicFlagClear?: boolean;
 };
 
+/** Result of applying an optimistic keyword patch to the cache. */
 export type CachePatchResult = {
   incomplete: boolean;
   snapshots: QuerySnapshot[];
@@ -73,6 +102,7 @@ export type CachePatchResult = {
 const LOCAL_MUTATION_TTL_MS = 5_000;
 const localMutationEvents = new Map<string, number>();
 
+/** Derive boolean flags (`isRead`, `isFlagged`) from raw keyword strings. */
 export function deriveKeywordState(keywords: string[]): KeywordState {
   return {
     isFlagged: keywords.includes("$flagged"),
@@ -81,6 +111,11 @@ export function deriveKeywordState(keywords: string[]): KeywordState {
   };
 }
 
+/**
+ * Normalize a backend conversation page into a cache slice,
+ * extracting each summary into its own query entry.
+ * @spec spec/L1-ui#data-fetching
+ */
 export function normalizeConversationPage(
   queryClient: QueryClient,
   page: ConversationPage,
@@ -92,6 +127,7 @@ export function normalizeConversationPage(
   };
 }
 
+/** Write each conversation summary into its own React Query entry. */
 export function upsertConversationSummaries(
   queryClient: QueryClient,
   conversations: ConversationSummary[],
@@ -104,6 +140,7 @@ export function upsertConversationSummaries(
   }
 }
 
+/** Read a cached conversation summary by ID. */
 export function getConversationSummary(
   queryClient: QueryClient,
   conversationId: string,
@@ -127,6 +164,11 @@ function cleanupLocalMutationEvents(now: number) {
   }
 }
 
+/**
+ * Record events from a locally initiated mutation so they can be
+ * suppressed when echoed back via SSE.
+ * @spec spec/L1-ui#live-prepend-behavior
+ */
 export function recordLocalMutationEvents(events: DomainEvent[]) {
   const now = Date.now();
   cleanupLocalMutationEvents(now);
@@ -138,6 +180,11 @@ export function recordLocalMutationEvents(events: DomainEvent[]) {
   }
 }
 
+/**
+ * Returns true if this SSE event was caused by a recent local mutation
+ * and should be ignored to prevent double-application.
+ * @spec spec/L1-ui#live-prepend-behavior
+ */
 export function shouldSuppressLocalEcho(event: DomainEvent): boolean {
   if (!event.messageId) {
     return false;
@@ -164,6 +211,7 @@ function snapshotQuery(queryClient: QueryClient, queryKey: QueryKey): QuerySnaps
   };
 }
 
+/** Restore previously snapshotted query entries (used for optimistic rollback). */
 export function restoreSnapshots(
   queryClient: QueryClient,
   snapshots: QuerySnapshot[],
@@ -189,6 +237,10 @@ function replaceMessageKeywords<T extends MessageSummary | MessageDetail>(
   };
 }
 
+/**
+ * Heuristically patch a conversation summary for a single-message keyword change
+ * when the full conversation view is not cached.
+ */
 function applyHeuristicConversationPatch(
   conversation: ConversationSummary,
   patch: KeywordPatch,
@@ -218,6 +270,10 @@ function applyHeuristicConversationPatch(
   return { conversation: nextConversation, incomplete };
 }
 
+/**
+ * Derive a conversation summary from a full conversation view.
+ * @spec spec/L1-sync#conversation-pagination
+ */
 function summarizeConversation(conversation: ConversationView): ConversationSummary {
   const latestMessage = conversation.messages[conversation.messages.length - 1];
   return {
@@ -243,6 +299,9 @@ function summarizeConversation(conversation: ConversationView): ConversationSumm
   };
 }
 
+/**
+ * Apply a keyword patch to a full conversation view and derive the updated summary.
+ */
 function applyPatchToConversationView(
   conversation: ConversationView,
   target: MailSelection,
@@ -265,6 +324,11 @@ function applyPatchToConversationView(
   };
 }
 
+/**
+ * Optimistically apply a keyword patch across message, conversation, and summary cache entries.
+ * Returns rollback snapshots and whether the patch was incomplete (needs server confirmation).
+ * @spec spec/L1-ui#data-fetching
+ */
 export function applyKeywordPatch(
   queryClient: QueryClient,
   target: MailSelection,
@@ -329,6 +393,10 @@ export function applyKeywordPatch(
   return { incomplete, snapshots };
 }
 
+/**
+ * Merge a fresh message detail into the cache and update the parent conversation summary.
+ * @spec spec/L1-ui#data-fetching
+ */
 export function mergeMessageDetail(
   queryClient: QueryClient,
   detail: MessageDetail,
@@ -360,6 +428,10 @@ export function mergeMessageDetail(
   return true;
 }
 
+/**
+ * Look up a conversation ID for a message by checking cached detail,
+ * conversation views, and conversation summaries.
+ */
 export function findConversationIdForMessage(
   queryClient: QueryClient,
   target: SourceMessageRef,
@@ -398,6 +470,11 @@ export function findConversationIdForMessage(
   return null;
 }
 
+/**
+ * Apply a keyword change from an SSE event by resolving the conversation
+ * from the cache and delegating to {@link applyKeywordPatch}.
+ * @spec spec/L1-ui#live-prepend-behavior
+ */
 export function applyKeywordEventPatch(
   queryClient: QueryClient,
   target: SourceMessageRef,
@@ -426,6 +503,10 @@ export function applyKeywordEventPatch(
   return true;
 }
 
+/**
+ * Write a full conversation view into the cache and update the derived summary.
+ * @spec spec/L1-ui#data-fetching
+ */
 export function mergeConversationView(
   queryClient: QueryClient,
   conversation: ConversationView,
@@ -437,6 +518,10 @@ export function mergeConversationView(
   );
 }
 
+/**
+ * Flatten all pages of an infinite conversation query into a single ID array.
+ * @spec spec/L1-ui#messagelist
+ */
 export function readConversationIds(
   data: InfiniteData<ConversationPageSlice, unknown> | undefined,
 ): string[] {

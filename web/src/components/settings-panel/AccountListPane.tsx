@@ -1,3 +1,9 @@
+/**
+ * Left-pane account list with default-account selector, summary cards,
+ * and per-account action buttons (edit, sync, enable/disable, delete).
+ *
+ * @spec spec/L1-api#account-crud-lifecycle
+ */
 import type { UseMutationResult } from "@tanstack/react-query";
 import type { AccountOverview } from "../../api/types";
 import { cn } from "../../lib/utils";
@@ -14,6 +20,11 @@ import {
   SelectValue,
 } from "../ui/select";
 
+/**
+ * Account list pane: default account selector, summary stats, and account cards.
+ *
+ * @spec spec/L1-api#account-crud-lifecycle
+ */
 export function AccountListPane({
   accounts,
   selectedAccountId,

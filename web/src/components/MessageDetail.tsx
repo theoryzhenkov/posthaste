@@ -1,3 +1,11 @@
+/**
+ * Right-pane message detail: metadata header, thread switcher, and email body.
+ *
+ * Loads both the conversation (for the thread switcher) and the selected
+ * message detail (for the body). Messages are deduped by `(sourceId, messageId)`.
+ *
+ * @spec spec/L1-ui#messagedetail-and-emailframe
+ */
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchConversation, fetchMessage } from "../api/client";
@@ -9,10 +17,12 @@ import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { EmailFrame } from "./EmailFrame";
 
+/** @spec spec/L1-ui#messagedetail-and-emailframe */
 interface MessageSelection extends SourceMessageRef {
   conversationId: string;
 }
 
+/** @spec spec/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null;
   onSelectMessage: (message: MessageSummary) => void;
@@ -23,6 +33,11 @@ function userTags(keywords: string[]): string[] {
   return keywords.filter((kw) => !kw.startsWith("$"));
 }
 
+/**
+ * Deduplicate and sort conversation messages by `(sourceId, messageId)`,
+ * ordered by `receivedAt`.
+ * @spec spec/L1-ui#messagedetail-and-emailframe
+ */
 function dedupeConversationMessages(messages: MessageSummary[]): MessageSummary[] {
   const uniqueMessages = new Map<string, MessageSummary>();
   for (const message of messages) {
@@ -36,6 +51,11 @@ function dedupeConversationMessages(messages: MessageSummary[]): MessageSummary[
   });
 }
 
+/**
+ * Message detail pane with sticky header, thread switcher, and email body.
+ *
+ * @spec spec/L1-ui#messagedetail-and-emailframe
+ */
 export function MessageDetail({
   selection,
   onSelectMessage,

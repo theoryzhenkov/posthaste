@@ -10,11 +10,19 @@ use mail_domain::{
 
 use crate::live::map_gateway_error;
 
+/// Push transport that reads JMAP state-change notifications via Server-Sent Events.
+///
+/// Used as a fallback when the server does not advertise WebSocket capability.
+/// Wraps `jmap_client::Client::event_source()`.
+///
+/// @spec spec/L2-transport#pushtransport
+/// @spec spec/L1-jmap#push
 pub struct SsePushTransport {
     client: Arc<Client>,
 }
 
 impl SsePushTransport {
+    /// Create an SSE push transport wrapping an authenticated JMAP client.
     pub fn new(client: Arc<Client>) -> Self {
         Self { client }
     }
@@ -22,10 +30,17 @@ impl SsePushTransport {
 
 #[async_trait]
 impl PushTransport for SsePushTransport {
+    /// Transport identifier used in logging and push status tracking.
     fn name(&self) -> &'static str {
         "sse"
     }
 
+    /// Open an EventSource connection and return a filtered stream of `PushNotification`.
+    ///
+    /// Resumes from `checkpoint` (SSE last-event-id) when provided.
+    ///
+    /// @spec spec/L2-transport#sse-fallback
+    /// @spec spec/L1-jmap#push
     async fn open(
         &self,
         account_id: &AccountId,

@@ -4,6 +4,10 @@ use std::path::Path;
 
 use mail_domain::ConfigError;
 
+/// Writes `content` to `path` atomically via write-fsync-rename to prevent
+/// corruption on crash.
+///
+/// @spec spec/L1-accounts#atomic-writes
 pub fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
     let parent = path
         .parent()
@@ -20,6 +24,7 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Wraps an I/O error into `ConfigError::Io`.
 fn io_error(err: std::io::Error) -> ConfigError {
     ConfigError::Io(err.to_string())
 }

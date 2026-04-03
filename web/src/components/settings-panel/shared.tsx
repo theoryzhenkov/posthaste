@@ -1,5 +1,8 @@
+/** Reusable form and display primitives for the settings panel. */
+
 import { Input } from "../ui/input";
 
+/** Labeled text input field. */
 export function Field({
   label,
   value,
@@ -30,6 +33,7 @@ export function Field({
   );
 }
 
+/** Rounded card displaying a label and large value (e.g., account count). */
 export function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border bg-background/70 px-3 py-2">
@@ -41,6 +45,7 @@ export function SummaryCard({ label, value }: { label: string; value: string }) 
   );
 }
 
+/** Compact label/value stat row for metadata sections. */
 export function MetaStat({ label, value }: { label: string; value: string }) {
   return (
     <div>

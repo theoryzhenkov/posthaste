@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 
 // -- app.toml --
 
+/// TOML representation of the global `app.toml` config file.
+///
+/// @spec spec/L1-accounts#apptoml
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AppToml {
     #[serde(default)]
@@ -17,6 +20,10 @@ pub struct AppToml {
     pub daemon: DaemonToml,
 }
 
+/// Daemon-specific settings read only at startup (bind address, CORS, poll
+/// interval).
+///
+/// @spec spec/L1-accounts#apptoml
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DaemonToml {
     pub bind: Option<String>,
@@ -35,12 +42,19 @@ impl Default for DaemonToml {
 }
 
 impl AppToml {
+    /// Converts this TOML struct to the domain `AppSettings`.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn to_app_settings(&self) -> AppSettings {
         AppSettings {
             default_account_id: self.default_source_id.as_deref().map(AccountId::from),
         }
     }
 
+    /// Builds an `AppToml` from domain settings, preserving daemon config from
+    /// the existing file.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn from_app_settings(settings: &AppSettings, existing: &AppToml) -> Self {
         Self {
             schema_version: existing.schema_version.max(1),
@@ -55,6 +69,9 @@ impl AppToml {
 
 // -- sources/<id>.toml --
 
+/// TOML representation of an account source file (`sources/{id}.toml`).
+///
+/// @spec spec/L1-accounts#sourcesidtoml
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SourceToml {
     pub id: String,
@@ -68,6 +85,7 @@ pub struct SourceToml {
     pub updated_at: Option<String>,
 }
 
+/// Account driver variant: `jmap` or `mock`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriverToml {
@@ -75,6 +93,8 @@ pub enum DriverToml {
     Mock,
 }
 
+/// TOML `[transport]` section: JMAP endpoint URL, username, and credential
+/// reference.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TransportToml {
     pub base_url: Option<String>,
@@ -82,12 +102,16 @@ pub struct TransportToml {
     pub secret_ref: Option<SecretRefToml>,
 }
 
+/// Credential reference: OS keyring (`os`) or environment variable (`env`).
+///
+/// @spec spec/L0-accounts#credential-storage
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SecretRefToml {
     pub kind: SecretKindToml,
     pub key: String,
 }
 
+/// Secret storage backend: environment variable or OS keyring.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretKindToml {
@@ -96,6 +120,10 @@ pub enum SecretKindToml {
 }
 
 impl SourceToml {
+    /// Converts this TOML struct to the domain `AccountSettings`. Missing
+    /// timestamps default to `RFC3339_EPOCH`.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn to_account_settings(&self) -> AccountSettings {
         AccountSettings {
             id: AccountId::from(self.id.as_str()),
@@ -127,6 +155,9 @@ impl SourceToml {
         }
     }
 
+    /// Builds a `SourceToml` from domain `AccountSettings` for serialization.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn from_account_settings(settings: &AccountSettings) -> Self {
         Self {
             id: settings.id.to_string(),
@@ -159,6 +190,11 @@ impl SourceToml {
 
 // -- smart-mailboxes/<id>.toml --
 
+/// TOML representation of a smart mailbox file (`smart-mailboxes/{id}.toml`).
+/// Rules are recursive: groups contain nodes that are either leaf conditions or
+/// nested groups.
+///
+/// @spec spec/L1-accounts#smart-mailboxesidtoml
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SmartMailboxToml {
     pub id: String,
@@ -174,6 +210,7 @@ pub struct SmartMailboxToml {
     pub updated_at: Option<String>,
 }
 
+/// Whether a smart mailbox is a built-in default or user-created.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SmartMailboxKindToml {
@@ -181,6 +218,10 @@ pub enum SmartMailboxKindToml {
     User,
 }
 
+/// A group of rule nodes combined with a boolean operator (all/any), optionally
+/// negated.
+///
+/// @spec spec/L1-accounts#smart-mailboxesidtoml
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RuleGroupToml {
     #[serde(default = "default_all_operator")]
@@ -191,6 +232,7 @@ pub struct RuleGroupToml {
     pub nodes: Vec<RuleNodeToml>,
 }
 
+/// Boolean group operator: `all` (AND) or `any` (OR).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GroupOperatorToml {
@@ -198,6 +240,7 @@ pub enum GroupOperatorToml {
     Any,
 }
 
+/// A rule node: either a leaf `Condition` or a nested `Group`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuleNodeToml {
@@ -205,6 +248,9 @@ pub enum RuleNodeToml {
     Group(RuleGroupToml),
 }
 
+/// A leaf condition matching a message field against a value with an operator.
+///
+/// @spec spec/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ConditionToml {
     pub field: FieldToml,
@@ -214,6 +260,9 @@ pub struct ConditionToml {
     pub value: toml::Value,
 }
 
+/// Message fields available for smart mailbox conditions.
+///
+/// @spec spec/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldToml {
@@ -232,6 +281,9 @@ pub enum FieldToml {
     ReceivedAt,
 }
 
+/// Comparison operators for smart mailbox conditions.
+///
+/// @spec spec/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConditionOperatorToml {
@@ -247,6 +299,10 @@ pub enum ConditionOperatorToml {
 // -- Conversions --
 
 impl SmartMailboxToml {
+    /// Converts this TOML struct to the domain `SmartMailbox`, recursively
+    /// converting the rule tree.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn to_smart_mailbox(&self) -> Result<SmartMailbox, String> {
         Ok(SmartMailbox {
             id: SmartMailboxId::from(self.id.as_str()),
@@ -272,6 +328,10 @@ impl SmartMailboxToml {
         })
     }
 
+    /// Builds a `SmartMailboxToml` from a domain `SmartMailbox` for
+    /// serialization.
+    ///
+    /// @spec spec/L1-accounts#toml-schema
     pub fn from_smart_mailbox(mailbox: &SmartMailbox) -> Self {
         Self {
             id: mailbox.id.to_string(),
@@ -290,6 +350,7 @@ impl SmartMailboxToml {
     }
 }
 
+/// Recursively converts a TOML rule group to the domain representation.
 fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGroup, String> {
     let operator = match group.operator {
         GroupOperatorToml::All => SmartMailboxGroupOperator::All,
@@ -307,6 +368,7 @@ fn convert_rule_group(group: &RuleGroupToml) -> Result<SmartMailboxGroup, String
     })
 }
 
+/// Converts a single TOML rule node (condition or group) to the domain type.
 fn convert_rule_node(node: &RuleNodeToml) -> Result<SmartMailboxRuleNode, String> {
     match node {
         RuleNodeToml::Condition(condition) => Ok(SmartMailboxRuleNode::Condition(
@@ -316,6 +378,8 @@ fn convert_rule_node(node: &RuleNodeToml) -> Result<SmartMailboxRuleNode, String
     }
 }
 
+/// Converts a TOML condition to the domain `SmartMailboxCondition`, mapping
+/// field/operator enums and parsing the TOML value.
 fn convert_condition(condition: &ConditionToml) -> Result<SmartMailboxCondition, String> {
     let field = match condition.field {
         FieldToml::SourceId => SmartMailboxField::SourceId,
@@ -350,6 +414,8 @@ fn convert_condition(condition: &ConditionToml) -> Result<SmartMailboxCondition,
     })
 }
 
+/// Converts a TOML value to a `SmartMailboxValue`. Supports string, boolean,
+/// and string arrays (for `in` operator).
 fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValue, String> {
     match value {
         toml::Value::String(s) => Ok(SmartMailboxValue::String(s.clone())),
@@ -370,6 +436,7 @@ fn convert_toml_value(value: &toml::Value) -> Result<SmartMailboxValue, String> 
 
 // -- Domain → TOML conversions --
 
+/// Recursively converts a domain rule group back to the TOML representation.
 fn convert_group_to_toml(group: &SmartMailboxGroup) -> RuleGroupToml {
     RuleGroupToml {
         operator: match group.operator {
@@ -381,6 +448,7 @@ fn convert_group_to_toml(group: &SmartMailboxGroup) -> RuleGroupToml {
     }
 }
 
+/// Converts a single domain rule node back to TOML.
 fn convert_node_to_toml(node: &SmartMailboxRuleNode) -> RuleNodeToml {
     match node {
         SmartMailboxRuleNode::Condition(condition) => {
@@ -390,6 +458,7 @@ fn convert_node_to_toml(node: &SmartMailboxRuleNode) -> RuleNodeToml {
     }
 }
 
+/// Converts a domain condition back to its TOML representation.
 fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> ConditionToml {
     let field = match condition.field {
         SmartMailboxField::SourceId => FieldToml::SourceId,
@@ -424,6 +493,7 @@ fn convert_condition_to_toml(condition: &SmartMailboxCondition) -> ConditionToml
     }
 }
 
+/// Converts a domain `SmartMailboxValue` back to a `toml::Value`.
 fn convert_value_to_toml(value: &SmartMailboxValue) -> toml::Value {
     match value {
         SmartMailboxValue::String(s) => toml::Value::String(s.clone()),

@@ -1,3 +1,12 @@
+/**
+ * Left-pane sidebar with smart mailbox and source mailbox navigation.
+ *
+ * Loads data from `GET /v1/sidebar` and renders collapsible sections
+ * for smart mailboxes and per-source mailbox trees.
+ *
+ * @spec spec/L1-ui#component-hierarchy
+ * @spec spec/L0-ui#navigation-model
+ */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -10,10 +19,15 @@ import {
   smartMailboxFallbackIcon,
 } from "../mailboxRoles";
 
+/**
+ * Discriminated union representing the current sidebar selection.
+ * @spec spec/L0-ui#navigation-model
+ */
 export type SidebarSelection =
   | { kind: "smart-mailbox"; id: string; name: string }
   | { kind: "source-mailbox"; sourceId: string; mailboxId: string; name: string };
 
+/** @spec spec/L1-ui#component-hierarchy */
 interface SidebarProps {
   selectedView: SidebarSelection | null;
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void;
@@ -42,6 +56,7 @@ function itemButtonClass(isSelected: boolean): string {
   );
 }
 
+/** Smart mailbox row with unread badge. */
 function ViewItem({
   name,
   unreadMessages,
@@ -66,6 +81,7 @@ function ViewItem({
   );
 }
 
+/** Source mailbox row with role icon and unread badge. */
 function MailboxItem({
   mailbox,
   isSelected,
@@ -88,6 +104,7 @@ function MailboxItem({
   );
 }
 
+/** Collapsible source section with its mailbox children. */
 function SourceSection({
   source,
   selectedView,
@@ -132,6 +149,7 @@ function SourceSection({
   );
 }
 
+/** Collapsible section header button. */
 function SectionHeader({
   label,
   collapsed,
@@ -153,6 +171,12 @@ function SectionHeader({
   );
 }
 
+/**
+ * Sidebar navigation with smart mailbox and source mailbox sections.
+ *
+ * @spec spec/L1-ui#component-hierarchy
+ * @spec spec/L0-ui#navigation-model
+ */
 export function Sidebar({
   selectedView,
   onSelectSmartMailbox,
