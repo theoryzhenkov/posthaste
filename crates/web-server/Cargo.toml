@@ -3,6 +3,10 @@ name = "mail-daemon"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "web_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "mail-daemon"
 path = "src/main.rs"
