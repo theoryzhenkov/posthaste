@@ -59,16 +59,9 @@ pub struct ServerHandle {
 }
 
 /// Additional origins to allow in CORS beyond the configured default.
+#[derive(Default)]
 pub struct ServerConfig {
     pub extra_cors_origins: Vec<String>,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            extra_cors_origins: Vec::new(),
-        }
-    }
 }
 
 /// Initialize the entire backend (config, store, supervisor, logging)
@@ -77,6 +70,7 @@ impl Default for ServerConfig {
 /// @spec spec/L0-api#axum
 /// @spec spec/L1-accounts#initialization
 pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
+    #[cfg(debug_assertions)]
     dotenv().ok();
 
     let roots = resolve_roots();
