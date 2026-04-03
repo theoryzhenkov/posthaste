@@ -39,7 +39,7 @@ impl PushTransport for SsePushTransport {
     ///
     /// Resumes from `checkpoint` (SSE last-event-id) when provided.
     ///
-    /// @spec spec/L2-transport#sse-fallback
+    /// @spec spec/L2-transport#http-fallback
     /// @spec spec/L1-jmap#push
     async fn open(
         &self,

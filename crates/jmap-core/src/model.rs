@@ -212,6 +212,8 @@ pub struct SecretRef {
 }
 
 /// Alias for [`SecretKind`], used in API responses to describe where a secret is stored.
+///
+/// @spec spec/L1-api#secret-management
 pub type SecretStorage = SecretKind;
 
 /// Redacted secret status returned in API responses. Never contains the secret value.
@@ -718,6 +720,8 @@ pub struct MessageRecord {
 }
 
 /// Builds a minimal RFC 2822 message from constituent parts for draft storage.
+///
+/// @spec spec/L1-compose#mime-structures
 pub fn synthesize_plain_text_raw_mime(
     from_header: &str,
     subject: &str,
@@ -901,6 +905,8 @@ pub struct Identity {
 }
 
 /// Email address with optional display name.
+///
+/// @spec spec/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recipient {
