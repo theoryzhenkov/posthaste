@@ -24,6 +24,10 @@ pub(crate) fn count_smart_mailbox_messages(
         .map_err(sql_to_store_error)
 }
 
+/// Queries messages matching a smart mailbox rule across all sources, ordered
+/// by `received_at DESC`.
+///
+/// @spec spec/L1-search#smart-mailbox-data-model
 pub(crate) fn query_messages_by_rule(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -44,6 +48,9 @@ pub(crate) fn query_messages_by_rule(
     hydrate_message_summaries(connection, rows)
 }
 
+/// Queries conversations matching a smart mailbox rule with seek pagination.
+///
+/// @spec spec/L1-sync#conversation-pagination
 pub(crate) fn query_conversations_by_rule(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -61,6 +68,11 @@ pub(crate) fn query_conversations_by_rule(
     )
 }
 
+/// Core conversation pagination query using CTEs: filters messages, ranks by
+/// recency within each conversation, groups sources, and applies seek-based
+/// cursor pagination (`latest_received_at DESC, conversation_id DESC`).
+///
+/// @spec spec/L1-sync#conversation-pagination
 pub(crate) fn query_conversations(
     connection: &Connection,
     where_clause: &str,
@@ -211,6 +223,7 @@ pub(crate) fn query_conversations(
     Ok(ConversationPage { items, next_cursor })
 }
 
+/// Extracts a string value or returns a type error.
 fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
     match value {
         SmartMailboxValue::String(value) => Ok(value.as_str()),
@@ -220,6 +233,7 @@ fn expect_string_value(value: &SmartMailboxValue) -> Result<&str, StoreError> {
     }
 }
 
+/// Extracts a string array value or returns a type error.
 fn expect_strings_value(value: &SmartMailboxValue) -> Result<&[String], StoreError> {
     match value {
         SmartMailboxValue::Strings(values) => Ok(values.as_slice()),
@@ -229,6 +243,7 @@ fn expect_strings_value(value: &SmartMailboxValue) -> Result<&[String], StoreErr
     }
 }
 
+/// Extracts a boolean value or returns a type error.
 fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
     match value {
         SmartMailboxValue::Bool(value) => Ok(*value),
@@ -238,6 +253,8 @@ fn expect_bool_value(value: &SmartMailboxValue) -> Result<bool, StoreError> {
     }
 }
 
+/// Compiles a smart mailbox rule tree into a SQL WHERE clause with
+/// parameterized bindings.
 fn compile_smart_mailbox_rule(
     rule: &SmartMailboxRule,
     params: &mut Vec<SqlValue>,
@@ -245,6 +262,8 @@ fn compile_smart_mailbox_rule(
     compile_smart_mailbox_group(&rule.root, params)
 }
 
+/// Recursively compiles a rule group into SQL, joining nodes with AND/OR and
+/// optionally wrapping in NOT.
 fn compile_smart_mailbox_group(
     group: &SmartMailboxGroup,
     params: &mut Vec<SqlValue>,
@@ -278,6 +297,8 @@ fn compile_smart_mailbox_group(
     })
 }
 
+/// Compiles a single condition into a SQL fragment, dispatching to
+/// field-specific compilers.
 fn compile_smart_mailbox_condition(
     condition: &SmartMailboxCondition,
     params: &mut Vec<SqlValue>,
@@ -334,6 +355,7 @@ fn compile_smart_mailbox_condition(
     })
 }
 
+/// Compiles an `equals` or `in` condition against a simple column.
 fn compile_simple_field(
     column: &str,
     condition: &SmartMailboxCondition,
@@ -357,6 +379,8 @@ fn compile_simple_field(
     }
 }
 
+/// Compiles a text field condition, handling NULL with COALESCE and
+/// case-insensitive `contains` via LOWER/LIKE.
 fn compile_text_field(
     column: &str,
     condition: &SmartMailboxCondition,
@@ -387,6 +411,7 @@ fn compile_text_field(
     }
 }
 
+/// Compiles a date comparison condition (before/after/on-or-before/on-or-after).
 fn compile_date_field(
     column: &str,
     condition: &SmartMailboxCondition,
@@ -410,6 +435,7 @@ fn compile_date_field(
     Ok(format!("{column} {comparator} ?"))
 }
 
+/// Compiles a boolean field equality check (integer 0/1).
 fn compile_bool_field(
     column: &str,
     condition: &SmartMailboxCondition,
@@ -428,6 +454,8 @@ fn compile_bool_field(
     Ok(format!("{column} = {expected}"))
 }
 
+/// Compiles a condition that checks membership via an EXISTS subquery
+/// (mailbox ID, keyword, or mailbox role).
 fn compile_exists_membership(
     prefix: &str,
     condition: &SmartMailboxCondition,
@@ -455,6 +483,7 @@ fn compile_exists_membership(
     Ok(format!("{prefix}{suffix}\n            )"))
 }
 
+/// Builds a SQL `IN (?, ?, ...)` clause, returning `1 = 0` for empty lists.
 fn compile_in_clause(
     column: &str,
     values: &[String],
@@ -467,6 +496,8 @@ fn compile_in_clause(
     Ok(format!("{column} IN ({placeholders})"))
 }
 
+/// Pushes string values onto the params list and returns comma-separated `?`
+/// placeholders.
 fn push_placeholders(values: &[String], params: &mut Vec<SqlValue>) -> String {
     for value in values {
         params.push(SqlValue::Text(value.clone()));
@@ -474,6 +505,7 @@ fn push_placeholders(values: &[String], params: &mut Vec<SqlValue>) -> String {
     vec!["?"; values.len()].join(", ")
 }
 
+/// Splits a GROUP_CONCAT result (unit separator delimited) into `AccountId`s.
 fn split_group_concat_ids(value: Option<String>) -> Vec<AccountId> {
     split_group_concat_strings(value)
         .into_iter()
@@ -481,6 +513,7 @@ fn split_group_concat_ids(value: Option<String>) -> Vec<AccountId> {
         .collect()
 }
 
+/// Splits a GROUP_CONCAT result (unit separator delimited) into strings.
 fn split_group_concat_strings(value: Option<String>) -> Vec<String> {
     value
         .unwrap_or_default()
