@@ -7,6 +7,8 @@ use jmap_client::core::response::{Response, TaggedMethodResponse};
 use jmap_client::PushObject;
 use tokio::sync::RwLock;
 
+use tracing::{debug, info, warn};
+
 use crate::live::map_gateway_error;
 use mail_domain::GatewayError;
 
@@ -33,6 +35,14 @@ impl SharedWsConnection {
         }
     }
 
+    /// Return the WebSocket URL from the JMAP session, if the server advertises it.
+    pub fn ws_url(&self) -> Option<String> {
+        self.client
+            .session()
+            .websocket_capabilities()
+            .map(|caps| caps.url().to_string())
+    }
+
     /// Open the WS connection if not already active.
     ///
     /// Uses double-checked locking: reads first, upgrades to write only if needed.
@@ -50,12 +60,19 @@ impl SharedWsConnection {
         if guard.is_some() {
             return Ok(());
         }
+        let target_url = self.ws_url();
+        debug!(target_url = target_url.as_deref(), "opening WebSocket connection");
         let ws = self
             .client
             .connect_ws_correlated()
             .await
-            .map_err(map_gateway_error)?;
+            .map_err(|error| {
+                let mapped = map_gateway_error(error);
+                warn!(target_url = target_url.as_deref(), error = %mapped, "WebSocket connection failed");
+                mapped
+            })?;
         *guard = Some(ws);
+        info!(target_url = target_url.as_deref(), "WebSocket connection established");
         Ok(())
     }
 

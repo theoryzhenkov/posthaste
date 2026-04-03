@@ -80,7 +80,14 @@ pub fn resilient_push_stream(
                     consecutive_failures += 1;
                 }
                 Err(error) => {
-                    warn!(account_id = %account_id, transport = transport.name(), error = %error, "push transport open failed");
+                    warn!(
+                        account_id = %account_id,
+                        transport = transport.name(),
+                        error = %error,
+                        attempt = consecutive_failures + 1,
+                        fallback_threshold = config.fallback_threshold,
+                        "push transport open failed"
+                    );
                     yield PushStreamEvent::Disconnected {
                         transport: transport.name(),
                         reason: error.to_string(),
@@ -94,6 +101,13 @@ pub fn resilient_push_stream(
                 if let Some(ref fb) = fallback {
                     match active {
                         ActiveTransport::Primary => {
+                            warn!(
+                                account_id = %account_id,
+                                from = primary.name(),
+                                to = fb.name(),
+                                consecutive_failures,
+                                "push transport fallback triggered"
+                            );
                             active = ActiveTransport::Fallback;
                             consecutive_failures = 0;
                             current_delay = config.initial_retry_delay;
@@ -105,6 +119,13 @@ pub fn resilient_push_stream(
                         }
                         ActiveTransport::Fallback => {
                             // Fallback also exhausted, cycle back to primary
+                            warn!(
+                                account_id = %account_id,
+                                from = fb.name(),
+                                to = primary.name(),
+                                consecutive_failures,
+                                "push fallback exhausted, cycling back to primary"
+                            );
                             active = ActiveTransport::Primary;
                             consecutive_failures = 0;
                             current_delay = config.initial_retry_delay;
@@ -114,7 +135,13 @@ pub fn resilient_push_stream(
                 }
             }
 
-            debug!(account_id = %account_id, delay_ms = current_delay.as_millis(), "push reconnect backoff");
+            debug!(
+                account_id = %account_id,
+                delay_ms = current_delay.as_millis(),
+                attempt = consecutive_failures,
+                fallback_threshold = config.fallback_threshold,
+                "push reconnect backoff"
+            );
             tokio::time::sleep(current_delay).await;
             current_delay = (current_delay * 2).min(config.max_retry_delay);
         }

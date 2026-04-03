@@ -401,6 +401,18 @@ async fn build_connection(
             let primary = transports.next();
             let fallback = transports.next();
 
+            info!(
+                account_id = %account.id,
+                primary = primary.as_ref().map(|t| t.name()),
+                fallback = fallback.as_ref().map(|t| t.name()),
+                reason = if primary.as_ref().map(|t| t.name()) == Some("ws") {
+                    "server advertises WebSocket capability"
+                } else {
+                    "WebSocket not available, SSE only"
+                },
+                "push transport negotiation complete"
+            );
+
             let push_events = primary.map(|primary| {
                 resilient_push_stream(
                     account.id.clone(),

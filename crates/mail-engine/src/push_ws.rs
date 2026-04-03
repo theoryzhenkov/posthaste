@@ -46,7 +46,8 @@ impl PushTransport for WsPushTransport {
         account_id: &AccountId,
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
-        debug!(account_id = %account_id, checkpoint, "opening WS push stream");
+        let target_url = self.ws.ws_url();
+        debug!(account_id = %account_id, target_url = target_url.as_deref(), checkpoint, "opening WS push stream");
         self.ws.ensure_connected().await?;
         self.ws.enable_push(checkpoint).await?;
 
