@@ -2,6 +2,7 @@ use futures_util::StreamExt;
 use mail_domain::{
     AccountId, PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig,
 };
+use tracing::{debug, warn};
 
 /// Which transport is currently being used by the resilient stream.
 enum ActiveTransport {
@@ -75,10 +76,11 @@ pub fn resilient_push_stream(
                     consecutive_failures += 1;
                 }
                 Ok(None) => {
-                    // Transport unsupported by server
+                    debug!(account_id = %account_id, transport = transport.name(), "transport unsupported by server");
                     consecutive_failures += 1;
                 }
                 Err(error) => {
+                    warn!(account_id = %account_id, transport = transport.name(), error = %error, "push transport open failed");
                     yield PushStreamEvent::Disconnected {
                         transport: transport.name(),
                         reason: error.to_string(),
@@ -112,6 +114,7 @@ pub fn resilient_push_stream(
                 }
             }
 
+            debug!(account_id = %account_id, delay_ms = current_delay.as_millis(), "push reconnect backoff");
             tokio::time::sleep(current_delay).await;
             current_delay = (current_delay * 2).min(config.max_retry_delay);
         }

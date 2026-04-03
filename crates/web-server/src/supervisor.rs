@@ -13,6 +13,7 @@ use mail_jmap::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::push::resilient_push_stream;
 
@@ -93,6 +94,7 @@ impl AccountSupervisor {
     pub async fn start_account(&self, account: &AccountSettings) {
         self.stop_account(&account.id).await;
         if !account.enabled {
+            info!(account_id = %account.id, "account disabled, skipping runtime");
             self.shared
                 .set_runtime_overview(
                     &account.id,
@@ -106,13 +108,18 @@ impl AccountSupervisor {
             return;
         }
 
+        info!(account_id = %account.id, driver = ?account.driver, "starting account runtime");
         let (command_tx, command_rx) = mpsc::channel(32);
         let shared = self.shared.clone();
         let account = account.clone();
         let account_id = account.id.clone();
-        let handle = tokio::spawn(async move {
-            run_account_runtime(shared, account, command_rx).await;
-        });
+        let span = info_span!("supervisor.runtime", account_id = %account_id);
+        let handle = tokio::spawn(
+            async move {
+                run_account_runtime(shared, account, command_rx).await;
+            }
+            .instrument(span),
+        );
         self.runtimes.write().await.insert(
             account_id.to_string(),
             ManagedRuntime { command_tx, handle },
@@ -122,6 +129,7 @@ impl AccountSupervisor {
     /// Stop the runtime task and remove the gateway for an account.
     pub async fn stop_account(&self, account_id: &AccountId) {
         if let Some(runtime) = self.runtimes.write().await.remove(account_id.as_str()) {
+            info!(account_id = %account_id, "stopping account runtime");
             runtime.handle.abort();
         }
         self.shared.service.remove_gateway(account_id);
@@ -129,6 +137,7 @@ impl AccountSupervisor {
 
     /// Stop the runtime and clear runtime overview state for a deleted account.
     pub async fn remove_account(&self, account_id: &AccountId) {
+        info!(account_id = %account_id, "removing account");
         self.stop_account(account_id).await;
         self.shared
             .runtime_overviews
@@ -235,18 +244,26 @@ async fn run_account_runtime(
             }
             Some(event) = next_push => {
                 match event {
-                    PushStreamEvent::Notification(_) => {
+                    PushStreamEvent::Notification(ref notification) => {
+                        debug!(
+                            account_id = %account_id,
+                            changed = ?notification.changed,
+                            "push notification received"
+                        );
                         let _ = process_sync_trigger(
                             &shared, &account, SyncTrigger::Push, &mut connection, None,
                         ).await;
                     }
-                    PushStreamEvent::Connected { .. } => {
+                    PushStreamEvent::Connected { transport } => {
+                        info!(account_id = %account_id, transport, "push connected");
                         shared.set_push_status(&account_id, PushStatus::Connected).await;
                     }
                     PushStreamEvent::Disconnected { transport, reason } => {
+                        warn!(account_id = %account_id, transport, reason = %reason, "push disconnected");
                         shared.handle_push_disconnect(&account_id, &format!("{transport}: {reason}")).await;
                     }
                     PushStreamEvent::Fallback { from, to } => {
+                        warn!(account_id = %account_id, from, to, "push falling back");
                         shared.handle_push_disconnect(
                             &account_id,
                             &format!("falling back from {from} to {to}"),
@@ -272,6 +289,7 @@ async fn process_sync_trigger(
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
+    debug!(account_id = %account_id, trigger = ?trigger, "sync triggered");
     shared
         .set_status_only(&account_id, AccountStatus::Syncing)
         .await;
@@ -289,6 +307,7 @@ async fn process_sync_trigger(
     match result {
         Ok(events) => {
             let event_count = events.len();
+            info!(account_id = %account_id, event_count, "sync completed");
             shared.publish_events(&events);
             shared.mark_sync_success(&account_id).await;
             if let Some(reply) = reply {
@@ -308,6 +327,7 @@ async fn process_sync_trigger(
             } else {
                 "sync"
             };
+            error!(account_id = %account_id, error = %error, stage, "sync failed");
             if let Ok(event) = shared.service.record_sync_failure(
                 &account_id,
                 error.code(),
@@ -337,9 +357,11 @@ async fn ensure_connection(
     if connection.is_some() {
         return Ok(());
     }
+    debug!(account_id = %account.id, "establishing connection");
     let conn = build_connection(account, shared.secret_store.as_ref()).await?;
     shared.service.set_gateway(&account.id, conn.gateway.clone());
     *connection = Some(conn);
+    info!(account_id = %account.id, "connection established");
     Ok(())
 }
 

@@ -28,7 +28,7 @@ In scope:
 - `tracing` ecosystem on the Rust backend (structured spans, leveled events, multiple subscribers)
 - `pino` structured logger on the React frontend
 - Dual-sink output: human-readable stderr (dev) + JSON-lines log files (production)
-- Daily log rotation with 7-day retention
+- Daily log rotation (7-day retention cleanup deferred — see L1 assertion `seven-day-retention`)
 - Per-request HTTP tracing via `tower-http::TraceLayer`
 - Log level as a user-facing setting in the TOML config, runtime-reconfigurable if feasible
 - Priority instrumentation of JMAP sync and push transport

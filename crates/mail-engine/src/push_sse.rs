@@ -8,6 +8,8 @@ use mail_domain::{
     PushTransport,
 };
 
+use tracing::debug;
+
 use crate::live::map_gateway_error;
 
 /// Push transport that reads JMAP state-change notifications via Server-Sent Events.
@@ -46,6 +48,7 @@ impl PushTransport for SsePushTransport {
         account_id: &AccountId,
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
+        debug!(account_id = %account_id, checkpoint, "opening SSE push stream");
         let stream = self
             .client
             .event_source(

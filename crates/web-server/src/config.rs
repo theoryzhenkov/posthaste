@@ -30,6 +30,7 @@ pub struct DaemonSettings {
     pub bind_address: String,
     pub cors_origin: String,
     pub poll_interval_seconds: u64,
+    pub log_level: String,
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
@@ -90,10 +91,16 @@ pub fn read_daemon_settings(
         .or(app_toml.daemon.poll_interval_seconds)
         .unwrap_or(60);
 
+    let log_level = std::env::var("MAIL_LOG_LEVEL")
+        .ok()
+        .or(app_toml.logging.level)
+        .unwrap_or_else(|| "info".to_string());
+
     Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
         poll_interval_seconds,
+        log_level,
     })
 }
 

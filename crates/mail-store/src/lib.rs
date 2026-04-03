@@ -30,6 +30,8 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use tracing::{debug, info};
+
 use crate::db::{
     bool_to_i64, configure_connection, init_schema, io_to_store_error, json_to_store_error,
     now_iso8601, parse_sync_object, sql_to_store_error,
@@ -77,6 +79,7 @@ impl DatabaseStore {
         configure_connection(&connection)?;
         init_schema(&connection)?;
 
+        info!(db_path = %db_path.display(), "database store opened");
         Ok(Self {
             db_path,
             data_root,
@@ -628,6 +631,12 @@ impl MailStore for DatabaseStore {
         account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
+        debug!(
+            account_id = %account_id,
+            mailboxes = batch.mailboxes.len(),
+            messages = batch.messages.len(),
+            "applying sync batch to store"
+        );
         let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
         self.write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))
     }

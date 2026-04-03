@@ -1,5 +1,6 @@
 mod api;
 mod config;
+mod logging;
 mod push;
 mod sanitize;
 mod secret;
@@ -16,6 +17,8 @@ use mail_domain::{ConfigRepository, DomainEvent, MailService, MailStore, SecretS
 use mail_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::trace::TraceLayer;
+use tracing::{info, info_span};
 
 use crate::config::resolve_roots;
 use crate::secret::SystemSecretStore;
@@ -60,26 +63,30 @@ async fn main() {
     let config_repo =
         TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
 
+    // Read daemon settings (includes log level) before initializing logging
+    let daemon =
+        config::read_daemon_settings(&config_repo).expect("failed to read daemon settings");
+
+    // Initialize tracing subscriber (stderr + JSON file).
+    // Guard must live for the duration of main to flush pending log writes.
+    let _log_guard = logging::init(&roots.state_root, &daemon.log_level);
+
     // Startup flow: initialize config if empty
     if config_repo.is_empty() {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
             config::import_bootstrap(bootstrap_path, &config_repo)
                 .expect("failed to import bootstrap template");
-            println!(
-                "imported bootstrap template from {}",
-                bootstrap_path.display()
+            info!(
+                path = %bootstrap_path.display(),
+                "imported bootstrap template"
             );
         } else {
             config_repo
                 .initialize_defaults()
                 .expect("failed to initialize default config");
-            println!("initialized default config");
+            info!("initialized default config");
         }
     }
-
-    // Read daemon settings from config
-    let daemon =
-        config::read_daemon_settings(&config_repo).expect("failed to read daemon settings");
 
     // Open SQLite store (state only)
     let db_path = roots.state_root.join("mail.sqlite");
@@ -128,6 +135,14 @@ async fn main() {
         ))
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
+
+    let trace_layer = TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+        info_span!(
+            "http.request",
+            method = %request.method(),
+            path = %request.uri().path(),
+        )
+    });
 
     let app = Router::new()
         .route(
@@ -222,16 +237,17 @@ async fn main() {
         )
         .route("/v1/config:reload", post(api::reload_config))
         .route("/v1/events", get(api::stream_events))
+        .layer(trace_layer)
         .layer(cors)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&daemon.bind_address)
         .await
         .expect("failed to bind daemon listener");
-    println!(
-        "mail-daemon listening on http://{} (config: {})",
-        daemon.bind_address,
-        roots.config_root.display()
+    info!(
+        address = %daemon.bind_address,
+        config_root = %roots.config_root.display(),
+        "mail-daemon listening"
     );
     axum::serve(listener, app)
         .await

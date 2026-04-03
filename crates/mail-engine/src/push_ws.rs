@@ -6,6 +6,8 @@ use mail_domain::{
     PushTransport,
 };
 
+use tracing::{debug, warn};
+
 use crate::live::map_gateway_error;
 use crate::ws_connection::SharedWsConnection;
 
@@ -44,6 +46,7 @@ impl PushTransport for WsPushTransport {
         account_id: &AccountId,
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
+        debug!(account_id = %account_id, checkpoint, "opening WS push stream");
         self.ws.ensure_connected().await?;
         self.ws.enable_push(checkpoint).await?;
 
@@ -61,10 +64,15 @@ impl PushTransport for WsPushTransport {
                         }
                     }
                     Some(Err(error)) => {
-                        yield Err(map_gateway_error(error));
+                        let mapped = map_gateway_error(error);
+                        warn!(account_id = %account_id, error = %mapped, "WS push stream error");
+                        yield Err(mapped);
                         return;
                     }
-                    None => return,
+                    None => {
+                        debug!(account_id = %account_id, "WS push stream ended");
+                        return;
+                    }
                 }
             }
         })))
