@@ -1,21 +1,21 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use jmap_client::client::Client;
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, AccountId, GatewayError, PushNotification, PushStream,
     PushTransport,
 };
 
 use crate::live::map_gateway_error;
+use crate::ws_connection::SharedWsConnection;
 
 pub struct WsPushTransport {
-    client: Arc<Client>,
+    ws: Arc<SharedWsConnection>,
 }
 
 impl WsPushTransport {
-    pub fn new(client: Arc<Client>) -> Self {
-        Self { client }
+    pub fn new(ws: Arc<SharedWsConnection>) -> Self {
+        Self { ws }
     }
 }
 
@@ -30,23 +30,10 @@ impl PushTransport for WsPushTransport {
         account_id: &AccountId,
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
-        if self.client.session().websocket_capabilities().is_none() {
-            return Ok(None);
-        }
+        self.ws.ensure_connected().await?;
+        self.ws.enable_push(checkpoint).await?;
 
-        let ws = self
-            .client
-            .connect_ws_correlated()
-            .await
-            .map_err(map_gateway_error)?;
-
-        ws.enable_push_ws(
-            Some(crate::WATCHED_DATA_TYPES),
-            checkpoint.map(String::from),
-        )
-        .await
-        .map_err(map_gateway_error)?;
-
+        let ws = self.ws.clone();
         let account_id = account_id.clone();
 
         Ok(Some(Box::pin(async_stream::stream! {
@@ -80,8 +67,7 @@ fn convert_push_object(
                 .remove(account_id.as_str())
                 .map(|entries| entries.into_keys().map(|dt| dt.to_string()).collect())
                 .unwrap_or_default();
-            let received_at =
-                domain_now_iso8601().map_err(GatewayError::Rejected)?;
+            let received_at = domain_now_iso8601().map_err(GatewayError::Rejected)?;
             Ok(Some(PushNotification {
                 account_id: account_id.clone(),
                 changed: changed_types,

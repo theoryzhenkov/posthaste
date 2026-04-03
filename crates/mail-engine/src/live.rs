@@ -34,20 +34,50 @@ pub async fn connect_jmap_client(
 
 pub struct LiveJmapGateway {
     client: Arc<Client>,
+    ws: Option<Arc<crate::ws_connection::SharedWsConnection>>,
 }
 
 impl LiveJmapGateway {
     pub fn from_client(client: Arc<Client>) -> Self {
-        Self { client }
+        let ws = if client.session().websocket_capabilities().is_some() {
+            Some(Arc::new(crate::ws_connection::SharedWsConnection::new(
+                client.clone(),
+            )))
+        } else {
+            None
+        };
+        Self { client, ws }
     }
 
     pub async fn connect(url: &str, username: &str, password: &str) -> Result<Self, GatewayError> {
         let client = connect_jmap_client(url, username, password).await?;
-        Ok(Self { client })
+        Ok(Self::from_client(client))
     }
 
     pub fn client(&self) -> &Arc<Client> {
         &self.client
+    }
+
+    /// Route a JMAP request through WebSocket if connected, HTTP otherwise.
+    ///
+    /// Currently only interactive methods (mutations, body fetch, identity,
+    /// compose) use this. Sync helpers still use HTTP convenience methods
+    /// directly. TODO: once jmap-client supports transparent WS routing in
+    /// Client::send(), all paths will use WS automatically and this method
+    /// can be removed.
+    async fn send_request(
+        &self,
+        request: jmap_client::core::request::Request<'_>,
+    ) -> Result<
+        jmap_client::core::response::Response<jmap_client::core::response::TaggedMethodResponse>,
+        GatewayError,
+    > {
+        if let Some(ref ws) = self.ws {
+            if ws.is_connected().await {
+                return ws.send(request).await;
+            }
+        }
+        request.send().await.map_err(map_gateway_error)
     }
 }
 
@@ -114,9 +144,12 @@ impl MailGateway for LiveJmapGateway {
             .body_properties([email::BodyProperty::PartId, email::BodyProperty::Type])
             .fetch_all_body_values(true);
 
-        let mut emails = request
-            .send_get_email()
-            .await
+        let mut emails = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_get_email()
             .map_err(map_gateway_error)?
             .take_list();
         let email = emails
@@ -174,7 +207,13 @@ impl MailGateway for LiveJmapGateway {
         for keyword in &command.remove {
             update.keyword(keyword.as_str(), false);
         }
-        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        let response = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_set_email()
+            .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
     }
 
@@ -192,7 +231,13 @@ impl MailGateway for LiveJmapGateway {
         }
         set.update(message_id.as_str())
             .mailbox_ids(mailbox_ids.iter().map(MailboxId::as_str));
-        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        let response = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_set_email()
+            .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
     }
 
@@ -208,7 +253,13 @@ impl MailGateway for LiveJmapGateway {
             set.if_in_state(expected_state);
         }
         set.destroy([message_id.as_str()]);
-        let response = request.send_set_email().await.map_err(map_gateway_error)?;
+        let response = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_set_email()
+            .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
     }
 
@@ -219,9 +270,12 @@ impl MailGateway for LiveJmapGateway {
             identity::Property::Name,
             identity::Property::Email,
         ]);
-        let mut identities = request
-            .send_get_identity()
-            .await
+        let mut identities = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_get_identity()
             .map_err(map_gateway_error)?
             .take_list();
         let identity = identities
@@ -258,9 +312,12 @@ impl MailGateway for LiveJmapGateway {
             .body_properties([email::BodyProperty::PartId, email::BodyProperty::Type])
             .fetch_all_body_values(true);
 
-        let mut emails = request
-            .send_get_email()
-            .await
+        let mut emails = self
+            .send_request(request)
+            .await?
+            .pop_method_response()
+            .unwrap()
+            .unwrap_get_email()
             .map_err(map_gateway_error)?
             .take_list();
         let email = emails
@@ -339,15 +396,19 @@ impl MailGateway for LiveJmapGateway {
         let submission = request.set_email_submission().create();
         submission.email_id("#c0");
         submission.identity_id(identity.id.as_str());
-        request.send().await.map_err(map_gateway_error)?;
+        self.send_request(request).await?;
         Ok(())
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
-        vec![
-            Box::new(crate::push_ws::WsPushTransport::new(self.client.clone())),
-            Box::new(crate::push_sse::SsePushTransport::new(self.client.clone())),
-        ]
+        let mut transports: Vec<Box<dyn PushTransport>> = Vec::new();
+        if let Some(ref ws) = self.ws {
+            transports.push(Box::new(crate::push_ws::WsPushTransport::new(ws.clone())));
+        }
+        transports.push(Box::new(crate::push_sse::SsePushTransport::new(
+            self.client.clone(),
+        )));
+        transports
     }
 }
 
