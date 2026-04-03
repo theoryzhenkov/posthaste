@@ -12,6 +12,7 @@ dependents:
   - path: spec/L0-search
   - path: spec/L0-compose
   - path: spec/L0-ui
+  - path: spec/L0-logging
 ---
 
 # PostHaste
@@ -83,6 +84,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **ui** -- Web UI, React components, conversation list, HTML rendering, keyboard model
 - **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](spec/L0-accounts.md) [L1](spec/L1-accounts.md)
 - **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](spec/L0-api.md) [L1](spec/L1-api.md)
+- **logging** -- Structured tracing and logging across backend and frontend. [L0](spec/L0-logging.md) [L1](spec/L1-logging.md)
 
 ## MVP acceptance criteria
 
