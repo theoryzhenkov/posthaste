@@ -10,6 +10,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { buildEventsUrl } from "../api/client";
+import { syncLogger } from "../logger";
 import type { DomainEvent } from "../api/types";
 import {
   applyKeywordEventPatch,
@@ -62,7 +63,7 @@ export function useDaemonEvents() {
       try {
         payload = JSON.parse(event.data) as DomainEvent;
       } catch (error) {
-        console.warn("Ignoring malformed daemon event", error, event.data);
+        syncLogger.warn({ error, raw: event.data }, "ignoring malformed daemon event");
         return;
       }
 

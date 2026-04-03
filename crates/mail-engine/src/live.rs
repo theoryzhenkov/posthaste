@@ -11,6 +11,8 @@ use mail_domain::{
     SyncCursor, SyncObject,
 };
 
+use tracing::{debug, info, instrument};
+
 use crate::compose::{addresses_to_recipients, prefix_subject, recipient_to_address, render_markdown};
 use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 
@@ -21,11 +23,13 @@ use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 ///
 /// @spec spec/L1-jmap#session
 /// @spec spec/L1-jmap#authentication
+#[instrument(skip(password))]
 pub async fn connect_jmap_client(
     url: &str,
     username: &str,
     password: &str,
 ) -> Result<Arc<Client>, GatewayError> {
+    debug!("connecting to JMAP server");
     let host = url::Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(String::from))
@@ -36,6 +40,7 @@ pub async fn connect_jmap_client(
         .connect(url)
         .await
         .map_err(map_gateway_error)?;
+    info!("JMAP session established");
     Ok(Arc::new(client))
 }
 
@@ -156,8 +161,21 @@ impl MailGateway for LiveJmapGateway {
             .find(|cursor| cursor.object_type == SyncObject::Message)
             .map(|cursor| cursor.state.as_str());
 
+        debug!(
+            has_mailbox_state = mailbox_cursor.is_some(),
+            has_message_state = message_cursor.is_some(),
+            "fetching JMAP changes"
+        );
         let mailbox_sync = fetch_mailbox_sync(&self.client, mailbox_cursor).await?;
         let email_sync = fetch_email_sync(&self.client, message_cursor).await?;
+        debug!(
+            mailboxes = mailbox_sync.mailboxes.len(),
+            messages = email_sync.messages.len(),
+            deleted_mailboxes = mailbox_sync.deleted_mailbox_ids.len(),
+            deleted_messages = email_sync.deleted_message_ids.len(),
+            replace_all_mailboxes = mailbox_sync.replace_all_mailboxes,
+            "JMAP sync batch fetched"
+        );
 
         Ok(SyncBatch {
             mailboxes: mailbox_sync.mailboxes,

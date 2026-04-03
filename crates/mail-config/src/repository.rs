@@ -61,6 +61,7 @@ impl TomlConfigRepository {
             schema_version: 1,
             default_source_id: None,
             daemon: Default::default(),
+            logging: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;
 

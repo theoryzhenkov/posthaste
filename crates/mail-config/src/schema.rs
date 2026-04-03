@@ -18,6 +18,13 @@ pub struct AppToml {
     pub default_source_id: Option<String>,
     #[serde(default)]
     pub daemon: DaemonToml,
+    #[serde(default)]
+    pub logging: LoggingToml,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LoggingToml {
+    pub level: Option<String>,
 }
 
 /// Daemon-specific settings read only at startup (bind address, CORS, poll
@@ -63,6 +70,7 @@ impl AppToml {
                 .as_ref()
                 .map(|id| id.to_string()),
             daemon: existing.daemon.clone(),
+            logging: existing.logging.clone(),
         }
     }
 }
@@ -578,6 +586,7 @@ mod tests {
             schema_version: 1,
             default_source_id: None,
             daemon: DaemonToml::default(),
+            logging: LoggingToml::default(),
         };
         let toml_struct = AppToml::from_app_settings(&settings, &existing);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
