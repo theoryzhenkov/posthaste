@@ -12,7 +12,8 @@ use crate::ConfigError;
 
 /// Generates a newtype wrapper around `String` for type-safe identifiers.
 macro_rules! string_id {
-    ($name:ident) => {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(pub String);
@@ -43,40 +44,54 @@ macro_rules! string_id {
     };
 }
 
-/// Opaque server-assigned identifier for a mail account.
-///
-/// @spec spec/L0-accounts#the-invariant
-string_id!(AccountId);
+string_id!(
+    /// Opaque server-assigned identifier for a mail account.
+    ///
+    /// @spec spec/L0-accounts#the-invariant
+    AccountId
+);
 
-/// Opaque server-assigned identifier for a mailbox (folder or label).
-///
-/// @spec spec/L1-jmap#core-types
-string_id!(MailboxId);
+string_id!(
+    /// Opaque server-assigned identifier for a mailbox (folder or label).
+    ///
+    /// @spec spec/L1-jmap#core-types
+    MailboxId
+);
 
-/// Opaque server-assigned identifier for a single email message.
-///
-/// @spec spec/L1-jmap#core-types
-string_id!(MessageId);
+string_id!(
+    /// Opaque server-assigned identifier for a single email message.
+    ///
+    /// @spec spec/L1-jmap#core-types
+    MessageId
+);
 
-/// Opaque server-assigned identifier for a JMAP thread.
-///
-/// @spec spec/L1-jmap#core-types
-string_id!(ThreadId);
+string_id!(
+    /// Opaque server-assigned identifier for a JMAP thread.
+    ///
+    /// @spec spec/L1-jmap#core-types
+    ThreadId
+);
 
-/// Opaque server-assigned identifier for a binary blob (attachment or body content).
-///
-/// @spec spec/L1-jmap#methods-used
-string_id!(BlobId);
+string_id!(
+    /// Opaque server-assigned identifier for a binary blob (attachment or body content).
+    ///
+    /// @spec spec/L1-jmap#methods-used
+    BlobId
+);
 
-/// Locally-derived identifier for a conversation (cross-source thread grouping).
-///
-/// @spec spec/L1-sync#conversation-pagination
-string_id!(ConversationId);
+string_id!(
+    /// Locally-derived identifier for a conversation (cross-source thread grouping).
+    ///
+    /// @spec spec/L1-sync#conversation-pagination
+    ConversationId
+);
 
-/// Identifier for a smart mailbox (saved query with display metadata).
-///
-/// @spec spec/L1-search#smart-mailbox-data-model
-string_id!(SmartMailboxId);
+string_id!(
+    /// Identifier for a smart mailbox (saved query with display metadata).
+    ///
+    /// @spec spec/L1-search#smart-mailbox-data-model
+    SmartMailboxId
+);
 
 /// Default timestamp for missing `created_at`/`updated_at` fields in config.
 ///
