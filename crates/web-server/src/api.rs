@@ -14,7 +14,7 @@ use mail_domain::{
     ReplaceMailboxesCommand, SecretKind, SecretRef, SecretStatus, SecretStorage, ServiceError,
     SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind,
     SmartMailboxRule, SmartMailboxSummary, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -28,10 +28,10 @@ mod cursor_support;
 use account_support::{
     account_overview, append_and_publish_account_event, apply_account_patch,
     apply_secret_instruction, delete_managed_secret, generate_smart_mailbox_id, internal_error,
-    secret_status, store_error_to_api, validate_account_settings, validate_secret_request,
+    store_error_to_api, validate_account_settings,
 };
 use cursor_support::{
-    conversation_limit, conversation_page_response, encode_conversation_cursor, event_to_sse,
+    conversation_limit, conversation_page_response, event_to_sse,
     matches_event, parse_conversation_cursor,
 };
 

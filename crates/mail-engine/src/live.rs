@@ -5,9 +5,9 @@ use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::{email, identity};
 use mail_domain::{
-    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
-    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId, MutationOutcome,
-    PushTransport, Recipient, ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch,
+    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, FetchedBody,
+    GatewayError, Identity, MailGateway, MailboxId, MessageId, MutationOutcome, PushTransport,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch,
     SyncCursor, SyncObject,
 };
 
