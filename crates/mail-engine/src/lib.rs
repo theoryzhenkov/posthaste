@@ -1,7 +1,10 @@
+mod compose;
+mod conversions;
 mod live;
 mod mock;
 mod push_sse;
 mod push_ws;
+mod sync;
 mod ws_connection;
 
 pub use live::{connect_jmap_client, LiveJmapGateway};

@@ -3,16 +3,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
-use jmap_client::{email, identity, mailbox};
+use jmap_client::{email, identity};
 use mail_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
-    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, MutationOutcome, PushTransport, Recipient, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, RFC3339_EPOCH,
+    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId, MutationOutcome,
+    PushTransport, Recipient, ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch,
+    SyncCursor, SyncObject,
 };
-use pulldown_cmark::{html, Options, Parser};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+
+use crate::compose::{addresses_to_recipients, prefix_subject, recipient_to_address, render_markdown};
+use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 
 pub async fn connect_jmap_client(
     url: &str,
@@ -412,11 +412,30 @@ impl MailGateway for LiveJmapGateway {
     }
 }
 
+pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
+    match error {
+        jmap_client::Error::Problem(problem) => {
+            if problem.status == Some(401) {
+                GatewayError::Auth
+            } else {
+                GatewayError::Network(problem.to_string())
+            }
+        }
+        jmap_client::Error::Method(method) => match method.p_type {
+            MethodErrorType::StateMismatch => GatewayError::StateMismatch,
+            MethodErrorType::CannotCalculateChanges => GatewayError::CannotCalculateChanges,
+            _ => GatewayError::Rejected(format!("{:?}", method.p_type)),
+        },
+        other => GatewayError::Network(other.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use mail_domain::{FetchedBody, PushTransport, SetKeywordsCommand, SyncBatch};
 
     struct RecordingGateway {
         seen_account_ids: Mutex<Vec<AccountId>>,
@@ -469,7 +488,10 @@ mod tests {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
-        async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError> {
+        async fn fetch_identity(
+            &self,
+            account_id: &AccountId,
+        ) -> Result<Identity, GatewayError> {
             self.seen_account_ids
                 .lock()
                 .expect("recording lock poisoned")
@@ -532,373 +554,5 @@ mod tests {
         assert_eq!(cursor.object_type, SyncObject::Message);
         assert_eq!(cursor.state, "message-9");
         assert!(!cursor.updated_at.is_empty());
-    }
-}
-
-struct MailboxSync {
-    mailboxes: Vec<MailboxRecord>,
-    deleted_mailbox_ids: Vec<MailboxId>,
-    replace_all_mailboxes: bool,
-    cursor: SyncCursor,
-}
-
-struct MessageSync {
-    messages: Vec<MessageRecord>,
-    deleted_message_ids: Vec<MessageId>,
-    cursor: SyncCursor,
-}
-
-async fn fetch_mailbox_sync(
-    client: &Client,
-    since_state: Option<&str>,
-) -> Result<MailboxSync, GatewayError> {
-    match since_state {
-        Some(state) => match fetch_mailbox_delta(client, state).await {
-            Ok(sync) => Ok(sync),
-            Err(GatewayError::CannotCalculateChanges) => fetch_mailbox_full(client).await,
-            Err(err) => Err(err),
-        },
-        None => fetch_mailbox_full(client).await,
-    }
-}
-
-async fn fetch_email_sync(
-    client: &Client,
-    since_state: Option<&str>,
-) -> Result<MessageSync, GatewayError> {
-    match since_state {
-        Some(state) => match fetch_email_delta(client, state).await {
-            Ok(sync) => Ok(sync),
-            Err(GatewayError::CannotCalculateChanges) => fetch_email_full(client).await,
-            Err(err) => Err(err),
-        },
-        None => fetch_email_full(client).await,
-    }
-}
-
-async fn fetch_mailbox_delta(
-    client: &Client,
-    since_state: &str,
-) -> Result<MailboxSync, GatewayError> {
-    let mut current_state = since_state.to_string();
-    let mut upsert = Vec::new();
-    let mut deleted = Vec::new();
-    loop {
-        let changes = client
-            .mailbox_changes(&current_state, 500)
-            .await
-            .map_err(map_gateway_error)?;
-        deleted.extend(changes.destroyed().iter().cloned().map(MailboxId));
-        let fetch_ids: Vec<&str> = changes
-            .created()
-            .iter()
-            .chain(changes.updated().iter())
-            .map(String::as_str)
-            .collect();
-        if !fetch_ids.is_empty() {
-            let mut request = client.build();
-            request.get_mailbox().ids(fetch_ids).properties([
-                mailbox::Property::Id,
-                mailbox::Property::Name,
-                mailbox::Property::Role,
-                mailbox::Property::UnreadEmails,
-                mailbox::Property::TotalEmails,
-            ]);
-            for mailbox in request
-                .send_get_mailbox()
-                .await
-                .map_err(map_gateway_error)?
-                .take_list()
-            {
-                upsert.push(to_mailbox_record(&mailbox));
-            }
-        }
-        current_state = changes.new_state().to_string();
-        if !changes.has_more_changes() {
-            break;
-        }
-    }
-    Ok(MailboxSync {
-        mailboxes: upsert,
-        deleted_mailbox_ids: deleted,
-        replace_all_mailboxes: false,
-        cursor: SyncCursor {
-            object_type: SyncObject::Mailbox,
-            state: current_state,
-            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
-        },
-    })
-}
-
-async fn fetch_email_delta(
-    client: &Client,
-    since_state: &str,
-) -> Result<MessageSync, GatewayError> {
-    let mut current_state = since_state.to_string();
-    let mut upsert = Vec::new();
-    let mut deleted = Vec::new();
-    loop {
-        let changes = client
-            .email_changes(&current_state, Some(500))
-            .await
-            .map_err(map_gateway_error)?;
-        deleted.extend(changes.destroyed().iter().cloned().map(MessageId));
-        let fetch_ids: Vec<String> = changes
-            .created()
-            .iter()
-            .chain(changes.updated().iter())
-            .cloned()
-            .collect();
-        for chunk in fetch_ids.chunks(100) {
-            let mut request = client.build();
-            request
-                .get_email()
-                .ids(chunk.iter().map(String::as_str))
-                .properties([
-                    email::Property::Id,
-                    email::Property::ThreadId,
-                    email::Property::BlobId,
-                    email::Property::MailboxIds,
-                    email::Property::Keywords,
-                    email::Property::Subject,
-                    email::Property::From,
-                    email::Property::Preview,
-                    email::Property::ReceivedAt,
-                    email::Property::HasAttachment,
-                    email::Property::Size,
-                ]);
-            for email in request
-                .send_get_email()
-                .await
-                .map_err(map_gateway_error)?
-                .take_list()
-            {
-                upsert.push(to_message_record(&email));
-            }
-        }
-        current_state = changes.new_state().to_string();
-        if !changes.has_more_changes() {
-            break;
-        }
-    }
-    Ok(MessageSync {
-        messages: upsert,
-        deleted_message_ids: deleted,
-        cursor: SyncCursor {
-            object_type: SyncObject::Message,
-            state: current_state,
-            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
-        },
-    })
-}
-
-async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError> {
-    let mailbox_ids = client
-        .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
-        .await
-        .map_err(map_gateway_error)?
-        .take_ids();
-    let mut request = client.build();
-    request
-        .get_mailbox()
-        .ids(mailbox_ids.iter().map(String::as_str))
-        .properties([
-            mailbox::Property::Id,
-            mailbox::Property::Name,
-            mailbox::Property::Role,
-            mailbox::Property::UnreadEmails,
-            mailbox::Property::TotalEmails,
-        ]);
-    let mut response = request
-        .send_get_mailbox()
-        .await
-        .map_err(map_gateway_error)?;
-    let state = response.take_state();
-    Ok(MailboxSync {
-        mailboxes: response.take_list().iter().map(to_mailbox_record).collect(),
-        deleted_mailbox_ids: Vec::new(),
-        replace_all_mailboxes: true,
-        cursor: SyncCursor {
-            object_type: SyncObject::Mailbox,
-            state,
-            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
-        },
-    })
-}
-
-async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> {
-    let email_ids = client
-        .email_query(
-            None::<email::query::Filter>,
-            [email::query::Comparator::received_at().descending()].into(),
-        )
-        .await
-        .map_err(map_gateway_error)?
-        .take_ids();
-    let mut messages = Vec::new();
-    let mut state = None;
-    for chunk in email_ids.chunks(100) {
-        let mut request = client.build();
-        request
-            .get_email()
-            .ids(chunk.iter().map(String::as_str))
-            .properties([
-                email::Property::Id,
-                email::Property::ThreadId,
-                email::Property::BlobId,
-                email::Property::MailboxIds,
-                email::Property::Keywords,
-                email::Property::Subject,
-                email::Property::From,
-                email::Property::Preview,
-                email::Property::ReceivedAt,
-                email::Property::HasAttachment,
-                email::Property::Size,
-                email::Property::MessageId,
-                email::Property::References,
-                email::Property::InReplyTo,
-            ]);
-        let mut response = request.send_get_email().await.map_err(map_gateway_error)?;
-        if state.is_none() {
-            state = Some(response.take_state());
-        }
-        messages.extend(response.take_list().iter().map(to_message_record));
-    }
-    Ok(MessageSync {
-        messages,
-        deleted_message_ids: Vec::new(),
-        cursor: SyncCursor {
-            object_type: SyncObject::Message,
-            state: state.unwrap_or_default(),
-            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
-        },
-    })
-}
-
-fn to_mailbox_record(mailbox: &jmap_client::mailbox::Mailbox) -> MailboxRecord {
-    let role = match mailbox.role() {
-        mailbox::Role::Inbox => Some("inbox".to_string()),
-        mailbox::Role::Drafts => Some("drafts".to_string()),
-        mailbox::Role::Sent => Some("sent".to_string()),
-        mailbox::Role::Trash => Some("trash".to_string()),
-        mailbox::Role::Junk => Some("junk".to_string()),
-        mailbox::Role::Archive => Some("archive".to_string()),
-        mailbox::Role::None => None,
-        other => Some(format!("{other:?}").to_lowercase()),
-    };
-    MailboxRecord {
-        id: MailboxId(mailbox.id().unwrap_or_default().to_string()),
-        name: mailbox.name().unwrap_or("(unnamed)").to_string(),
-        role,
-        unread_emails: mailbox.unread_emails() as i64,
-        total_emails: mailbox.total_emails() as i64,
-    }
-}
-
-fn to_message_record(email: &jmap_client::email::Email) -> MessageRecord {
-    let (from_name, from_email) = email
-        .from()
-        .and_then(|addresses| addresses.first())
-        .map(|address| {
-            (
-                address.name().map(String::from),
-                Some(address.email().to_string()),
-            )
-        })
-        .unwrap_or((None, None));
-    MessageRecord {
-        id: MessageId(email.id().unwrap_or_default().to_string()),
-        source_thread_id: mail_domain::ThreadId(email.thread_id().unwrap_or_default().to_string()),
-        remote_blob_id: email.blob_id().map(|blob_id| BlobId(blob_id.to_string())),
-        subject: email.subject().map(String::from),
-        from_name,
-        from_email,
-        preview: email.preview().map(String::from),
-        received_at: email
-            .received_at()
-            .and_then(timestamp_to_iso8601)
-            .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
-        has_attachment: email.has_attachment(),
-        size: email.size() as i64,
-        mailbox_ids: email
-            .mailbox_ids()
-            .into_iter()
-            .map(|id| MailboxId(id.to_string()))
-            .collect(),
-        keywords: email.keywords().into_iter().map(String::from).collect(),
-        body_html: None,
-        body_text: None,
-        raw_mime: None,
-        rfc_message_id: email.message_id().and_then(|ids| ids.first()).cloned(),
-        in_reply_to: email.in_reply_to().and_then(|ids| ids.first()).cloned(),
-        references: email
-            .references()
-            .map(|references| references.to_vec())
-            .unwrap_or_default(),
-    }
-}
-
-fn render_markdown(markdown: &str) -> String {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(markdown, options);
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body>{html_output}</body></html>"
-    )
-}
-
-fn recipient_to_address(recipient: &Recipient) -> jmap_client::email::EmailAddress {
-    match &recipient.name {
-        Some(name) if !name.is_empty() => (name.as_str(), recipient.email.as_str()).into(),
-        _ => recipient.email.as_str().into(),
-    }
-}
-
-fn addresses_to_recipients(addresses: &[jmap_client::email::EmailAddress]) -> Vec<Recipient> {
-    addresses
-        .iter()
-        .map(|address| Recipient {
-            name: address.name().map(String::from),
-            email: address.email().to_string(),
-        })
-        .collect()
-}
-
-fn prefix_subject(prefix: &str, subject: &str) -> String {
-    if subject
-        .to_ascii_lowercase()
-        .starts_with(&prefix.to_ascii_lowercase())
-    {
-        subject.to_string()
-    } else {
-        format!("{prefix} {subject}")
-    }
-}
-
-fn timestamp_to_iso8601(timestamp: i64) -> Option<String> {
-    OffsetDateTime::from_unix_timestamp(timestamp)
-        .ok()
-        .and_then(|value| value.format(&Rfc3339).ok())
-}
-
-pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
-    match error {
-        jmap_client::Error::Problem(problem) => {
-            if problem.status == Some(401) {
-                GatewayError::Auth
-            } else {
-                GatewayError::Network(problem.to_string())
-            }
-        }
-        jmap_client::Error::Method(method) => match method.p_type {
-            MethodErrorType::StateMismatch => GatewayError::StateMismatch,
-            MethodErrorType::CannotCalculateChanges => GatewayError::CannotCalculateChanges,
-            _ => GatewayError::Rejected(format!("{:?}", method.p_type)),
-        },
-        other => GatewayError::Network(other.to_string()),
     }
 }
