@@ -468,8 +468,8 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-background">
-      <div className="border-b border-border px-3 pb-2 pt-3">
-        <div className="flex items-baseline gap-2">
+      <div className="border-b border-border pt-3">
+        <div className="flex items-baseline gap-2 px-3">
           <h2 className="text-sm font-semibold tracking-tight">{selectedView.name}</h2>
           <span className="text-xs text-muted-foreground">{countLabel}</span>
         </div>
@@ -480,7 +480,7 @@ export function MessageList({
           onReset={resetColumns}
         >
           <div
-            className="mt-2 grid gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+            className="mt-2 grid gap-3 border-t border-border px-3 pb-2 pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
             style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
           >
             <DndContext
