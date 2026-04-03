@@ -29,6 +29,7 @@ App
         │   ├── Smart mailbox section
         │   └── Source mailbox sections
         ├── MessageList
+        │   ├── Column header bar (SortableColumnHeader + ColumnResizeHandle)
         │   ├── Paginated conversation query
         │   ├── Virtualized visible rows
         │   └── Bottom load-more sentinel
@@ -62,6 +63,16 @@ Mutations still use query invalidation for local actions, but the conversation l
 - Near the bottom of the scroll container, the list fetches the next page.
 
 Each row represents a conversation summary, not an individual message. The row displays the latest sender, subject, preview, relative timestamp, unread state, attachment marker, and message count.
+
+## Column configuration
+
+Columns are reorderable (drag-and-drop via dnd-kit), sortable (click header), and resizable (drag right edge via `ColumnResizeHandle`).
+
+`useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is forwarded to the backend via `sort` and `sortDir` query params -- the backend performs the sort, not the frontend. Available sort fields: `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment`; default is `date` DESC.
+
+Column widths are stored as pixel overrides (`ColumnWidths = Partial<Record<ColumnId, number>>`). Columns without an override use their default CSS grid width from the column definition's `gridWidth`. `buildGridTemplate` accepts optional width overrides and emits pixel values for overridden columns.
+
+All column config (visibility, order, sort, widths) is persisted to localStorage.
 
 ## Live prepend behavior
 
