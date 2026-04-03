@@ -1,6 +1,11 @@
+/**
+ * Mailbox role icons and name-to-role mapping for sidebar and list rendering.
+ * @spec spec/L1-ui#component-hierarchy
+ */
 import { Archive, Folder, Inbox, Mail, PenLine, Send, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
 import type { KnownMailboxRole } from "./api/types";
 
+/** Lucide icon mapping for each known JMAP mailbox role. */
 const ROLE_ICON_MAP: Record<KnownMailboxRole, LucideIcon> = {
   inbox: Inbox,
   archive: Archive,
@@ -10,6 +15,7 @@ const ROLE_ICON_MAP: Record<KnownMailboxRole, LucideIcon> = {
   trash: Trash2,
 };
 
+/** Heuristically map a mailbox or smart-mailbox name to a known role. */
 export function mailboxRoleFromName(name: string): KnownMailboxRole | null {
   switch (name.toLowerCase()) {
     case "inbox":
@@ -30,6 +36,7 @@ export function mailboxRoleFromName(name: string): KnownMailboxRole | null {
   }
 }
 
+/** Render the Lucide icon for a mailbox role, falling back to a generic folder icon. */
 export function renderMailboxRoleIcon(
   role: KnownMailboxRole | null,
   size = 14,
@@ -39,6 +46,7 @@ export function renderMailboxRoleIcon(
   return <Icon size={size} className="shrink-0 text-muted-foreground" />;
 }
 
+/** Choose a fallback icon for smart mailboxes ("All Mail" gets a Mail icon). */
 export function smartMailboxFallbackIcon(name: string): LucideIcon {
   return name.toLowerCase() === "all mail" ? Mail : Folder;
 }

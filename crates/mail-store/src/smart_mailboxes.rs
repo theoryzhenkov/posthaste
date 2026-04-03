@@ -1,5 +1,8 @@
 use super::*;
 
+/// Returns (unread, total) counts for messages matching a smart mailbox rule.
+///
+/// @spec spec/L1-search#smart-mailbox-data-model
 pub(crate) fn count_smart_mailbox_messages(
     connection: &Connection,
     rule: &SmartMailboxRule,

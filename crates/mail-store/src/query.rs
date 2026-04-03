@@ -86,6 +86,7 @@ pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> Result<DomainEvent, rusql
     })
 }
 
+/// Fetches mailbox IDs for a single message (read connection).
 pub(crate) fn fetch_mailbox_ids(
     connection: &Connection,
     account_id: &AccountId,
@@ -108,6 +109,7 @@ pub(crate) fn fetch_mailbox_ids(
         .map_err(sql_to_store_error)
 }
 
+/// Fetches mailbox IDs for a single message (within a transaction).
 pub(crate) fn fetch_mailbox_ids_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -130,6 +132,7 @@ pub(crate) fn fetch_mailbox_ids_tx(
         .map_err(sql_to_store_error)
 }
 
+/// Fetches keywords for a single message (within a transaction).
 pub(crate) fn fetch_keywords_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -152,6 +155,8 @@ pub(crate) fn fetch_keywords_tx(
         .map_err(sql_to_store_error)
 }
 
+/// Fetches a single message's full detail (summary + body + raw ref) within
+/// a transaction.
 pub(crate) fn query_message_detail_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -237,6 +242,7 @@ pub(crate) fn query_message_detail_tx(
     }))
 }
 
+/// Maps a database row to a `MessageSummaryRow`.
 fn row_to_message_summary_row(
     row: &rusqlite::Row<'_>,
 ) -> Result<MessageSummaryRow, rusqlite::Error> {
@@ -257,6 +263,7 @@ fn row_to_message_summary_row(
     })
 }
 
+/// Bulk-fetches mailbox IDs for a set of messages in chunks.
 fn fetch_mailbox_ids_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
@@ -266,6 +273,7 @@ fn fetch_mailbox_ids_bulk(
     })
 }
 
+/// Bulk-fetches keywords for a set of messages in chunks.
 fn fetch_keywords_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
@@ -275,6 +283,8 @@ fn fetch_keywords_bulk(
     })
 }
 
+/// Generic bulk-fetch for message-associated values (mailbox IDs or keywords).
+/// Queries in chunks of 400 to avoid SQLite parameter limits.
 fn fetch_message_values_bulk<T>(
     connection: &Connection,
     rows: &[MessageSummaryRow],
