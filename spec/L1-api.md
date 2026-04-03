@@ -110,11 +110,20 @@ Request validation errors use handler-specific codes: `invalid_account`, `invali
 
 ## Cursor pagination
 
-Conversation list endpoints accept `limit` and `cursor` query parameters. The default limit is 100; the maximum is 250. A limit of 0 or above 250 returns `invalid_limit`.
+Conversation list endpoints accept `limit`, `cursor`, `sort`, and `sort_dir` query parameters. The default limit is 100; the maximum is 250. A limit of 0 or above 250 returns `invalid_limit`.
 
-The cursor is an opaque string encoding `{timestamp_len}:{latest_received_at}:{conversation_id}`. Clients must treat it as opaque. The backend decodes the cursor and uses seek-based pagination (`WHERE (latest_received_at, conversation_id) < (cursor_ts, cursor_id)`) to produce the next page. The response includes `nextCursor` if more results exist; `null` otherwise.
+### Sort parameters
 
-Conversation list sort order is `latest_received_at DESC, conversation_id DESC`. Pages are strictly older than the cursor, with no OFFSET-based skipping.
+| Param | Type | Default | Values |
+|-------|------|---------|--------|
+| `sort` | `ConversationSortField?` | `Date` | `Date`, `From`, `Subject`, `Source`, `ThreadSize`, `Flagged`, `Attachment` |
+| `sort_dir` | `SortDirection?` | `Desc` | `Asc`, `Desc` |
+
+The backend sorts by `(sort_key, conversation_id)` in the requested direction. For example, `sort=From&sort_dir=Asc` orders by sender ascending, breaking ties by conversation ID ascending.
+
+### Cursor format
+
+The cursor is an opaque string encoding `{value_len}:{sort_value}:{conversation_id}`. Clients must treat it as opaque — the `sort_value` is the value of whichever column is being sorted. The backend decodes the cursor and uses seek-based pagination to produce the next page. The response includes `nextCursor` if more results exist; `null` otherwise. Pages are strictly past the cursor in the current sort order, with no OFFSET-based skipping.
 
 ## SSE event stream
 

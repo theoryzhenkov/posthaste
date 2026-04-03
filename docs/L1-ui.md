@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, conversation list behavior, live updates, HTML rendering"
-modified: 2026-04-01
-reviewed: 2026-04-01
+modified: 2026-04-03
+reviewed: 2026-04-03
 depends:
   - path: docs/L0-ui
   - path: docs/L0-api
