@@ -506,14 +506,17 @@ fn convert_value_to_toml(value: &SmartMailboxValue) -> toml::Value {
 
 // -- Helpers --
 
+/// Serde default for `SourceToml.enabled`.
 fn default_true() -> bool {
     true
 }
 
+/// Serde default: smart mailboxes default to user-created kind.
 fn default_user_kind() -> SmartMailboxKindToml {
     SmartMailboxKindToml::User
 }
 
+/// Serde default: rule groups default to the `All` (AND) operator.
 fn default_all_operator() -> GroupOperatorToml {
     GroupOperatorToml::All
 }
