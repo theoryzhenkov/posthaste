@@ -207,42 +207,13 @@ export const DEFAULT_SORT: SortConfig = {
   direction: "desc",
 };
 
-function getSortValue(
-  columnId: ColumnId,
-  c: ConversationSummary,
-): string | number {
-  switch (columnId) {
-    case "from":
-      return (c.fromName ?? c.fromEmail ?? "").toLowerCase();
-    case "subject":
-      return (c.subject ?? "").toLowerCase();
-    case "preview":
-      return (c.preview ?? "").toLowerCase();
-    case "date":
-      return c.latestReceivedAt;
-    case "source":
-      return c.latestSourceName.toLowerCase();
-    case "threadSize":
-      return c.messageCount;
-    case "flagged":
-      return c.isFlagged ? 1 : 0;
-    case "attachment":
-      return c.hasAttachment ? 1 : 0;
-  }
-}
-
-export function compareConversations(
-  config: SortConfig,
-  a: ConversationSummary,
-  b: ConversationSummary,
-): number {
-  const va = getSortValue(config.columnId, a);
-  const vb = getSortValue(config.columnId, b);
-  let cmp: number;
-  if (typeof va === "number" && typeof vb === "number") {
-    cmp = va - vb;
-  } else {
-    cmp = String(va).localeCompare(String(vb));
-  }
-  return config.direction === "asc" ? cmp : -cmp;
-}
+/** Columns that the backend supports for server-side sorting. */
+export const SORTABLE_COLUMNS: ReadonlySet<ColumnId> = new Set<ColumnId>([
+  "date",
+  "from",
+  "subject",
+  "source",
+  "threadSize",
+  "flagged",
+  "attachment",
+]);

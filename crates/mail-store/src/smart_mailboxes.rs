@@ -101,11 +101,17 @@ fn is_numeric_sort(sort_field: ConversationSortField) -> bool {
 }
 
 /// Bind a cursor's sort_value as the correct SQL type for the sort field.
-fn cursor_sort_sql_value(sort_field: ConversationSortField, raw: &str) -> SqlValue {
+fn cursor_sort_sql_value(
+    sort_field: ConversationSortField,
+    raw: &str,
+) -> Result<SqlValue, StoreError> {
     if is_numeric_sort(sort_field) {
-        SqlValue::Integer(raw.parse::<i64>().unwrap_or(0))
+        let n = raw.parse::<i64>().map_err(|_| {
+            StoreError::Failure(format!("invalid numeric cursor value: {raw}"))
+        })?;
+        Ok(SqlValue::Integer(n))
     } else {
-        SqlValue::Text(raw.to_string())
+        Ok(SqlValue::Text(raw.to_string()))
     }
 }
 
@@ -134,8 +140,8 @@ pub(crate) fn query_conversations(
     };
     let sort_key = sort_key_expr(sort_field);
     let page_filter = if let Some(cursor) = cursor {
-        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value));
-        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value));
+        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value)?);
+        params.push(cursor_sort_sql_value(sort_field, &cursor.sort_value)?);
         params.push(SqlValue::Text(cursor.conversation_id.as_str().to_string()));
         format!(
             "WHERE sort_key {seek_op} ?

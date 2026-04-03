@@ -7,6 +7,7 @@ import {
   ALL_COLUMNS,
   DEFAULT_COLUMNS,
   DEFAULT_SORT,
+  SORTABLE_COLUMNS,
 } from "./columns";
 
 const STORAGE_KEY = "posthaste-thread-columns";
@@ -139,6 +140,7 @@ export function useColumnConfig() {
   }, []);
 
   const toggleSort = useCallback((columnId: ColumnId) => {
+    if (!SORTABLE_COLUMNS.has(columnId)) return;
     const { columns, sort, widths } = getSnapshot();
     if (sort.columnId === columnId) {
       persist({
