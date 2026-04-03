@@ -18,6 +18,7 @@ import { RuleGroupEditor } from "./RuleGroupEditor";
 import { Field } from "./shared";
 import type { SmartMailboxEditorTarget } from "./types";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 
 export function SmartMailboxEditor({
   editorTarget,
@@ -103,9 +104,9 @@ export function SmartMailboxEditor({
           />
           <label className="grid gap-1.5 text-sm">
             <span className="text-muted-foreground">Position</span>
-            <input
+            <Input
               type="number"
-              className="h-9 rounded-md border border-border bg-card px-3 text-sm"
+              className="h-9 bg-card"
               value={form.position}
               onChange={(event) =>
                 setForm((current) => ({

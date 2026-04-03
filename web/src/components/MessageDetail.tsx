@@ -5,6 +5,8 @@ import type { MessageSummary, SourceMessageRef } from "../api/types";
 import { cn } from "../lib/utils";
 import { mergeConversationView } from "../mailState";
 import { formatRelativeTime } from "../utils/relativeTime";
+import { Badge } from "./ui/badge";
+import { Separator } from "./ui/separator";
 import { EmailFrame } from "./EmailFrame";
 
 interface MessageSelection extends SourceMessageRef {
@@ -116,19 +118,22 @@ export function MessageDetail({
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {tags.map((tag) => (
-              <span
-                className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
+              <Badge
+                variant="outline"
+                className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
                 key={tag}
               >
                 {tag}
-              </span>
+              </Badge>
             ))}
           </div>
         )}
 
         {/* Thread switcher */}
         {threadMessages.length > 1 && (
-          <div className="flex flex-wrap gap-1.5 border-t border-border pt-2">
+          <div className="space-y-2">
+            <Separator />
+            <div className="flex flex-wrap gap-1.5">
             {threadMessages.map((item, index) => (
               <button
                 key={`${item.sourceId}:${item.id}`}
@@ -153,6 +158,7 @@ export function MessageDetail({
                 </span>
               </button>
             ))}
+            </div>
           </div>
         )}
       </div>

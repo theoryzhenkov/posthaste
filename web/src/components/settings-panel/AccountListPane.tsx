@@ -4,7 +4,15 @@ import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { statusTone } from "./helpers";
 import { MetaStat, SummaryCard } from "./shared";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 export function AccountListPane({
   accounts,
@@ -42,21 +50,27 @@ export function AccountListPane({
           application
         </p>
         <div className="mt-3 grid gap-3">
-          <label className="grid gap-1.5 text-sm">
+          <div className="grid gap-1.5 text-sm">
             <span className="text-muted-foreground">Default account</span>
-            <select
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm"
-              value={defaultAccountId ?? ""}
-              onChange={(event) => onDefaultAccountChange(event.target.value || null)}
+            <Select
+              value={defaultAccountId ?? "__none__"}
+              onValueChange={(value) =>
+                onDefaultAccountChange(value === "__none__" ? null : value)
+              }
             >
-              <option value="">No default</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No default</SelectItem>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <SummaryCard label="Accounts" value={String(accountSummary.total)} />
@@ -109,9 +123,12 @@ export function AccountListPane({
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{account.name}</span>
                     {account.isDefault && (
-                      <span className="rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-primary">
+                      <Badge
+                        variant="outline"
+                        className="border-primary/40 bg-primary/10 font-mono text-[10px] uppercase tracking-wider text-primary"
+                      >
                         default
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -120,14 +137,15 @@ export function AccountListPane({
                   </p>
                 </button>
 
-                <span
+                <Badge
+                  variant="outline"
                   className={cn(
-                    "rounded border px-2 py-1 text-[10px] font-mono uppercase tracking-wider",
+                    "font-mono text-[10px] uppercase tracking-wider",
                     statusTone(account.status),
                   )}
                 >
                   {account.status}
-                </span>
+                </Badge>
               </div>
 
               <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">

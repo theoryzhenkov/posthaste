@@ -180,3 +180,59 @@ export function getColumnDef(id: ColumnId): ColumnDef {
 export function buildGridTemplate(columns: ColumnId[]): string {
   return columns.map((id) => COLUMN_DEFS[id].gridWidth).join(" ");
 }
+
+// ---------------------------------------------------------------------------
+// Sorting
+// ---------------------------------------------------------------------------
+
+export type SortDirection = "asc" | "desc";
+
+export interface SortConfig {
+  columnId: ColumnId;
+  direction: SortDirection;
+}
+
+export const DEFAULT_SORT: SortConfig = {
+  columnId: "date",
+  direction: "desc",
+};
+
+function getSortValue(
+  columnId: ColumnId,
+  c: ConversationSummary,
+): string | number {
+  switch (columnId) {
+    case "from":
+      return (c.fromName ?? c.fromEmail ?? "").toLowerCase();
+    case "subject":
+      return (c.subject ?? "").toLowerCase();
+    case "preview":
+      return (c.preview ?? "").toLowerCase();
+    case "date":
+      return c.latestReceivedAt;
+    case "source":
+      return c.latestSourceName.toLowerCase();
+    case "threadSize":
+      return c.messageCount;
+    case "flagged":
+      return c.isFlagged ? 1 : 0;
+    case "attachment":
+      return c.hasAttachment ? 1 : 0;
+  }
+}
+
+export function compareConversations(
+  config: SortConfig,
+  a: ConversationSummary,
+  b: ConversationSummary,
+): number {
+  const va = getSortValue(config.columnId, a);
+  const vb = getSortValue(config.columnId, b);
+  let cmp: number;
+  if (typeof va === "number" && typeof vb === "number") {
+    cmp = va - vb;
+  } else {
+    cmp = String(va).localeCompare(String(vb));
+  }
+  return config.direction === "asc" ? cmp : -cmp;
+}

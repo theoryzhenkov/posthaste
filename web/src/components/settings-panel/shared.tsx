@@ -1,21 +1,29 @@
+import { Input } from "../ui/input";
+
 export function Field({
   label,
   value,
   placeholder,
   onChange,
+  type,
+  disabled,
 }: {
   label: string;
-  value: string;
+  value: string | number;
   placeholder?: string;
   onChange: (value: string) => void;
+  type?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="grid gap-1.5 text-sm">
       <span className="text-muted-foreground">{label}</span>
-      <input
-        className="h-9 rounded-md border border-border bg-card px-3 text-sm"
+      <Input
+        className="h-9 bg-card"
+        type={type}
         value={value}
         placeholder={placeholder}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>

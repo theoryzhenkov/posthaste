@@ -14,7 +14,17 @@ import {
 } from "./helpers";
 import { Field, MetaStat } from "./shared";
 import type { EditorTarget } from "./types";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
+import { Input } from "../ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 export function AccountEditor({
   editorTarget,
@@ -99,20 +109,14 @@ export function AccountEditor({
       </div>
 
       <div className="mt-4 grid gap-4">
-        <div className="grid gap-1.5">
-          <label className="text-sm text-muted-foreground" htmlFor="account-id">
-            Account ID
-          </label>
-          <input
-            id="account-id"
-            className="h-9 rounded-md border border-border bg-card px-3 text-sm"
-            value={form.id}
-            disabled={editorTarget !== "new"}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, id: event.target.value }))
-            }
-          />
-        </div>
+        <Field
+          label="Account ID"
+          value={form.id}
+          disabled={editorTarget !== "new"}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, id: value }))
+          }
+        />
 
         <div className="grid grid-cols-2 gap-4">
           <Field
@@ -120,22 +124,26 @@ export function AccountEditor({
             value={form.name}
             onChange={(value) => setForm((current) => ({ ...current, name: value }))}
           />
-          <label className="grid gap-1.5 text-sm">
+          <div className="grid gap-1.5 text-sm">
             <span className="text-muted-foreground">Driver</span>
-            <select
-              className="h-9 rounded-md border border-border bg-card px-3 text-sm"
+            <Select
               value={form.driver}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setForm((current) => ({
                   ...current,
-                  driver: parseAccountDriver(event.target.value, current.driver),
+                  driver: parseAccountDriver(value, current.driver),
                 }))
               }
             >
-              <option value="jmap">JMAP</option>
-              <option value="mock">Mock</option>
-            </select>
-          </label>
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="jmap">JMAP</SelectItem>
+                <SelectItem value="mock">Mock</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -168,9 +176,12 @@ export function AccountEditor({
               </p>
             </div>
             {editingAccount?.transport.secret.configured && (
-              <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-emerald-700">
+              <Badge
+                variant="outline"
+                className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] uppercase tracking-wider text-emerald-700"
+              >
                 configured
-              </span>
+              </Badge>
             )}
           </div>
 
@@ -205,10 +216,10 @@ export function AccountEditor({
             <label className="text-sm text-muted-foreground" htmlFor="account-password">
               Password
             </label>
-            <input
+            <Input
               id="account-password"
               type="password"
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+              className="h-9"
               value={form.password}
               disabled={form.secretMode !== "replace"}
               placeholder={
@@ -225,13 +236,12 @@ export function AccountEditor({
         </div>
 
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={form.enabled}
-            onChange={(event) =>
+            onCheckedChange={(checked) =>
               setForm((current) => ({
                 ...current,
-                enabled: event.target.checked,
+                enabled: checked === true,
               }))
             }
           />

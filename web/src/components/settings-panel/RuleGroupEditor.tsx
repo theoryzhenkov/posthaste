@@ -3,6 +3,15 @@ import type {
   SmartMailboxGroup,
 } from "../../api/types";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
+import { Input } from "../ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import {
   defaultCondition,
   defaultGroup,
@@ -24,31 +33,36 @@ export function RuleGroupEditor({
   return (
     <div className="space-y-3 rounded-lg border border-border/70 bg-background/60 p-3">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="grid gap-1 text-sm">
+        <div className="grid gap-1 text-sm">
           <span className="text-muted-foreground">Match</span>
-          <select
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+          <Select
             value={group.operator}
-            onChange={(event) =>
+            onValueChange={(value) =>
               onChange({
                 ...group,
-                operator: parseGroupOperator(event.target.value, group.operator),
+                operator: parseGroupOperator(value, group.operator),
               })
             }
           >
-            {GROUP_OPERATOR_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {GROUP_OPERATOR_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <label className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={group.negated}
-            onChange={(event) => onChange({ ...group, negated: event.target.checked })}
+            onCheckedChange={(checked) =>
+              onChange({ ...group, negated: checked === true })
+            }
           />
           Negate group
         </label>
@@ -155,13 +169,12 @@ function ConditionEditor({
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto] gap-3">
-        <label className="grid gap-1 text-sm">
+        <div className="grid gap-1 text-sm">
           <span className="text-muted-foreground">Field</span>
-          <select
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+          <Select
             value={condition.field}
-            onChange={(event) => {
-              const field = parseField(event.target.value, condition.field);
+            onValueChange={(value) => {
+              const field = parseField(value, condition.field);
               const nextOperator = operatorOptionsForField(field)[0];
               onChange({
                 ...defaultCondition(field),
@@ -169,22 +182,26 @@ function ConditionEditor({
               });
             }}
           >
-            {FIELD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FIELD_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <label className="grid gap-1 text-sm">
+        <div className="grid gap-1 text-sm">
           <span className="text-muted-foreground">Operator</span>
-          <select
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+          <Select
             value={condition.operator}
-            onChange={(event) => {
+            onValueChange={(value) => {
               const operator = parseOperator(
-                event.target.value,
+                value,
                 condition.field,
                 condition.operator,
               );
@@ -195,33 +212,42 @@ function ConditionEditor({
               });
             }}
           >
-            {operators.map((operator) => (
-              <option key={operator} value={operator}>
-                {operator}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {operators.map((operator) => (
+                <SelectItem key={operator} value={operator}>
+                  {operator}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <label className="grid gap-1 text-sm">
+        <div className="grid gap-1 text-sm">
           <span className="text-muted-foreground">Value</span>
           {isBooleanField ? (
-            <select
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+            <Select
               value={String(Boolean(condition.value))}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 onChange({
                   ...condition,
-                  value: event.target.value === "true",
+                  value: value === "true",
                 })
               }
             >
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
+              <SelectTrigger className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">true</SelectItem>
+                <SelectItem value="false">false</SelectItem>
+              </SelectContent>
+            </Select>
           ) : (
-            <input
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+            <Input
+              className="h-8"
               value={
                 Array.isArray(condition.value)
                   ? condition.value.join(", ")
@@ -241,7 +267,7 @@ function ConditionEditor({
               }
             />
           )}
-        </label>
+        </div>
 
         <div className="flex items-end">
           <Button size="xs" variant="outline" type="button" onClick={onRemove}>
@@ -251,10 +277,11 @@ function ConditionEditor({
       </div>
 
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={condition.negated}
-          onChange={(event) => onChange({ ...condition, negated: event.target.checked })}
+          onCheckedChange={(checked) =>
+            onChange({ ...condition, negated: checked === true })
+          }
         />
         Negate condition
       </label>

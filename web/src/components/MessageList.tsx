@@ -1,4 +1,17 @@
 import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import {
   useInfiniteQuery,
   useQueryClient,
   useQueries,
@@ -15,7 +28,6 @@ import type {
 } from "../api/types";
 import type { EmailActions } from "../hooks/useEmailActions";
 import { MAIL_DOMAIN_EVENT_NAME } from "../hooks/useDaemonEvents";
-import { cn } from "../lib/utils";
 import {
   getConversationSummary,
   mailKeys,
@@ -27,7 +39,13 @@ import {
 import type { SidebarSelection } from "./Sidebar";
 import { MessageRow } from "./MessageRow";
 import { ColumnPickerMenu } from "./thread-list/ColumnPickerMenu";
-import { buildGridTemplate, getColumnDef } from "./thread-list/columns";
+import { SortableColumnHeader } from "./thread-list/SortableColumnHeader";
+import {
+  type ColumnId,
+  buildGridTemplate,
+  compareConversations,
+  getColumnDef,
+} from "./thread-list/columns";
 import { useColumnConfig } from "./thread-list/useColumnConfig";
 
 interface MessageListProps {
@@ -95,7 +113,11 @@ export function MessageList({
   actions,
 }: MessageListProps) {
   const queryClient = useQueryClient();
-  const { columns, toggleColumn, resetColumns } = useColumnConfig();
+  const { columns, sort, toggleColumn, reorderColumns, resetColumns, toggleSort } =
+    useColumnConfig();
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
   const queryKey = useMemo(
     () => mailKeys.view(selectedView),
     [selectedView],
@@ -129,7 +151,24 @@ export function MessageList({
     enabled: selectedView !== null,
   });
 
-  const conversationIds = useMemo(() => readConversationIds(data), [data]);
+  const rawConversationIds = useMemo(() => readConversationIds(data), [data]);
+
+  const conversationIds = useMemo(() => {
+    const conversations = rawConversationIds
+      .map((id) => getConversationSummary(queryClient, id))
+      .filter((c): c is ConversationSummary => c !== undefined);
+    conversations.sort((a, b) => compareConversations(sort, a, b));
+    return conversations.map((c) => c.id);
+  }, [rawConversationIds, sort, queryClient]);
+
+  function handleColumnDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = columns.indexOf(active.id as ColumnId);
+      const newIndex = columns.indexOf(over.id as ColumnId);
+      reorderColumns(arrayMove(columns, oldIndex, newIndex));
+    }
+  }
 
   const refreshFirstPage = useCallback(async () => {
     if (!selectedView) {
@@ -406,20 +445,32 @@ export function MessageList({
             className="mt-2 grid gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
             style={{ gridTemplateColumns: buildGridTemplate(columns) }}
           >
-            {columns.map((colId) => {
-              const def = getColumnDef(colId);
-              return (
-                <span
-                  key={colId}
-                  className={cn(
-                    def.align === "right" && "text-right",
-                    def.align === "center" && "text-center",
-                  )}
-                >
-                  {def.label}
-                </span>
-              );
-            })}
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleColumnDragEnd}
+            >
+              <SortableContext
+                items={columns}
+                strategy={horizontalListSortingStrategy}
+              >
+                {columns.map((colId) => {
+                  const def = getColumnDef(colId);
+                  return (
+                    <SortableColumnHeader
+                      key={colId}
+                      id={colId}
+                      label={def.label}
+                      align={def.align}
+                      sortDirection={
+                        sort.columnId === colId ? sort.direction : undefined
+                      }
+                      onSort={() => toggleSort(colId)}
+                    />
+                  );
+                })}
+              </SortableContext>
+            </DndContext>
           </div>
         </ColumnPickerMenu>
       </div>
