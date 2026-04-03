@@ -9,6 +9,7 @@ depends:
 dependents:
   - path: spec/L0-sync
   - path: spec/L0-ui
+  - path: spec/L1-api
   - path: spec/L1-sync
   - path: spec/L1-ui
 ---
