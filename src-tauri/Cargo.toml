@@ -1,0 +1,17 @@
+[package]
+name = "posthaste-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "posthaste_desktop_lib"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+mail-daemon = { path = "../crates/web-server" }
+tracing = { workspace = true }
