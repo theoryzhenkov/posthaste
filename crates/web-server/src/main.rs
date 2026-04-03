@@ -1,5 +1,6 @@
 mod api;
 mod config;
+mod push;
 mod sanitize;
 mod secret;
 mod supervisor;

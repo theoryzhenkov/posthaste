@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use jmap_client::client::Client;
@@ -13,23 +15,40 @@ use pulldown_cmark::{html, Options, Parser};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+pub async fn connect_jmap_client(
+    url: &str,
+    username: &str,
+    password: &str,
+) -> Result<Arc<Client>, GatewayError> {
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(String::from))
+        .unwrap_or_default();
+    let client = Client::new()
+        .credentials((username, password))
+        .follow_redirects([host])
+        .connect(url)
+        .await
+        .map_err(map_gateway_error)?;
+    Ok(Arc::new(client))
+}
+
 pub struct LiveJmapGateway {
-    client: Client,
+    client: Arc<Client>,
 }
 
 impl LiveJmapGateway {
+    pub fn from_client(client: Arc<Client>) -> Self {
+        Self { client }
+    }
+
     pub async fn connect(url: &str, username: &str, password: &str) -> Result<Self, GatewayError> {
-        let host = url::Url::parse(url)
-            .ok()
-            .and_then(|parsed| parsed.host_str().map(String::from))
-            .unwrap_or_default();
-        let client = Client::new()
-            .credentials((username, password))
-            .follow_redirects([host])
-            .connect(url)
-            .await
-            .map_err(map_gateway_error)?;
+        let client = connect_jmap_client(url, username, password).await?;
         Ok(Self { client })
+    }
+
+    pub fn client(&self) -> &Arc<Client> {
+        &self.client
     }
 }
 
@@ -859,7 +878,7 @@ fn timestamp_to_iso8601(timestamp: i64) -> Option<String> {
         .and_then(|value| value.format(&Rfc3339).ok())
 }
 
-fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
+pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
     match error {
         jmap_client::Error::Problem(problem) => {
             if problem.status == Some(401) {

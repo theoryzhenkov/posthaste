@@ -5,17 +5,18 @@ use std::time::Duration;
 use futures_util::{future::pending, StreamExt};
 use mail_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, PushStatus, PushStream, SecretStore,
-    ServiceError, SharedGateway, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
-    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus, PushStreamEvent,
+    PushTransport, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
+    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
-use mail_jmap::{LiveJmapGateway, MockJmapGateway};
+use mail_jmap::{
+    connect_jmap_client, LiveJmapGateway, MockJmapGateway, SsePushTransport, WsPushTransport,
+};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
-const PUSH_RETRY_DELAY: Duration = Duration::from_secs(15);
-const PUSH_UNSUPPORTED_RETRY_DELAY: Duration = Duration::from_secs(3600);
+use crate::push::resilient_push_stream;
 
 pub struct AccountSupervisor {
     shared: Arc<SupervisorShared>,
@@ -47,6 +48,11 @@ pub struct AccountVerification {
     pub ok: bool,
     pub identity: Option<Identity>,
     pub push_supported: bool,
+}
+
+struct GatewayBundle {
+    gateway: SharedGateway,
+    push_stream: Option<PushEventStream>,
 }
 
 impl AccountSupervisor {
@@ -142,8 +148,8 @@ impl AccountSupervisor {
         &self,
         account: &AccountSettings,
     ) -> Result<AccountVerification, ServiceError> {
-        let gateway = build_gateway(account, self.shared.secret_store.as_ref()).await?;
-        let identity = gateway.fetch_identity(&account.id).await.ok();
+        let bundle = build_gateway_bundle(account, self.shared.secret_store.as_ref()).await?;
+        let identity = bundle.gateway.fetch_identity(&account.id).await.ok();
         Ok(AccountVerification {
             ok: true,
             identity,
@@ -159,9 +165,7 @@ async fn run_account_runtime(
 ) {
     let account_id = account.id.clone();
     let mut gateway: Option<SharedGateway> = None;
-    let mut push_stream: Option<PushStream> = None;
-    let mut push_checkpoint: Option<String> = None;
-    let mut next_push_retry = tokio::time::Instant::now();
+    let mut push_events: Option<PushEventStream> = None;
     let mut interval = tokio::time::interval(shared.poll_interval);
 
     shared
@@ -175,53 +179,20 @@ async fn run_account_runtime(
         )
         .await;
 
+    // Initial sync + gateway setup
     let _ = process_sync_trigger(
         &shared,
         &account,
         SyncTrigger::Startup,
         &mut gateway,
-        &mut push_stream,
-        &mut push_checkpoint,
-        &mut next_push_retry,
+        &mut push_events,
         None,
     )
     .await;
 
     loop {
-        if gateway.is_some()
-            && push_stream.is_none()
-            && tokio::time::Instant::now() >= next_push_retry
-        {
-            match gateway
-                .as_ref()
-                .expect("gateway checked above")
-                .open_push_stream(&account_id, push_checkpoint.as_deref())
-                .await
-            {
-                Ok(Some(stream)) => {
-                    push_stream = Some(stream);
-                    shared
-                        .set_push_status(&account_id, PushStatus::Connected)
-                        .await;
-                }
-                Ok(None) => {
-                    shared
-                        .set_push_status(&account_id, PushStatus::Unsupported)
-                        .await;
-                    next_push_retry = tokio::time::Instant::now() + PUSH_UNSUPPORTED_RETRY_DELAY;
-                }
-                Err(error) => {
-                    push_stream = None;
-                    next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
-                    shared
-                        .handle_push_disconnect(&account_id, &error.to_string())
-                        .await;
-                }
-            }
-        }
-
-        let next_push_event = async {
-            match push_stream.as_mut() {
+        let next_push = async {
+            match push_events.as_mut() {
                 Some(stream) => stream.next().await,
                 None => pending().await,
             }
@@ -234,9 +205,7 @@ async fn run_account_runtime(
                     &account,
                     SyncTrigger::Poll,
                     &mut gateway,
-                    &mut push_stream,
-                    &mut push_checkpoint,
-                    &mut next_push_retry,
+                    &mut push_events,
                     None,
                 ).await;
             }
@@ -248,38 +217,36 @@ async fn run_account_runtime(
                             &account,
                             trigger,
                             &mut gateway,
-                            &mut push_stream,
-                            &mut push_checkpoint,
-                            &mut next_push_retry,
+                            &mut push_events,
                             Some(reply),
                         ).await;
                     }
                 }
             }
-            push = next_push_event => {
-                match push {
-                    Some(Ok(notification)) => {
-                        push_checkpoint = notification.checkpoint.clone().or(push_checkpoint);
+            Some(event) = next_push => {
+                match event {
+                    PushStreamEvent::Notification(_) => {
                         let _ = process_sync_trigger(
                             &shared,
                             &account,
                             SyncTrigger::Push,
                             &mut gateway,
-                            &mut push_stream,
-                            &mut push_checkpoint,
-                            &mut next_push_retry,
+                            &mut push_events,
                             None,
                         ).await;
                     }
-                    Some(Err(error)) => {
-                        push_stream = None;
-                        next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
-                        shared.handle_push_disconnect(&account_id, &error.to_string()).await;
+                    PushStreamEvent::Connected { transport } => {
+                        shared.set_push_status(&account_id, PushStatus::Connected).await;
+                        tracing_connected(&shared, &account_id, transport);
                     }
-                    None => {
-                        push_stream = None;
-                        next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
-                        shared.handle_push_disconnect(&account_id, "push stream ended").await;
+                    PushStreamEvent::Disconnected { transport, reason } => {
+                        shared.handle_push_disconnect(&account_id, &format!("{transport}: {reason}")).await;
+                    }
+                    PushStreamEvent::Fallback { from, to } => {
+                        shared.handle_push_disconnect(
+                            &account_id,
+                            &format!("falling back from {from} to {to}"),
+                        ).await;
                     }
                 }
             }
@@ -287,15 +254,24 @@ async fn run_account_runtime(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+fn tracing_connected(shared: &SupervisorShared, account_id: &AccountId, transport: &str) {
+    if let Ok(event) = shared.store.append_event(
+        account_id,
+        EVENT_TOPIC_PUSH_CONNECTED,
+        None,
+        None,
+        json!({ "transport": transport }),
+    ) {
+        shared.publish_events(&[event]);
+    }
+}
+
 async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
     gateway: &mut Option<SharedGateway>,
-    push_stream: &mut Option<PushStream>,
-    push_checkpoint: &mut Option<String>,
-    next_push_retry: &mut tokio::time::Instant,
+    push_events: &mut Option<PushEventStream>,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
@@ -303,7 +279,7 @@ async fn process_sync_trigger(
         .set_status_only(&account_id, AccountStatus::Syncing)
         .await;
 
-    let result = match ensure_gateway(shared, account, gateway).await {
+    let result = match ensure_gateway(shared, account, gateway, push_events).await {
         Ok(()) => {
             shared
                 .service
@@ -325,9 +301,8 @@ async fn process_sync_trigger(
         Err(error) => {
             shared.service.remove_gateway(&account_id);
             *gateway = None;
-            *push_stream = None;
-            *push_checkpoint = None;
-            *next_push_retry = tokio::time::Instant::now() + PUSH_RETRY_DELAY;
+            // Push stream keeps running — it has its own reconnection logic.
+            // It will fail independently if the underlying connection is gone.
             let stage = if matches!(
                 error,
                 ServiceError::Gateway(GatewayError::Unavailable(_))
@@ -361,22 +336,31 @@ async fn ensure_gateway(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     gateway: &mut Option<SharedGateway>,
+    push_events: &mut Option<PushEventStream>,
 ) -> Result<(), ServiceError> {
     if gateway.is_some() {
         return Ok(());
     }
-    let built = build_gateway(account, shared.secret_store.as_ref()).await?;
-    shared.service.set_gateway(&account.id, built.clone());
-    *gateway = Some(built);
+    let bundle = build_gateway_bundle(account, shared.secret_store.as_ref()).await?;
+    shared
+        .service
+        .set_gateway(&account.id, bundle.gateway.clone());
+    *gateway = Some(bundle.gateway);
+    if let Some(stream) = bundle.push_stream {
+        *push_events = Some(stream);
+    }
     Ok(())
 }
 
-pub async fn build_gateway(
+async fn build_gateway_bundle(
     account: &AccountSettings,
     secret_store: &dyn SecretStore,
-) -> Result<SharedGateway, ServiceError> {
+) -> Result<GatewayBundle, ServiceError> {
     match account.driver {
-        AccountDriver::Mock => Ok(Arc::new(MockJmapGateway::default())),
+        AccountDriver::Mock => Ok(GatewayBundle {
+            gateway: Arc::new(MockJmapGateway::default()),
+            push_stream: None,
+        }),
         AccountDriver::Jmap => {
             let url = account
                 .transport
@@ -392,8 +376,24 @@ pub async fn build_gateway(
                 GatewayError::Rejected("missing JMAP secret reference".to_string())
             })?;
             let password = secret_store.resolve(secret_ref)?;
-            let gateway = LiveJmapGateway::connect(url, username, &password).await?;
-            Ok(Arc::new(gateway))
+            let client = connect_jmap_client(url, username, &password).await?;
+
+            let gateway = LiveJmapGateway::from_client(client.clone());
+
+            let primary: Box<dyn PushTransport> = Box::new(WsPushTransport::new(client.clone()));
+            let fallback: Box<dyn PushTransport> = Box::new(SsePushTransport::new(client));
+
+            let push_stream = resilient_push_stream(
+                account.id.clone(),
+                primary,
+                Some(fallback),
+                ResilientPushConfig::default(),
+            );
+
+            Ok(GatewayBundle {
+                gateway: Arc::new(gateway),
+                push_stream: Some(push_stream),
+            })
         }
     }
 }
