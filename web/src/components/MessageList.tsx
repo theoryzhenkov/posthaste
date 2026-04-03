@@ -15,6 +15,7 @@ import type {
 } from "../api/types";
 import type { EmailActions } from "../hooks/useEmailActions";
 import { MAIL_DOMAIN_EVENT_NAME } from "../hooks/useDaemonEvents";
+import { cn } from "../lib/utils";
 import {
   getConversationSummary,
   mailKeys,
@@ -25,6 +26,9 @@ import {
 } from "../mailState";
 import type { SidebarSelection } from "./Sidebar";
 import { MessageRow } from "./MessageRow";
+import { ColumnPickerMenu } from "./thread-list/ColumnPickerMenu";
+import { buildGridTemplate, getColumnDef } from "./thread-list/columns";
+import { useColumnConfig } from "./thread-list/useColumnConfig";
 
 interface MessageListProps {
   selectedView: SidebarSelection | null;
@@ -91,6 +95,7 @@ export function MessageList({
   actions,
 }: MessageListProps) {
   const queryClient = useQueryClient();
+  const { columns, toggleColumn, resetColumns } = useColumnConfig();
   const queryKey = useMemo(
     () => mailKeys.view(selectedView),
     [selectedView],
@@ -392,11 +397,31 @@ export function MessageList({
           <span className="text-xs text-muted-foreground">{countLabel}</span>
         </div>
 
-        <div className="mt-2 grid grid-cols-[minmax(140px,0.8fr)_minmax(0,2fr)_80px] gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-          <span>From</span>
-          <span>Subject</span>
-          <span className="text-right">Date</span>
-        </div>
+        <ColumnPickerMenu
+          activeColumns={columns}
+          onToggle={toggleColumn}
+          onReset={resetColumns}
+        >
+          <div
+            className="mt-2 grid gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
+            style={{ gridTemplateColumns: buildGridTemplate(columns) }}
+          >
+            {columns.map((colId) => {
+              const def = getColumnDef(colId);
+              return (
+                <span
+                  key={colId}
+                  className={cn(
+                    def.align === "right" && "text-right",
+                    def.align === "center" && "text-center",
+                  )}
+                >
+                  {def.label}
+                </span>
+              );
+            })}
+          </div>
+        </ColumnPickerMenu>
       </div>
 
       <div
@@ -423,6 +448,7 @@ export function MessageList({
                 <MessageRow
                   message={conversation}
                   isSelected={conversation.id === selection?.conversationId}
+                  columns={columns}
                   onSelect={() =>
                     onSelectMessage({
                       conversationId: conversation.id,

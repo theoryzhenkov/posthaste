@@ -7,11 +7,15 @@ import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type SidebarSelection } from "./components/Sidebar";
-import { ResizeHandle } from "./components/ResizeHandle";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  useDefaultLayout,
+} from "./components/ui/resizable";
 import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useEmailActions } from "./hooks/useEmailActions";
-import { useResizablePanel } from "./hooks/useResizablePanel";
 import { mailKeys, type MailSelection } from "./mailState";
 
 const queryClient = new QueryClient({
@@ -61,7 +65,10 @@ function MailClient() {
 
   useDaemonEvents();
 
-  const { widths, startResize } = useResizablePanel();
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "posthaste-panels",
+    storage: localStorage,
+  });
   const actions = useEmailActions();
 
   function handleSelectMessage(message: MessageSummary) {
@@ -203,31 +210,46 @@ function MailClient() {
           />
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="h-full" style={{ width: widths.sidebar, flexShrink: 0 }}>
+        <ResizablePanelGroup
+          orientation="horizontal"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
+          className="min-h-0 flex-1"
+        >
+          <ResizablePanel
+            id="sidebar"
+            defaultSize="220px"
+            minSize="160px"
+            maxSize="400px"
+          >
             <Sidebar
               selectedView={effectiveView}
               onSelectSmartMailbox={handleSelectSmartMailbox}
               onSelectSourceMailbox={handleSelectSourceMailbox}
             />
-          </div>
-          <ResizeHandle onMouseDown={(e) => startResize("sidebar", e)} />
-          <div className="h-full" style={{ width: widths.messageList, flexShrink: 0 }}>
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel
+            id="message-list"
+            defaultSize="420px"
+            minSize="280px"
+            maxSize="800px"
+          >
             <MessageList
               selectedView={effectiveView}
               selection={selectedMessage}
               onSelectMessage={handleSelectMessageRef}
               actions={actions}
             />
-          </div>
-          <ResizeHandle onMouseDown={(e) => startResize("messageList", e)} />
-          <div className="h-full min-w-0 flex-1">
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel id="message-detail" minSize="300px">
             <MessageDetail
               selection={selectedMessage}
               onSelectMessage={handleSelectMessage}
             />
-          </div>
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       )}
     </div>
   );
