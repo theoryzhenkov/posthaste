@@ -34,16 +34,7 @@ impl PushTransport for SsePushTransport {
         let stream = self
             .client
             .event_source(
-                [
-                    jmap_client::DataType::Email,
-                    jmap_client::DataType::Mailbox,
-                    jmap_client::DataType::EmailDelivery,
-                    jmap_client::DataType::EmailSubmission,
-                ]
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .into(),
+                crate::WATCHED_DATA_TYPES.into_iter().collect::<Vec<_>>().into_iter().into(),
                 false,
                 Some(60),
                 checkpoint,

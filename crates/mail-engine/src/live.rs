@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::{email, identity, mailbox};
