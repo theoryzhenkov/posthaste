@@ -1,3 +1,12 @@
+/**
+ * Full-screen settings panel for account and smart mailbox administration.
+ *
+ * Two-column layout: left pane lists accounts and smart mailboxes;
+ * right pane shows the active editor form.
+ *
+ * @spec spec/L1-api#account-crud-lifecycle
+ * @spec spec/L1-api#smart-mailbox-crud
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
@@ -27,12 +36,19 @@ import type {
   SmartMailboxEditorTarget,
 } from "./settings-panel/types";
 
+/** @spec spec/L1-api#account-crud-lifecycle */
 interface SettingsPanelProps {
   accounts: AccountOverview[];
   activeAccountId: string | null;
   onActiveAccountChange: (accountId: string | null) => void;
 }
 
+/**
+ * Settings panel with account CRUD, smart mailbox CRUD, and default-account selection.
+ *
+ * @spec spec/L1-api#account-crud-lifecycle
+ * @spec spec/L1-api#smart-mailbox-crud
+ */
 export function SettingsPanel({
   accounts,
   activeAccountId,

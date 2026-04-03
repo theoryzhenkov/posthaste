@@ -1,3 +1,11 @@
+/**
+ * React hook that provides optimistic email actions (toggle read/flag, archive, trash, delete).
+ *
+ * Mutations apply optimistic keyword patches to the cache, record local mutation
+ * events for echo suppression, and fall back to invalidation when the cache is incomplete.
+ *
+ * @spec spec/L1-ui#data-fetching
+ */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { fetchSidebar, performMessageCommand } from "../api/client";
@@ -22,8 +30,10 @@ import {
   type QuerySnapshot,
 } from "../mailState";
 
+/** Message reference augmented with optional keyword fields for optimistic patching. */
 type ReadToggleTarget = MailSelection &
   Partial<Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">>;
+/** Message reference augmented with optional keyword fields for optimistic patching. */
 type FlagToggleTarget = MailSelection &
   Partial<Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">>;
 
@@ -48,6 +58,7 @@ type MutationContext = {
   target: SourceMessageRef;
 };
 
+/** Return type of {@link useEmailActions}. */
 export type EmailActions = ReturnType<typeof useEmailActions>;
 
 function requiredMailboxByRole(
@@ -165,6 +176,14 @@ function invalidateMessageScope(
   queryClient.invalidateQueries({ queryKey: ["conversations"] });
 }
 
+/**
+ * Provides optimistic email action methods: `toggleRead`, `toggleFlag`,
+ * `archive`, `trash`, and `deletePermanently`.
+ *
+ * Uses optimistic cache patches with rollback on error.
+ *
+ * @spec spec/L1-ui#data-fetching
+ */
 export function useEmailActions() {
   const queryClient = useQueryClient();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

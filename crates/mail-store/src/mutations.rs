@@ -8,6 +8,9 @@ use crate::query::{
     fetch_keywords_tx, fetch_mailbox_ids_tx, query_message_detail_tx, row_to_event,
 };
 
+/// Stages raw MIME bodies to disk before the write transaction so that file
+/// I/O does not block the SQLite lock. Falls back to synthesizing a minimal
+/// RFC 822 message when `raw_mime` is absent but body HTML/text is present.
 pub(crate) fn stage_sync_bodies(
     store: &DatabaseStore,
     account_id: &AccountId,
@@ -29,6 +32,12 @@ pub(crate) fn stage_sync_bodies(
         .collect()
 }
 
+/// Core sync write path: applies a `SyncBatch` within one SQLite transaction.
+/// Handles mailbox snapshot replacement, deletes, upserts, keyword/mailbox
+/// junction updates, conversation assignment, projection refreshes, and cursor
+/// persistence. Emits domain events for each mutation.
+///
+/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
 pub(crate) fn apply_sync_batch_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -369,6 +378,10 @@ pub(crate) fn apply_sync_batch_tx(
     Ok(events)
 }
 
+/// Stores a lazily fetched body (HTML, text, raw ref) and emits a
+/// `message.body_cached` event. Returns the updated message detail.
+///
+/// @spec spec/L1-sync#invariants
 pub(crate) fn apply_message_body_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -400,6 +413,9 @@ pub(crate) fn apply_message_body_tx(
     })
 }
 
+/// Adds and removes keywords on a message, updates the `is_read`/`is_flagged`
+/// denormalized columns, refreshes mailbox counters, and emits a
+/// `message.keywords_changed` event.
 pub(crate) fn set_keywords_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -463,6 +479,9 @@ pub(crate) fn set_keywords_tx(
     })
 }
 
+/// Replaces a message's mailbox memberships. Refreshes counters for both old
+/// and new mailboxes, emits `message.mailboxes_changed` and
+/// `message.arrived` events for newly added mailboxes.
 pub(crate) fn replace_mailboxes_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -529,6 +548,8 @@ pub(crate) fn replace_mailboxes_tx(
     })
 }
 
+/// Deletes a message and all junction rows, refreshes thread/mailbox
+/// projections, and emits a deletion event.
 pub(crate) fn destroy_message_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -568,6 +589,10 @@ pub(crate) fn destroy_message_tx(
     })
 }
 
+/// Queries the `event_log` table with optional filters (account, seq cursor,
+/// topic, mailbox). Returns events ordered by `seq ASC`.
+///
+/// @spec spec/L1-sync#event-propagation
 pub(crate) fn list_events(
     connection: &Connection,
     filter: &EventFilter,

@@ -6,6 +6,8 @@ use ammonia::Builder;
 ///
 /// Allows email-safe tags/attributes, forces safe link behavior,
 /// and strips tracking pixels.
+///
+/// @spec spec/L1-api#message-body-sanitization
 pub fn sanitize_email_html(raw_html: &str) -> String {
     let tags: HashSet<&str> = [
         "a",
@@ -123,7 +125,7 @@ pub fn sanitize_email_html(raw_html: &str) -> String {
     strip_tracking_pixels(&sanitized)
 }
 
-/// Remove 1x1 tracking pixel images and images with non-allowed src schemes.
+/// Remove 1x1 tracking pixel images and images with disallowed src schemes.
 fn strip_tracking_pixels(html: &str) -> String {
     // Simple approach: parse <img ...> tags and filter them.
     // We use a basic state machine rather than regex to avoid the regex dep.
@@ -152,6 +154,7 @@ fn strip_tracking_pixels(html: &str) -> String {
     result
 }
 
+/// Find the byte offset of the next `<img` tag start (case-insensitive).
 fn find_img_tag_start(html: &str) -> Option<usize> {
     let bytes = html.as_bytes();
     let last_start = bytes.len().saturating_sub(4);

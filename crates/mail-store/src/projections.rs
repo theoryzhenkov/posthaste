@@ -1,5 +1,14 @@
 use super::*;
 
+/// Determines the conversation ID for a message using a three-tier lookup:
+/// 1. Match by RFC `Message-ID`, `In-Reply-To`, or `References` headers
+/// 2. Match by server-assigned `thread_id`
+/// 3. Match by normalized subject
+///
+/// If multiple conversations match, they are merged into the lowest-sorted ID.
+/// If none match, a new deterministic ID is generated.
+///
+/// @spec spec/L1-sync#sqlite-schema
 pub(crate) fn assign_conversation_id_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -86,6 +95,10 @@ pub(crate) fn assign_conversation_id_tx(
     Ok(target)
 }
 
+/// Recomputes the `conversation` projection row (subject, latest message,
+/// counts) from the linked messages. Deletes the row if no messages remain.
+///
+/// @spec spec/L1-sync#sqlite-schema
 pub(crate) fn refresh_conversation_projection_tx(
     tx: &Transaction<'_>,
     conversation_id: &ConversationId,
@@ -163,6 +176,7 @@ pub(crate) fn refresh_conversation_projection_tx(
     Ok(())
 }
 
+/// Removes conversation rows that have no linked messages.
 pub(crate) fn cleanup_orphan_conversations_tx(tx: &Transaction<'_>) -> Result<(), StoreError> {
     tx.execute(
         "DELETE FROM conversation
@@ -173,6 +187,8 @@ pub(crate) fn cleanup_orphan_conversations_tx(tx: &Transaction<'_>) -> Result<()
     Ok(())
 }
 
+/// Recomputes the `thread_view` row with the ordered list of email IDs.
+/// Deletes the row if no messages remain in the thread.
 pub(crate) fn refresh_thread_projection_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -216,6 +232,8 @@ pub(crate) fn refresh_thread_projection_tx(
     Ok(())
 }
 
+/// Recomputes `total_emails` and `unread_emails` on the `mailbox` row from
+/// the `message_mailbox` junction.
 pub(crate) fn refresh_mailbox_counters_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -249,6 +267,7 @@ pub(crate) fn refresh_mailbox_counters_tx(
     Ok(())
 }
 
+/// Upserts HTML/text body and raw message reference into `message_body`.
 pub(crate) fn upsert_body_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -285,6 +304,8 @@ pub(crate) fn upsert_body_tx(
     Ok(())
 }
 
+/// Deletes a message and all its junction rows (keywords, mailboxes, body,
+/// conversation link).
 pub(crate) fn delete_message_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -318,6 +339,10 @@ pub(crate) fn delete_message_tx(
     Ok(())
 }
 
+/// Inserts a domain event into `event_log` with a monotonically increasing
+/// `seq`.
+///
+/// @spec spec/L1-sync#event-propagation
 pub(crate) fn insert_event_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -352,6 +377,8 @@ pub(crate) fn insert_event_tx(
     })
 }
 
+/// Merges multiple conversations into a single target by reassigning all
+/// messages and cleaning up old conversation rows.
 fn merge_conversations_tx(
     tx: &Transaction<'_>,
     target: &ConversationId,
@@ -378,6 +405,8 @@ fn merge_conversations_tx(
     Ok(())
 }
 
+/// Trims whitespace from header tokens, returning `None` for empty/absent
+/// values.
 fn normalize_header_token(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -389,6 +418,8 @@ fn normalize_header_token(value: Option<&str>) -> Option<String> {
     })
 }
 
+/// Strips `Re:`/`Fwd:` prefixes and lowercases the subject for conversation
+/// grouping.
 pub(crate) fn normalized_subject(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let mut normalized = value.trim();
@@ -412,6 +443,8 @@ pub(crate) fn normalized_subject(value: Option<&str>) -> Option<String> {
     })
 }
 
+/// Generates a deterministic conversation ID from account ID, message ID,
+/// RFC `Message-ID`, and subject via SHA-256.
 fn generate_conversation_id(
     account_id: &AccountId,
     message: &mail_domain::MessageRecord,
@@ -428,6 +461,8 @@ fn generate_conversation_id(
     ConversationId(format!("conv-{}", hex_encode(hasher.finalize())))
 }
 
+/// Synthesizes a minimal RFC 822 message from available body/metadata when no
+/// raw MIME was provided by the sync layer.
 pub(crate) fn synthesize_raw_mime(message: &mail_domain::MessageRecord) -> Option<String> {
     if message.body_html.is_none() && message.body_text.is_none() {
         return None;

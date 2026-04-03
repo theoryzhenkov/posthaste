@@ -16,11 +16,17 @@ use tokio::task::JoinHandle;
 
 use crate::push::resilient_push_stream;
 
+/// Manages per-account async runtimes: connection lifecycle, sync triggers,
+/// push stream consumption, and runtime status tracking.
+///
+/// @spec spec/L1-sync#sync-loop
+/// @spec spec/L1-api#account-crud-lifecycle
 pub struct AccountSupervisor {
     shared: Arc<SupervisorShared>,
     runtimes: RwLock<HashMap<String, ManagedRuntime>>,
 }
 
+/// Shared state across all account runtimes: services, event bus, and runtime overviews.
 struct SupervisorShared {
     service: Arc<MailService>,
     store: Arc<dyn MailStore>,
@@ -30,11 +36,13 @@ struct SupervisorShared {
     poll_interval: Duration,
 }
 
+/// A running account task and its command channel.
 struct ManagedRuntime {
     command_tx: mpsc::Sender<RuntimeCommand>,
     handle: JoinHandle<()>,
 }
 
+/// Commands sent to a running account runtime via the mpsc channel.
 enum RuntimeCommand {
     Trigger {
         trigger: SyncTrigger,
@@ -42,18 +50,23 @@ enum RuntimeCommand {
     },
 }
 
+/// Result of `POST /v1/accounts/{id}/verify` — JMAP session discovery outcome.
+///
+/// @spec spec/L1-api#account-crud-lifecycle
 pub struct AccountVerification {
     pub ok: bool,
     pub identity: Option<Identity>,
     pub push_supported: bool,
 }
 
+/// A live gateway connection paired with its optional push event stream.
 struct AccountConnection {
     gateway: SharedGateway,
     push_events: Option<PushEventStream>,
 }
 
 impl AccountSupervisor {
+    /// Create a supervisor with shared services and the configured poll interval.
     pub fn new(
         service: Arc<MailService>,
         store: Arc<dyn MailStore>,
@@ -74,6 +87,9 @@ impl AccountSupervisor {
         }
     }
 
+    /// Start (or restart) the async runtime for an account. Stops any
+    /// existing runtime first. Disabled accounts get a `Disabled` status
+    /// without spawning a task.
     pub async fn start_account(&self, account: &AccountSettings) {
         self.stop_account(&account.id).await;
         if !account.enabled {
@@ -103,6 +119,7 @@ impl AccountSupervisor {
         );
     }
 
+    /// Stop the runtime task and remove the gateway for an account.
     pub async fn stop_account(&self, account_id: &AccountId) {
         if let Some(runtime) = self.runtimes.write().await.remove(account_id.as_str()) {
             runtime.handle.abort();
@@ -110,6 +127,7 @@ impl AccountSupervisor {
         self.shared.service.remove_gateway(account_id);
     }
 
+    /// Stop the runtime and clear runtime overview state for a deleted account.
     pub async fn remove_account(&self, account_id: &AccountId) {
         self.stop_account(account_id).await;
         self.shared
@@ -119,6 +137,9 @@ impl AccountSupervisor {
             .remove(account_id.as_str());
     }
 
+    /// Send a manual sync trigger to the account runtime and await its result.
+    ///
+    /// @spec spec/L1-api#sync-and-events
     pub async fn sync_account(&self, account_id: &AccountId) -> Result<usize, ServiceError> {
         let runtimes = self.runtimes.read().await;
         let runtime = runtimes
@@ -138,10 +159,15 @@ impl AccountSupervisor {
             .map_err(|_| ServiceError::from(GatewayError::Unavailable(account_id.to_string())))?
     }
 
+    /// Get the current runtime status snapshot for an account.
     pub async fn runtime_overview(&self, account_id: &AccountId) -> AccountRuntimeOverview {
         self.shared.runtime_overview(account_id).await
     }
 
+    /// Attempt JMAP session discovery for an account without starting a
+    /// persistent runtime.
+    ///
+    /// @spec spec/L1-api#account-crud-lifecycle
     pub async fn verify_account(
         &self,
         account: &AccountSettings,
@@ -156,6 +182,10 @@ impl AccountSupervisor {
     }
 }
 
+/// Main event loop for an account: polls on timer, push notifications, and
+/// manual sync commands. Runs until the task is aborted.
+///
+/// @spec spec/L1-sync#sync-loop
 async fn run_account_runtime(
     shared: Arc<SupervisorShared>,
     account: AccountSettings,
@@ -228,6 +258,12 @@ async fn run_account_runtime(
     }
 }
 
+/// Execute one sync cycle: ensure connection, run sync, publish events,
+/// and update runtime status. On failure, tears down the connection and
+/// records the error.
+///
+/// @spec spec/L1-sync#sync-loop
+/// @spec spec/L1-sync#error-handling
 async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
@@ -291,6 +327,8 @@ async fn process_sync_trigger(
     Ok(())
 }
 
+/// Lazily establish the gateway connection and push stream if not already
+/// connected.
 async fn ensure_connection(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
@@ -305,6 +343,10 @@ async fn ensure_connection(
     Ok(())
 }
 
+/// Build a gateway connection for an account, resolving its secret and
+/// opening a resilient push stream (WS preferred, SSE fallback).
+///
+/// @spec spec/L2-transport#transport-negotiation
 async fn build_connection(
     account: &AccountSettings,
     secret_store: &dyn SecretStore,
@@ -355,12 +397,14 @@ async fn build_connection(
 }
 
 impl SupervisorShared {
+    /// Broadcast domain events to all SSE subscribers.
     fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {
             let _ = self.event_sender.send(event.clone());
         }
     }
 
+    /// Read the cached runtime overview for an account, defaulting to empty.
     async fn runtime_overview(&self, account_id: &AccountId) -> AccountRuntimeOverview {
         self.runtime_overviews
             .read()
@@ -370,18 +414,21 @@ impl SupervisorShared {
             .unwrap_or_default()
     }
 
+    /// Update only the account status, preserving other overview fields.
     async fn set_status_only(&self, account_id: &AccountId, status: AccountStatus) {
         let mut current = self.runtime_overview(account_id).await;
         current.status = status;
         self.set_runtime_overview(account_id, current).await;
     }
 
+    /// Update only the push status, preserving other overview fields.
     async fn set_push_status(&self, account_id: &AccountId, push: PushStatus) {
         let mut current = self.runtime_overview(account_id).await;
         current.push = push;
         self.set_runtime_overview(account_id, current).await;
     }
 
+    /// Record a successful sync: set status to Ready, clear error, update timestamp.
     async fn mark_sync_success(&self, account_id: &AccountId) {
         let mut current = self.runtime_overview(account_id).await;
         current.status = AccountStatus::Ready;
@@ -396,6 +443,7 @@ impl SupervisorShared {
         self.set_runtime_overview(account_id, current).await;
     }
 
+    /// Record a sync failure: derive status from error type, store error details.
     async fn mark_sync_failure(&self, account_id: &AccountId, error: &ServiceError) {
         let mut current = self.runtime_overview(account_id).await;
         current.status = match error {
@@ -413,6 +461,7 @@ impl SupervisorShared {
         self.set_runtime_overview(account_id, current).await;
     }
 
+    /// Handle a push stream disconnect: emit event and set push status to Reconnecting.
     async fn handle_push_disconnect(&self, account_id: &AccountId, message: &str) {
         let event = self
             .store
@@ -431,6 +480,9 @@ impl SupervisorShared {
             .await;
     }
 
+    /// Persist a runtime overview and emit status/push change events when transitions occur.
+    ///
+    /// @spec spec/L1-sync#event-propagation
     async fn set_runtime_overview(&self, account_id: &AccountId, overview: AccountRuntimeOverview) {
         let previous = self
             .runtime_overviews

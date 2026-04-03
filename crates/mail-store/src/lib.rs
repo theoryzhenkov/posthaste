@@ -1,3 +1,8 @@
+/// SQLite-backed `MailStore` implementation: sync batch writes, lazy body
+/// fetching, conversation projections, smart mailbox queries, and event log.
+///
+/// @spec spec/L1-sync#sqlite-schema
+
 mod db;
 mod mutations;
 mod projections;
@@ -41,6 +46,12 @@ use crate::smart_mailboxes::{
     query_messages_by_rule,
 };
 
+/// SQLite-backed store with a single serialized write connection and pooled
+/// read connections. Raw MIME bodies are stored as content-addressed files
+/// on disk.
+///
+/// @spec spec/L1-sync#sqlite-schema
+/// @spec spec/L0-accounts#the-invariant
 pub struct DatabaseStore {
     db_path: PathBuf,
     data_root: PathBuf,
@@ -48,6 +59,8 @@ pub struct DatabaseStore {
 }
 
 impl DatabaseStore {
+    /// Opens (or creates) the SQLite database and data directory, runs schema
+    /// migrations, and returns a ready-to-use store.
     pub fn open(
         db_path: impl Into<PathBuf>,
         data_root: impl Into<PathBuf>,
@@ -71,6 +84,8 @@ impl DatabaseStore {
         })
     }
 
+    /// Opens a new read-only SQLite connection (WAL mode allows concurrent
+    /// readers).
     fn read_connection(&self) -> Result<Connection, StoreError> {
         let connection =
             Connection::open(&self.db_path).map_err(|err| StoreError::Failure(err.to_string()))?;
@@ -78,6 +93,10 @@ impl DatabaseStore {
         Ok(connection)
     }
 
+    /// Acquires the write lock and executes `operation` inside a single SQLite
+    /// transaction. Rolls back on error.
+    ///
+    /// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
     fn write_transaction<T>(
         &self,
         operation: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
@@ -95,6 +114,9 @@ impl DatabaseStore {
         Ok(result)
     }
 
+    /// Writes raw MIME to a content-addressed file under `data_root/accounts/
+    /// {account_id}/messages/{sha256_prefix}/{sha256}.eml`. Deduplicates by
+    /// hash.
     fn store_raw_message(
         &self,
         account_id: &AccountId,
@@ -124,6 +146,9 @@ impl DatabaseStore {
         })
     }
 
+    /// Persists a sync state token in the same transaction as sync data.
+    ///
+    /// @spec spec/L1-sync#state-management
     fn upsert_sync_cursor_tx(
         tx: &Transaction<'_>,
         account_id: &AccountId,
@@ -146,6 +171,9 @@ impl DatabaseStore {
         Ok(())
     }
 
+    /// Lists all messages in a thread, ordered by `received_at ASC`.
+    ///
+    /// @spec spec/L1-search#thread-view
     fn list_messages_for_thread(
         &self,
         account_id: &AccountId,
@@ -172,6 +200,8 @@ impl DatabaseStore {
 }
 
 impl MailStore for DatabaseStore {
+    /// Creates or updates the `source_projection` row that maps account IDs to
+    /// display names for query joins.
     fn upsert_source_projection(
         &self,
         source_id: &AccountId,
@@ -188,6 +218,7 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    /// Removes a source projection row when an account is deleted.
     fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError> {
         self.write_transaction(|tx| {
             tx.execute(
@@ -199,6 +230,7 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    /// Lists mailboxes for an account, ordered by role then name.
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
@@ -227,6 +259,10 @@ impl MailStore for DatabaseStore {
         Ok(mailboxes)
     }
 
+    /// Returns a seek-paginated page of conversations, optionally filtered by
+    /// account and/or mailbox.
+    ///
+    /// @spec spec/L1-sync#conversation-pagination
     fn list_conversations(
         &self,
         account_id: Option<&AccountId>,
@@ -260,6 +296,10 @@ impl MailStore for DatabaseStore {
         )
     }
 
+    /// Returns all messages in a conversation ordered by `received_at ASC`,
+    /// or `None` if the conversation does not exist.
+    ///
+    /// @spec spec/L1-search#conversation-view
     fn get_conversation(
         &self,
         conversation_id: &ConversationId,
@@ -296,6 +336,8 @@ impl MailStore for DatabaseStore {
         }))
     }
 
+    /// Lists messages for an account, optionally filtered by mailbox, ordered
+    /// by `received_at DESC`.
     fn list_messages(
         &self,
         account_id: &AccountId,
@@ -336,6 +378,10 @@ impl MailStore for DatabaseStore {
         hydrate_message_summaries(&connection, summary_rows)
     }
 
+    /// Evaluates a smart mailbox rule against all sources and returns matching
+    /// messages.
+    ///
+    /// @spec spec/L1-search#smart-mailbox-data-model
     fn query_messages_by_rule(
         &self,
         rule: &SmartMailboxRule,
@@ -344,6 +390,9 @@ impl MailStore for DatabaseStore {
         query_messages_by_rule(&connection, rule)
     }
 
+    /// Evaluates a smart mailbox rule and returns a paginated conversation view.
+    ///
+    /// @spec spec/L1-search#smart-mailbox-data-model
     fn query_conversations_by_rule(
         &self,
         rule: &SmartMailboxRule,
@@ -354,6 +403,7 @@ impl MailStore for DatabaseStore {
         query_conversations_by_rule(&connection, rule, limit, cursor)
     }
 
+    /// Returns (unread, total) message counts for a smart mailbox rule.
     fn query_smart_mailbox_counts(
         &self,
         rule: &SmartMailboxRule,
@@ -362,6 +412,8 @@ impl MailStore for DatabaseStore {
         count_smart_mailbox_messages(&connection, rule)
     }
 
+    /// Removes all data for an account from every table, including orphaned
+    /// conversations.
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError> {
         self.write_transaction(|tx| {
             tx.execute(
@@ -414,6 +466,10 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    /// Returns full message detail including body (if fetched) and raw message
+    /// reference.
+    ///
+    /// @spec spec/L1-sync#email-bodies-are-fetched-lazily
     fn get_message_detail(
         &self,
         account_id: &AccountId,
@@ -478,6 +534,10 @@ impl MailStore for DatabaseStore {
         }))
     }
 
+    /// Returns a thread view with all messages ordered chronologically, or
+    /// `None` if empty.
+    ///
+    /// @spec spec/L1-search#thread-view
     fn get_thread(
         &self,
         account_id: &AccountId,
@@ -493,6 +553,9 @@ impl MailStore for DatabaseStore {
         }))
     }
 
+    /// Returns all stored sync state tokens for an account.
+    ///
+    /// @spec spec/L1-sync#state-management
     fn get_sync_cursors(&self, account_id: &AccountId) -> Result<Vec<SyncCursor>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
@@ -517,6 +580,10 @@ impl MailStore for DatabaseStore {
         Ok(cursors)
     }
 
+    /// Returns the sync state token for a specific object type, or `None` if
+    /// no sync has occurred yet.
+    ///
+    /// @spec spec/L1-sync#state-management
     fn get_cursor(
         &self,
         account_id: &AccountId,
@@ -541,6 +608,7 @@ impl MailStore for DatabaseStore {
             .map_err(sql_to_store_error)
     }
 
+    /// Returns the mailbox IDs a message belongs to.
     fn get_message_mailboxes(
         &self,
         account_id: &AccountId,
@@ -550,6 +618,11 @@ impl MailStore for DatabaseStore {
         fetch_mailbox_ids(&connection, account_id, message_id)
     }
 
+    /// Applies a sync batch within a single SQLite transaction: stages raw
+    /// bodies to disk first, then upserts/deletes mailboxes and messages,
+    /// refreshes projections, and persists cursors atomically with data.
+    ///
+    /// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
     fn apply_sync_batch(
         &self,
         account_id: &AccountId,
@@ -559,6 +632,10 @@ impl MailStore for DatabaseStore {
         self.write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))
     }
 
+    /// Stores a lazily fetched message body and emits a `message.body_cached`
+    /// event.
+    ///
+    /// @spec spec/L1-sync#invariants
     fn apply_message_body(
         &self,
         account_id: &AccountId,
@@ -575,6 +652,8 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    /// Adds/removes keywords on a message and refreshes mailbox counters.
+    /// Optionally persists a new sync cursor atomically.
     fn set_keywords(
         &self,
         account_id: &AccountId,
@@ -585,6 +664,8 @@ impl MailStore for DatabaseStore {
         self.write_transaction(|tx| set_keywords_tx(tx, account_id, message_id, cursor, command))
     }
 
+    /// Replaces a message's mailbox memberships, refreshes counters, and emits
+    /// arrival events for newly added mailboxes. Optionally persists a cursor.
     fn replace_mailboxes(
         &self,
         account_id: &AccountId,
@@ -597,6 +678,8 @@ impl MailStore for DatabaseStore {
         })
     }
 
+    /// Permanently deletes a message and all its junction rows, refreshes
+    /// thread/mailbox projections, and optionally persists a cursor.
     fn destroy_message(
         &self,
         account_id: &AccountId,
@@ -606,11 +689,17 @@ impl MailStore for DatabaseStore {
         self.write_transaction(|tx| destroy_message_tx(tx, account_id, message_id, cursor))
     }
 
+    /// Queries the event log, supporting `afterSeq` cursor-based replay.
+    ///
+    /// @spec spec/L1-sync#event-propagation
     fn list_events(&self, filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError> {
         let connection = self.read_connection()?;
         list_events_for_filter(&connection, filter)
     }
 
+    /// Inserts a domain event into the event log.
+    ///
+    /// @spec spec/L1-sync#event-propagation
     fn append_event(
         &self,
         account_id: &AccountId,

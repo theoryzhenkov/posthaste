@@ -1,3 +1,9 @@
+/**
+ * Smart mailbox create/edit form with rule builder integration.
+ *
+ * @spec spec/L1-api#smart-mailbox-crud
+ * @spec spec/L1-search#smart-mailbox-data-model
+ */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import {
@@ -20,6 +26,14 @@ import type { SmartMailboxEditorTarget } from "./types";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
+/**
+ * Smart mailbox editor form: create new or edit existing smart mailboxes.
+ *
+ * Embeds the recursive `RuleGroupEditor` for building filter rules.
+ *
+ * @spec spec/L1-api#smart-mailbox-crud
+ * @spec spec/L1-search#smart-mailbox-data-model
+ */
 export function SmartMailboxEditor({
   editorTarget,
   editingSmartMailbox,

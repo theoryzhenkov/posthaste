@@ -1,3 +1,7 @@
+/**
+ * Core button component with CVA variant support.
+ * @spec spec/L0-branding#color-palette-light-mode-primary
+ */
 import * as React from "react"
 import { type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
@@ -5,6 +9,10 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "./button-variants"
 
+/**
+ * Polymorphic button with variant and size props driven by `buttonVariants`.
+ * Supports `asChild` for rendering as a Radix `Slot`.
+ */
 function Button({
   className,
   variant = "default",

@@ -4,6 +4,11 @@ use mail_domain::{
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 
+/// Returns the built-in smart mailboxes: Inbox, Archive, Drafts, Sent, Junk,
+/// Trash, and All Mail. Each filters by `mailbox_role`; All Mail uses an empty
+/// rule (matches everything).
+///
+/// @spec spec/L1-accounts#smart-mailbox-defaults
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     vec![
         role_mailbox("default-inbox", "Inbox", 0, "inbox", "inbox"),
@@ -16,6 +21,8 @@ pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     ]
 }
 
+/// Constructs a default smart mailbox that filters messages by a single
+/// `mailbox_role` condition.
 fn role_mailbox(
     id: &str,
     name: &str,
@@ -48,6 +55,8 @@ fn role_mailbox(
     }
 }
 
+/// Constructs the "All Mail" smart mailbox with an empty rule that matches
+/// every message.
 fn all_mail_mailbox() -> SmartMailbox {
     let timestamp = RFC3339_EPOCH.to_string();
     SmartMailbox {

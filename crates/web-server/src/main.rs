@@ -21,6 +21,10 @@ use crate::config::resolve_roots;
 use crate::secret::SystemSecretStore;
 use crate::supervisor::AccountSupervisor;
 
+/// Shared application state threaded through all Axum handlers.
+///
+/// @spec spec/L0-api#axum
+/// @spec spec/L1-api#endpoint-table
 pub struct AppState {
     pub service: Arc<MailService>,
     pub store: Arc<dyn MailStore>,
@@ -30,6 +34,10 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Broadcast domain events to all connected SSE clients.
+    ///
+    /// @spec spec/L1-api#sse-event-stream
+    /// @spec spec/L1-sync#event-propagation
     pub fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {
             let _ = self.event_sender.send(event.clone());
@@ -37,6 +45,11 @@ impl AppState {
     }
 }
 
+/// Start the mail daemon: resolve config/state roots, open repositories,
+/// wire up account supervisors, and bind the Axum HTTP server.
+///
+/// @spec spec/L0-api#axum
+/// @spec spec/L1-accounts#initialization
 #[tokio::main]
 async fn main() {
     dotenv().ok();

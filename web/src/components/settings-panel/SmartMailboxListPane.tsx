@@ -1,7 +1,17 @@
+/**
+ * Left-pane smart mailbox list with reorder and reset-defaults controls.
+ *
+ * @spec spec/L1-api#smart-mailbox-crud
+ */
 import type { SmartMailboxSummary } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 
+/**
+ * Smart mailbox list pane: shows all saved smart mailboxes with reorder buttons.
+ *
+ * @spec spec/L1-api#smart-mailbox-crud
+ */
 export function SmartMailboxListPane({
   smartMailboxSummaries,
   selectedSmartMailboxId,

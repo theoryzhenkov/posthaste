@@ -1,3 +1,12 @@
+/**
+ * Pure helper functions and constants for the settings panel editors.
+ *
+ * Handles form state conversion, smart mailbox rule builder helpers,
+ * and visual status mapping.
+ *
+ * @spec spec/L1-api#account-crud-lifecycle
+ * @spec spec/L1-search#smart-mailbox-data-model
+ */
 import type {
   AccountDriver,
   AccountOverview,
@@ -16,8 +25,10 @@ import type {
   SmartMailboxFormState,
 } from "./types";
 
+/** @spec spec/L1-api#account-crud-lifecycle */
 export const ACCOUNT_DRIVER_VALUES = ["jmap", "mock"] as const;
 
+/** Default empty form state for creating a new account. */
 export const EMPTY_FORM: AccountFormState = {
   id: "",
   name: "",
@@ -29,6 +40,7 @@ export const EMPTY_FORM: AccountFormState = {
   secretMode: "replace",
 };
 
+/** Default empty form state for creating a new smart mailbox. */
 export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
   name: "",
   position: 0,
@@ -41,6 +53,7 @@ export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
   },
 };
 
+/** Convert an existing account overview into editable form state. */
 export function formFromAccount(account: AccountOverview): AccountFormState {
   return {
     id: account.id,
@@ -54,6 +67,7 @@ export function formFromAccount(account: AccountOverview): AccountFormState {
   };
 }
 
+/** Convert an existing smart mailbox into editable form state. */
 export function formFromSmartMailbox(
   smartMailbox: SmartMailbox | SmartMailboxSummary,
 ): SmartMailboxFormState {
@@ -64,6 +78,10 @@ export function formFromSmartMailbox(
   };
 }
 
+/**
+ * Available smart mailbox filter fields for the rule builder UI.
+ * @spec spec/L1-search#smart-mailbox-data-model
+ */
 export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> = [
   { value: "sourceId", label: "Source ID" },
   { value: "sourceName", label: "Source Name" },
@@ -80,6 +98,7 @@ export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> =
   { value: "receivedAt", label: "Received at" },
 ];
 
+/** @spec spec/L1-search#smart-mailbox-data-model */
 export const GROUP_OPERATOR_OPTIONS: Array<{
   value: SmartMailboxGroupOperator;
   label: string;
@@ -88,6 +107,7 @@ export const GROUP_OPERATOR_OPTIONS: Array<{
   { value: "any", label: "Any" },
 ];
 
+/** Parse a string into a valid account driver, returning the fallback on mismatch. */
 export function parseAccountDriver(
   value: string,
   fallback: AccountDriver,
@@ -95,6 +115,7 @@ export function parseAccountDriver(
   return ACCOUNT_DRIVER_VALUES.find((candidate) => candidate === value) ?? fallback;
 }
 
+/** Parse a string into a valid group operator, returning the fallback on mismatch. */
 export function parseGroupOperator(
   value: string,
   fallback: SmartMailboxGroupOperator,
@@ -102,6 +123,7 @@ export function parseGroupOperator(
   return GROUP_OPERATOR_OPTIONS.find((option) => option.value === value)?.value ?? fallback;
 }
 
+/** Parse a string into a valid smart mailbox field, returning the fallback on mismatch. */
 export function parseField(
   value: string,
   fallback: SmartMailboxField,
@@ -109,6 +131,7 @@ export function parseField(
   return FIELD_OPTIONS.find((option) => option.value === value)?.value ?? fallback;
 }
 
+/** Parse a string into a valid operator for the given field. */
 export function parseOperator(
   value: string,
   field: SmartMailboxField,
@@ -117,6 +140,10 @@ export function parseOperator(
   return operatorOptionsForField(field).find((operator) => operator === value) ?? fallback;
 }
 
+/**
+ * Return the valid operators for a given smart mailbox field.
+ * @spec spec/L1-search#smart-mailbox-data-model
+ */
 export function operatorOptionsForField(
   field: SmartMailboxField,
 ): SmartMailboxOperator[] {
@@ -141,6 +168,7 @@ export function operatorOptionsForField(
   }
 }
 
+/** Create a default condition node for the given field. */
 export function defaultCondition(
   field: SmartMailboxField = "mailboxRole",
 ): SmartMailboxCondition {
@@ -156,6 +184,7 @@ export function defaultCondition(
   };
 }
 
+/** Create an empty rule group node. */
 export function defaultGroup(): SmartMailboxRuleNode {
   return {
     type: "group",
@@ -165,6 +194,10 @@ export function defaultGroup(): SmartMailboxRuleNode {
   };
 }
 
+/**
+ * Build a secret instruction payload from the current form state.
+ * @spec spec/L1-api#secret-management
+ */
 export function buildSecretInput(form: AccountFormState) {
   if (form.secretMode === "replace") {
     return { mode: "replace" as const, password: form.password };
@@ -172,6 +205,7 @@ export function buildSecretInput(form: AccountFormState) {
   return { mode: form.secretMode as "keep" | "clear" };
 }
 
+/** Build a create-account API payload from form state. */
 export function buildCreateAccountPayload(form: AccountFormState): CreateAccountInput {
   return {
     id: form.id.trim(),
@@ -186,6 +220,10 @@ export function buildCreateAccountPayload(form: AccountFormState): CreateAccount
   };
 }
 
+/**
+ * Build an update-account API payload from form state.
+ * @spec spec/L1-api#account-crud-lifecycle
+ */
 export function buildUpdateAccountPayload(form: AccountFormState): UpdateAccountInput {
   return {
     name: form.name.trim(),
@@ -199,6 +237,7 @@ export function buildUpdateAccountPayload(form: AccountFormState): UpdateAccount
   };
 }
 
+/** Map account status to Tailwind color classes for the status badge. */
 export function statusTone(status: AccountOverview["status"]): string {
   switch (status) {
     case "ready":

@@ -9,11 +9,19 @@ use mail_domain::{
 use crate::live::map_gateway_error;
 use crate::ws_connection::SharedWsConnection;
 
+/// Push transport that reads JMAP state-change notifications from a shared WebSocket.
+///
+/// Preferred over SSE when the server advertises `urn:ietf:params:jmap:websocket`.
+/// The underlying connection is shared with API request routing via `SharedWsConnection`.
+///
+/// @spec spec/L2-transport#pushtransport
+/// @spec spec/L2-transport#websocket-connection-lifecycle
 pub struct WsPushTransport {
     ws: Arc<SharedWsConnection>,
 }
 
 impl WsPushTransport {
+    /// Create a WebSocket push transport wrapping an existing shared connection.
     pub fn new(ws: Arc<SharedWsConnection>) -> Self {
         Self { ws }
     }
@@ -21,10 +29,16 @@ impl WsPushTransport {
 
 #[async_trait]
 impl PushTransport for WsPushTransport {
+    /// Transport identifier used in logging and push status tracking.
     fn name(&self) -> &'static str {
         "ws"
     }
 
+    /// Ensure the WS connection is active, enable push, and return a stream
+    /// of `PushNotification` values filtered from WS messages.
+    ///
+    /// @spec spec/L2-transport#websocket-connection-lifecycle
+    /// @spec spec/L1-jmap#push
     async fn open(
         &self,
         account_id: &AccountId,
@@ -57,6 +71,13 @@ impl PushTransport for WsPushTransport {
     }
 }
 
+/// Convert a raw JMAP `PushObject` into a domain `PushNotification`.
+///
+/// Only `StateChange` variants are relevant; other push object types are ignored.
+/// WS push does not carry SSE-style checkpoint IDs, so the notification's
+/// `checkpoint` is always `None`.
+///
+/// @spec spec/L1-jmap#push
 fn convert_push_object(
     account_id: &AccountId,
     push: jmap_client::PushObject,

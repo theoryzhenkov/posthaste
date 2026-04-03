@@ -7,10 +7,15 @@ use mail_domain::{
     SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
 };
 
+/// In-memory `MailGateway` for tests and local development.
+///
+/// Holds a fixed set of sample mailboxes and messages. Mutations update
+/// internal state and bump a revision counter to simulate JMAP state strings.
 pub struct MockJmapGateway {
     state: Mutex<MockState>,
 }
 
+/// Mutable inner state behind the `MockJmapGateway` mutex.
 struct MockState {
     revision: u64,
     mailboxes: Vec<MailboxRecord>,
@@ -29,6 +34,7 @@ impl Default for MockJmapGateway {
     }
 }
 
+/// Build a mock mutation outcome from the current revision.
 fn mutation_outcome(state: &MockState) -> MutationOutcome {
     MutationOutcome {
         cursor: Some(SyncCursor {
@@ -41,6 +47,7 @@ fn mutation_outcome(state: &MockState) -> MutationOutcome {
 
 #[async_trait]
 impl MailGateway for MockJmapGateway {
+    /// Return a full snapshot of all mock mailboxes and messages.
     async fn sync(
         &self,
         _account_id: &AccountId,
@@ -71,6 +78,7 @@ impl MailGateway for MockJmapGateway {
         })
     }
 
+    /// Return the pre-populated body for a mock message.
     async fn fetch_message_body(
         &self,
         _account_id: &AccountId,
@@ -92,6 +100,7 @@ impl MailGateway for MockJmapGateway {
         })
     }
 
+    /// Apply keyword changes to a mock message, respecting optimistic concurrency.
     async fn set_keywords(
         &self,
         _account_id: &AccountId,
@@ -121,6 +130,7 @@ impl MailGateway for MockJmapGateway {
         Ok(mutation_outcome(&state))
     }
 
+    /// Replace a mock message's mailbox membership.
     async fn replace_mailboxes(
         &self,
         _account_id: &AccountId,
@@ -143,6 +153,7 @@ impl MailGateway for MockJmapGateway {
         Ok(mutation_outcome(&state))
     }
 
+    /// Remove a message from mock state.
     async fn destroy_message(
         &self,
         _account_id: &AccountId,
@@ -159,6 +170,7 @@ impl MailGateway for MockJmapGateway {
         Ok(mutation_outcome(&state))
     }
 
+    /// Return a hard-coded mock sender identity.
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {
             id: "mock-identity".to_string(),
@@ -167,6 +179,7 @@ impl MailGateway for MockJmapGateway {
         })
     }
 
+    /// Build a reply context from mock message data.
     async fn fetch_reply_context(
         &self,
         _account_id: &AccountId,
@@ -198,6 +211,7 @@ impl MailGateway for MockJmapGateway {
         })
     }
 
+    /// No-op: accept the send request without side effects.
     async fn send_message(
         &self,
         _account_id: &AccountId,
@@ -206,11 +220,13 @@ impl MailGateway for MockJmapGateway {
         Ok(())
     }
 
+    /// Mock gateway has no push transports.
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
         vec![]
     }
 }
 
+/// Simulate optimistic concurrency: reject if the expected state doesn't match.
 fn ensure_expected_state(
     state: &MockState,
     expected_state: Option<&str>,
@@ -224,10 +240,12 @@ fn ensure_expected_state(
     Ok(())
 }
 
+/// Advance the mock revision counter to simulate a new JMAP state string.
 fn bump_revision(state: &mut MockState) {
     state.revision += 1;
 }
 
+/// Seed data: Inbox, Archive, and Trash mailboxes.
 fn sample_mailboxes() -> Vec<MailboxRecord> {
     vec![
         MailboxRecord {
@@ -254,6 +272,7 @@ fn sample_mailboxes() -> Vec<MailboxRecord> {
     ]
 }
 
+/// Seed data: three messages across two threads with pre-populated bodies.
 fn sample_messages() -> Vec<MessageRecord> {
     vec![
         MessageRecord {

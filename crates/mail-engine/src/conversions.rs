@@ -3,6 +3,12 @@ use mail_domain::{BlobId, MailboxId, MailboxRecord, MessageId, MessageRecord, RF
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+/// Convert a `jmap_client::mailbox::Mailbox` to the domain `MailboxRecord`.
+///
+/// Maps JMAP mailbox roles to lowercase string identifiers (`inbox`, `drafts`,
+/// `sent`, `trash`, `junk`, `archive`). Non-standard roles use debug formatting.
+///
+/// @spec spec/L1-jmap#core-types
 pub(crate) fn to_mailbox_record(mailbox: &jmap_client::mailbox::Mailbox) -> MailboxRecord {
     let role = match mailbox.role() {
         mailbox::Role::Inbox => Some("inbox".to_string()),
@@ -23,6 +29,14 @@ pub(crate) fn to_mailbox_record(mailbox: &jmap_client::mailbox::Mailbox) -> Mail
     }
 }
 
+/// Convert a `jmap_client::email::Email` to the domain `MessageRecord`.
+///
+/// Extracts metadata-only properties (subject, sender, preview, keywords,
+/// mailbox membership, threading headers). Body fields are left as `None`
+/// because bodies are fetched lazily on first view.
+///
+/// @spec spec/L1-jmap#core-types
+/// @spec spec/L1-sync#sync-granularity
 pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRecord {
     let (from_name, from_email) = email
         .from()
@@ -68,6 +82,7 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
     }
 }
 
+/// Convert a Unix timestamp (seconds) to an RFC 3339 string.
 fn timestamp_to_iso8601(timestamp: i64) -> Option<String> {
     OffsetDateTime::from_unix_timestamp(timestamp)
         .ok()

@@ -1,10 +1,27 @@
+/**
+ * Sandboxed iframe for rendering sanitized email HTML.
+ *
+ * The HTML is already sanitized in Rust via ammonia before reaching the frontend.
+ * The iframe uses `sandbox="allow-same-origin"` with no script execution.
+ * Long messages scroll inside the iframe rather than expanding the detail pane.
+ *
+ * @spec spec/L1-ui#messagedetail-and-emailframe
+ * @spec spec/L0-ui#html-email-rendering
+ */
 import { cn } from "../lib/utils";
 
+/** @spec spec/L1-ui#messagedetail-and-emailframe */
 interface EmailFrameProps {
   html: string;
   className?: string;
 }
 
+/**
+ * Renders pre-sanitized email HTML inside a sandboxed `srcdoc` iframe.
+ *
+ * @spec spec/L1-ui#messagedetail-and-emailframe
+ * @spec spec/L0-branding#color-palette-light-mode-primary
+ */
 export function EmailFrame({ html, className }: EmailFrameProps) {
   const wrappedHtml = `<!DOCTYPE html>
 <html>

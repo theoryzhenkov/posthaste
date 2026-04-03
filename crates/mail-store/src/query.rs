@@ -1,5 +1,7 @@
 use super::*;
 
+/// Intermediate row from a message summary query, before hydration with
+/// mailbox IDs and keywords.
 #[derive(Debug)]
 pub(crate) struct MessageSummaryRow {
     pub(crate) id: MessageId,
@@ -17,6 +19,7 @@ pub(crate) struct MessageSummaryRow {
     pub(crate) is_flagged: bool,
 }
 
+/// Executes a prepared message summary statement and collects the rows.
 pub(crate) fn load_message_summary_rows<P: rusqlite::Params>(
     statement: &mut rusqlite::Statement<'_>,
     params: P,
@@ -28,6 +31,8 @@ pub(crate) fn load_message_summary_rows<P: rusqlite::Params>(
         .map_err(sql_to_store_error)
 }
 
+/// Hydrates intermediate message rows with mailbox IDs and keywords via bulk
+/// lookups, preserving the original row order.
 pub(crate) fn hydrate_message_summaries(
     connection: &Connection,
     rows: Vec<MessageSummaryRow>,
@@ -67,6 +72,7 @@ pub(crate) fn hydrate_message_summaries(
         .collect())
 }
 
+/// Maps an `event_log` row to a `DomainEvent`.
 pub(crate) fn row_to_event(row: &rusqlite::Row<'_>) -> Result<DomainEvent, rusqlite::Error> {
     let payload: String = row.get(6)?;
     Ok(DomainEvent {

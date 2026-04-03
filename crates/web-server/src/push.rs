@@ -3,11 +3,18 @@ use mail_domain::{
     AccountId, PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig,
 };
 
+/// Which transport is currently being used by the resilient stream.
 enum ActiveTransport {
     Primary,
     Fallback,
 }
 
+/// Build a resilient push notification stream that reconnects with backoff
+/// and falls back from the primary transport (WS) to the fallback (SSE)
+/// after repeated failures.
+///
+/// @spec spec/L2-transport#resilientpushstream
+/// @spec spec/L2-transport#sse-fallback
 pub fn resilient_push_stream(
     account_id: AccountId,
     primary: Box<dyn PushTransport>,

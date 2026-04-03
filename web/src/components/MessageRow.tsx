@@ -1,3 +1,12 @@
+/**
+ * Single conversation row in the message list.
+ *
+ * Renders sender, subject, preview, relative timestamp, unread dot,
+ * flag star, message count badge, and source tag.
+ *
+ * @spec spec/L1-ui#messagelist
+ */
+import { Star } from "lucide-react";
 import type { ConversationSummary } from "../api/types";
 import { cn } from "../lib/utils";
 import {
@@ -6,6 +15,7 @@ import {
   getColumnDef,
 } from "./thread-list/columns";
 
+/** @spec spec/L1-ui#messagelist */
 interface MessageRowProps {
   message: ConversationSummary;
   isSelected: boolean;
@@ -13,6 +23,12 @@ interface MessageRowProps {
   columns: ColumnId[];
 }
 
+/**
+ * Fixed-height conversation row displaying sender, subject,
+ * preview, date, unread state, flag, and thread count.
+ *
+ * @spec spec/L1-ui#messagelist
+ */
 export function MessageRow({
   message,
   isSelected,
