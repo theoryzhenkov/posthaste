@@ -11,6 +11,7 @@ import type { ConversationSummary } from "../api/types";
 import { cn } from "../lib/utils";
 import {
   type ColumnId,
+  type ColumnWidths,
   buildGridTemplate,
   getColumnDef,
 } from "./thread-list/columns";
@@ -21,6 +22,7 @@ interface MessageRowProps {
   isSelected: boolean;
   onSelect: () => void;
   columns: ColumnId[];
+  widths?: ColumnWidths;
 }
 
 /**
@@ -34,6 +36,7 @@ export function MessageRow({
   isSelected,
   onSelect,
   columns,
+  widths,
 }: MessageRowProps) {
   return (
     <button
@@ -44,7 +47,7 @@ export function MessageRow({
         isSelected && "border-l-2 border-l-primary bg-accent",
         !isSelected && "border-l-2 border-l-transparent",
       )}
-      style={{ gridTemplateColumns: buildGridTemplate(columns) }}
+      style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
       onClick={onSelect}
       type="button"
     >
