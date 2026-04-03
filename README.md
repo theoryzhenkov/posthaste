@@ -81,8 +81,8 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **search** -- Query language, smart mailboxes, search execution. [L0](spec/L0-search.md)
 - **compose** -- Markdown composition, MIME assembly, send/draft lifecycle
 - **ui** -- Web UI, React components, conversation list, HTML rendering, keyboard model
-- **accounts** -- Multi-account scoping (deferred, L0-only)
-- **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](spec/L0-api.md)
+- **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](spec/L0-accounts.md) [L1](spec/L1-accounts.md)
+- **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](spec/L0-api.md) [L1](spec/L1-api.md)
 
 ## MVP acceptance criteria
 
