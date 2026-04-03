@@ -47,11 +47,11 @@ export function ColumnResizeHandle({
 
   return (
     <div
-      className="absolute top-0 right-0 z-20 h-full w-1.5 cursor-col-resize opacity-0 transition-opacity hover:opacity-100 active:opacity-100"
+      className="absolute -right-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-center justify-center"
       onPointerDown={handlePointerDown}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="mx-auto h-full w-px bg-border" />
+      <div className="h-3 w-px bg-border" />
     </div>
   );
 }
