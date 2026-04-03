@@ -106,9 +106,13 @@ pub trait MailGateway: Send + Sync {
 /// @spec spec/L1-sync#sqlite-schema
 pub trait MailStore: Send + Sync {
     /// List all mailboxes for an account.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError>;
 
     /// List messages, optionally filtered by mailbox.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn list_messages(
         &self,
         account_id: &AccountId,
@@ -134,6 +138,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<ConversationPage, StoreError>;
 
     /// Return (unread, total) counts for a smart mailbox rule.
+    ///
+    /// @spec spec/L1-search#smart-mailbox-data-model
     fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
         -> Result<(i64, i64), StoreError>;
 
@@ -149,12 +155,16 @@ pub trait MailStore: Send + Sync {
     ) -> Result<ConversationPage, StoreError>;
 
     /// Fetch a single conversation with all its messages.
+    ///
+    /// @spec spec/L1-sync#conversation-pagination
     fn get_conversation(
         &self,
         conversation_id: &ConversationId,
     ) -> Result<Option<ConversationView>, StoreError>;
 
     /// Fetch full message detail including body content.
+    ///
+    /// @spec spec/L1-sync#body-lazy
     fn get_message_detail(
         &self,
         account_id: &AccountId,
@@ -162,6 +172,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<Option<MessageDetail>, StoreError>;
 
     /// Fetch all messages in a thread.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn get_thread(
         &self,
         account_id: &AccountId,
@@ -183,6 +195,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<Option<SyncCursor>, StoreError>;
 
     /// Return current mailbox memberships for a message.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn get_message_mailboxes(
         &self,
         account_id: &AccountId,
@@ -199,6 +213,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<Vec<DomainEvent>, StoreError>;
 
     /// Persist a lazily-fetched message body.
+    ///
+    /// @spec spec/L1-sync#body-lazy
     fn apply_message_body(
         &self,
         account_id: &AccountId,
@@ -207,6 +223,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<CommandResult, StoreError>;
 
     /// Apply a keyword mutation locally, updating the sync cursor.
+    ///
+    /// @spec spec/L1-jmap#methods-used
     fn set_keywords(
         &self,
         account_id: &AccountId,
@@ -216,6 +234,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<CommandResult, StoreError>;
 
     /// Apply a mailbox replacement locally, updating the sync cursor.
+    ///
+    /// @spec spec/L1-jmap#methods-used
     fn replace_mailboxes(
         &self,
         account_id: &AccountId,
@@ -225,6 +245,8 @@ pub trait MailStore: Send + Sync {
     ) -> Result<CommandResult, StoreError>;
 
     /// Delete a message locally, updating the sync cursor.
+    ///
+    /// @spec spec/L1-jmap#methods-used
     fn destroy_message(
         &self,
         account_id: &AccountId,
@@ -250,13 +272,19 @@ pub trait MailStore: Send + Sync {
     ) -> Result<DomainEvent, StoreError>;
 
     /// Create or update the source projection row for sidebar display.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn upsert_source_projection(&self, source_id: &AccountId, name: &str)
         -> Result<(), StoreError>;
 
     /// Remove the source projection row.
+    ///
+    /// @spec spec/L1-sync#sqlite-schema
     fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError>;
 
     /// Delete all synced data for an account (messages, mailboxes, events).
+    ///
+    /// @spec spec/L0-accounts#the-invariant
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError>;
 }
 

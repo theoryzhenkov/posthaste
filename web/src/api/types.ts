@@ -129,7 +129,10 @@ export interface MessageSummary {
   keywords: string[];
 }
 
-/** Reference to a raw message file stored on the backend. */
+/**
+ * Reference to a raw message file stored on the backend.
+ * @spec spec/L1-sync#body-lazy
+ */
 export interface RawMessageRef {
   path: string;
   sha256: string;
@@ -148,7 +151,10 @@ export interface MessageDetail extends MessageSummary {
   rawMessage: RawMessageRef | null;
 }
 
-/** Pair that uniquely identifies a message within a source account. */
+/**
+ * Pair that uniquely identifies a message within a source account.
+ * @spec spec/L1-api#endpoint-table
+ */
 export interface SourceMessageRef {
   sourceId: string;
   messageId: string;
