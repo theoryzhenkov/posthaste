@@ -177,8 +177,18 @@ export function getColumnDef(id: ColumnId): ColumnDef {
   return COLUMN_DEFS[id];
 }
 
-export function buildGridTemplate(columns: ColumnId[]): string {
-  return columns.map((id) => COLUMN_DEFS[id].gridWidth).join(" ");
+export type ColumnWidths = Partial<Record<ColumnId, number>>;
+
+export function buildGridTemplate(
+  columns: ColumnId[],
+  widths?: ColumnWidths,
+): string {
+  return columns
+    .map((id) => {
+      const override = widths?.[id];
+      return override !== undefined ? `${override}px` : COLUMN_DEFS[id].gridWidth;
+    })
+    .join(" ");
 }
 
 // ---------------------------------------------------------------------------

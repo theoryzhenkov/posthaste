@@ -147,7 +147,7 @@ export function MessageList({
   actions,
 }: MessageListProps) {
   const queryClient = useQueryClient();
-  const { columns, sort, toggleColumn, reorderColumns, resetColumns, toggleSort } =
+  const { columns, sort, widths, toggleColumn, reorderColumns, resetColumns, toggleSort, setColumnWidth } =
     useColumnConfig();
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -481,7 +481,7 @@ export function MessageList({
         >
           <div
             className="mt-2 grid gap-3 border-t border-border pt-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground"
-            style={{ gridTemplateColumns: buildGridTemplate(columns) }}
+            style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
           >
             <DndContext
               sensors={dndSensors}
@@ -504,6 +504,7 @@ export function MessageList({
                         sort.columnId === colId ? sort.direction : undefined
                       }
                       onSort={() => toggleSort(colId)}
+                      onResize={(w) => setColumnWidth(colId, w)}
                     />
                   );
                 })}
@@ -538,6 +539,7 @@ export function MessageList({
                   message={conversation}
                   isSelected={conversation.id === selection?.conversationId}
                   columns={columns}
+                  widths={widths}
                   onSelect={() =>
                     onSelectMessage({
                       conversationId: conversation.id,
