@@ -1,6 +1,11 @@
 use super::*;
 use std::time::Duration;
 
+/// Creates all tables and indexes if they do not exist. Tables use
+/// `(account_id, ...)` composite keys to enforce the account-scoping invariant.
+///
+/// @spec spec/L1-sync#sqlite-schema
+/// @spec spec/L0-accounts#the-invariant
 pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(
@@ -132,6 +137,7 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Configures WAL journal mode and a 5-second busy timeout.
 pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     connection
         .pragma_update(None, "journal_mode", "wal")
@@ -142,10 +148,12 @@ pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreE
     Ok(())
 }
 
+/// Returns the current time as an ISO 8601 string.
 pub(crate) fn now_iso8601() -> Result<String, StoreError> {
     domain_now_iso8601().map_err(StoreError::Failure)
 }
 
+/// Parses a `sync_cursor.object_type` string into a `SyncObject` enum.
 pub(crate) fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Error> {
     match value {
         "mailbox" => Ok(SyncObject::Mailbox),
@@ -161,6 +169,7 @@ pub(crate) fn parse_sync_object(value: &str) -> Result<SyncObject, rusqlite::Err
     }
 }
 
+/// Converts a bool to SQLite integer (0/1).
 pub(crate) fn bool_to_i64(value: bool) -> i64 {
     if value {
         1
