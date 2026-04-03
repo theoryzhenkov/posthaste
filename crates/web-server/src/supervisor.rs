@@ -5,13 +5,11 @@ use std::time::Duration;
 use futures_util::{future::pending, StreamExt};
 use mail_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus, PushStreamEvent,
-    PushTransport, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
+    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus,
+    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
-use mail_jmap::{
-    connect_jmap_client, LiveJmapGateway, MockJmapGateway, SsePushTransport, WsPushTransport,
-};
+use mail_jmap::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
@@ -50,9 +48,9 @@ pub struct AccountVerification {
     pub push_supported: bool,
 }
 
-struct GatewayBundle {
+struct AccountConnection {
     gateway: SharedGateway,
-    push_stream: Option<PushEventStream>,
+    push_events: Option<PushEventStream>,
 }
 
 impl AccountSupervisor {
@@ -148,8 +146,8 @@ impl AccountSupervisor {
         &self,
         account: &AccountSettings,
     ) -> Result<AccountVerification, ServiceError> {
-        let bundle = build_gateway_bundle(account, self.shared.secret_store.as_ref()).await?;
-        let identity = bundle.gateway.fetch_identity(&account.id).await.ok();
+        let conn = build_connection(account, self.shared.secret_store.as_ref()).await?;
+        let identity = conn.gateway.fetch_identity(&account.id).await.ok();
         Ok(AccountVerification {
             ok: true,
             identity,
@@ -164,8 +162,7 @@ async fn run_account_runtime(
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
 ) {
     let account_id = account.id.clone();
-    let mut gateway: Option<SharedGateway> = None;
-    let mut push_events: Option<PushEventStream> = None;
+    let mut connection: Option<AccountConnection> = None;
     let mut interval = tokio::time::interval(shared.poll_interval);
 
     shared
@@ -180,19 +177,12 @@ async fn run_account_runtime(
         .await;
 
     // Initial sync + gateway setup
-    let _ = process_sync_trigger(
-        &shared,
-        &account,
-        SyncTrigger::Startup,
-        &mut gateway,
-        &mut push_events,
-        None,
-    )
-    .await;
+    let _ = process_sync_trigger(&shared, &account, SyncTrigger::Startup, &mut connection, None)
+        .await;
 
     loop {
         let next_push = async {
-            match push_events.as_mut() {
+            match connection.as_mut().and_then(|c| c.push_events.as_mut()) {
                 Some(stream) => stream.next().await,
                 None => pending().await,
             }
@@ -201,24 +191,14 @@ async fn run_account_runtime(
         tokio::select! {
             _ = interval.tick() => {
                 let _ = process_sync_trigger(
-                    &shared,
-                    &account,
-                    SyncTrigger::Poll,
-                    &mut gateway,
-                    &mut push_events,
-                    None,
+                    &shared, &account, SyncTrigger::Poll, &mut connection, None,
                 ).await;
             }
             Some(command) = command_rx.recv() => {
                 match command {
                     RuntimeCommand::Trigger { trigger, reply } => {
                         let _ = process_sync_trigger(
-                            &shared,
-                            &account,
-                            trigger,
-                            &mut gateway,
-                            &mut push_events,
-                            Some(reply),
+                            &shared, &account, trigger, &mut connection, Some(reply),
                         ).await;
                     }
                 }
@@ -227,12 +207,7 @@ async fn run_account_runtime(
                 match event {
                     PushStreamEvent::Notification(_) => {
                         let _ = process_sync_trigger(
-                            &shared,
-                            &account,
-                            SyncTrigger::Push,
-                            &mut gateway,
-                            &mut push_events,
-                            None,
+                            &shared, &account, SyncTrigger::Push, &mut connection, None,
                         ).await;
                     }
                     PushStreamEvent::Connected { transport } => {
@@ -270,8 +245,7 @@ async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
-    gateway: &mut Option<SharedGateway>,
-    push_events: &mut Option<PushEventStream>,
+    connection: &mut Option<AccountConnection>,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
@@ -279,7 +253,7 @@ async fn process_sync_trigger(
         .set_status_only(&account_id, AccountStatus::Syncing)
         .await;
 
-    let result = match ensure_gateway(shared, account, gateway, push_events).await {
+    let result = match ensure_connection(shared, account, connection).await {
         Ok(()) => {
             shared
                 .service
@@ -300,9 +274,7 @@ async fn process_sync_trigger(
         }
         Err(error) => {
             shared.service.remove_gateway(&account_id);
-            *gateway = None;
-            // Push stream keeps running — it has its own reconnection logic.
-            // It will fail independently if the underlying connection is gone.
+            *connection = None; // tears down gateway + push stream together
             let stage = if matches!(
                 error,
                 ServiceError::Gateway(GatewayError::Unavailable(_))
@@ -332,34 +304,28 @@ async fn process_sync_trigger(
     Ok(())
 }
 
-async fn ensure_gateway(
+async fn ensure_connection(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
-    gateway: &mut Option<SharedGateway>,
-    push_events: &mut Option<PushEventStream>,
+    connection: &mut Option<AccountConnection>,
 ) -> Result<(), ServiceError> {
-    if gateway.is_some() {
+    if connection.is_some() {
         return Ok(());
     }
-    let bundle = build_gateway_bundle(account, shared.secret_store.as_ref()).await?;
-    shared
-        .service
-        .set_gateway(&account.id, bundle.gateway.clone());
-    *gateway = Some(bundle.gateway);
-    if let Some(stream) = bundle.push_stream {
-        *push_events = Some(stream);
-    }
+    let conn = build_connection(account, shared.secret_store.as_ref()).await?;
+    shared.service.set_gateway(&account.id, conn.gateway.clone());
+    *connection = Some(conn);
     Ok(())
 }
 
-async fn build_gateway_bundle(
+async fn build_connection(
     account: &AccountSettings,
     secret_store: &dyn SecretStore,
-) -> Result<GatewayBundle, ServiceError> {
+) -> Result<AccountConnection, ServiceError> {
     match account.driver {
-        AccountDriver::Mock => Ok(GatewayBundle {
+        AccountDriver::Mock => Ok(AccountConnection {
             gateway: Arc::new(MockJmapGateway::default()),
-            push_stream: None,
+            push_events: None,
         }),
         AccountDriver::Jmap => {
             let url = account
@@ -377,22 +343,25 @@ async fn build_gateway_bundle(
             })?;
             let password = secret_store.resolve(secret_ref)?;
             let client = connect_jmap_client(url, username, &password).await?;
+            let gateway: SharedGateway = Arc::new(LiveJmapGateway::from_client(client));
 
-            let gateway = LiveJmapGateway::from_client(client.clone());
+            let transports = gateway.push_transports();
+            let mut transports = transports.into_iter();
+            let primary = transports.next();
+            let fallback = transports.next();
 
-            let primary: Box<dyn PushTransport> = Box::new(WsPushTransport::new(client.clone()));
-            let fallback: Box<dyn PushTransport> = Box::new(SsePushTransport::new(client));
+            let push_events = primary.map(|primary| {
+                resilient_push_stream(
+                    account.id.clone(),
+                    primary,
+                    fallback,
+                    ResilientPushConfig::default(),
+                )
+            });
 
-            let push_stream = resilient_push_stream(
-                account.id.clone(),
-                primary,
-                Some(fallback),
-                ResilientPushConfig::default(),
-            );
-
-            Ok(GatewayBundle {
-                gateway: Arc::new(gateway),
-                push_stream: Some(push_stream),
+            Ok(AccountConnection {
+                gateway,
+                push_events,
             })
         }
     }
