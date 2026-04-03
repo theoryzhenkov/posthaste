@@ -1,26 +1,78 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { type ColumnId, DEFAULT_COLUMNS, ALL_COLUMNS } from "./columns";
+import {
+  type ColumnId,
+  type SortConfig,
+  type SortDirection,
+  ALL_COLUMNS,
+  DEFAULT_COLUMNS,
+  DEFAULT_SORT,
+} from "./columns";
 
 const STORAGE_KEY = "posthaste-thread-columns";
 
+interface StoredConfig {
+  columns: ColumnId[];
+  sort: SortConfig;
+}
+
+const DEFAULT_CONFIG: StoredConfig = {
+  columns: [...DEFAULT_COLUMNS],
+  sort: { ...DEFAULT_SORT },
+};
+
 const validIds = new Set<string>(ALL_COLUMNS);
 
-function readFromStorage(): ColumnId[] {
+function isValidColumnId(id: unknown): id is ColumnId {
+  return typeof id === "string" && validIds.has(id);
+}
+
+function readFromStorage(): StoredConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_COLUMNS;
+    if (!raw) return DEFAULT_CONFIG;
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_COLUMNS;
-    const filtered = parsed.filter(
-      (id): id is ColumnId => typeof id === "string" && validIds.has(id),
-    );
-    return filtered.length > 0 ? filtered : DEFAULT_COLUMNS;
+
+    // Migrate from old format (plain array of column IDs)
+    if (Array.isArray(parsed)) {
+      const columns = parsed.filter(isValidColumnId);
+      const migrated: StoredConfig = {
+        columns: columns.length > 0 ? columns : DEFAULT_CONFIG.columns,
+        sort: DEFAULT_CONFIG.sort,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+
+    if (typeof parsed !== "object" || parsed === null) return DEFAULT_CONFIG;
+    const obj = parsed as Record<string, unknown>;
+
+    let columns = DEFAULT_CONFIG.columns;
+    if (Array.isArray(obj.columns)) {
+      const filtered = obj.columns.filter(isValidColumnId);
+      if (filtered.length > 0) columns = filtered;
+    }
+
+    let sort = DEFAULT_CONFIG.sort;
+    if (typeof obj.sort === "object" && obj.sort !== null) {
+      const s = obj.sort as Record<string, unknown>;
+      if (
+        isValidColumnId(s.columnId) &&
+        (s.direction === "asc" || s.direction === "desc")
+      ) {
+        sort = {
+          columnId: s.columnId,
+          direction: s.direction as SortDirection,
+        };
+      }
+    }
+
+    return { columns, sort };
   } catch {
-    return DEFAULT_COLUMNS;
+    return DEFAULT_CONFIG;
   }
 }
 
-let cached: ColumnId[] = readFromStorage();
+let cached: StoredConfig = readFromStorage();
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -34,32 +86,61 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-function getSnapshot(): ColumnId[] {
+function getSnapshot(): StoredConfig {
   return cached;
 }
 
-function persist(columns: ColumnId[]) {
-  cached = columns;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(columns));
+function persist(config: StoredConfig) {
+  cached = config;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   notify();
 }
 
 export function useColumnConfig() {
-  const columns = useSyncExternalStore(subscribe, getSnapshot);
+  const config = useSyncExternalStore(subscribe, getSnapshot);
 
   const toggleColumn = useCallback((columnId: ColumnId) => {
-    const current = getSnapshot();
-    if (current.includes(columnId)) {
-      if (current.length <= 1) return;
-      persist(current.filter((id) => id !== columnId));
+    const { columns, sort } = getSnapshot();
+    if (columns.includes(columnId)) {
+      if (columns.length <= 1) return;
+      persist({ columns: columns.filter((id) => id !== columnId), sort });
     } else {
-      persist([...current, columnId]);
+      persist({ columns: [...columns, columnId], sort });
     }
   }, []);
 
-  const resetColumns = useCallback(() => {
-    persist([...DEFAULT_COLUMNS]);
+  const reorderColumns = useCallback((newColumns: ColumnId[]) => {
+    persist({ columns: newColumns, sort: getSnapshot().sort });
   }, []);
 
-  return { columns, toggleColumn, resetColumns } as const;
+  const resetColumns = useCallback(() => {
+    persist({ columns: [...DEFAULT_COLUMNS], sort: { ...DEFAULT_SORT } });
+  }, []);
+
+  const toggleSort = useCallback((columnId: ColumnId) => {
+    const { columns, sort } = getSnapshot();
+    if (sort.columnId === columnId) {
+      persist({
+        columns,
+        sort: {
+          columnId,
+          direction: sort.direction === "asc" ? "desc" : "asc",
+        },
+      });
+    } else {
+      // New column: default ascending, except date which defaults descending
+      const direction: SortDirection =
+        columnId === "date" ? "desc" : "asc";
+      persist({ columns, sort: { columnId, direction } });
+    }
+  }, []);
+
+  return {
+    columns: config.columns,
+    sort: config.sort,
+    toggleColumn,
+    reorderColumns,
+    resetColumns,
+    toggleSort,
+  } as const;
 }

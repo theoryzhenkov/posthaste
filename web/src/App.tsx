@@ -13,6 +13,7 @@ import {
   ResizablePanelGroup,
   useDefaultLayout,
 } from "./components/ui/resizable";
+import { Separator } from "./components/ui/separator";
 import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useEmailActions } from "./hooks/useEmailActions";
@@ -149,7 +150,7 @@ function MailClient() {
                   })
                 }
               />
-              <div className="mx-1.5 h-4 w-px bg-border" />
+              <Separator orientation="vertical" className="mx-1.5 h-4" />
             </>
           )}
 
