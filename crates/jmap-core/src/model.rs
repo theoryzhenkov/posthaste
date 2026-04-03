@@ -970,7 +970,7 @@ pub enum StoreError {
     Failure(String),
 }
 
-/// Unified error type surfaced by [`MailService`] and mapped to HTTP status codes.
+/// Unified error type surfaced by [`crate::MailService`] and mapped to HTTP status codes.
 ///
 /// @spec spec/L1-api#error-format
 #[derive(Debug, Error)]
