@@ -178,14 +178,17 @@ pub(crate) fn bool_to_i64(value: bool) -> i64 {
     }
 }
 
+/// Wraps a rusqlite error into `StoreError::Failure`.
 pub(crate) fn sql_to_store_error(err: rusqlite::Error) -> StoreError {
     StoreError::Failure(err.to_string())
 }
 
+/// Wraps an I/O error into `StoreError::Failure`.
 pub(crate) fn io_to_store_error(err: std::io::Error) -> StoreError {
     StoreError::Failure(err.to_string())
 }
 
+/// Wraps a JSON serialization error into `StoreError::Failure`.
 pub(crate) fn json_to_store_error(err: impl std::error::Error) -> StoreError {
     StoreError::Failure(err.to_string())
 }
