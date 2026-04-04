@@ -8,6 +8,19 @@ fn get_api_port(handle: State<'_, ServerHandle>) -> u16 {
     handle.addr.port()
 }
 
+/// Receive a log entry from the frontend and emit it through the backend's
+/// tracing subscriber so it lands in the same log files with rotation.
+#[tauri::command]
+fn log_from_frontend(level: &str, domain: &str, message: &str) {
+    match level {
+        "error" => tracing::error!(target: "frontend", domain, "{message}"),
+        "warn" => tracing::warn!(target: "frontend", domain, "{message}"),
+        "info" => tracing::info!(target: "frontend", domain, "{message}"),
+        "debug" => tracing::debug!(target: "frontend", domain, "{message}"),
+        _ => tracing::trace!(target: "frontend", domain, "{message}"),
+    }
+}
+
 /// Run the PostHaste desktop application.
 ///
 /// Starts the embedded Axum backend on an OS-assigned port, then opens a Tauri
@@ -17,7 +30,7 @@ fn get_api_port(handle: State<'_, ServerHandle>) -> u16 {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_api_port])
+        .invoke_handler(tauri::generate_handler![get_api_port, log_from_frontend])
         .setup(|app| {
             let config = ServerConfig {
                 extra_cors_origins: vec!["https://tauri.localhost".to_string()],
