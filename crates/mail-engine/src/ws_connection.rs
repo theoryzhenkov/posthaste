@@ -19,8 +19,8 @@ use mail_domain::GatewayError;
 /// carries interleaved API responses and push notifications, demultiplexed
 /// by the `CorrelatedWs` layer in `jmap-client`.
 ///
-/// @spec spec/L2-transport#websocket-connection-lifecycle
-/// @spec spec/L2-transport#single-ws-per-account
+/// @spec docs/L2-transport#websocket-connection-lifecycle
+/// @spec docs/L2-transport#single-ws-per-account
 pub struct SharedWsConnection {
     client: Arc<Client>,
     ws: RwLock<Option<CorrelatedWs>>,
@@ -47,7 +47,7 @@ impl SharedWsConnection {
     ///
     /// Uses double-checked locking: reads first, upgrades to write only if needed.
     ///
-    /// @spec spec/L2-transport#websocket-connection-lifecycle
+    /// @spec docs/L2-transport#websocket-connection-lifecycle
     pub async fn ensure_connected(&self) -> Result<(), GatewayError> {
         {
             let guard = self.ws.read().await;
@@ -86,7 +86,7 @@ impl SharedWsConnection {
     /// Caller should check `is_connected()` first; if WS is disconnected,
     /// this returns a connection error. Responses are correlated by request ID.
     ///
-    /// @spec spec/L2-transport#requestresponse-correlation
+    /// @spec docs/L2-transport#requestresponse-correlation
     pub async fn send(
         &self,
         request: Request<'_>,
@@ -100,7 +100,7 @@ impl SharedWsConnection {
 
     /// Read the next push notification from the shared WS.
     ///
-    /// @spec spec/L1-jmap#push
+    /// @spec docs/L1-jmap#push
     pub async fn next_push(&self) -> Option<Result<PushObject, jmap_client::Error>> {
         let guard = self.ws.read().await;
         let ws = guard.as_ref()?;
@@ -113,8 +113,8 @@ impl SharedWsConnection {
 
     /// Enable push notifications on the WS connection for watched data types.
     ///
-    /// @spec spec/L2-transport#websocket-connection-lifecycle
-    /// @spec spec/L1-jmap#push
+    /// @spec docs/L2-transport#websocket-connection-lifecycle
+    /// @spec docs/L1-jmap#push
     pub async fn enable_push(&self, checkpoint: Option<&str>) -> Result<(), GatewayError> {
         let guard = self.ws.read().await;
         let ws = guard
@@ -130,7 +130,7 @@ impl SharedWsConnection {
 
     /// Clear the WS connection state (e.g. after a connection error).
     ///
-    /// @spec spec/L2-transport#http-fallback
+    /// @spec docs/L2-transport#http-fallback
     pub async fn disconnect(&self) {
         let mut guard = self.ws.write().await;
         *guard = None;

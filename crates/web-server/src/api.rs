@@ -37,7 +37,7 @@ use cursor_support::{
 
 /// Query parameters for conversation list endpoints.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListConversationsQuery {
@@ -51,7 +51,7 @@ pub struct ListConversationsQuery {
 
 /// Query parameters for source-scoped message listing.
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListSourceMessagesQuery {
@@ -60,7 +60,7 @@ pub struct ListSourceMessagesQuery {
 
 /// Query parameters for the SSE event stream endpoint.
 ///
-/// @spec spec/L1-api#sse-event-stream
+/// @spec docs/L1-api#sse-event-stream
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventsQuery {
@@ -72,7 +72,7 @@ pub struct EventsQuery {
 
 /// Request body for `PATCH /v1/settings`.
 ///
-/// @spec spec/L1-api#settings
+/// @spec docs/L1-api#settings
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSettingsRequest {
@@ -81,7 +81,7 @@ pub struct PatchSettingsRequest {
 
 /// Transport fields for account create/patch requests.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportRequest {
@@ -91,7 +91,7 @@ pub struct AccountTransportRequest {
 
 /// Tri-state write mode controlling how a secret is mutated on account save.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretWriteMode {
@@ -103,7 +103,7 @@ pub enum SecretWriteMode {
 
 /// Secret instruction embedded in account create/patch requests.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretWriteRequest {
@@ -114,7 +114,7 @@ pub struct SecretWriteRequest {
 
 /// Request body for `POST /v1/accounts`.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountRequest {
@@ -130,7 +130,7 @@ pub struct CreateAccountRequest {
 
 /// Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchAccountRequest {
@@ -143,7 +143,7 @@ pub struct PatchAccountRequest {
 
 /// Request body for `POST /v1/smart-mailboxes`.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
+/// @spec docs/L1-api#smart-mailbox-crud
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSmartMailboxRequest {
@@ -154,7 +154,7 @@ pub struct CreateSmartMailboxRequest {
 
 /// Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
+/// @spec docs/L1-api#smart-mailbox-crud
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSmartMailboxRequest {
@@ -165,7 +165,7 @@ pub struct PatchSmartMailboxRequest {
 
 /// JSON error response body returned by all API error paths.
 ///
-/// @spec spec/L1-api#error-format
+/// @spec docs/L1-api#error-format
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiErrorBody {
@@ -176,8 +176,8 @@ pub struct ApiErrorBody {
 
 /// Structured API error carrying an HTTP status code and a JSON body.
 ///
-/// @spec spec/L1-api#error-format
-/// @spec spec/L1-api#error-code-mapping
+/// @spec docs/L1-api#error-format
+/// @spec docs/L1-api#error-code-mapping
 pub struct ApiError {
     status: StatusCode,
     body: ApiErrorBody,
@@ -185,7 +185,7 @@ pub struct ApiError {
 
 /// Generic success response for mutating endpoints that return no domain data.
 ///
-/// @spec spec/L1-api#endpoint-table
+/// @spec docs/L1-api#endpoint-table
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OkResponse {
@@ -194,7 +194,7 @@ pub struct OkResponse {
 
 /// Response from `POST /v1/accounts/{id}/verify`.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResponse {
@@ -205,7 +205,7 @@ pub struct VerificationResponse {
 
 /// Paginated conversation list response with an opaque cursor for the next page.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationPageResponse {
@@ -216,7 +216,7 @@ pub struct ConversationPageResponse {
 impl ApiError {
     /// Map a domain `ServiceError` to an HTTP status code and JSON error body.
     ///
-    /// @spec spec/L1-api#error-code-mapping
+    /// @spec docs/L1-api#error-code-mapping
     pub fn from_service_error(error: ServiceError) -> Self {
         let status = match error.code() {
             "not_found" => StatusCode::NOT_FOUND,
@@ -268,7 +268,7 @@ impl IntoResponse for ApiError {
 
 /// GET /v1/settings
 ///
-/// @spec spec/L1-api#settings
+/// @spec docs/L1-api#settings
 pub async fn get_settings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AppSettings>, ApiError> {
@@ -283,7 +283,7 @@ pub async fn get_settings(
 ///
 /// Validates that the referenced default account exists before persisting.
 ///
-/// @spec spec/L1-api#settings
+/// @spec docs/L1-api#settings
 pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PatchSettingsRequest>,
@@ -314,7 +314,7 @@ pub async fn patch_settings(
 
 /// GET /v1/accounts
 ///
-/// @spec spec/L1-api#accounts
+/// @spec docs/L1-api#accounts
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AccountOverview>>, ApiError> {
@@ -335,7 +335,7 @@ pub async fn list_accounts(
 
 /// GET /v1/accounts/{account_id}
 ///
-/// @spec spec/L1-api#accounts
+/// @spec docs/L1-api#accounts
 pub async fn get_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -357,7 +357,7 @@ pub async fn get_account(
 /// Validates uniqueness, applies secret instruction, persists config, starts
 /// the supervisor runtime, and emits an `account.created` event.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn create_account(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateAccountRequest>,
@@ -416,7 +416,7 @@ pub async fn create_account(
 /// Sparse-merges provided fields into the existing account and restarts
 /// the supervisor runtime.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn patch_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -459,7 +459,7 @@ pub async fn patch_account(
 ///
 /// Attempts JMAP session discovery and reports identity and push support.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn verify_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -483,7 +483,7 @@ pub async fn verify_account(
 
 /// POST /v1/accounts/{account_id}/enable
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn enable_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -493,7 +493,7 @@ pub async fn enable_account(
 
 /// POST /v1/accounts/{account_id}/disable
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn disable_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -506,7 +506,7 @@ pub async fn disable_account(
 /// Removes the managed OS keyring secret, stops the supervisor runtime,
 /// deletes the config file, and emits an `account.deleted` event.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub async fn delete_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -539,8 +539,8 @@ pub async fn delete_account(
 /// Re-reads config from disk, diffs against the in-memory snapshot, and
 /// starts/stops supervisor runtimes for changed accounts.
 ///
-/// @spec spec/L1-api#sync-and-events
-/// @spec spec/L1-accounts#configdiff
+/// @spec docs/L1-api#sync-and-events
+/// @spec docs/L1-accounts#configdiff
 pub async fn reload_config(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<OkResponse>, ApiError> {
@@ -568,7 +568,7 @@ pub async fn reload_config(
 
 /// GET /v1/sources/{source_id}/mailboxes
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 pub async fn list_mailboxes(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -582,7 +582,7 @@ pub async fn list_mailboxes(
 
 /// GET /v1/sources/{source_id}/messages
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 pub async fn list_source_messages(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -598,7 +598,7 @@ pub async fn list_source_messages(
 
 /// GET /v1/sidebar
 ///
-/// @spec spec/L1-api#navigation
+/// @spec docs/L1-api#navigation
 pub async fn get_sidebar(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<SidebarResponse>, ApiError> {
@@ -611,7 +611,7 @@ pub async fn get_sidebar(
 
 /// GET /v1/smart-mailboxes
 ///
-/// @spec spec/L1-api#smart-mailboxes
+/// @spec docs/L1-api#smart-mailboxes
 pub async fn list_smart_mailboxes(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
@@ -626,7 +626,7 @@ pub async fn list_smart_mailboxes(
 ///
 /// Generates an ID from the name (`sm-{slug}-{uuid}`) and persists to config.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
+/// @spec docs/L1-api#smart-mailbox-crud
 pub async fn create_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateSmartMailboxRequest>,
@@ -652,7 +652,7 @@ pub async fn create_smart_mailbox(
 
 /// GET /v1/smart-mailboxes/{id}
 ///
-/// @spec spec/L1-api#smart-mailboxes
+/// @spec docs/L1-api#smart-mailboxes
 pub async fn get_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
@@ -668,7 +668,7 @@ pub async fn get_smart_mailbox(
 ///
 /// Merges name, position, and rule fields. Omitted fields are preserved.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
+/// @spec docs/L1-api#smart-mailbox-crud
 pub async fn patch_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
@@ -698,7 +698,7 @@ pub async fn patch_smart_mailbox(
 
 /// DELETE /v1/smart-mailboxes/{id}
 ///
-/// @spec spec/L1-api#smart-mailboxes
+/// @spec docs/L1-api#smart-mailboxes
 pub async fn delete_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
@@ -715,8 +715,8 @@ pub async fn delete_smart_mailbox(
 /// Restores default smart mailboxes (Inbox, Archive, Drafts, Sent, Junk,
 /// Trash, All Mail) and returns the full list.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
-/// @spec spec/L1-accounts#smart-mailbox-defaults
+/// @spec docs/L1-api#smart-mailbox-crud
+/// @spec docs/L1-accounts#smart-mailbox-defaults
 pub async fn reset_default_smart_mailboxes(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
@@ -733,7 +733,7 @@ pub async fn reset_default_smart_mailboxes(
 
 /// GET /v1/smart-mailboxes/{id}/messages
 ///
-/// @spec spec/L1-api#smart-mailboxes
+/// @spec docs/L1-api#smart-mailboxes
 pub async fn list_smart_mailbox_messages(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
@@ -747,8 +747,8 @@ pub async fn list_smart_mailbox_messages(
 
 /// GET /v1/smart-mailboxes/{id}/conversations
 ///
-/// @spec spec/L1-api#smart-mailboxes
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#smart-mailboxes
+/// @spec docs/L1-api#cursor-pagination
 pub async fn list_smart_mailbox_conversations(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
@@ -774,8 +774,8 @@ pub async fn list_smart_mailbox_conversations(
 
 /// GET /v1/views/conversations
 ///
-/// @spec spec/L1-api#conversations-and-messages
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#conversations-and-messages
+/// @spec docs/L1-api#cursor-pagination
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListConversationsQuery>,
@@ -803,7 +803,7 @@ pub async fn list_conversations(
 
 /// GET /v1/views/conversations/{id}
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 pub async fn get_conversation(
     State(state): State<Arc<AppState>>,
     Path(conversation_id): Path<String>,
@@ -820,8 +820,8 @@ pub async fn get_conversation(
 /// Sanitizes `body_html` through [`sanitize::sanitize_email_html`] before
 /// returning to the frontend.
 ///
-/// @spec spec/L1-api#conversations-and-messages
-/// @spec spec/L1-api#message-body-sanitization
+/// @spec docs/L1-api#conversations-and-messages
+/// @spec docs/L1-api#message-body-sanitization
 pub async fn get_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -848,7 +848,7 @@ pub async fn get_message(
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 pub async fn set_keywords(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -865,7 +865,7 @@ pub async fn set_keywords(
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/add-to-mailbox
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 pub async fn add_to_mailbox(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -882,7 +882,7 @@ pub async fn add_to_mailbox(
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/remove-from-mailbox
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 pub async fn remove_from_mailbox(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -899,7 +899,7 @@ pub async fn remove_from_mailbox(
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/replace-mailboxes
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 pub async fn replace_mailboxes(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -916,7 +916,7 @@ pub async fn replace_mailboxes(
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/destroy
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 pub async fn destroy_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -932,8 +932,8 @@ pub async fn destroy_message(
 
 /// POST /v1/sources/{source_id}/commands/sync
 ///
-/// @spec spec/L1-api#sync-and-events
-/// @spec spec/L1-sync#sync-loop
+/// @spec docs/L1-api#sync-and-events
+/// @spec docs/L1-sync#sync-loop
 pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -952,8 +952,8 @@ pub async fn trigger_sync(
 /// Opens an SSE stream. When `afterSeq` is provided, replays matching events
 /// from the backlog before switching to the live broadcast stream.
 ///
-/// @spec spec/L1-api#sse-event-stream
-/// @spec spec/L0-api#server-sent-events-for-push
+/// @spec docs/L1-api#sse-event-stream
+/// @spec docs/L0-api#server-sent-events-for-push
 pub async fn stream_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EventsQuery>,
@@ -993,7 +993,7 @@ pub async fn stream_events(
 
 /// Toggle the `enabled` flag on an account, re-persist, and restart the supervisor.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 async fn set_account_enabled(
     state: Arc<AppState>,
     account_id: String,

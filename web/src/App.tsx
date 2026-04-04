@@ -2,8 +2,8 @@
  * Root application component: QueryClientProvider, toolbar, three-column layout,
  * and settings panel.
  *
- * @spec spec/L1-ui#component-hierarchy
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L1-ui#component-hierarchy
+ * @spec docs/L0-ui#navigation-model
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -26,7 +26,7 @@ import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useEmailActions } from "./hooks/useEmailActions";
 import { mailKeys, type MailSelection } from "./mailState";
 
-/** @spec spec/L1-ui#data-fetching */
+/** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -48,8 +48,8 @@ const DEFAULT_VIEW: SidebarSelection = {
  * Manages view selection, message selection, SSE event subscription,
  * and keyboard-accessible email actions.
  *
- * @spec spec/L1-ui#component-hierarchy
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L1-ui#component-hierarchy
+ * @spec docs/L0-ui#navigation-model
  */
 function MailClient() {
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(DEFAULT_VIEW);
@@ -297,7 +297,7 @@ function ToolbarButton({
 
 /**
  * Root App component: wraps `MailClient` in a `QueryClientProvider`.
- * @spec spec/L1-ui#component-hierarchy
+ * @spec docs/L1-ui#component-hierarchy
  */
 export default function App() {
   return (

@@ -4,11 +4,11 @@ summary: "REST endpoint contracts, request/response schemas, error codes, SSE ev
 modified: 2026-04-03
 reviewed: 2026-04-03
 depends:
-  - path: spec/L0-api
-  - path: spec/L1-sync
-  - path: spec/L1-jmap
+  - path: docs/L0-api
+  - path: docs/L1-sync
+  - path: docs/L1-jmap
 dependents:
-  - path: spec/L1-ui
+  - path: docs/L1-ui
 ---
 
 # API domain -- L1

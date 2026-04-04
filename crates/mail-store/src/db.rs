@@ -4,8 +4,8 @@ use std::time::Duration;
 /// Creates all tables and indexes if they do not exist. Tables use
 /// `(account_id, ...)` composite keys to enforce the account-scoping invariant.
 ///
-/// @spec spec/L1-sync#sqlite-schema
-/// @spec spec/L0-accounts#the-invariant
+/// @spec docs/L1-sync#sqlite-schema
+/// @spec docs/L0-accounts#the-invariant
 pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(

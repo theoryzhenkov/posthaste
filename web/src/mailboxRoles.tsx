@@ -1,6 +1,6 @@
 /**
  * Mailbox role icons and name-to-role mapping for sidebar and list rendering.
- * @spec spec/L1-ui#component-hierarchy
+ * @spec docs/L1-ui#component-hierarchy
  */
 import { Archive, Folder, Inbox, Mail, PenLine, Send, ShieldAlert, Trash2, type LucideIcon } from "lucide-react";
 import type { KnownMailboxRole } from "./api/types";

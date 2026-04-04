@@ -14,8 +14,8 @@ enum ActiveTransport {
 /// and falls back from the primary transport (WS) to the fallback (SSE)
 /// after repeated failures.
 ///
-/// @spec spec/L2-transport#resilientpushstream
-/// @spec spec/L2-transport#http-fallback
+/// @spec docs/L2-transport#resilientpushstream
+/// @spec docs/L2-transport#http-fallback
 pub fn resilient_push_stream(
     account_id: AccountId,
     primary: Box<dyn PushTransport>,

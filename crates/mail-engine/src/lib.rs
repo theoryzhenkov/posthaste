@@ -1,8 +1,8 @@
 //! JMAP mail engine -- gateway implementations, sync loop, push transports, and compose helpers.
 //!
-//! @spec spec/L1-jmap
-//! @spec spec/L1-sync
-//! @spec spec/L2-transport
+//! @spec docs/L1-jmap
+//! @spec docs/L1-sync
+//! @spec docs/L2-transport
 
 mod compose;
 mod conversions;
@@ -21,7 +21,7 @@ pub use ws_connection::SharedWsConnection;
 
 /// JMAP data types monitored for push notifications and sync triggers.
 ///
-/// @spec spec/L1-jmap#push
+/// @spec docs/L1-jmap#push
 const WATCHED_DATA_TYPES: [jmap_client::DataType; 4] = [
     jmap_client::DataType::Email,
     jmap_client::DataType::Mailbox,

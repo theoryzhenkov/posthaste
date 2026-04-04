@@ -11,6 +11,7 @@ dependents:
   - path: docs/L1-search
   - path: docs/L1-compose
   - path: docs/L1-ui
+  - path: docs/L2-transport
 ---
 
 # Sync domain -- L1

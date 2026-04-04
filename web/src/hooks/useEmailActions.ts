@@ -4,7 +4,7 @@
  * Mutations apply optimistic keyword patches to the cache, record local mutation
  * events for echo suppression, and fall back to invalidation when the cache is incomplete.
  *
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -182,7 +182,7 @@ function invalidateMessageScope(
  *
  * Uses optimistic cache patches with rollback on error.
  *
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export function useEmailActions() {
   const queryClient = useQueryClient();

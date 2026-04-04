@@ -37,7 +37,7 @@ pub(crate) fn stage_sync_bodies(
 /// junction updates, conversation assignment, projection refreshes, and cursor
 /// persistence. Emits domain events for each mutation.
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 pub(crate) fn apply_sync_batch_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -381,7 +381,7 @@ pub(crate) fn apply_sync_batch_tx(
 /// Stores a lazily fetched body (HTML, text, raw ref) and emits a
 /// `message.body_cached` event. Returns the updated message detail.
 ///
-/// @spec spec/L1-sync#invariants
+/// @spec docs/L1-sync#invariants
 pub(crate) fn apply_message_body_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -592,7 +592,7 @@ pub(crate) fn destroy_message_tx(
 /// Queries the `event_log` table with optional filters (account, seq cursor,
 /// topic, mailbox). Returns events ordered by `seq ASC`.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub(crate) fn list_events(
     connection: &Connection,
     filter: &EventFilter,

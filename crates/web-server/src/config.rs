@@ -13,7 +13,7 @@ const APP_DIR_NAME: &str = "mail";
 
 /// Resolved filesystem paths for config, state, and optional bootstrap template.
 ///
-/// @spec spec/L1-accounts#config-directory-layout
+/// @spec docs/L1-accounts#config-directory-layout
 #[derive(Clone, Debug)]
 pub struct ResolvedRoots {
     pub config_root: PathBuf,
@@ -24,7 +24,7 @@ pub struct ResolvedRoots {
 /// Runtime settings for the daemon process, read from `app.toml` `[daemon]`
 /// section with environment variable overrides.
 ///
-/// @spec spec/L1-accounts#apptoml
+/// @spec docs/L1-accounts#apptoml
 #[derive(Clone, Debug)]
 pub struct DaemonSettings {
     pub bind_address: String,
@@ -36,7 +36,7 @@ pub struct DaemonSettings {
 /// Resolve config, state, and bootstrap paths from environment variables
 /// or XDG defaults.
 ///
-/// @spec spec/L1-accounts#config-directory-layout
+/// @spec docs/L1-accounts#config-directory-layout
 pub fn resolve_roots() -> ResolvedRoots {
     let config_root = std::env::var("MAIL_CONFIG_ROOT")
         .map(PathBuf::from)
@@ -68,7 +68,7 @@ pub fn resolve_roots() -> ResolvedRoots {
 /// Read daemon settings from `app.toml` `[daemon]` section, with env var
 /// overrides for bind address, CORS origin, and poll interval.
 ///
-/// @spec spec/L1-accounts#apptoml
+/// @spec docs/L1-accounts#apptoml
 pub fn read_daemon_settings(
     config_repo: &TomlConfigRepository,
 ) -> Result<DaemonSettings, ConfigError> {
@@ -107,7 +107,7 @@ pub fn read_daemon_settings(
 /// Import a bootstrap TOML file: initialize defaults, then apply seed
 /// app settings and account definitions.
 ///
-/// @spec spec/L1-accounts#initialization
+/// @spec docs/L1-accounts#initialization
 pub fn import_bootstrap(
     bootstrap_path: &Path,
     config_repo: &TomlConfigRepository,

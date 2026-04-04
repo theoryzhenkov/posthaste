@@ -5,7 +5,7 @@
  * injected as `window.__POSTHASTE_PORT__` via initialization script. In
  * browser dev mode, falls back to `VITE_API_BASE_URL` or `localhost:3001`.
  *
- * @spec spec/L1-api#endpoint-table
+ * @spec docs/L1-api#endpoint-table
  */
 import { ApiError } from "./errors";
 import type {
@@ -82,29 +82,29 @@ function jsonRequest<T>(path: string, method: string, body?: unknown): Promise<T
   });
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchSettings(): Promise<AppSettings> {
   return request<AppSettings>("/settings");
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function patchSettings(
   input: Partial<AppSettings>,
 ): Promise<AppSettings> {
   return jsonRequest<AppSettings>("/settings", "PATCH", input);
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchAccounts(): Promise<AccountOverview[]> {
   return request<AccountOverview[]>("/accounts");
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchAccount(accountId: string): Promise<AccountOverview> {
   return request<AccountOverview>(`/accounts/${accountId}`);
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export async function createAccount(
   input: CreateAccountInput,
 ): Promise<AccountOverview> {
@@ -113,7 +113,7 @@ export async function createAccount(
 
 /**
  * Sparse-merge update -- omitted fields are preserved on the backend.
- * @spec spec/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#account-crud-lifecycle
  */
 export async function updateAccount(
   accountId: string,
@@ -122,12 +122,12 @@ export async function updateAccount(
   return jsonRequest<AccountOverview>(`/accounts/${accountId}`, "PATCH", input);
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export async function deleteAccount(accountId: string): Promise<OkResponse> {
   return request<OkResponse>(`/accounts/${accountId}`, { method: "DELETE" });
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export async function verifyAccount(
   accountId: string,
 ): Promise<VerificationResponse> {
@@ -136,44 +136,44 @@ export async function verifyAccount(
   });
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export async function enableAccount(accountId: string): Promise<OkResponse> {
   return request<OkResponse>(`/accounts/${accountId}/enable`, { method: "POST" });
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export async function disableAccount(accountId: string): Promise<OkResponse> {
   return request<OkResponse>(`/accounts/${accountId}/disable`, { method: "POST" });
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchMailboxes(accountId: string): Promise<Mailbox[]> {
   return request<Mailbox[]>(`/sources/${accountId}/mailboxes`);
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchSidebar(): Promise<SidebarResponse> {
   return request<SidebarResponse>("/sidebar");
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function fetchSmartMailboxes(): Promise<SmartMailboxSummary[]> {
   return request<SmartMailboxSummary[]>("/smart-mailboxes");
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function createSmartMailbox(
   input: CreateSmartMailboxInput,
 ): Promise<SmartMailbox> {
   return jsonRequest<SmartMailbox>("/smart-mailboxes", "POST", input);
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function fetchSmartMailbox(id: string): Promise<SmartMailbox> {
   return request<SmartMailbox>(`/smart-mailboxes/${id}`);
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function updateSmartMailbox(
   id: string,
   input: UpdateSmartMailboxInput,
@@ -181,19 +181,19 @@ export async function updateSmartMailbox(
   return jsonRequest<SmartMailbox>(`/smart-mailboxes/${id}`, "PATCH", input);
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function deleteSmartMailbox(id: string): Promise<OkResponse> {
   return request<OkResponse>(`/smart-mailboxes/${id}`, { method: "DELETE" });
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export async function resetDefaultSmartMailboxes(): Promise<SmartMailboxSummary[]> {
   return request<SmartMailboxSummary[]>("/smart-mailboxes:reset-defaults", {
     method: "POST",
   });
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchSmartMailboxMessages(
   id: string,
 ): Promise<MessageSummary[]> {
@@ -202,7 +202,7 @@ export async function fetchSmartMailboxMessages(
 
 /**
  * Fetch a cursor-paginated page of conversations for a smart mailbox.
- * @spec spec/L1-api#cursor-pagination
+ * @spec docs/L1-api#cursor-pagination
  */
 export async function fetchSmartMailboxConversations(
   id: string,
@@ -234,7 +234,7 @@ export async function fetchSmartMailboxConversations(
 
 /**
  * Fetch a cursor-paginated page of conversations, optionally filtered by source or mailbox.
- * @spec spec/L1-api#cursor-pagination
+ * @spec docs/L1-api#cursor-pagination
  */
 export async function fetchConversations(input?: {
   sourceId?: string | null;
@@ -269,7 +269,7 @@ export async function fetchConversations(input?: {
   );
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchConversation(
   conversationId: string,
 ): Promise<ConversationView> {
@@ -278,7 +278,7 @@ export async function fetchConversation(
 
 /**
  * Fetch full message detail (body is sanitized in Rust before reaching the response).
- * @spec spec/L1-api#message-body-sanitization
+ * @spec docs/L1-api#message-body-sanitization
  */
 export async function fetchMessage(
   messageId: string,
@@ -287,7 +287,7 @@ export async function fetchMessage(
   return request<MessageDetail>(`/sources/${sourceId}/messages/${messageId}`);
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function fetchSourceMessages(
   sourceId: string,
   mailboxId: string | null,
@@ -298,7 +298,7 @@ export async function fetchSourceMessages(
 
 /**
  * Dispatch a message command (keyword change, mailbox move, or destroy).
- * @spec spec/L1-api#endpoint-table
+ * @spec docs/L1-api#endpoint-table
  */
 export async function performMessageCommand(
   messageId: string,
@@ -340,7 +340,7 @@ export async function performMessageCommand(
   }
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export async function triggerSync(
   sourceId: string,
 ): Promise<{ ok: boolean; eventCount: number }> {
@@ -352,7 +352,7 @@ export async function triggerSync(
 
 /**
  * Build the SSE event stream URL, optionally resuming from a sequence number.
- * @spec spec/L1-api#sse-event-stream
+ * @spec docs/L1-api#sse-event-stream
  */
 export function buildEventsUrl(input?: {
   accountId?: string;
