@@ -52,20 +52,13 @@ export function useDaemonEvents() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    let cancelled = false;
-    let source: EventSource | null = null;
+    const storedSeq = window.sessionStorage.getItem(EVENT_CURSOR_STORAGE_KEY);
+    const afterSeq = storedSeq ? Number.parseInt(storedSeq, 10) : null;
+    const source = new EventSource(
+      buildEventsUrl({ afterSeq: Number.isFinite(afterSeq) ? afterSeq : null }),
+    );
 
-    (async () => {
-      const storedSeq = window.sessionStorage.getItem(EVENT_CURSOR_STORAGE_KEY);
-      const afterSeq = storedSeq ? Number.parseInt(storedSeq, 10) : null;
-      const url = await buildEventsUrl({
-        afterSeq: Number.isFinite(afterSeq) ? afterSeq : null,
-      });
-      if (cancelled) return;
-
-      source = new EventSource(url);
-
-      source.onmessage = (event) => {
+    source.onmessage = (event) => {
       let payload: DomainEvent;
       try {
         payload = JSON.parse(event.data) as DomainEvent;
@@ -166,11 +159,8 @@ export function useDaemonEvents() {
       }
     };
 
-    })();
-
     return () => {
-      cancelled = true;
-      source?.close();
+      source.close();
     };
   }, [queryClient]);
 }

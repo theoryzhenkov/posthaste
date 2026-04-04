@@ -1,9 +1,9 @@
 /**
  * Typed HTTP client for the PostHaste REST API.
  *
- * All functions target the `/v1` prefix. In Tauri, the base URL is resolved
- * dynamically via the `get_api_port` command (OS-assigned port). In browser
- * dev mode, it falls back to `VITE_API_BASE_URL` or `http://localhost:3001/v1`.
+ * All functions target the `/v1` prefix. In Tauri, the backend port is
+ * injected as `window.__POSTHASTE_PORT__` via initialization script. In
+ * browser dev mode, falls back to `VITE_API_BASE_URL` or `localhost:3001`.
  *
  * @spec spec/L1-api#endpoint-table
  */
@@ -33,32 +33,17 @@ function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
 }
 
-const FALLBACK_BASE_URL = normalizeApiBaseUrl(
-  import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:3001/v1",
-);
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+function resolveBaseUrl(): string {
+  const port = (window as unknown as Record<string, unknown>).__POSTHASTE_PORT__;
+  if (typeof port === "number") {
+    return `http://127.0.0.1:${port}/v1`;
+  }
+  return normalizeApiBaseUrl(
+    import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:3001/v1",
+  );
 }
 
-let resolvedBaseUrl: string | null = null;
-let baseUrlPromise: Promise<string> | null = null;
-
-async function getBaseUrl(): Promise<string> {
-  if (resolvedBaseUrl) return resolvedBaseUrl;
-  if (!isTauri()) {
-    resolvedBaseUrl = FALLBACK_BASE_URL;
-    return resolvedBaseUrl;
-  }
-  if (!baseUrlPromise) {
-    baseUrlPromise = import("@tauri-apps/api/core").then(async ({ invoke }) => {
-      const port = await invoke<number>("get_api_port");
-      resolvedBaseUrl = `http://127.0.0.1:${port}/v1`;
-      return resolvedBaseUrl;
-    });
-  }
-  return baseUrlPromise;
-}
+const BASE_URL = resolveBaseUrl();
 
 /** Parse a non-OK response into a structured {@link ApiError}. */
 async function parseError(response: Response): Promise<never> {
@@ -81,8 +66,7 @@ async function parseError(response: Response): Promise<never> {
 
 /** Low-level fetch wrapper that throws {@link ApiError} on non-OK responses. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const baseUrl = await getBaseUrl();
-  const response = await fetch(`${baseUrl}${path}`, init);
+  const response = await fetch(`${BASE_URL}${path}`, init);
   if (!response.ok) {
     return parseError(response);
   }
@@ -370,11 +354,10 @@ export async function triggerSync(
  * Build the SSE event stream URL, optionally resuming from a sequence number.
  * @spec spec/L1-api#sse-event-stream
  */
-export async function buildEventsUrl(input?: {
+export function buildEventsUrl(input?: {
   accountId?: string;
   afterSeq?: number | null;
-}): Promise<string> {
-  const baseUrl = await getBaseUrl();
+}): string {
   const params = new URLSearchParams();
   if (input?.accountId) {
     params.set("accountId", input.accountId);
@@ -383,5 +366,5 @@ export async function buildEventsUrl(input?: {
     params.set("afterSeq", String(input.afterSeq));
   }
   const search = params.toString();
-  return `${baseUrl}/events${search ? `?${search}` : ""}`;
+  return `${BASE_URL}/events${search ? `?${search}` : ""}`;
 }
