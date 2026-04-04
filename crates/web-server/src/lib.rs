@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use axum::routing::{get, post};
 use axum::Router;
+#[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use mail_config::TomlConfigRepository;
 use mail_domain::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
@@ -62,6 +63,9 @@ pub struct ServerHandle {
 #[derive(Default)]
 pub struct ServerConfig {
     pub extra_cors_origins: Vec<String>,
+    /// Override the bind address from daemon settings (e.g. `"127.0.0.1:0"`
+    /// for OS-assigned ports in the Tauri shell).
+    pub bind_address_override: Option<String>,
 }
 
 /// Initialize the entire backend (config, store, supervisor, logging)
@@ -253,7 +257,11 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .layer(cors)
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(&daemon.bind_address)
+    let bind_address = server_config
+        .bind_address_override
+        .as_deref()
+        .unwrap_or(&daemon.bind_address);
+    let listener = tokio::net::TcpListener::bind(bind_address)
         .await
         .expect("failed to bind daemon listener");
     let addr = listener.local_addr().expect("failed to get local address");
