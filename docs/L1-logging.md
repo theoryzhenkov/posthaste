@@ -17,7 +17,7 @@ depends:
 
 ### Framework
 
-The `tracing` ecosystem (`tracing`, `tracing-subscriber`, `tracing-appender`). All crates instrument with `tracing` macros; subscriber setup is centralized in `web-server`.
+The `tracing` ecosystem (`tracing`, `tracing-subscriber`, `tracing-appender`). All crates instrument with `tracing` macros; subscriber setup is centralized in `posthaste-server`.
 
 ### Subscriber stack
 
@@ -65,13 +65,13 @@ Spans use a `domain.operation` naming pattern with structured fields:
 
 | Span | Fields | Crate |
 |------|--------|-------|
-| `http.request` | `method`, `path`, `status`, `latency_ms` | web-server (tower-http) |
-| `sync.cycle` | `account_id`, `mailbox_count`, `email_count` | mail-engine |
-| `sync.method_call` | `method_name`, `state_token` | mail-engine |
-| `push.connection` | `account_id`, `transport` (ws/sse), `target_url`, `attempt` | mail-engine |
-| `push.event` | `event_type`, `changed_types` | mail-engine |
-| `supervisor.action` | `account_id`, `action` | web-server |
-| `store.query` | `operation`, `table` | mail-store |
+| `http.request` | `method`, `path`, `status`, `latency_ms` | posthaste-server (tower-http) |
+| `sync.cycle` | `account_id`, `mailbox_count`, `email_count` | posthaste-engine |
+| `sync.method_call` | `method_name`, `state_token` | posthaste-engine |
+| `push.connection` | `account_id`, `transport` (ws/sse), `target_url`, `attempt` | posthaste-engine |
+| `push.event` | `event_type`, `changed_types` | posthaste-engine |
+| `supervisor.action` | `account_id`, `action` | posthaste-server |
+| `store.query` | `operation`, `table` | posthaste-store |
 
 Start coarse-grained (the above list). Add finer spans based on debugging experience.
 

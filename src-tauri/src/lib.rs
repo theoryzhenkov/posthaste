@@ -1,7 +1,7 @@
 use tauri::webview::WebviewWindowBuilder;
 use tauri::Manager;
 use tauri_utils::config::WebviewUrl;
-use web_server::ServerConfig;
+use posthaste_server::ServerConfig;
 
 /// Receive a log entry from the frontend and emit it through the backend's
 /// tracing subscriber so it lands in the same log files with rotation.
@@ -34,7 +34,7 @@ pub fn run() {
                 ],
                 bind_address_override: Some("127.0.0.1:0".to_string()),
             };
-            let handle = tauri::async_runtime::block_on(web_server::start_server(config));
+            let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
             let port = handle.addr.port();
             tracing::info!(addr = %handle.addr, "embedded backend started");
             app.manage(handle);

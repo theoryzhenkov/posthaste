@@ -2100,98 +2100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
-name = "mail-config"
-version = "0.1.0"
-dependencies = [
- "mail-domain",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "toml 0.8.2",
-]
-
-[[package]]
-name = "mail-daemon"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "async-stream",
- "async-trait",
- "axum",
- "dirs",
- "dotenvy",
- "futures-util",
- "keyring",
- "mail-config",
- "mail-domain",
- "mail-jmap",
- "mail-store",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tokio-stream",
- "toml 0.8.2",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "mail-domain"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
-]
-
-[[package]]
-name = "mail-jmap"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "futures-util",
- "jmap-client",
- "mail-domain",
- "pulldown-cmark",
- "reqwest 0.12.28",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "mail-store"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "hex",
- "mail-domain",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2897,14 +2805,106 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-config"
+version = "0.1.0"
+dependencies = [
+ "posthaste-domain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "posthaste-desktop"
 version = "0.1.0"
 dependencies = [
- "mail-daemon",
+ "posthaste-server",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",
  "tauri-utils",
+ "tracing",
+]
+
+[[package]]
+name = "posthaste-domain"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "posthaste-engine"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "futures-util",
+ "jmap-client",
+ "posthaste-domain",
+ "pulldown-cmark",
+ "reqwest 0.12.28",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "posthaste-server"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "dirs",
+ "dotenvy",
+ "futures-util",
+ "keyring",
+ "posthaste-config",
+ "posthaste-domain",
+ "posthaste-engine",
+ "posthaste-store",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "toml 0.8.2",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "posthaste-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hex",
+ "posthaste-domain",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
  "tracing",
 ]
 

@@ -195,7 +195,7 @@ The small blue dot in `MessageRow` for unread status is not immediately obvious.
 
 API error codes ("NOT_FOUND", "INVALID_REQUEST") are scattered as string literals in `account_support.rs` and `cursor_support.rs`. Create `error_codes.rs` with named constants and update handlers.
 
-**Files**: new `crates/web-server/src/error_codes.rs`, `crates/web-server/src/api/account_support.rs`, `crates/web-server/src/api/cursor_support.rs`
+**Files**: new `crates/posthaste-server/src/error_codes.rs`, `crates/posthaste-server/src/api/account_support.rs`, `crates/posthaste-server/src/api/cursor_support.rs`
 **Depends on**: nothing
 **Skills learned**: Rust modules, constants, DRY principle
 
@@ -207,7 +207,7 @@ API error codes ("NOT_FOUND", "INVALID_REQUEST") are scattered as string literal
 
 The API has no structured logging. Add tracing middleware that logs HTTP method, path, status code, and duration for every request.
 
-**Files**: new `crates/web-server/src/logging.rs`, `crates/web-server/src/main.rs`
+**Files**: new `crates/posthaste-server/src/logging.rs`, `crates/posthaste-server/src/main.rs`
 **Depends on**: nothing
 **Skills learned**: Rust logging (tracing), middleware, observability
 
@@ -219,7 +219,7 @@ The API has no structured logging. Add tracing middleware that logs HTTP method,
 
 Add `GET /v1/health` that returns `{"status":"ok"}` (200) or 503 if the database is unavailable. Useful for monitoring and deployment.
 
-**Files**: `crates/web-server/src/api.rs`, `crates/web-server/src/main.rs`
+**Files**: `crates/posthaste-server/src/api.rs`, `crates/posthaste-server/src/main.rs`
 **Depends on**: nothing
 **Skills learned**: Axum routing, async functions, HTTP status codes
 
@@ -231,7 +231,7 @@ Add `GET /v1/health` that returns `{"status":"ok"}` (200) or 503 if the database
 
 The API has no rate limiting. Add `tower-governor` or similar middleware with 429 responses when limits are exceeded.
 
-**Files**: `crates/web-server/src/main.rs`
+**Files**: `crates/posthaste-server/src/main.rs`
 **Depends on**: nothing
 **Skills learned**: Rust middleware, rate limiting, security
 
@@ -255,13 +255,13 @@ Create a reference document listing all error codes with HTTP status, example JS
 
 Account validation logic in `account_support.rs` has no unit tests. Write tests for valid configs, invalid URLs, missing fields, and edge cases.
 
-**Files**: `crates/web-server/src/api/account_support.rs` (add `#[cfg(test)]` module)
+**Files**: `crates/posthaste-server/src/api/account_support.rs` (add `#[cfg(test)]` module)
 **Depends on**: nothing
 **Skills learned**: Rust unit testing, validation logic
 
 ---
 
-### 21. Document mail-config schema
+### 21. Document posthaste-config schema
 
 **Difficulty**: Easy
 
@@ -285,13 +285,13 @@ SQLite schema is defined in code but not documented. Create `docs/database-schem
 
 ---
 
-### 23. Extract SQL constants from mail-store
+### 23. Extract SQL constants from posthaste-store
 
 **Difficulty**: Easy
 
-Various Rust files have hardcoded table/column name strings. Create `crates/mail-store/src/db/constants.rs` and update imports.
+Various Rust files have hardcoded table/column name strings. Create `crates/posthaste-store/src/db/constants.rs` and update imports.
 
-**Files**: new `crates/mail-store/src/db/constants.rs`, `crates/mail-store/src/db.rs`
+**Files**: new `crates/posthaste-store/src/db/constants.rs`, `crates/posthaste-store/src/db.rs`
 **Depends on**: nothing
 **Skills learned**: Rust modules, constants, maintainability
 
@@ -301,9 +301,9 @@ Various Rust files have hardcoded table/column name strings. Create `crates/mail
 
 **Difficulty**: Easy
 
-Public functions in web-server and mail-store lack `///` doc comments. Add them and verify with `cargo doc --open`.
+Public functions in posthaste-server and posthaste-store lack `///` doc comments. Add them and verify with `cargo doc --open`.
 
-**Files**: multiple files in `crates/web-server/src/api/`
+**Files**: multiple files in `crates/posthaste-server/src/api/`
 **Depends on**: nothing
 **Skills learned**: Rust doc comments, `cargo doc`
 
