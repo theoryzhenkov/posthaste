@@ -6,7 +6,6 @@
  *
  * @spec spec/L1-ui#messagelist
  */
-import { Star } from "lucide-react";
 import type { ConversationSummary } from "../api/types";
 import { cn } from "../lib/utils";
 import {
