@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-utils = "2"
 tauri-plugin-shell = "2"
 mail-daemon = { path = "../crates/web-server" }
 tracing = { workspace = true }
