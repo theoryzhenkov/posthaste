@@ -1,0 +1,25 @@
+# Frontend (React/Vite) recipes
+
+# Start dev server
+dev:
+    bun run dev
+
+# Production build
+build:
+    bun run build
+
+# Lint
+check:
+    bun run lint
+
+# Lint with auto-fix
+lint-fix:
+    bun run lint --fix
+
+# Preview production build
+preview:
+    bun run preview
+
+# Install dependencies
+install:
+    bun install

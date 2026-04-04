@@ -1,0 +1,31 @@
+# Backend (Rust workspace) recipes
+
+set working-directory := '..'
+
+# Run the daemon
+run *args:
+    cargo run --bin posthaste-daemon {{args}}
+
+# Build all crates
+build:
+    cargo build
+
+# Build in release mode
+build-release:
+    cargo build --release
+
+# Run tests
+test *args:
+    cargo test {{args}}
+
+# Run clippy + check
+check:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Format code
+fmt:
+    cargo fmt --all
+
+# Check formatting
+fmt-check:
+    cargo fmt --all -- --check

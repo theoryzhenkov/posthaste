@@ -1,0 +1,9 @@
+# Desktop (Tauri) recipes
+
+# Run in dev mode
+dev:
+    cargo tauri dev
+
+# Build for release
+build:
+    cargo tauri build
