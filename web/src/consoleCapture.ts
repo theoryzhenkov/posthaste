@@ -33,8 +33,8 @@ function formatArgs(args: unknown[]): string {
 
 export function installConsoleCapture(): void {
   for (const [method, level] of Object.entries(CONSOLE_LEVEL_MAP)) {
-    const original = (console as Record<string, unknown>)[method] as (...args: unknown[]) => void;
-    (console as Record<string, unknown>)[method] = (...args: unknown[]) => {
+    const original = (console as unknown as Record<string, unknown>)[method] as (...args: unknown[]) => void;
+    (console as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
       original.apply(console, args);
       if (args.length === 1 && isPinoObject(args[0])) return;
       invoke("log_from_frontend", {

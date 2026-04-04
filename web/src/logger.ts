@@ -33,20 +33,20 @@ function sendToBackend(obj: WriteObj): void {
  * via Tauri IPC while also writing to the browser console for dev convenience.
  */
 function makeTauriWrite(): pino.LoggerOptions["browser"] {
-  const write = (obj: WriteObj) => {
-    sendToBackend(obj);
+  const write = (obj: object) => {
+    sendToBackend(obj as WriteObj);
   };
   return {
     // Keep console output in dev for devtools, skip in production.
     asObject: true,
     write: import.meta.env.DEV
       ? {
-          trace: (obj: WriteObj) => { console.debug(obj); write(obj); },
-          debug: (obj: WriteObj) => { console.debug(obj); write(obj); },
-          info: (obj: WriteObj) => { console.info(obj); write(obj); },
-          warn: (obj: WriteObj) => { console.warn(obj); write(obj); },
-          error: (obj: WriteObj) => { console.error(obj); write(obj); },
-          fatal: (obj: WriteObj) => { console.error(obj); write(obj); },
+          trace: (obj: object) => { console.debug(obj); write(obj); },
+          debug: (obj: object) => { console.debug(obj); write(obj); },
+          info: (obj: object) => { console.info(obj); write(obj); },
+          warn: (obj: object) => { console.warn(obj); write(obj); },
+          error: (obj: object) => { console.error(obj); write(obj); },
+          fatal: (obj: object) => { console.error(obj); write(obj); },
         }
       : write,
   };
