@@ -10,7 +10,7 @@ use crate::live::map_gateway_error;
 
 /// Result of a mailbox sync cycle (delta or full).
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 pub(crate) struct MailboxSync {
     pub mailboxes: Vec<MailboxRecord>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
@@ -22,7 +22,7 @@ pub(crate) struct MailboxSync {
 
 /// Result of an email sync cycle (delta or full).
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 pub(crate) struct MessageSync {
     pub messages: Vec<MessageRecord>,
     pub deleted_message_ids: Vec<MessageId>,
@@ -32,8 +32,8 @@ pub(crate) struct MessageSync {
 /// Sync mailbox state: try delta via `Mailbox/changes`, fall back to full snapshot
 /// on `cannotCalculateChanges`.
 ///
-/// @spec spec/L1-sync#state-management
-/// @spec spec/L1-sync#error-handling
+/// @spec docs/L1-sync#state-management
+/// @spec docs/L1-sync#error-handling
 pub(crate) async fn fetch_mailbox_sync(
     client: &Client,
     since_state: Option<&str>,
@@ -51,8 +51,8 @@ pub(crate) async fn fetch_mailbox_sync(
 /// Sync email state: try delta via `Email/changes`, fall back to full snapshot
 /// on `cannotCalculateChanges`.
 ///
-/// @spec spec/L1-sync#state-management
-/// @spec spec/L1-sync#error-handling
+/// @spec docs/L1-sync#state-management
+/// @spec docs/L1-sync#error-handling
 pub(crate) async fn fetch_email_sync(
     client: &Client,
     since_state: Option<&str>,
@@ -71,8 +71,8 @@ pub(crate) async fn fetch_email_sync(
 ///
 /// Loops through paginated change batches until `has_more_changes` is false.
 ///
-/// @spec spec/L1-jmap#methods-used
-/// @spec spec/L1-sync#state-management
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/L1-sync#state-management
 async fn fetch_mailbox_delta(
     client: &Client,
     since_state: &str,
@@ -132,8 +132,8 @@ async fn fetch_mailbox_delta(
 /// Fetches changed email IDs in batches and retrieves their metadata in
 /// chunks of 100 to stay within JMAP request size limits.
 ///
-/// @spec spec/L1-jmap#methods-used
-/// @spec spec/L1-sync#state-management
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/L1-sync#state-management
 async fn fetch_email_delta(
     client: &Client,
     since_state: &str,
@@ -201,8 +201,8 @@ async fn fetch_email_delta(
 /// Sets `replace_all_mailboxes = true` so the store prunes stale local
 /// mailboxes that no longer exist on the server.
 ///
-/// @spec spec/L1-sync#full-snapshot-reconciliation
-/// @spec spec/L0-sync#full-snapshot-reconciliation
+/// @spec docs/L1-sync#full-snapshot-reconciliation
+/// @spec docs/L0-sync#full-snapshot-reconciliation
 async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError> {
     let mailbox_ids = client
         .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
@@ -246,8 +246,8 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
 /// Queries all email IDs sorted by `receivedAt DESC` and fetches metadata
 /// in chunks of 100. Bodies are omitted (fetched lazily on first view).
 ///
-/// @spec spec/L1-sync#sync-granularity
-/// @spec spec/L0-sync#sync-granularity
+/// @spec docs/L1-sync#sync-granularity
+/// @spec docs/L0-sync#sync-granularity
 async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> {
     let email_ids = client
         .email_query(

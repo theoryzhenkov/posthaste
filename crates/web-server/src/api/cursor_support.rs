@@ -6,18 +6,18 @@ use super::*;
 
 /// Default page size when no `limit` query parameter is provided.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 const DEFAULT_CONVERSATION_LIMIT: usize = 100;
 
 /// Hard upper bound for the `limit` query parameter.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 const MAX_CONVERSATION_LIMIT: usize = 250;
 
 /// Check whether a domain event passes the given filter criteria (account,
 /// topic, mailbox, afterSeq).
 ///
-/// @spec spec/L1-api#sse-event-stream
+/// @spec docs/L1-api#sse-event-stream
 pub(super) fn matches_event(event: &DomainEvent, filter: &EventFilter) -> bool {
     if let Some(account_id) = &filter.account_id {
         if &event.account_id != account_id {
@@ -44,7 +44,7 @@ pub(super) fn matches_event(event: &DomainEvent, filter: &EventFilter) -> bool {
 
 /// Convert a domain event into an SSE frame with `id` set to the sequence number.
 ///
-/// @spec spec/L1-api#sse-event-stream
+/// @spec docs/L1-api#sse-event-stream
 pub(super) fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
     Ok(Event::default()
         .id(event.seq.to_string())
@@ -55,7 +55,7 @@ pub(super) fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
 /// Resolve and validate the conversation page limit, defaulting to 100.
 /// Returns 400 if `limit` is 0 or exceeds 250.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 pub(super) fn conversation_limit(limit: Option<usize>) -> Result<usize, ApiError> {
     let limit = limit.unwrap_or(DEFAULT_CONVERSATION_LIMIT);
     if limit == 0 || limit > MAX_CONVERSATION_LIMIT {
@@ -71,7 +71,7 @@ pub(super) fn conversation_limit(limit: Option<usize>) -> Result<usize, ApiError
 /// Decode an opaque cursor string into a [`ConversationCursor`].
 /// Format: `{value_len}:{sort_value}:{conversation_id}`.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 pub(super) fn parse_conversation_cursor(
     cursor: Option<&str>,
 ) -> Result<Option<ConversationCursor>, ApiError> {
@@ -109,7 +109,7 @@ pub(super) fn invalid_cursor() -> ApiError {
 
 /// Encode a [`ConversationCursor`] into its opaque string representation.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 pub(super) fn encode_conversation_cursor(cursor: &ConversationCursor) -> String {
     format!(
         "{}:{}:{}",
@@ -122,7 +122,7 @@ pub(super) fn encode_conversation_cursor(cursor: &ConversationCursor) -> String 
 /// Convert a domain [`ConversationPage`] into the API response, encoding
 /// the next cursor if more results exist.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 pub(super) fn conversation_page_response(page: ConversationPage) -> ConversationPageResponse {
     ConversationPageResponse {
         items: page.items,

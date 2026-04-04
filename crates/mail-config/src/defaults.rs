@@ -8,7 +8,7 @@ use mail_domain::{
 /// Trash, and All Mail. Each filters by `mailbox_role`; All Mail uses an empty
 /// rule (matches everything).
 ///
-/// @spec spec/L1-accounts#smart-mailbox-defaults
+/// @spec docs/L1-accounts#smart-mailbox-defaults
 pub fn default_smart_mailboxes() -> Vec<SmartMailbox> {
     vec![
         role_mailbox("default-inbox", "Inbox", 0, "inbox", "inbox"),

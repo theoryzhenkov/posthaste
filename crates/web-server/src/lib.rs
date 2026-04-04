@@ -29,8 +29,8 @@ use crate::supervisor::AccountSupervisor;
 
 /// Shared application state threaded through all Axum handlers.
 ///
-/// @spec spec/L0-api#axum
-/// @spec spec/L1-api#endpoint-table
+/// @spec docs/L0-api#axum
+/// @spec docs/L1-api#endpoint-table
 pub struct AppState {
     pub service: Arc<MailService>,
     pub store: Arc<dyn MailStore>,
@@ -42,8 +42,8 @@ pub struct AppState {
 impl AppState {
     /// Broadcast domain events to all connected SSE clients.
     ///
-    /// @spec spec/L1-api#sse-event-stream
-    /// @spec spec/L1-sync#event-propagation
+    /// @spec docs/L1-api#sse-event-stream
+    /// @spec docs/L1-sync#event-propagation
     pub fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {
             let _ = self.event_sender.send(event.clone());
@@ -71,8 +71,8 @@ pub struct ServerConfig {
 /// Initialize the entire backend (config, store, supervisor, logging)
 /// and spawn the Axum server on a Tokio task. Returns immediately.
 ///
-/// @spec spec/L0-api#axum
-/// @spec spec/L1-accounts#initialization
+/// @spec docs/L0-api#axum
+/// @spec docs/L1-accounts#initialization
 pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     #[cfg(debug_assertions)]
     dotenv().ok();

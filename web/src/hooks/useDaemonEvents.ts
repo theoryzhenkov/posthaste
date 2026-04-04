@@ -4,8 +4,8 @@
  *
  * Resumes from the last seen sequence number stored in `sessionStorage`.
  *
- * @spec spec/L1-api#sse-event-stream
- * @spec spec/L1-ui#live-prepend-behavior
+ * @spec docs/L1-api#sse-event-stream
+ * @spec docs/L1-ui#live-prepend-behavior
  */
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,8 +45,8 @@ function dispatchDomainEvent(payload: DomainEvent) {
  * incoming domain events (keyword changes, mailbox changes, message arrivals),
  * and keeps the React Query cache in sync.
  *
- * @spec spec/L1-api#sse-event-stream
- * @spec spec/L1-ui#live-prepend-behavior
+ * @spec docs/L1-api#sse-event-stream
+ * @spec docs/L1-ui#live-prepend-behavior
  */
 export function useDaemonEvents() {
   const queryClient = useQueryClient();

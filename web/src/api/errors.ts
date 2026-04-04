@@ -1,6 +1,6 @@
 /**
  * Structured API error carrying HTTP status and an optional backend error code.
- * @spec spec/L1-api#error-format
+ * @spec docs/L1-api#error-format
  */
 export class ApiError extends Error {
   readonly status: number;

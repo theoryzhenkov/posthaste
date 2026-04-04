@@ -4,7 +4,7 @@ use crate::{AccountId, AccountSettings, AppSettings, SmartMailbox, SmartMailboxI
 
 /// Full in-memory snapshot of all config: app settings, sources, smart mailboxes.
 ///
-/// @spec spec/L1-accounts#configsnapshot
+/// @spec docs/L1-accounts#configsnapshot
 #[derive(Clone, Debug)]
 pub struct ConfigSnapshot {
     pub app_settings: AppSettings,
@@ -14,7 +14,7 @@ pub struct ConfigSnapshot {
 
 /// Delta returned by [`ConfigRepository::reload`]: added, changed, and removed sources.
 ///
-/// @spec spec/L1-accounts#configdiff
+/// @spec docs/L1-accounts#configdiff
 #[derive(Clone, Debug)]
 pub struct ConfigDiff {
     pub added_sources: Vec<AccountId>,
@@ -24,7 +24,7 @@ pub struct ConfigDiff {
 
 /// Errors from configuration persistence operations.
 ///
-/// @spec spec/L1-accounts#configrepository-trait
+/// @spec docs/L1-accounts#configrepository-trait
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("not found: {0}")]
@@ -45,14 +45,14 @@ pub enum ConfigError {
 /// Reads serve from an in-memory snapshot after initialization; writes
 /// use atomic write-fsync-rename.
 ///
-/// @spec spec/L1-accounts#configrepository-trait
+/// @spec docs/L1-accounts#configrepository-trait
 pub trait ConfigRepository: Send + Sync {
     /// Load a full in-memory snapshot of all config files.
     fn load_snapshot(&self) -> Result<ConfigSnapshot, ConfigError>;
 
     /// Re-read all config files from disk and return a diff against the cached snapshot.
     ///
-    /// @spec spec/L1-accounts#configdiff
+    /// @spec docs/L1-accounts#configdiff
     fn reload(&self) -> Result<ConfigDiff, ConfigError>;
 
     /// Read global application settings.
@@ -80,7 +80,7 @@ pub trait ConfigRepository: Send + Sync {
 
     /// Restore all default smart mailboxes without deleting user-created ones.
     ///
-    /// @spec spec/L1-accounts#smart-mailbox-defaults
+    /// @spec docs/L1-accounts#smart-mailbox-defaults
     fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError>;
 }
 

@@ -4,9 +4,9 @@ summary: "JMAP transport abstraction: WS preferred with SSE fallback, JmapTransp
 modified: 2026-04-02
 reviewed: 2026-04-02
 depends:
-  - path: spec/L1-jmap
-  - path: spec/L1-sync
-  - path: spec/L0-sync
+  - path: docs/L1-jmap
+  - path: docs/L1-sync
+  - path: docs/L0-sync
 dependents: []
 ---
 

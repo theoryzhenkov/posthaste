@@ -4,8 +4,8 @@
  * Handles form state conversion, smart mailbox rule builder helpers,
  * and visual status mapping.
  *
- * @spec spec/L1-api#account-crud-lifecycle
- * @spec spec/L1-search#smart-mailbox-data-model
+ * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-search#smart-mailbox-data-model
  */
 import type {
   AccountDriver,
@@ -25,7 +25,7 @@ import type {
   SmartMailboxFormState,
 } from "./types";
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export const ACCOUNT_DRIVER_VALUES = ["jmap", "mock"] as const;
 
 /** Default empty form state for creating a new account. */
@@ -80,7 +80,7 @@ export function formFromSmartMailbox(
 
 /**
  * Available smart mailbox filter fields for the rule builder UI.
- * @spec spec/L1-search#smart-mailbox-data-model
+ * @spec docs/L1-search#smart-mailbox-data-model
  */
 export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> = [
   { value: "sourceId", label: "Source ID" },
@@ -98,7 +98,7 @@ export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> =
   { value: "receivedAt", label: "Received at" },
 ];
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export const GROUP_OPERATOR_OPTIONS: Array<{
   value: SmartMailboxGroupOperator;
   label: string;
@@ -142,7 +142,7 @@ export function parseOperator(
 
 /**
  * Return the valid operators for a given smart mailbox field.
- * @spec spec/L1-search#smart-mailbox-data-model
+ * @spec docs/L1-search#smart-mailbox-data-model
  */
 export function operatorOptionsForField(
   field: SmartMailboxField,
@@ -196,7 +196,7 @@ export function defaultGroup(): SmartMailboxRuleNode {
 
 /**
  * Build a secret instruction payload from the current form state.
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#secret-management
  */
 export function buildSecretInput(form: AccountFormState) {
   if (form.secretMode === "replace") {
@@ -222,7 +222,7 @@ export function buildCreateAccountPayload(form: AccountFormState): CreateAccount
 
 /**
  * Build an update-account API payload from form state.
- * @spec spec/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#account-crud-lifecycle
  */
 export function buildUpdateAccountPayload(form: AccountFormState): UpdateAccountInput {
   return {

@@ -7,7 +7,7 @@ use ammonia::Builder;
 /// Allows email-safe tags/attributes, forces safe link behavior,
 /// and strips tracking pixels.
 ///
-/// @spec spec/L1-api#message-body-sanitization
+/// @spec docs/L1-api#message-body-sanitization
 pub fn sanitize_email_html(raw_html: &str) -> String {
     let tags: HashSet<&str> = [
         "a",

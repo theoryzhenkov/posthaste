@@ -17,8 +17,8 @@ use crate::live::map_gateway_error;
 /// Used as a fallback when the server does not advertise WebSocket capability.
 /// Wraps `jmap_client::Client::event_source()`.
 ///
-/// @spec spec/L2-transport#pushtransport
-/// @spec spec/L1-jmap#push
+/// @spec docs/L2-transport#pushtransport
+/// @spec docs/L1-jmap#push
 pub struct SsePushTransport {
     client: Arc<Client>,
 }
@@ -41,8 +41,8 @@ impl PushTransport for SsePushTransport {
     ///
     /// Resumes from `checkpoint` (SSE last-event-id) when provided.
     ///
-    /// @spec spec/L2-transport#http-fallback
-    /// @spec spec/L1-jmap#push
+    /// @spec docs/L2-transport#http-fallback
+    /// @spec docs/L1-jmap#push
     async fn open(
         &self,
         account_id: &AccountId,

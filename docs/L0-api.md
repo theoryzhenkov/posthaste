@@ -9,6 +9,7 @@ depends:
 dependents:
   - path: docs/L0-sync
   - path: docs/L0-ui
+  - path: docs/L1-api
   - path: docs/L1-sync
   - path: docs/L1-ui
 ---

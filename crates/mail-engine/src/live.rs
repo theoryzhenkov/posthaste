@@ -21,8 +21,8 @@ use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 /// Performs session discovery via `.well-known/jmap`, authenticates with
 /// basic credentials, and follows redirects scoped to the server's host.
 ///
-/// @spec spec/L1-jmap#session
-/// @spec spec/L1-jmap#authentication
+/// @spec docs/L1-jmap#session
+/// @spec docs/L1-jmap#authentication
 #[instrument(skip(password))]
 pub async fn connect_jmap_client(
     url: &str,
@@ -64,8 +64,8 @@ pub async fn connect_jmap_client(
 /// advertises WebSocket capability, a `SharedWsConnection` used for
 /// interactive API calls and push notifications.
 ///
-/// @spec spec/L1-jmap#session
-/// @spec spec/L2-transport#transport-negotiation
+/// @spec docs/L1-jmap#session
+/// @spec docs/L2-transport#transport-negotiation
 pub struct LiveJmapGateway {
     client: Arc<Client>,
     ws: Option<Arc<crate::ws_connection::SharedWsConnection>>,
@@ -74,7 +74,7 @@ pub struct LiveJmapGateway {
 impl LiveJmapGateway {
     /// Wrap an already-connected client, opening a WebSocket if the server supports it.
     ///
-    /// @spec spec/L2-transport#transport-negotiation
+    /// @spec docs/L2-transport#transport-negotiation
     pub fn from_client(client: Arc<Client>) -> Self {
         let ws = if client.session().websocket_capabilities().is_some() {
             debug!("WebSocket capability available, creating shared connection");
@@ -90,7 +90,7 @@ impl LiveJmapGateway {
 
     /// Discover, authenticate, and construct a gateway in one step.
     ///
-    /// @spec spec/L1-jmap#session
+    /// @spec docs/L1-jmap#session
     pub async fn connect(url: &str, username: &str, password: &str) -> Result<Self, GatewayError> {
         let client = connect_jmap_client(url, username, password).await?;
         Ok(Self::from_client(client))
@@ -109,8 +109,8 @@ impl LiveJmapGateway {
     /// Client::send(), all paths will use WS automatically and this method
     /// can be removed.
     ///
-    /// @spec spec/L2-transport#jmaptransport
-    /// @spec spec/L2-transport#http-fallback
+    /// @spec docs/L2-transport#jmaptransport
+    /// @spec docs/L2-transport#http-fallback
     async fn send_request(
         &self,
         request: jmap_client::core::request::Request<'_>,
@@ -129,8 +129,8 @@ impl LiveJmapGateway {
 
 /// Build a `MutationOutcome` with a message-type sync cursor from the server's new state string.
 ///
-/// @spec spec/L1-jmap#core-types
-/// @spec spec/L1-sync#state-management
+/// @spec docs/L1-jmap#core-types
+/// @spec docs/L1-sync#state-management
 fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayError> {
     Ok(MutationOutcome {
         cursor: Some(SyncCursor {
@@ -143,8 +143,8 @@ fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayErr
 
 /// Resolve the sender identity for an account before composing or sending.
 ///
-/// @spec spec/L1-jmap#methods-used
-/// @spec spec/L1-compose#composesession-interface
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/L1-compose#composesession-interface
 async fn fetch_send_identity(
     gateway: &impl MailGateway,
     account_id: &AccountId,
@@ -152,17 +152,17 @@ async fn fetch_send_identity(
     gateway.fetch_identity(account_id).await
 }
 
-/// @spec spec/L1-jmap#method-calls
-/// @spec spec/L1-sync#sync-loop
-/// @spec spec/L2-transport#gateway-unchanged
+/// @spec docs/L1-jmap#method-calls
+/// @spec docs/L1-sync#sync-loop
+/// @spec docs/L2-transport#gateway-unchanged
 #[async_trait]
 impl MailGateway for LiveJmapGateway {
     /// Perform a full sync cycle: mailbox state then email state.
     ///
     /// Falls back from delta to full sync on `cannotCalculateChanges`.
     ///
-    /// @spec spec/L1-sync#sync-loop
-    /// @spec spec/L1-sync#state-management
+    /// @spec docs/L1-sync#sync-loop
+    /// @spec docs/L1-sync#state-management
     async fn sync(
         &self,
         _account_id: &AccountId,
@@ -208,8 +208,8 @@ impl MailGateway for LiveJmapGateway {
     /// Bodies are not synced during metadata sync; they are fetched on first
     /// view and cached locally.
     ///
-    /// @spec spec/L1-sync#sync-granularity
-    /// @spec spec/L1-jmap#methods-used
+    /// @spec docs/L1-sync#sync-granularity
+    /// @spec docs/L1-jmap#methods-used
     async fn fetch_message_body(
         &self,
         _account_id: &AccountId,
@@ -275,8 +275,8 @@ impl MailGateway for LiveJmapGateway {
     ///
     /// Uses `ifInState` for optimistic concurrency when `expected_state` is provided.
     ///
-    /// @spec spec/L1-jmap#methods-used
-    /// @spec spec/L1-sync#conflict-model
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/L1-sync#conflict-model
     async fn set_keywords(
         &self,
         _account_id: &AccountId,
@@ -310,8 +310,8 @@ impl MailGateway for LiveJmapGateway {
     ///
     /// Used for move and archive operations. Supports optimistic concurrency.
     ///
-    /// @spec spec/L1-jmap#methods-used
-    /// @spec spec/L1-sync#conflict-model
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/L1-sync#conflict-model
     async fn replace_mailboxes(
         &self,
         _account_id: &AccountId,
@@ -338,8 +338,8 @@ impl MailGateway for LiveJmapGateway {
 
     /// Permanently destroy a message via `Email/set`.
     ///
-    /// @spec spec/L1-jmap#methods-used
-    /// @spec spec/L1-sync#conflict-model
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/L1-sync#conflict-model
     async fn destroy_message(
         &self,
         _account_id: &AccountId,
@@ -364,8 +364,8 @@ impl MailGateway for LiveJmapGateway {
 
     /// Fetch the primary sender identity for an account via `Identity/get`.
     ///
-    /// @spec spec/L1-jmap#methods-used
-    /// @spec spec/L1-compose#composesession-interface
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/L1-compose#composesession-interface
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         let mut request = self.client.build();
         request.get_identity().properties([
@@ -397,8 +397,8 @@ impl MailGateway for LiveJmapGateway {
     /// Retrieves subject, sender, recipients, threading headers, and quoted
     /// body text. The body is `>` prefixed for reply quoting.
     ///
-    /// @spec spec/L1-compose#reply-quoting
-    /// @spec spec/L1-compose#forward-quoting
+    /// @spec docs/L1-compose#reply-quoting
+    /// @spec docs/L1-compose#forward-quoting
     async fn fetch_reply_context(
         &self,
         _account_id: &AccountId,
@@ -468,8 +468,8 @@ impl MailGateway for LiveJmapGateway {
     /// Renders the Markdown body to HTML and constructs a multipart/alternative
     /// MIME structure. The server handles Sent folder placement.
     ///
-    /// @spec spec/L1-compose#mime-structure
-    /// @spec spec/L1-jmap#methods-used
+    /// @spec docs/L1-compose#mime-structure
+    /// @spec docs/L1-jmap#methods-used
     async fn send_message(
         &self,
         account_id: &AccountId,
@@ -519,7 +519,7 @@ impl MailGateway for LiveJmapGateway {
 
     /// Return available push transports, preferring WebSocket over SSE.
     ///
-    /// @spec spec/L2-transport#pushtransport
+    /// @spec docs/L2-transport#pushtransport
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
         let mut transports: Vec<Box<dyn PushTransport>> = Vec::new();
         if let Some(ref ws) = self.ws {
@@ -537,7 +537,7 @@ impl MailGateway for LiveJmapGateway {
 /// Distinguishes auth errors (401), state mismatches, `cannotCalculateChanges`,
 /// and generic network/method errors.
 ///
-/// @spec spec/L1-jmap#error-model
+/// @spec docs/L1-jmap#error-model
 pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
     match error {
         jmap_client::Error::Problem(problem) => {

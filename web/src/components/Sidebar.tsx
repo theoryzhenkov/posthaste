@@ -4,8 +4,8 @@
  * Loads data from `GET /v1/sidebar` and renders collapsible sections
  * for smart mailboxes and per-source mailbox trees.
  *
- * @spec spec/L1-ui#component-hierarchy
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L1-ui#component-hierarchy
+ * @spec docs/L0-ui#navigation-model
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -21,13 +21,13 @@ import {
 
 /**
  * Discriminated union representing the current sidebar selection.
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L0-ui#navigation-model
  */
 export type SidebarSelection =
   | { kind: "smart-mailbox"; id: string; name: string }
   | { kind: "source-mailbox"; sourceId: string; mailboxId: string; name: string };
 
-/** @spec spec/L1-ui#component-hierarchy */
+/** @spec docs/L1-ui#component-hierarchy */
 interface SidebarProps {
   selectedView: SidebarSelection | null;
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void;
@@ -174,8 +174,8 @@ function SectionHeader({
 /**
  * Sidebar navigation with smart mailbox and source mailbox sections.
  *
- * @spec spec/L1-ui#component-hierarchy
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L1-ui#component-hierarchy
+ * @spec docs/L0-ui#navigation-model
  */
 export function Sidebar({
   selectedView,

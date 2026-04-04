@@ -4,7 +4,7 @@
  * This module owns the cache key schema, optimistic update logic,
  * local-echo suppression, and conversation-summary derivation.
  *
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 import type {
   InfiniteData,
@@ -23,13 +23,13 @@ import type {
 
 /**
  * Selected message reference used by list and detail views.
- * @spec spec/L1-ui#messagelist
+ * @spec docs/L1-ui#messagelist
  */
 export type MailSelection = SourceMessageRef & { conversationId: string };
 
 /**
  * Current sidebar selection -- either a smart mailbox or a source+mailbox pair.
- * @spec spec/L0-ui#navigation-model
+ * @spec docs/L0-ui#navigation-model
  */
 export type MailViewSelection =
   | { kind: "smart-mailbox"; id: string }
@@ -39,7 +39,7 @@ export type MailViewSelection =
 /**
  * Normalized conversation page stored in the infinite query cache.
  * Summaries are extracted into per-ID cache entries; only IDs remain here.
- * @spec spec/L1-api#cursor-pagination
+ * @spec docs/L1-api#cursor-pagination
  */
 export type ConversationPageSlice = {
   itemIds: string[];
@@ -48,7 +48,7 @@ export type ConversationPageSlice = {
 
 /**
  * Canonical React Query key builders for mail-related data.
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export const mailKeys = {
   message: (sourceId: string, messageId: string) =>
@@ -119,7 +119,7 @@ export function deriveKeywordState(keywords: string[]): KeywordState {
 /**
  * Normalize a backend conversation page into a cache slice,
  * extracting each summary into its own query entry.
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export function normalizeConversationPage(
   queryClient: QueryClient,
@@ -172,7 +172,7 @@ function cleanupLocalMutationEvents(now: number) {
 /**
  * Record events from a locally initiated mutation so they can be
  * suppressed when echoed back via SSE.
- * @spec spec/L1-ui#live-prepend-behavior
+ * @spec docs/L1-ui#live-prepend-behavior
  */
 export function recordLocalMutationEvents(events: DomainEvent[]) {
   const now = Date.now();
@@ -188,7 +188,7 @@ export function recordLocalMutationEvents(events: DomainEvent[]) {
 /**
  * Returns true if this SSE event was caused by a recent local mutation
  * and should be ignored to prevent double-application.
- * @spec spec/L1-ui#live-prepend-behavior
+ * @spec docs/L1-ui#live-prepend-behavior
  */
 export function shouldSuppressLocalEcho(event: DomainEvent): boolean {
   if (!event.messageId) {
@@ -277,7 +277,7 @@ function applyHeuristicConversationPatch(
 
 /**
  * Derive a conversation summary from a full conversation view.
- * @spec spec/L1-sync#conversation-pagination
+ * @spec docs/L1-sync#conversation-pagination
  */
 function summarizeConversation(conversation: ConversationView): ConversationSummary {
   const latestMessage = conversation.messages[conversation.messages.length - 1];
@@ -332,7 +332,7 @@ function applyPatchToConversationView(
 /**
  * Optimistically apply a keyword patch across message, conversation, and summary cache entries.
  * Returns rollback snapshots and whether the patch was incomplete (needs server confirmation).
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export function applyKeywordPatch(
   queryClient: QueryClient,
@@ -400,7 +400,7 @@ export function applyKeywordPatch(
 
 /**
  * Merge a fresh message detail into the cache and update the parent conversation summary.
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export function mergeMessageDetail(
   queryClient: QueryClient,
@@ -478,7 +478,7 @@ export function findConversationIdForMessage(
 /**
  * Apply a keyword change from an SSE event by resolving the conversation
  * from the cache and delegating to {@link applyKeywordPatch}.
- * @spec spec/L1-ui#live-prepend-behavior
+ * @spec docs/L1-ui#live-prepend-behavior
  */
 export function applyKeywordEventPatch(
   queryClient: QueryClient,
@@ -510,7 +510,7 @@ export function applyKeywordEventPatch(
 
 /**
  * Write a full conversation view into the cache and update the derived summary.
- * @spec spec/L1-ui#data-fetching
+ * @spec docs/L1-ui#data-fetching
  */
 export function mergeConversationView(
   queryClient: QueryClient,
@@ -525,7 +525,7 @@ export function mergeConversationView(
 
 /**
  * Flatten all pages of an infinite conversation query into a single ID array.
- * @spec spec/L1-ui#messagelist
+ * @spec docs/L1-ui#messagelist
  */
 export function readConversationIds(
   data: InfiniteData<ConversationPageSlice, unknown> | undefined,

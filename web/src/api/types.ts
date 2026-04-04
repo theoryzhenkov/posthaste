@@ -1,14 +1,14 @@
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export type AccountDriver = "jmap" | "mock";
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
   defaultAccountId: string | null;
 }
 
 /**
  * Redacted secret status returned by the API -- never contains the actual value.
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#secret-management
  */
 export interface SecretStatus {
   storage: "env" | "os";
@@ -16,7 +16,7 @@ export interface SecretStatus {
   label: string | null;
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export type KnownMailboxRole =
   | "inbox"
   | "archive"
@@ -27,7 +27,7 @@ export type KnownMailboxRole =
 
 /**
  * Summary of a configured account, including transport and sync status.
- * @spec spec/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#account-crud-lifecycle
  */
 export interface AccountOverview {
   id: string;
@@ -49,7 +49,7 @@ export interface AccountOverview {
   lastSyncErrorCode: string | null;
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountTransportInput {
   baseUrl: string;
   username: string;
@@ -57,14 +57,14 @@ export interface AccountTransportInput {
 
 /**
  * Tri-state secret write mode: keep existing, replace with new password, or clear.
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#secret-management
  */
 export interface SecretInstructionInput {
   mode: "keep" | "replace" | "clear";
   password?: string;
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export interface CreateAccountInput {
   id: string;
   name: string;
@@ -76,7 +76,7 @@ export interface CreateAccountInput {
 
 /**
  * Sparse-merge update payload -- omitted fields are preserved.
- * @spec spec/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#account-crud-lifecycle
  */
 export interface UpdateAccountInput {
   name?: string;
@@ -86,19 +86,19 @@ export interface UpdateAccountInput {
   secret?: SecretInstructionInput;
 }
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export interface VerificationResponse {
   ok: boolean;
   identityEmail: string | null;
   pushSupported: boolean;
 }
 
-/** @spec spec/L1-api#error-format */
+/** @spec docs/L1-api#error-format */
 export interface OkResponse {
   ok: boolean;
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export interface Mailbox {
   id: string;
   name: string;
@@ -109,7 +109,7 @@ export interface Mailbox {
 
 /**
  * Compact message metadata used in conversation rows and thread switchers.
- * @spec spec/L1-ui#messagelist
+ * @spec docs/L1-ui#messagelist
  */
 export interface MessageSummary {
   id: string;
@@ -131,7 +131,7 @@ export interface MessageSummary {
 
 /**
  * Reference to a raw message file stored on the backend.
- * @spec spec/L1-sync#body-lazy
+ * @spec docs/L1-sync#body-lazy
  */
 export interface RawMessageRef {
   path: string;
@@ -143,7 +143,7 @@ export interface RawMessageRef {
 
 /**
  * Full message detail including sanitized body HTML.
- * @spec spec/L1-api#message-body-sanitization
+ * @spec docs/L1-api#message-body-sanitization
  */
 export interface MessageDetail extends MessageSummary {
   bodyHtml: string | null;
@@ -153,20 +153,20 @@ export interface MessageDetail extends MessageSummary {
 
 /**
  * Pair that uniquely identifies a message within a source account.
- * @spec spec/L1-api#endpoint-table
+ * @spec docs/L1-api#endpoint-table
  */
 export interface SourceMessageRef {
   sourceId: string;
   messageId: string;
 }
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxKind = "default" | "user";
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxGroupOperator = "all" | "any";
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxField =
   | "sourceId"
   | "sourceName"
@@ -182,7 +182,7 @@ export type SmartMailboxField =
   | "preview"
   | "receivedAt";
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxOperator =
   | "equals"
   | "in"
@@ -192,17 +192,17 @@ export type SmartMailboxOperator =
   | "onOrBefore"
   | "onOrAfter";
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxValue = string | string[] | boolean;
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxGroup {
   operator: SmartMailboxGroupOperator;
   negated: boolean;
   nodes: SmartMailboxRuleNode[];
 }
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxCondition {
   type: "condition";
   field: SmartMailboxField;
@@ -211,7 +211,7 @@ export interface SmartMailboxCondition {
   value: SmartMailboxValue;
 }
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxRuleGroup {
   type: "group";
   operator: SmartMailboxGroupOperator;
@@ -219,15 +219,15 @@ export interface SmartMailboxRuleGroup {
   nodes: SmartMailboxRuleNode[];
 }
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxRuleNode = SmartMailboxRuleGroup | SmartMailboxCondition;
 
-/** @spec spec/L1-search#smart-mailbox-data-model */
+/** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxRule {
   root: SmartMailboxGroup;
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailbox {
   id: string;
   name: string;
@@ -240,7 +240,7 @@ export interface SmartMailbox {
   updatedAt: string;
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailboxSummary {
   id: string;
   name: string;
@@ -256,7 +256,7 @@ export interface SmartMailboxSummary {
 
 /**
  * Locally derived conversation summary for middle-pane rows.
- * @spec spec/L1-sync#conversation-pagination
+ * @spec docs/L1-sync#conversation-pagination
  */
 export interface ConversationSummary {
   id: string;
@@ -277,7 +277,7 @@ export interface ConversationSummary {
 
 /**
  * Cursor-paginated conversation response.
- * @spec spec/L1-api#cursor-pagination
+ * @spec docs/L1-api#cursor-pagination
  */
 export interface ConversationPage {
   items: ConversationSummary[];
@@ -286,7 +286,7 @@ export interface ConversationPage {
 
 /**
  * Full conversation view with all message summaries in the thread.
- * @spec spec/L1-ui#messagedetail-and-emailframe
+ * @spec docs/L1-ui#messagedetail-and-emailframe
  */
 export interface ConversationView {
   id: string;
@@ -294,7 +294,7 @@ export interface ConversationView {
   messages: MessageSummary[];
 }
 
-/** @spec spec/L1-ui#component-hierarchy */
+/** @spec docs/L1-ui#component-hierarchy */
 export interface SidebarSmartMailbox {
   id: string;
   name: string;
@@ -302,14 +302,14 @@ export interface SidebarSmartMailbox {
   totalMessages: number;
 }
 
-/** @spec spec/L1-ui#component-hierarchy */
+/** @spec docs/L1-ui#component-hierarchy */
 export interface SidebarSource {
   id: string;
   name: string;
   mailboxes: Mailbox[];
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export interface SidebarResponse {
   smartMailboxes: SidebarSmartMailbox[];
   sources: SidebarSource[];
@@ -317,7 +317,7 @@ export interface SidebarResponse {
 
 /**
  * Server-sent domain event from the event log.
- * @spec spec/L1-api#sse-event-stream
+ * @spec docs/L1-api#sse-event-stream
  */
 export interface DomainEvent {
   seq: number;
@@ -329,7 +329,7 @@ export interface DomainEvent {
   payload: Record<string, unknown>;
 }
 
-/** @spec spec/L1-api#endpoint-table */
+/** @spec docs/L1-api#endpoint-table */
 export interface MessageCommandResult {
   detail: MessageDetail | null;
   events: DomainEvent[];
@@ -337,7 +337,7 @@ export interface MessageCommandResult {
 
 /**
  * Discriminated union of all message commands the API accepts.
- * @spec spec/L1-api#endpoint-table
+ * @spec docs/L1-api#endpoint-table
  */
 export type MessageCommand =
   | { kind: "setKeywords"; add: string[]; remove: string[] }
@@ -346,14 +346,14 @@ export type MessageCommand =
   | { kind: "replaceMailboxes"; mailboxIds: string[] }
   | { kind: "destroy" };
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export interface CreateSmartMailboxInput {
   name: string;
   position?: number;
   rule: SmartMailboxRule;
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export interface UpdateSmartMailboxInput {
   name?: string;
   position?: number;

@@ -8,7 +8,7 @@ use super::*;
 /// If multiple conversations match, they are merged into the lowest-sorted ID.
 /// If none match, a new deterministic ID is generated.
 ///
-/// @spec spec/L1-sync#sqlite-schema
+/// @spec docs/L1-sync#sqlite-schema
 pub(crate) fn assign_conversation_id_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -98,7 +98,7 @@ pub(crate) fn assign_conversation_id_tx(
 /// Recomputes the `conversation` projection row (subject, latest message,
 /// counts) from the linked messages. Deletes the row if no messages remain.
 ///
-/// @spec spec/L1-sync#sqlite-schema
+/// @spec docs/L1-sync#sqlite-schema
 pub(crate) fn refresh_conversation_projection_tx(
     tx: &Transaction<'_>,
     conversation_id: &ConversationId,
@@ -342,7 +342,7 @@ pub(crate) fn delete_message_tx(
 /// Inserts a domain event into `event_log` with a monotonically increasing
 /// `seq`.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub(crate) fn insert_event_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,

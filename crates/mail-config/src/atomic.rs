@@ -7,7 +7,7 @@ use mail_domain::ConfigError;
 /// Writes `content` to `path` atomically via write-fsync-rename to prevent
 /// corruption on crash.
 ///
-/// @spec spec/L1-accounts#atomic-writes
+/// @spec docs/L1-accounts#atomic-writes
 pub fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ConfigError> {
     let parent = path
         .parent()

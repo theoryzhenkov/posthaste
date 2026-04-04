@@ -14,7 +14,7 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
  * - Under 7 days: "X days ago"
  * - Otherwise: formatted date (e.g., "Mar 25")
  *
- * @spec spec/L1-ui#messagelist
+ * @spec docs/L1-ui#messagelist
  */
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);

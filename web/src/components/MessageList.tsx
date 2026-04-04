@@ -4,8 +4,8 @@
  * Uses manual fixed-row virtualization (no library), seek-based cursor pagination,
  * and anchored scroll adjustment on live prepends.
  *
- * @spec spec/L1-ui#messagelist
- * @spec spec/L1-ui#keyboard-shortcuts
+ * @spec docs/L1-ui#messagelist
+ * @spec docs/L1-ui#keyboard-shortcuts
  */
 import {
   DndContext,
@@ -57,7 +57,7 @@ import {
 } from "./thread-list/columns";
 import { useColumnConfig } from "./thread-list/useColumnConfig";
 
-/** @spec spec/L1-ui#messagelist */
+/** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
   selectedView: SidebarSelection | null;
   selection: MailSelection | null;
@@ -65,9 +65,9 @@ interface MessageListProps {
   actions: EmailActions;
 }
 
-/** @spec spec/L1-ui#messagelist */
+/** @spec docs/L1-ui#messagelist */
 const PAGE_SIZE = 100;
-/** @spec spec/L1-ui#messagelist */
+/** @spec docs/L1-ui#messagelist */
 const ROW_HEIGHT = 78;
 const OVERSCAN_ROWS = 6;
 const LOAD_MORE_THRESHOLD_PX = 800;
@@ -78,7 +78,7 @@ const scrollOffsetByView = new Map<string, number>();
 /**
  * Fetch a conversation page for the currently selected sidebar view,
  * routing to the appropriate API endpoint.
- * @spec spec/L1-api#cursor-pagination
+ * @spec docs/L1-api#cursor-pagination
  */
 function fetchConversationPageForView(
   selectedView: SidebarSelection,
@@ -136,9 +136,9 @@ function eventMayAffectView(
  * Handles pagination, manual virtualization, live prepend on domain events,
  * per-view scroll restoration, and keyboard shortcuts (j/k, arrows, archive, trash).
  *
- * @spec spec/L1-ui#messagelist
- * @spec spec/L1-ui#live-prepend-behavior
- * @spec spec/L1-ui#keyboard-shortcuts
+ * @spec docs/L1-ui#messagelist
+ * @spec docs/L1-ui#live-prepend-behavior
+ * @spec docs/L1-ui#keyboard-shortcuts
  */
 export function MessageList({
   selectedView,
@@ -199,7 +199,7 @@ export function MessageList({
   /**
    * Refetch the first page and prepend any new conversations, adjusting
    * `scrollTop` to keep the visible viewport anchored.
-   * @spec spec/L1-ui#live-prepend-behavior
+   * @spec docs/L1-ui#live-prepend-behavior
    */
   const refreshFirstPage = useCallback(async () => {
     if (!selectedView) {
