@@ -9,18 +9,8 @@
     "beforeBuildCommand": "cd ../web && bun run build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "PostHaste",
-        "width": 1200,
-        "height": 800,
-        "resizable": true,
-        "fullscreen": false
-      }
-    ],
-    "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:"
-    }
+    "windows": [],
+    "security": {}
   },
   "bundle": {
     "active": true,
