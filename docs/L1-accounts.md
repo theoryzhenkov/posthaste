@@ -57,7 +57,7 @@ A `ConfigSnapshot` holds the full in-memory state: `app_settings`, `sources`, an
 
 ## ConfigDiff
 
-`reload()` re-reads all files from disk, compares against the cached snapshot, and returns a `ConfigDiff` listing `added_sources`, `changed_sources`, and `removed_sources`. The caller (web-server) uses this diff to start/stop supervisor runtimes for changed accounts.
+`reload()` re-reads all files from disk, compares against the cached snapshot, and returns a `ConfigDiff` listing `added_sources`, `changed_sources`, and `removed_sources`. The caller (posthaste-server) uses this diff to start/stop supervisor runtimes for changed accounts.
 
 ## TOML schema
 
