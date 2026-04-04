@@ -1,0 +1,11 @@
+# Docs (MkDocs) recipes
+
+set working-directory := '..'
+
+# Serve docs locally
+serve:
+    uv run mkdocs serve
+
+# Build docs
+build:
+    uv run mkdocs build
