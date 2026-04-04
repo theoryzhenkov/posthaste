@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*", "src-tauri"]
+exclude = ["crates/data", "crates/target"]
 resolver = "2"
 
 [workspace.dependencies]
