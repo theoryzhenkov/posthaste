@@ -7,7 +7,7 @@ const KEYRING_SERVICE_NAME: &str = "mail-daemon";
 /// [`SecretStore`] implementation backed by the OS keyring (via the `keyring` crate)
 /// for OS-type secrets and environment variables for env-type secrets.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 pub struct SystemSecretStore;
 
 impl SystemSecretStore {

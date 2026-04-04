@@ -4,15 +4,15 @@ summary: "PostHaste — JMAP mail client with MailMate-grade search and conversa
 modified: 2026-04-01
 reviewed: 2026-04-01
 dependents:
-  - path: spec/L0-branding
-  - path: spec/L0-jmap
-  - path: spec/L0-api
-  - path: spec/L0-sync
-  - path: spec/L0-accounts
-  - path: spec/L0-search
-  - path: spec/L0-compose
-  - path: spec/L0-ui
-  - path: spec/L0-logging
+  - path: docs/L0-branding
+  - path: docs/L0-jmap
+  - path: docs/L0-api
+  - path: docs/L0-sync
+  - path: docs/L0-accounts
+  - path: docs/L0-search
+  - path: docs/L0-compose
+  - path: docs/L0-ui
+  - path: docs/L0-logging
 ---
 
 # PostHaste
@@ -76,15 +76,15 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 
 ## Domains
 
-- **branding** -- Name, identity, palette, typography, logo. [L0](spec/L0-branding.md)
-- **jmap** -- JMAP protocol types, session, method calls, push. [L0](spec/L0-jmap.md)
+- **branding** -- Name, identity, palette, typography, logo. [L0](docs/L0-branding.md)
+- **jmap** -- JMAP protocol types, session, method calls, push. [L0](docs/L0-jmap.md)
 - **sync** -- Bidirectional sync engine, local SQLite replica, state tokens
-- **search** -- Query language, smart mailboxes, search execution. [L0](spec/L0-search.md)
+- **search** -- Query language, smart mailboxes, search execution. [L0](docs/L0-search.md)
 - **compose** -- Markdown composition, MIME assembly, send/draft lifecycle
 - **ui** -- Web UI, React components, conversation list, HTML rendering, keyboard model
-- **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](spec/L0-accounts.md) [L1](spec/L1-accounts.md)
-- **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](spec/L0-api.md) [L1](spec/L1-api.md)
-- **logging** -- Structured tracing and logging across backend and frontend. [L0](spec/L0-logging.md) [L1](spec/L1-logging.md)
+- **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](docs/L0-accounts.md) [L1](docs/L1-accounts.md)
+- **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](docs/L0-api.md) [L1](docs/L1-api.md)
+- **logging** -- Structured tracing and logging across backend and frontend. [L0](docs/L0-logging.md) [L1](docs/L1-logging.md)
 
 ## MVP acceptance criteria
 

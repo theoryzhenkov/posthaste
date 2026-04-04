@@ -1,6 +1,6 @@
 /**
  * Core button component with CVA variant support.
- * @spec spec/L0-branding#color-palette-light-mode-primary
+ * @spec docs/L0-branding#color-palette-light-mode-primary
  */
 import * as React from "react"
 import { type VariantProps } from "class-variance-authority"

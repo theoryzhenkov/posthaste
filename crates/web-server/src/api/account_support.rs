@@ -4,8 +4,8 @@ use uuid::Uuid;
 /// Build an [`AccountOverview`] by enriching settings with runtime status
 /// and secret metadata. Secret values are never included.
 ///
-/// @spec spec/L1-api#accounts
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#accounts
+/// @spec docs/L1-api#secret-management
 pub(super) async fn account_overview(
     state: &Arc<AppState>,
     settings: &AppSettings,
@@ -37,7 +37,7 @@ fn account_transport_overview(account: &AccountSettings) -> AccountTransportOver
 /// Derive a redacted [`SecretStatus`] from a secret reference.
 /// OS-kind secrets hide the key; env-kind secrets expose the variable name.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 pub(super) fn secret_status(secret_ref: Option<&SecretRef>) -> SecretStatus {
     match secret_ref {
         Some(secret_ref) => SecretStatus {
@@ -71,7 +71,7 @@ impl From<AccountTransportRequest> for mail_domain::AccountTransportSettings {
 /// Execute a secret write instruction (keep/replace/clear) against the OS
 /// keyring and update the account's `secret_ref` accordingly.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 pub(super) fn apply_secret_instruction(
     state: &AppState,
     account: &mut AccountSettings,
@@ -118,7 +118,7 @@ pub(super) fn apply_secret_instruction(
 /// Validate that the secret write request is internally consistent
 /// (e.g. `replace` requires a password, `keep`/`clear` forbid one).
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 pub(super) fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(), ApiError> {
     match secret.mode {
         SecretWriteMode::Keep => {
@@ -165,7 +165,7 @@ fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiErro
 /// Validate required fields for an account: non-empty ID and name, plus
 /// base URL, username, and configured secret for JMAP accounts.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(), ApiError> {
     if account.id.as_str().trim().is_empty() {
         return Err(ApiError::new(
@@ -231,7 +231,7 @@ fn account_secret_ref(account_id: &AccountId) -> SecretRef {
 
 /// Delete an OS-managed secret from the keyring. No-ops for env secrets.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub(super) fn delete_managed_secret(
     state: &AppState,
     secret_ref: Option<&SecretRef>,
@@ -263,7 +263,7 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
 /// Sparse-merge patch fields into an existing account. Omitted fields
 /// (including transport sub-fields) are preserved.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountRequest) {
     if let Some(name) = &request.name {
         account.name = name.clone();
@@ -286,7 +286,7 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
 
 /// Append an account lifecycle event to the event log and broadcast it.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub(super) fn append_and_publish_account_event(
     state: &Arc<AppState>,
     account_id: &AccountId,
@@ -315,7 +315,7 @@ pub(super) fn internal_error(error: String) -> ApiError {
 
 /// Generate a smart mailbox ID from a human name: `sm-{slug}-{uuid}`.
 ///
-/// @spec spec/L1-api#smart-mailbox-crud
+/// @spec docs/L1-api#smart-mailbox-crud
 pub(super) fn generate_smart_mailbox_id(name: &str) -> String {
     let slug = name
         .trim()

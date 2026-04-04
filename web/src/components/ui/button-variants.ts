@@ -1,6 +1,6 @@
 /**
  * CVA (class-variance-authority) variant definitions for the Button component.
- * @spec spec/L0-branding#color-palette-light-mode-primary
+ * @spec docs/L0-branding#color-palette-light-mode-primary
  */
 import { cva } from "class-variance-authority"
 

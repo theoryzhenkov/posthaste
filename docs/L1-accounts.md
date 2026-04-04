@@ -4,8 +4,8 @@ summary: "Config directory layout, ConfigRepository contract, TOML schema, reloa
 modified: 2026-04-03
 reviewed: 2026-04-03
 depends:
-  - path: spec/L0-accounts
-  - path: spec/L0-search
+  - path: docs/L0-accounts
+  - path: docs/L0-search
 dependents: []
 ---
 

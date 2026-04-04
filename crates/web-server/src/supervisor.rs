@@ -20,8 +20,8 @@ use crate::push::resilient_push_stream;
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
 ///
-/// @spec spec/L1-sync#sync-loop
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-sync#sync-loop
+/// @spec docs/L1-api#account-crud-lifecycle
 pub struct AccountSupervisor {
     shared: Arc<SupervisorShared>,
     runtimes: RwLock<HashMap<String, ManagedRuntime>>,
@@ -53,7 +53,7 @@ enum RuntimeCommand {
 
 /// Result of `POST /v1/accounts/{id}/verify` — JMAP session discovery outcome.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub struct AccountVerification {
     pub ok: bool,
     pub identity: Option<Identity>,
@@ -148,7 +148,7 @@ impl AccountSupervisor {
 
     /// Send a manual sync trigger to the account runtime and await its result.
     ///
-    /// @spec spec/L1-api#sync-and-events
+    /// @spec docs/L1-api#sync-and-events
     pub async fn sync_account(&self, account_id: &AccountId) -> Result<usize, ServiceError> {
         let runtimes = self.runtimes.read().await;
         let runtime = runtimes
@@ -176,7 +176,7 @@ impl AccountSupervisor {
     /// Attempt JMAP session discovery for an account without starting a
     /// persistent runtime.
     ///
-    /// @spec spec/L1-api#account-crud-lifecycle
+    /// @spec docs/L1-api#account-crud-lifecycle
     pub async fn verify_account(
         &self,
         account: &AccountSettings,
@@ -194,7 +194,7 @@ impl AccountSupervisor {
 /// Main event loop for an account: polls on timer, push notifications, and
 /// manual sync commands. Runs until the task is aborted.
 ///
-/// @spec spec/L1-sync#sync-loop
+/// @spec docs/L1-sync#sync-loop
 async fn run_account_runtime(
     shared: Arc<SupervisorShared>,
     account: AccountSettings,
@@ -279,8 +279,8 @@ async fn run_account_runtime(
 /// and update runtime status. On failure, tears down the connection and
 /// records the error.
 ///
-/// @spec spec/L1-sync#sync-loop
-/// @spec spec/L1-sync#error-handling
+/// @spec docs/L1-sync#sync-loop
+/// @spec docs/L1-sync#error-handling
 async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
@@ -368,7 +368,7 @@ async fn ensure_connection(
 /// Build a gateway connection for an account, resolving its secret and
 /// opening a resilient push stream (WS preferred, SSE fallback).
 ///
-/// @spec spec/L2-transport#transport-negotiation
+/// @spec docs/L2-transport#transport-negotiation
 async fn build_connection(
     account: &AccountSettings,
     secret_store: &dyn SecretStore,
@@ -516,7 +516,7 @@ impl SupervisorShared {
 
     /// Persist a runtime overview and emit status/push change events when transitions occur.
     ///
-    /// @spec spec/L1-sync#event-propagation
+    /// @spec docs/L1-sync#event-propagation
     async fn set_runtime_overview(&self, account_id: &AccountId, overview: AccountRuntimeOverview) {
         let previous = self
             .runtime_overviews

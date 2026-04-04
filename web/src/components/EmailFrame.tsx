@@ -5,12 +5,12 @@
  * The iframe uses `sandbox="allow-same-origin"` with no script execution.
  * Long messages scroll inside the iframe rather than expanding the detail pane.
  *
- * @spec spec/L1-ui#messagedetail-and-emailframe
- * @spec spec/L0-ui#html-email-rendering
+ * @spec docs/L1-ui#messagedetail-and-emailframe
+ * @spec docs/L0-ui#html-email-rendering
  */
 import { cn } from "../lib/utils";
 
-/** @spec spec/L1-ui#messagedetail-and-emailframe */
+/** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface EmailFrameProps {
   html: string;
   className?: string;
@@ -19,8 +19,8 @@ interface EmailFrameProps {
 /**
  * Renders pre-sanitized email HTML inside a sandboxed `srcdoc` iframe.
  *
- * @spec spec/L1-ui#messagedetail-and-emailframe
- * @spec spec/L0-branding#color-palette-light-mode-primary
+ * @spec docs/L1-ui#messagedetail-and-emailframe
+ * @spec docs/L0-branding#color-palette-light-mode-primary
  */
 export function EmailFrame({ html, className }: EmailFrameProps) {
   const wrappedHtml = `<!DOCTYPE html>

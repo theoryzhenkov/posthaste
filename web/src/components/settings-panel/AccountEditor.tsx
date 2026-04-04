@@ -1,8 +1,8 @@
 /**
  * Account create/edit form with save, verify, and secret management.
  *
- * @spec spec/L1-api#account-crud-lifecycle
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#secret-management
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -38,8 +38,8 @@ import {
  * Supports the tri-state secret write mode (keep/replace/clear) and
  * post-save JMAP session verification.
  *
- * @spec spec/L1-api#account-crud-lifecycle
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#secret-management
  */
 export function AccountEditor({
   editorTarget,

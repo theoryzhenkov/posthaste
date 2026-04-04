@@ -1,14 +1,14 @@
 ---
 scope: L0
 summary: "Production-grade structured logging and tracing across Rust backend and React frontend"
-modified: 2026-04-03
-reviewed: 2026-04-03
+modified: 2026-04-04
+reviewed: 2026-04-04
 depends:
-  - path: spec/L0-api
-  - path: spec/L0-sync
-  - path: spec/L0-accounts
+  - path: docs/L0-api
+  - path: docs/L0-sync
+  - path: docs/L0-accounts
 dependents:
-  - path: spec/L1-logging
+  - path: docs/L1-logging
 ---
 
 # Logging
@@ -32,11 +32,11 @@ In scope:
 - Per-request HTTP tracing via `tower-http::TraceLayer`
 - Log level as a user-facing setting in the TOML config, runtime-reconfigurable if feasible
 - Priority instrumentation of JMAP sync and push transport
+- Frontend-to-backend log forwarding via Tauri IPC (pino logs and WebKit console output routed to the Rust tracing subscriber)
 
 Out of scope (for now):
 
 - Prometheus metrics or OpenTelemetry export
 - Crash / panic reporting service
-- Frontend-to-backend log forwarding endpoint
 - Fine-grained SQL query tracing
 - In-app log viewer UI

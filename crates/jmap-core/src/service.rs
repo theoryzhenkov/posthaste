@@ -28,7 +28,7 @@ enum MessageMutation<'a> {
 /// `MailService` is the primary entry point for all business operations.
 /// It owns no I/O -- all external interactions flow through injected trait objects.
 ///
-/// @spec spec/L0-api#rust-owns-everything
+/// @spec docs/L0-api#rust-owns-everything
 pub struct MailService {
     store: SharedStore,
     config: SharedConfigRepository,
@@ -74,21 +74,21 @@ impl MailService {
 
     /// Read global application settings.
     ///
-    /// @spec spec/L1-api#settings
+    /// @spec docs/L1-api#settings
     pub fn get_app_settings(&self) -> Result<AppSettings, ServiceError> {
         self.config.get_app_settings().map_err(Into::into)
     }
 
     /// Persist updated global application settings.
     ///
-    /// @spec spec/L1-api#settings
+    /// @spec docs/L1-api#settings
     pub fn put_app_settings(&self, settings: &AppSettings) -> Result<(), ServiceError> {
         self.config.put_app_settings(settings).map_err(Into::into)
     }
 
     /// List all account configurations.
     ///
-    /// @spec spec/L1-api#accounts
+    /// @spec docs/L1-api#accounts
     pub fn list_sources(&self) -> Result<Vec<AccountSettings>, ServiceError> {
         self.config.list_sources().map_err(Into::into)
     }
@@ -100,7 +100,7 @@ impl MailService {
 
     /// Create or update an account, syncing the source projection in the store.
     ///
-    /// @spec spec/L1-api#account-crud-lifecycle
+    /// @spec docs/L1-api#account-crud-lifecycle
     pub fn save_source(&self, source: &AccountSettings) -> Result<(), ServiceError> {
         self.config.save_source(source)?;
         self.store
@@ -110,7 +110,7 @@ impl MailService {
 
     /// Delete an account: remove config, projection, and all synced data.
     ///
-    /// @spec spec/L1-api#account-crud-lifecycle
+    /// @spec docs/L1-api#account-crud-lifecycle
     pub fn delete_source(&self, id: &AccountId) -> Result<(), ServiceError> {
         self.config.delete_source(id)?;
         self.store.delete_source_projection(id)?;
@@ -135,7 +135,7 @@ impl MailService {
 
     /// Create or update a smart mailbox configuration.
     ///
-    /// @spec spec/L1-api#smart-mailbox-crud
+    /// @spec docs/L1-api#smart-mailbox-crud
     pub fn save_smart_mailbox(&self, smart_mailbox: &SmartMailbox) -> Result<(), ServiceError> {
         self.config
             .save_smart_mailbox(smart_mailbox)
@@ -154,7 +154,7 @@ impl MailService {
 
     /// Restore all default smart mailboxes, preserving user-created ones.
     ///
-    /// @spec spec/L1-accounts#smart-mailbox-defaults
+    /// @spec docs/L1-accounts#smart-mailbox-defaults
     pub fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ServiceError> {
         self.config
             .reset_default_smart_mailboxes()
@@ -163,7 +163,7 @@ impl MailService {
 
     /// Re-read config from disk, diff it, and sync source projections.
     ///
-    /// @spec spec/L1-accounts#configdiff
+    /// @spec docs/L1-accounts#configdiff
     pub fn reload_config(&self) -> Result<ConfigDiff, ServiceError> {
         let diff = self.config.reload()?;
         // Sync all source projections after reload
@@ -185,7 +185,7 @@ impl MailService {
 
     /// List smart mailboxes with live unread/total counts from the store.
     ///
-    /// @spec spec/L1-api#smart-mailboxes
+    /// @spec docs/L1-api#smart-mailboxes
     pub fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
         let mailboxes = self.config.list_smart_mailboxes()?;
         let mut summaries = Vec::with_capacity(mailboxes.len());
@@ -209,7 +209,7 @@ impl MailService {
 
     /// List messages matching a smart mailbox's rule.
     ///
-    /// @spec spec/L1-api#smart-mailboxes
+    /// @spec docs/L1-api#smart-mailboxes
     pub fn list_smart_mailbox_messages(
         &self,
         smart_mailbox_id: &SmartMailboxId,
@@ -225,7 +225,7 @@ impl MailService {
 
     /// Paginated conversations matching a smart mailbox's rule.
     ///
-    /// @spec spec/L1-api#smart-mailboxes
+    /// @spec docs/L1-api#smart-mailboxes
     pub fn list_smart_mailbox_conversations(
         &self,
         smart_mailbox_id: &SmartMailboxId,
@@ -245,7 +245,7 @@ impl MailService {
 
     /// Build the full sidebar: smart mailboxes with counts + per-source mailboxes.
     ///
-    /// @spec spec/L1-api#navigation
+    /// @spec docs/L1-api#navigation
     pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
         let smart_mailboxes = self.config.list_smart_mailboxes()?;
         let sources = self.config.list_sources()?;
@@ -305,7 +305,7 @@ impl MailService {
 
     /// Paginated conversation list with seek-based cursors.
     ///
-    /// @spec spec/L1-api#conversations-and-messages
+    /// @spec docs/L1-api#conversations-and-messages
     pub fn list_conversations(
         &self,
         account_id: Option<&AccountId>,
@@ -343,7 +343,7 @@ impl MailService {
 
     /// Fetch message detail, lazily fetching body from the gateway if needed.
     ///
-    /// @spec spec/L1-sync#sync-loop
+    /// @spec docs/L1-sync#sync-loop
     pub async fn get_message_detail(
         &self,
         account_id: &AccountId,
@@ -376,7 +376,7 @@ impl MailService {
 
     /// Run a full sync cycle: load cursors, fetch delta, apply batch, emit events.
     ///
-    /// @spec spec/L1-sync#sync-loop
+    /// @spec docs/L1-sync#sync-loop
     pub async fn sync_account(
         &self,
         account_id: &AccountId,
@@ -404,7 +404,7 @@ impl MailService {
 
     /// Append a `sync.failed` event to the event log.
     ///
-    /// @spec spec/L1-sync#error-handling
+    /// @spec docs/L1-sync#error-handling
     pub fn record_sync_failure(
         &self,
         account_id: &AccountId,
@@ -432,7 +432,7 @@ impl MailService {
     /// Apply a message mutation: send to gateway with optimistic concurrency,
     /// then persist locally with the returned cursor.
     ///
-    /// @spec spec/L1-sync#conflict-model
+    /// @spec docs/L1-sync#conflict-model
     async fn apply_message_mutation(
         &self,
         account_id: &AccountId,
@@ -497,7 +497,7 @@ impl MailService {
 
     /// Add/remove JMAP keywords on a message.
     ///
-    /// @spec spec/L1-api#message-commands
+    /// @spec docs/L1-api#message-commands
     pub async fn set_keywords(
         &self,
         account_id: &AccountId,
@@ -514,7 +514,7 @@ impl MailService {
 
     /// Atomically replace all mailbox memberships for a message.
     ///
-    /// @spec spec/L1-api#message-commands
+    /// @spec docs/L1-api#message-commands
     pub async fn replace_mailboxes(
         &self,
         account_id: &AccountId,
@@ -531,7 +531,7 @@ impl MailService {
 
     /// Add a message to a mailbox (idempotent: no-op if already present).
     ///
-    /// @spec spec/L1-api#message-commands
+    /// @spec docs/L1-api#message-commands
     pub async fn add_to_mailbox(
         &self,
         account_id: &AccountId,
@@ -555,7 +555,7 @@ impl MailService {
 
     /// Remove a message from a single mailbox.
     ///
-    /// @spec spec/L1-api#message-commands
+    /// @spec docs/L1-api#message-commands
     pub async fn remove_from_mailbox(
         &self,
         account_id: &AccountId,
@@ -578,7 +578,7 @@ impl MailService {
 
     /// Permanently delete a message.
     ///
-    /// @spec spec/L1-api#message-commands
+    /// @spec docs/L1-api#message-commands
     pub async fn destroy_message(
         &self,
         account_id: &AccountId,
@@ -590,7 +590,7 @@ impl MailService {
 
     /// Query the event log with optional filters.
     ///
-    /// @spec spec/L1-api#sse-event-stream
+    /// @spec docs/L1-api#sse-event-stream
     pub fn list_events(
         &self,
         filter: &crate::EventFilter,
@@ -600,7 +600,7 @@ impl MailService {
 
     /// Fetch the primary sender identity from the gateway.
     ///
-    /// @spec spec/L1-jmap#methods-used
+    /// @spec docs/L1-jmap#methods-used
     pub async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, ServiceError> {
         let gateway = self.required_gateway(account_id)?;
         gateway.fetch_identity(account_id).await.map_err(Into::into)
@@ -621,7 +621,7 @@ impl MailService {
 
     /// Send an email via the gateway.
     ///
-    /// @spec spec/L1-jmap#methods-used
+    /// @spec docs/L1-jmap#methods-used
     pub async fn send_message(
         &self,
         account_id: &AccountId,

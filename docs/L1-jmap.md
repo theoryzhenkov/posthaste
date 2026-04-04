@@ -1,13 +1,14 @@
 ---
 scope: L1
 summary: "JMAP session, method calls, type system, push, error model"
-modified: 2026-03-29
-reviewed: 2026-03-29
+modified: 2026-04-02
+reviewed: 2026-04-02
 depends:
   - path: docs/L0-jmap
 dependents:
   - path: docs/L1-sync
   - path: docs/L1-compose
+  - path: docs/L2-transport
 ---
 
 # JMAP domain -- L1
@@ -45,9 +46,9 @@ These come from `jmap-client` and are not reimplemented:
 
 ## Push
 
-An EventSource (SSE) connection to `eventSourceUrl` with type filters receives `StateChange` events containing updated state strings per object type. On receiving a state change, the sync engine triggers a delta sync for the affected type.
+Push notifications arrive over either WebSocket or EventSource (SSE), depending on server capabilities. The client prefers WebSocket when the server advertises `urn:ietf:params:jmap:websocket` and falls back to SSE otherwise. Both transports deliver the same `StateChange` events containing updated state strings per object type. On receiving a state change, the sync engine triggers a delta sync for the affected type.
 
-The SSE connection is maintained as long as the app is in the foreground. Reconnection uses the last known event ID for automatic catch-up.
+The push connection is maintained as long as the app is in the foreground. Reconnection uses the last known event ID (SSE) or push state (WebSocket) for automatic catch-up. Transport details are documented in the transport layer spec.
 
 ## Authentication
 

@@ -1,13 +1,13 @@
 ---
 scope: L1
 summary: "Logging contracts: crate layout, span conventions, config schema, event content rules, frontend logger interface"
-modified: 2026-04-03
-reviewed: 2026-04-03
+modified: 2026-04-04
+reviewed: 2026-04-04
 depends:
-  - path: spec/L0-logging
-  - path: spec/L1-accounts
+  - path: docs/L0-logging
+  - path: docs/L1-accounts
     section: "Config schema"
-  - path: spec/L1-api
+  - path: docs/L1-api
     section: "Axum router"
 ---
 
@@ -141,15 +141,20 @@ Errors that cross crate boundaries (returned from trait methods) are logged at t
 
 ```typescript
 import pino from "pino";
+import { invoke } from "@tauri-apps/api/core";
 
+// In Tauri, pino's browser.write is replaced with a custom handler
+// that calls invoke("log_from_frontend", { level, domain, message }).
+// In browser-only mode, falls back to { asObject: true } (console).
 const logger = pino({
   level: import.meta.env.DEV ? "debug" : "info",
-  browser: { asObject: true },
+  browser: isTauri() ? makeTauriWrite() : { asObject: true },
 });
 
-// Domain-scoped child loggers
+// Domain-scoped child loggers — the domain field flows through IPC
 const syncLogger = logger.child({ domain: "sync" });
 const uiLogger = logger.child({ domain: "ui" });
+const apiLogger = logger.child({ domain: "api" });
 ```
 
 ### Log levels
@@ -158,7 +163,11 @@ Same semantics as the Rust side: `error`, `warn`, `info`, `debug`, `trace`.
 
 ### Sink
 
-Browser console only for v1. The logger interface (`pino.Logger`) supports custom transports, so backend forwarding can be added later without changing call sites.
+In Tauri (desktop), pino logs are forwarded to the Rust tracing subscriber via a `log_from_frontend` IPC command, landing in the same daily-rotated JSON log files as backend events. The `domain` field from pino child loggers is preserved as a structured field with `target: "frontend"`.
+
+WebKit console output (`console.log/info/debug/warn/error`) is also captured and forwarded with `domain: "webview"`, catching logs from React, third-party libraries, and uncaught errors. Pino log objects are detected and skipped in the console capture to avoid double-sending.
+
+In browser dev mode (no Tauri), pino logs go to the browser console only. In Tauri dev mode, logs go to both the console (for devtools) and the backend.
 
 ## Assertions
 
@@ -182,3 +191,7 @@ Browser console only for v1. The logger interface (`pino.Logger`) supports custo
 | no-body-content | MUST | Email body content (HTML or plain text) never appears in log output |
 | pii-level-gate | SHOULD | Email addresses appear only at DEBUG and below; INFO and above use account/mailbox IDs |
 | payload-trace-only | SHOULD | Raw JMAP request/response payloads appear only at TRACE level |
+| fe-tauri-bridge | MUST | In Tauri, pino logs are forwarded to the Rust tracing subscriber via the `log_from_frontend` IPC command |
+| fe-webview-capture | MUST | In Tauri, WebKit console output is captured and forwarded with `domain: "webview"` |
+| fe-no-double-send | MUST | Pino log objects routed through console in dev mode are not re-forwarded by the console capture |
+| fe-browser-fallback | MUST | In browser-only mode (no Tauri), pino logs go to the browser console without errors |

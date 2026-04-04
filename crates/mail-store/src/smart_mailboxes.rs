@@ -2,7 +2,7 @@ use super::*;
 
 /// Returns (unread, total) counts for messages matching a smart mailbox rule.
 ///
-/// @spec spec/L1-search#smart-mailbox-data-model
+/// @spec docs/L1-search#smart-mailbox-data-model
 pub(crate) fn count_smart_mailbox_messages(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -27,7 +27,7 @@ pub(crate) fn count_smart_mailbox_messages(
 /// Queries messages matching a smart mailbox rule across all sources, ordered
 /// by `received_at DESC`.
 ///
-/// @spec spec/L1-search#smart-mailbox-data-model
+/// @spec docs/L1-search#smart-mailbox-data-model
 pub(crate) fn query_messages_by_rule(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -50,7 +50,7 @@ pub(crate) fn query_messages_by_rule(
 
 /// Queries conversations matching a smart mailbox rule with seek pagination.
 ///
-/// @spec spec/L1-sync#conversation-pagination
+/// @spec docs/L1-sync#conversation-pagination
 pub(crate) fn query_conversations_by_rule(
     connection: &Connection,
     rule: &SmartMailboxRule,
@@ -119,7 +119,7 @@ fn cursor_sort_sql_value(
 /// recency within each conversation, groups sources, and applies seek-based
 /// cursor pagination with configurable sort field and direction.
 ///
-/// @spec spec/L1-sync#conversation-pagination
+/// @spec docs/L1-sync#conversation-pagination
 pub(crate) fn query_conversations(
     connection: &Connection,
     where_clause: &str,

@@ -16,8 +16,8 @@ use crate::ws_connection::SharedWsConnection;
 /// Preferred over SSE when the server advertises `urn:ietf:params:jmap:websocket`.
 /// The underlying connection is shared with API request routing via `SharedWsConnection`.
 ///
-/// @spec spec/L2-transport#pushtransport
-/// @spec spec/L2-transport#websocket-connection-lifecycle
+/// @spec docs/L2-transport#pushtransport
+/// @spec docs/L2-transport#websocket-connection-lifecycle
 pub struct WsPushTransport {
     ws: Arc<SharedWsConnection>,
 }
@@ -39,8 +39,8 @@ impl PushTransport for WsPushTransport {
     /// Ensure the WS connection is active, enable push, and return a stream
     /// of `PushNotification` values filtered from WS messages.
     ///
-    /// @spec spec/L2-transport#websocket-connection-lifecycle
-    /// @spec spec/L1-jmap#push
+    /// @spec docs/L2-transport#websocket-connection-lifecycle
+    /// @spec docs/L1-jmap#push
     async fn open(
         &self,
         account_id: &AccountId,
@@ -86,7 +86,7 @@ impl PushTransport for WsPushTransport {
 /// WS push does not carry SSE-style checkpoint IDs, so the notification's
 /// `checkpoint` is always `None`.
 ///
-/// @spec spec/L1-jmap#push
+/// @spec docs/L1-jmap#push
 fn convert_push_object(
     account_id: &AccountId,
     push: jmap_client::PushObject,

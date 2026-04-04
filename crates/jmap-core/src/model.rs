@@ -47,115 +47,115 @@ macro_rules! string_id {
 string_id!(
     /// Opaque server-assigned identifier for a mail account.
     ///
-    /// @spec spec/L0-accounts#the-invariant
+    /// @spec docs/L0-accounts#the-invariant
     AccountId
 );
 
 string_id!(
     /// Opaque server-assigned identifier for a mailbox (folder or label).
     ///
-    /// @spec spec/L1-jmap#core-types
+    /// @spec docs/L1-jmap#core-types
     MailboxId
 );
 
 string_id!(
     /// Opaque server-assigned identifier for a single email message.
     ///
-    /// @spec spec/L1-jmap#core-types
+    /// @spec docs/L1-jmap#core-types
     MessageId
 );
 
 string_id!(
     /// Opaque server-assigned identifier for a JMAP thread.
     ///
-    /// @spec spec/L1-jmap#core-types
+    /// @spec docs/L1-jmap#core-types
     ThreadId
 );
 
 string_id!(
     /// Opaque server-assigned identifier for a binary blob (attachment or body content).
     ///
-    /// @spec spec/L1-jmap#methods-used
+    /// @spec docs/L1-jmap#methods-used
     BlobId
 );
 
 string_id!(
     /// Locally-derived identifier for a conversation (cross-source thread grouping).
     ///
-    /// @spec spec/L1-sync#conversation-pagination
+    /// @spec docs/L1-sync#conversation-pagination
     ConversationId
 );
 
 string_id!(
     /// Identifier for a smart mailbox (saved query with display metadata).
     ///
-    /// @spec spec/L1-search#smart-mailbox-data-model
+    /// @spec docs/L1-search#smart-mailbox-data-model
     SmartMailboxId
 );
 
 /// Default timestamp for missing `created_at`/`updated_at` fields in config.
 ///
-/// @spec spec/L1-accounts#toml-schema
+/// @spec docs/L1-accounts#toml-schema
 pub const RFC3339_EPOCH: &str = "1970-01-01T00:00:00Z";
 
 /// Event topic emitted after a successful sync cycle completes.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_SYNC_COMPLETED: &str = "sync.completed";
 
 /// Event topic emitted when a sync cycle fails.
 ///
-/// @spec spec/L1-sync#error-handling
+/// @spec docs/L1-sync#error-handling
 pub const EVENT_TOPIC_SYNC_FAILED: &str = "sync.failed";
 
 /// Event topic emitted when message metadata changes (keywords, mailboxes).
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
 
 /// Event topic emitted when a new message arrives in a mailbox.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_ARRIVED: &str = "message.arrived";
 
 /// Event topic emitted when a mailbox is created, updated, or deleted.
 ///
-/// @spec spec/L1-sync#event-propagation
+/// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MAILBOX_UPDATED: &str = "mailbox.updated";
 
 /// Event topic emitted when account configuration changes.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub const EVENT_TOPIC_ACCOUNT_UPDATED: &str = "account.updated";
 
 /// Event topic emitted when a new account is created.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub const EVENT_TOPIC_ACCOUNT_CREATED: &str = "account.created";
 
 /// Event topic emitted when an account is deleted.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub const EVENT_TOPIC_ACCOUNT_DELETED: &str = "account.deleted";
 
 /// Event topic emitted when account runtime status transitions.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 pub const EVENT_TOPIC_ACCOUNT_STATUS_CHANGED: &str = "account.status_changed";
 
 /// Event topic emitted when a push transport connects successfully.
 ///
-/// @spec spec/L2-transport#push-transport
+/// @spec docs/L2-transport#push-transport
 pub const EVENT_TOPIC_PUSH_CONNECTED: &str = "push.connected";
 
 /// Event topic emitted when a push transport disconnects or fails.
 ///
-/// @spec spec/L2-transport#push-transport
+/// @spec docs/L2-transport#push-transport
 pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 
 /// Global application settings shared across all accounts.
 ///
-/// @spec spec/L1-accounts#toml-schema
+/// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -172,7 +172,7 @@ impl Default for AppSettings {
 
 /// Backend driver type for an account.
 ///
-/// @spec spec/L1-accounts#toml-schema
+/// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccountDriver {
@@ -191,7 +191,7 @@ impl AccountDriver {
 
 /// Storage backend for account credentials.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretKind {
@@ -203,7 +203,7 @@ pub enum SecretKind {
 
 /// Pointer to a stored secret, combining storage kind and lookup key.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretRef {
@@ -213,12 +213,12 @@ pub struct SecretRef {
 
 /// Alias for [`SecretKind`], used in API responses to describe where a secret is stored.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 pub type SecretStorage = SecretKind;
 
 /// Redacted secret status returned in API responses. Never contains the secret value.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretStatus {
@@ -229,7 +229,7 @@ pub struct SecretStatus {
 
 /// Transport-layer settings for connecting to a JMAP server.
 ///
-/// @spec spec/L1-accounts#toml-schema
+/// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportSettings {
@@ -240,7 +240,7 @@ pub struct AccountTransportSettings {
 
 /// Full persisted configuration for a mail account.
 ///
-/// @spec spec/L1-accounts#toml-schema
+/// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountSettings {
@@ -255,7 +255,7 @@ pub struct AccountSettings {
 
 /// API-facing transport summary with redacted secret status.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportOverview {
@@ -266,7 +266,7 @@ pub struct AccountTransportOverview {
 
 /// Runtime health status of a mail account.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AccountStatus {
@@ -280,7 +280,7 @@ pub enum AccountStatus {
 
 /// Current state of the push notification transport for an account.
 ///
-/// @spec spec/L2-transport#push-transport
+/// @spec docs/L2-transport#push-transport
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PushStatus {
@@ -292,7 +292,7 @@ pub enum PushStatus {
 
 /// Volatile runtime state for an account (sync status, push status, last error).
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountRuntimeOverview {
@@ -317,7 +317,7 @@ impl Default for AccountRuntimeOverview {
 
 /// Combined account config and runtime state returned by the API.
 ///
-/// @spec spec/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountOverview {
@@ -335,7 +335,7 @@ pub struct AccountOverview {
 
 /// Per-type, per-account JMAP state string used for delta sync.
 ///
-/// @spec spec/L1-sync#state-management
+/// @spec docs/L1-sync#state-management
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncCursor {
@@ -346,7 +346,7 @@ pub struct SyncCursor {
 
 /// JMAP object type that participates in delta sync.
 ///
-/// @spec spec/L1-sync#state-management
+/// @spec docs/L1-sync#state-management
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncObject {
@@ -365,7 +365,7 @@ impl SyncObject {
 
 /// Metadata for a locally-cached raw MIME message file.
 ///
-/// @spec spec/L1-sync#sync-loop
+/// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawMessageRef {
@@ -378,7 +378,7 @@ pub struct RawMessageRef {
 
 /// Lightweight mailbox view for sidebar and list endpoints.
 ///
-/// @spec spec/L1-api#navigation
+/// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxSummary {
@@ -391,7 +391,7 @@ pub struct MailboxSummary {
 
 /// Message metadata for list views (no body content).
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSummary {
@@ -414,7 +414,7 @@ pub struct MessageSummary {
 
 /// Full message including sanitized body content, returned by message detail endpoint.
 ///
-/// @spec spec/L1-api#message-body-sanitization
+/// @spec docs/L1-api#message-body-sanitization
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDetail {
@@ -427,7 +427,7 @@ pub struct MessageDetail {
 
 /// All messages belonging to a single JMAP thread, ordered by `receivedAt`.
 ///
-/// @spec spec/L1-search#thread-view
+/// @spec docs/L1-search#thread-view
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadView {
@@ -437,7 +437,7 @@ pub struct ThreadView {
 
 /// Account-qualified reference to a specific message.
 ///
-/// @spec spec/L0-accounts#the-invariant
+/// @spec docs/L0-accounts#the-invariant
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceMessageRef {
@@ -447,7 +447,7 @@ pub struct SourceMessageRef {
 
 /// Conversation row for the paginated middle pane.
 ///
-/// @spec spec/L1-sync#conversation-pagination
+/// @spec docs/L1-sync#conversation-pagination
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationSummary {
@@ -469,7 +469,7 @@ pub struct ConversationSummary {
 
 /// Column by which conversation lists can be sorted.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ConversationSortField {
@@ -485,7 +485,7 @@ pub enum ConversationSortField {
 
 /// Sort direction for conversation lists.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortDirection {
@@ -496,7 +496,7 @@ pub enum SortDirection {
 
 /// Opaque seek-pagination cursor for conversation lists.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationCursor {
@@ -506,7 +506,7 @@ pub struct ConversationCursor {
 
 /// A single page of conversation summaries with an optional cursor for the next page.
 ///
-/// @spec spec/L1-api#cursor-pagination
+/// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationPage {
@@ -516,7 +516,7 @@ pub struct ConversationPage {
 
 /// Full conversation detail with all messages expanded.
 ///
-/// @spec spec/L1-api#conversations-and-messages
+/// @spec docs/L1-api#conversations-and-messages
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationView {
@@ -527,7 +527,7 @@ pub struct ConversationView {
 
 /// An account with its mailboxes, as rendered in the sidebar.
 ///
-/// @spec spec/L1-api#navigation
+/// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarSource {
@@ -538,7 +538,7 @@ pub struct SidebarSource {
 
 /// Distinguishes built-in smart mailboxes from user-created ones.
 ///
-/// @spec spec/L1-accounts#smart-mailbox-defaults
+/// @spec docs/L1-accounts#smart-mailbox-defaults
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SmartMailboxKind {
@@ -548,7 +548,7 @@ pub enum SmartMailboxKind {
 
 /// Smart mailbox entry with live counts for the sidebar.
 ///
-/// @spec spec/L1-api#navigation
+/// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarSmartMailbox {
@@ -560,7 +560,7 @@ pub struct SidebarSmartMailbox {
 
 /// Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.
 ///
-/// @spec spec/L1-api#navigation
+/// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarResponse {
@@ -570,7 +570,7 @@ pub struct SidebarResponse {
 
 /// Boolean combinator for smart mailbox rule groups: `All` (AND) or `Any` (OR).
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SmartMailboxGroupOperator {
@@ -580,7 +580,7 @@ pub enum SmartMailboxGroupOperator {
 
 /// Message field that a smart mailbox condition can filter on.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SmartMailboxField {
@@ -601,7 +601,7 @@ pub enum SmartMailboxField {
 
 /// Comparison operator for a smart mailbox condition.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SmartMailboxOperator {
@@ -616,7 +616,7 @@ pub enum SmartMailboxOperator {
 
 /// Condition value: scalar string, string list (for `In`), or boolean.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum SmartMailboxValue {
@@ -627,7 +627,7 @@ pub enum SmartMailboxValue {
 
 /// Boolean group node containing child conditions or nested groups.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartMailboxGroup {
@@ -638,7 +638,7 @@ pub struct SmartMailboxGroup {
 
 /// Leaf condition matching a single field with an operator and value.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartMailboxCondition {
@@ -650,7 +650,7 @@ pub struct SmartMailboxCondition {
 
 /// Recursive rule tree node: either a [`SmartMailboxGroup`] or a [`SmartMailboxCondition`].
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SmartMailboxRuleNode {
@@ -660,7 +660,7 @@ pub enum SmartMailboxRuleNode {
 
 /// Top-level rule for a smart mailbox, wrapping a root group.
 ///
-/// @spec spec/L1-accounts#condition-fields-and-operators
+/// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartMailboxRule {
@@ -669,8 +669,8 @@ pub struct SmartMailboxRule {
 
 /// A saved query with display metadata that behaves like a virtual mailbox.
 ///
-/// @spec spec/L0-search#smart-mailboxes
-/// @spec spec/L1-accounts#smart-mailbox-defaults
+/// @spec docs/L0-search#smart-mailboxes
+/// @spec docs/L1-accounts#smart-mailbox-defaults
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartMailbox {
@@ -688,7 +688,7 @@ pub struct SmartMailbox {
 
 /// Smart mailbox config with live unread/total counts from the store.
 ///
-/// @spec spec/L1-api#smart-mailboxes
+/// @spec docs/L1-api#smart-mailboxes
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartMailboxSummary {
@@ -706,7 +706,7 @@ pub struct SmartMailboxSummary {
 
 /// Mailbox state from a JMAP sync response, used in [`SyncBatch`].
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxRecord {
@@ -719,7 +719,7 @@ pub struct MailboxRecord {
 
 /// Full email record from a JMAP sync response, used in [`SyncBatch`].
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageRecord {
@@ -748,7 +748,7 @@ pub struct MessageRecord {
 
 /// Builds a minimal RFC 2822 message from constituent parts for draft storage.
 ///
-/// @spec spec/L1-compose#mime-structures
+/// @spec docs/L1-compose#mime-structures
 pub fn synthesize_plain_text_raw_mime(
     from_header: &str,
     subject: &str,
@@ -772,7 +772,7 @@ pub fn now_iso8601() -> Result<String, String> {
 /// When `replace_all_mailboxes` is true, the store treats the mailbox list as a
 /// full snapshot and prunes any local mailboxes not present in the batch.
 ///
-/// @spec spec/L1-sync#syncbatch-and-apply_sync_batch
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncBatch {
@@ -787,7 +787,7 @@ pub struct SyncBatch {
 
 /// Lazily-fetched message body content returned by the gateway.
 ///
-/// @spec spec/L1-sync#sync-loop
+/// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchedBody {
@@ -798,8 +798,8 @@ pub struct FetchedBody {
 
 /// An ordered domain event stored in `event_log` and published via SSE.
 ///
-/// @spec spec/L1-sync#event-propagation
-/// @spec spec/L1-api#sse-event-stream
+/// @spec docs/L1-sync#event-propagation
+/// @spec docs/L1-api#sse-event-stream
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainEvent {
@@ -814,7 +814,7 @@ pub struct DomainEvent {
 
 /// Query parameters for filtering the event log, used by `GET /v1/events`.
 ///
-/// @spec spec/L1-api#sse-event-stream
+/// @spec docs/L1-api#sse-event-stream
 #[derive(Clone, Debug)]
 pub struct EventFilter {
     pub account_id: Option<AccountId>,
@@ -825,7 +825,7 @@ pub struct EventFilter {
 
 /// What caused a sync cycle to run.
 ///
-/// @spec spec/L1-sync#sync-loop
+/// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncTrigger {
@@ -848,7 +848,7 @@ impl SyncTrigger {
 
 /// A JMAP `StateChange` notification delivered over WebSocket or SSE.
 ///
-/// @spec spec/L1-jmap#push
+/// @spec docs/L1-jmap#push
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PushNotification {
@@ -861,12 +861,12 @@ pub struct PushNotification {
 
 /// Async stream of push notifications from a single transport connection.
 ///
-/// @spec spec/L1-jmap#push
+/// @spec docs/L1-jmap#push
 pub type PushStream = Pin<Box<dyn Stream<Item = Result<PushNotification, GatewayError>> + Send>>;
 
 /// Command to add and/or remove JMAP keywords on a message.
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetKeywordsCommand {
@@ -876,7 +876,7 @@ pub struct SetKeywordsCommand {
 
 /// Command to atomically replace all mailbox memberships for a message.
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceMailboxesCommand {
@@ -885,7 +885,7 @@ pub struct ReplaceMailboxesCommand {
 
 /// Command to add a message to a single additional mailbox.
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddToMailboxCommand {
@@ -894,7 +894,7 @@ pub struct AddToMailboxCommand {
 
 /// Command to remove a message from a single mailbox.
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveFromMailboxCommand {
@@ -903,7 +903,7 @@ pub struct RemoveFromMailboxCommand {
 
 /// Result of a message mutation: updated detail (if applicable) and emitted events.
 ///
-/// @spec spec/L1-api#message-commands
+/// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
@@ -913,7 +913,7 @@ pub struct CommandResult {
 
 /// Server-side outcome of a gateway mutation, carrying an updated sync cursor.
 ///
-/// @spec spec/L1-sync#conflict-model
+/// @spec docs/L1-sync#conflict-model
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MutationOutcome {
@@ -922,7 +922,7 @@ pub struct MutationOutcome {
 
 /// JMAP sender identity for an account.
 ///
-/// @spec spec/L1-jmap#core-types
+/// @spec docs/L1-jmap#core-types
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
@@ -933,7 +933,7 @@ pub struct Identity {
 
 /// Email address with optional display name.
 ///
-/// @spec spec/L1-jmap#methods-used
+/// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recipient {
@@ -943,7 +943,7 @@ pub struct Recipient {
 
 /// Pre-computed reply/forward metadata fetched from the gateway.
 ///
-/// @spec spec/L1-jmap#methods-used
+/// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplyContext {
@@ -958,7 +958,7 @@ pub struct ReplyContext {
 
 /// Request payload for sending a new email via `EmailSubmission/set`.
 ///
-/// @spec spec/L1-jmap#methods-used
+/// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
@@ -973,7 +973,7 @@ pub struct SendMessageRequest {
 
 /// Errors from JMAP gateway operations.
 ///
-/// @spec spec/L1-jmap#error-model
+/// @spec docs/L1-jmap#error-model
 #[derive(Debug, Error)]
 pub enum GatewayError {
     #[error("gateway unavailable for account {0}")]
@@ -992,7 +992,7 @@ pub enum GatewayError {
 
 /// Errors from the local SQLite store.
 ///
-/// @spec spec/L1-sync#error-handling
+/// @spec docs/L1-sync#error-handling
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("not found: {0}")]
@@ -1005,7 +1005,7 @@ pub enum StoreError {
 
 /// Unified error type surfaced by [`crate::MailService`] and mapped to HTTP status codes.
 ///
-/// @spec spec/L1-api#error-format
+/// @spec docs/L1-api#error-format
 #[derive(Debug, Error)]
 pub enum ServiceError {
     #[error(transparent)]
@@ -1021,7 +1021,7 @@ pub enum ServiceError {
 impl ServiceError {
     /// Returns the error code string used in the JSON error response body.
     ///
-    /// @spec spec/L1-api#error-code-mapping
+    /// @spec docs/L1-api#error-code-mapping
     pub fn code(&self) -> &'static str {
         match self {
             Self::Gateway(GatewayError::Unavailable(_)) => "gateway_unavailable",
@@ -1046,7 +1046,7 @@ impl ServiceError {
 
 /// Errors from credential storage operations.
 ///
-/// @spec spec/L1-api#secret-management
+/// @spec docs/L1-api#secret-management
 #[derive(Debug, Error)]
 pub enum SecretStoreError {
     #[error("secret unavailable: {0}")]

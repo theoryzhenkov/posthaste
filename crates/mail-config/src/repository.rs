@@ -15,7 +15,7 @@ use crate::schema::{AppToml, SmartMailboxToml, SourceToml};
 /// Keeps an in-memory `ConfigSnapshot` behind an `RwLock` so reads never hit
 /// disk after initialization.
 ///
-/// @spec spec/L1-accounts#configrepository-trait
+/// @spec docs/L1-accounts#configrepository-trait
 pub struct TomlConfigRepository {
     config_root: PathBuf,
     snapshot: RwLock<ConfigSnapshot>,
@@ -25,7 +25,7 @@ impl TomlConfigRepository {
     /// Opens (or creates) the config directory and loads the initial snapshot
     /// from disk.
     ///
-    /// @spec spec/L1-accounts#initialization
+    /// @spec docs/L1-accounts#initialization
     pub fn open(config_root: impl Into<PathBuf>) -> Result<Self, ConfigError> {
         let config_root = config_root.into();
         fs::create_dir_all(&config_root).map_err(io_error)?;
@@ -47,7 +47,7 @@ impl TomlConfigRepository {
     /// Returns `true` if `app.toml` does not exist, indicating the repository
     /// has not been initialized.
     ///
-    /// @spec spec/L1-accounts#initialization
+    /// @spec docs/L1-accounts#initialization
     pub fn is_empty(&self) -> bool {
         !self.config_root.join("app.toml").exists()
     }
@@ -55,7 +55,7 @@ impl TomlConfigRepository {
     /// Creates `app.toml` and writes the default smart mailboxes. Called on
     /// first launch when no config exists.
     ///
-    /// @spec spec/L1-accounts#initialization
+    /// @spec docs/L1-accounts#initialization
     pub fn initialize_defaults(&self) -> Result<(), ConfigError> {
         let app = AppToml {
             schema_version: 1,
@@ -81,11 +81,11 @@ impl TomlConfigRepository {
     }
 }
 
-/// @spec spec/L1-accounts#configrepository-trait
+/// @spec docs/L1-accounts#configrepository-trait
 impl ConfigRepository for TomlConfigRepository {
     /// Returns a clone of the cached in-memory snapshot (no disk I/O).
     ///
-    /// @spec spec/L1-accounts#configsnapshot
+    /// @spec docs/L1-accounts#configsnapshot
     fn load_snapshot(&self) -> Result<ConfigSnapshot, ConfigError> {
         Ok(self.snapshot.read().map_err(lock_error)?.clone())
     }
@@ -93,7 +93,7 @@ impl ConfigRepository for TomlConfigRepository {
     /// Re-reads all files from disk, diffs against the cached snapshot, and
     /// returns `ConfigDiff` listing added/changed/removed sources.
     ///
-    /// @spec spec/L1-accounts#configdiff
+    /// @spec docs/L1-accounts#configdiff
     fn reload(&self) -> Result<ConfigDiff, ConfigError> {
         let old = self.snapshot.read().map_err(lock_error)?.clone();
         let new = load_snapshot_from_disk(&self.config_root)?;
@@ -172,7 +172,7 @@ impl ConfigRepository for TomlConfigRepository {
     /// Creates or updates an account source file via atomic write and updates
     /// the snapshot.
     ///
-    /// @spec spec/L1-accounts#id-validation
+    /// @spec docs/L1-accounts#id-validation
     fn save_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
         validate_safe_id(source.id.as_str())?;
         let source_toml = SourceToml::from_account_settings(source);
@@ -231,7 +231,7 @@ impl ConfigRepository for TomlConfigRepository {
 
     /// Creates or updates a smart mailbox TOML file and updates the snapshot.
     ///
-    /// @spec spec/L1-accounts#id-validation
+    /// @spec docs/L1-accounts#id-validation
     fn save_smart_mailbox(&self, mailbox: &SmartMailbox) -> Result<(), ConfigError> {
         validate_safe_id(mailbox.id.as_str())?;
         write_smart_mailbox_toml(&self.config_root, mailbox)?;
@@ -269,7 +269,7 @@ impl ConfigRepository for TomlConfigRepository {
     /// Restores built-in default smart mailboxes by upserting them. Existing
     /// user-created mailboxes are preserved.
     ///
-    /// @spec spec/L1-accounts#smart-mailbox-defaults
+    /// @spec docs/L1-accounts#smart-mailbox-defaults
     fn reset_default_smart_mailboxes(&self) -> Result<Vec<SmartMailbox>, ConfigError> {
         let defaults = default_smart_mailboxes();
         let now = now_iso8601();
@@ -308,7 +308,7 @@ impl ConfigRepository for TomlConfigRepository {
 
 /// Reads all TOML files from disk and assembles a full `ConfigSnapshot`.
 ///
-/// @spec spec/L1-accounts#configsnapshot
+/// @spec docs/L1-accounts#configsnapshot
 fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigError> {
     let app_settings = read_app_toml(config_root)?.to_app_settings();
 
@@ -341,7 +341,7 @@ fn write_app_toml(config_root: &Path, app: &AppToml) -> Result<(), ConfigError> 
 /// Reads all `sources/*.toml` files, validates filename-ID match, and returns
 /// sorted account settings.
 ///
-/// @spec spec/L1-accounts#config-directory-layout
+/// @spec docs/L1-accounts#config-directory-layout
 fn load_sources(config_root: &Path) -> Result<Vec<AccountSettings>, ConfigError> {
     let dir = config_root.join("sources");
     if !dir.exists() {
@@ -367,7 +367,7 @@ fn load_sources(config_root: &Path) -> Result<Vec<AccountSettings>, ConfigError>
 /// Reads all `smart-mailboxes/*.toml` files, validates filename-ID match, and
 /// returns mailboxes sorted by position then name.
 ///
-/// @spec spec/L1-accounts#config-directory-layout
+/// @spec docs/L1-accounts#config-directory-layout
 fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbox>, ConfigError> {
     let dir = config_root.join("smart-mailboxes");
     if !dir.exists() {
@@ -407,7 +407,7 @@ fn write_smart_mailbox_toml(config_root: &Path, mailbox: &SmartMailbox) -> Resul
 /// Rejects IDs containing path separators, parent traversal, or null bytes to
 /// prevent path injection.
 ///
-/// @spec spec/L1-accounts#id-validation
+/// @spec docs/L1-accounts#id-validation
 fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
     if id.is_empty()
         || id.contains('/')
@@ -424,7 +424,7 @@ fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
 
 /// Enforces that the TOML filename stem matches the `id` field inside the file.
 ///
-/// @spec spec/L1-accounts#assertions
+/// @spec docs/L1-accounts#assertions
 fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError> {
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     if stem != id {

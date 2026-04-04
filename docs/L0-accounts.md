@@ -7,7 +7,8 @@ depends:
   - path: README
   - path: docs/L0-jmap
   - path: docs/L0-sync
-dependents: []
+dependents:
+  - path: docs/L1-accounts
 ---
 
 # Accounts domain -- L0

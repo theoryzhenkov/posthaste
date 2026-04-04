@@ -1,7 +1,7 @@
 /**
  * Shared types for the settings panel editor components.
- * @spec spec/L1-api#account-crud-lifecycle
- * @spec spec/L1-api#smart-mailbox-crud
+ * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#smart-mailbox-crud
  */
 import type {
   AccountDriver,
@@ -14,11 +14,11 @@ export type EditorTarget = "new" | string;
 export type SmartMailboxEditorTarget = "new" | string;
 /**
  * Secret write mode tri-state.
- * @spec spec/L1-api#secret-management
+ * @spec docs/L1-api#secret-management
  */
 export type SecretMode = "keep" | "replace" | "clear";
 
-/** @spec spec/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountFormState {
   id: string;
   name: string;
@@ -30,7 +30,7 @@ export interface AccountFormState {
   secretMode: SecretMode;
 }
 
-/** @spec spec/L1-api#smart-mailbox-crud */
+/** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailboxFormState {
   name: string;
   position: number;
