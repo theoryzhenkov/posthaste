@@ -11,6 +11,17 @@ import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { statusTone } from "./helpers";
 import { MetaStat, SummaryCard } from "./shared";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -212,14 +223,31 @@ export function AccountListPane({
                 >
                   {account.enabled ? "Disable" : "Enable"}
                 </Button>
-                <Button
-                  size="xs"
-                  variant="destructive"
-                  type="button"
-                  onClick={() => onCommand("delete", account)}
-                >
-                  Delete
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="xs" variant="destructive" type="button">
+                      Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete account?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently remove &ldquo;{account.name}&rdquo; and all synced
+                        data. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        onClick={() => onCommand("delete", account)}
+                      >
+                        Delete account
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </article>
           ))}
