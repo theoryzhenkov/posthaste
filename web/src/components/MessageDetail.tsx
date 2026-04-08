@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Mail } from "lucide-react";
+import { AlertCircle, Mail, Paperclip } from "lucide-react";
 import { buildMessageAttachmentUrl, fetchConversation, fetchMessage } from "../api/client";
 import type { MessageAttachment, MessageSummary, SourceMessageRef } from "../api/types";
 import { cn } from "../lib/utils";
@@ -28,6 +28,7 @@ interface MessageSelection extends SourceMessageRef {
 interface MessageDetailProps {
   selection: MessageSelection | null;
   onSelectMessage: (message: MessageSummary) => void;
+  onSearch?: (query: string, append?: boolean) => void;
 }
 
 /** Filter out JMAP system keywords (starting with $). */
@@ -111,6 +112,7 @@ function AttachmentPreview({
 export function MessageDetail({
   selection,
   onSelectMessage,
+  onSearch,
 }: MessageDetailProps) {
   const queryClient = useQueryClient();
   const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null);
@@ -210,28 +212,59 @@ export function MessageDetail({
         {/* From + date */}
         <div className="flex items-baseline justify-between gap-4">
           <div className="min-w-0">
-            <span className="text-sm font-medium">{senderName}</span>
+            <button
+              className="text-sm font-medium hover:text-primary hover:underline"
+              onClick={(e) => onSearch?.(`from:${senderEmail || senderName}`, e.shiftKey)}
+              title="Search emails from this sender"
+            >
+              {senderName}
+            </button>
             {senderEmail && senderName !== senderEmail && (
-              <span className="ml-1.5 text-xs text-muted-foreground">&lt;{senderEmail}&gt;</span>
+              <button
+                className="ml-1.5 text-xs text-muted-foreground hover:text-primary hover:underline"
+                onClick={(e) => onSearch?.(`from:${senderEmail}`, e.shiftKey)}
+                title="Search emails from this sender"
+              >
+                &lt;{senderEmail}&gt;
+              </button>
             )}
           </div>
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+          <button
+            className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground hover:text-primary hover:underline"
+            onClick={(e) => {
+              const dateStr = new Date(message.receivedAt).toISOString().slice(0, 10);
+              onSearch?.(`date:${dateStr}`, e.shiftKey);
+            }}
+            title="Search emails from this date"
+          >
             {formatRelativeTime(message.receivedAt)}
-          </span>
+          </button>
         </div>
 
-        {/* Tags */}
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+        {/* Tags + attachment */}
+        {(tags.length > 0 || message.hasAttachment) && (
+          <div className="flex flex-wrap items-center gap-1.5">
             {tags.map((tag) => (
               <Badge
                 variant="outline"
-                className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground"
+                className="cursor-pointer font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:border-primary hover:text-primary"
                 key={tag}
+                onClick={(e: React.MouseEvent) => onSearch?.(`tag:${tag}`, e.shiftKey)}
+                title={`Search emails tagged "${tag}"`}
               >
                 {tag}
               </Badge>
             ))}
+            {message.hasAttachment && (
+              <button
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
+                onClick={(e) => onSearch?.("has:attachment", e.shiftKey)}
+                title="Search emails with attachments"
+              >
+                <Paperclip size={12} />
+                has attachment
+              </button>
+            )}
           </div>
         )}
 

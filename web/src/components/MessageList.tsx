@@ -64,6 +64,7 @@ interface MessageListProps {
   selection: MailSelection | null;
   onSelectMessage: (message: MailSelection) => void;
   actions: EmailActions;
+  searchQuery?: string;
 }
 
 /** @spec docs/L1-ui#messagelist */
@@ -85,8 +86,9 @@ function fetchConversationPageForView(
   selectedView: SidebarSelection,
   cursor: string | null,
   sort: SortConfig,
+  q?: string,
 ) {
-  const sortParams = { sort: sort.columnId, sortDir: sort.direction };
+  const sortParams = { sort: sort.columnId, sortDir: sort.direction, q };
   if (selectedView.kind === "smart-mailbox") {
     return fetchSmartMailboxConversations(selectedView.id, {
       limit: PAGE_SIZE,
@@ -146,6 +148,7 @@ export function MessageList({
   selection,
   onSelectMessage,
   actions,
+  searchQuery,
 }: MessageListProps) {
   const queryClient = useQueryClient();
   const { columns, sort, widths, toggleColumn, reorderColumns, resetColumns, toggleSort, setColumnWidth } =
@@ -154,8 +157,8 @@ export function MessageList({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
   const queryKey = useMemo(
-    () => mailKeys.view(selectedView, sort),
-    [selectedView, sort],
+    () => mailKeys.view(selectedView, sort, searchQuery),
+    [selectedView, sort, searchQuery],
   );
   const viewKey = useMemo(() => conversationViewKey(selectedView), [selectedView]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -180,7 +183,7 @@ export function MessageList({
     queryFn: async ({ pageParam }) =>
       normalizeConversationPage(
         queryClient,
-        await fetchConversationPageForView(selectedView!, pageParam, sort),
+        await fetchConversationPageForView(selectedView!, pageParam, sort, searchQuery),
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
@@ -215,7 +218,7 @@ export function MessageList({
     refreshInFlightRef.current = true;
     setIsRefreshingTop(true);
     try {
-      const fetchedPage = await fetchConversationPageForView(selectedView, null, sort);
+      const fetchedPage = await fetchConversationPageForView(selectedView, null, sort, searchQuery);
       const firstPage = normalizeConversationPage(queryClient, fetchedPage);
       let insertedCount = 0;
       queryClient.setQueryData<InfiniteData<ConversationPageSlice, string | null>>(queryKey, (current) => {
@@ -276,7 +279,7 @@ export function MessageList({
         void refreshFirstPage();
       }
     }
-  }, [queryClient, queryKey, scrollTop, selectedView, sort, viewKey]);
+  }, [queryClient, queryKey, scrollTop, searchQuery, selectedView, sort, viewKey]);
 
   /** Move selection to the next or previous conversation. */
   const navigateMessage = useCallback(
@@ -476,8 +479,17 @@ export function MessageList({
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-background">
       <div className="border-b border-border pt-3">
         <div className="flex items-baseline gap-2 px-3">
-          <h2 className="text-sm font-semibold tracking-tight">{selectedView.name}</h2>
-          <span className="text-xs text-muted-foreground">{countLabel}</span>
+          {searchQuery ? (
+            <>
+              <h2 className="text-sm font-semibold tracking-tight">Search results</h2>
+              <code className="text-xs text-muted-foreground">{searchQuery}</code>
+            </>
+          ) : (
+            <>
+              <h2 className="text-sm font-semibold tracking-tight">{selectedView.name}</h2>
+              <span className="text-xs text-muted-foreground">{countLabel}</span>
+            </>
+          )}
         </div>
 
         <ColumnPickerMenu
