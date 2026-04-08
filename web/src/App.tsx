@@ -22,7 +22,6 @@ import {
   ResizablePanelGroup,
   useDefaultLayout,
 } from "./components/ui/resizable";
-import { Separator } from "./components/ui/separator";
 import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useEmailActions } from "./hooks/useEmailActions";
@@ -58,7 +57,6 @@ function MailClient() {
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(null);
   const [isSettingsPinned, setIsSettingsPinned] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
@@ -139,76 +137,79 @@ function MailClient() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Toolbar */}
-      <header className="flex items-center justify-between border-b border-border bg-card px-3 py-1.5">
-        <span className="text-sm font-semibold tracking-tight select-none">PostHaste</span>
-
+      <header className="flex items-center border-b border-border bg-card px-3 py-1.5">
+        {/* Left group: branding + action buttons */}
         <div className="flex items-center gap-1">
-          {selectedMessage && (
-            <>
-              <ToolbarButton
-                icon={<Archive size={16} />}
-                title="Archive (e)"
-                label="Archive"
-                shortcut="e"
-                onClick={() =>
-                  actions.archive({
-                    sourceId: selectedMessage.sourceId,
-                    messageId: selectedMessage.messageId,
-                  })
-                }
-              />
-              <ToolbarButton
-                icon={<Trash2 size={16} />}
-                title="Trash (#)"
-                label="Trash"
-                shortcut="#"
-                onClick={() =>
-                  actions.trash({
-                    sourceId: selectedMessage.sourceId,
-                    messageId: selectedMessage.messageId,
-                  })
-                }
-              />
-              <ToolbarButton
-                icon={
-                  <Star
-                    size={16}
-                    className={
-                      selectedMessageQuery.data?.isFlagged
-                        ? "fill-amber-400 text-amber-400"
-                        : undefined
-                    }
-                  />
-                }
-                title="Flag"
-                onClick={() =>
-                  actions.toggleFlag({
-                    conversationId: selectedMessage.conversationId,
-                    sourceId: selectedMessage.sourceId,
-                    messageId: selectedMessage.messageId,
-                    isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
-                    isRead: selectedMessageQuery.data?.isRead,
-                    keywords: selectedMessageQuery.data?.keywords,
-                  })
-                }
-              />
-              <Separator orientation="vertical" className="mx-1.5 h-4" />
-            </>
-          )}
+          <span className="mr-2 text-sm font-semibold tracking-tight select-none">PostHaste</span>
 
+          <ToolbarButton
+            icon={<Archive size={16} />}
+            title="Archive (e)"
+            label="Archive"
+            shortcut="e"
+            disabled={!selectedMessage}
+            onClick={() =>
+              selectedMessage &&
+              actions.archive({
+                sourceId: selectedMessage.sourceId,
+                messageId: selectedMessage.messageId,
+              })
+            }
+          />
+          <ToolbarButton
+            icon={<Trash2 size={16} />}
+            title="Trash (#)"
+            label="Trash"
+            shortcut="#"
+            disabled={!selectedMessage}
+            onClick={() =>
+              selectedMessage &&
+              actions.trash({
+                sourceId: selectedMessage.sourceId,
+                messageId: selectedMessage.messageId,
+              })
+            }
+          />
+          <ToolbarButton
+            icon={
+              <Star
+                size={16}
+                className={
+                  selectedMessageQuery.data?.isFlagged
+                    ? "fill-amber-400 text-amber-400"
+                    : undefined
+                }
+              />
+            }
+            title="Flag"
+            disabled={!selectedMessage}
+            onClick={() =>
+              selectedMessage &&
+              actions.toggleFlag({
+                conversationId: selectedMessage.conversationId,
+                sourceId: selectedMessage.sourceId,
+                messageId: selectedMessage.messageId,
+                isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
+                isRead: selectedMessageQuery.data?.isRead,
+                keywords: selectedMessageQuery.data?.keywords,
+              })
+            }
+          />
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Right group: search + settings */}
+        <div className="flex items-center gap-1">
           <div className="relative flex items-center">
             <Search size={14} className="absolute left-2 text-muted-foreground" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setIsSearchFocused(true)}
-              onBlur={() => setIsSearchFocused(false)}
               placeholder="Search..."
-              className={cn(
-                "h-7 rounded border border-border bg-background pl-7 pr-7 text-sm transition-all placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring",
-                isSearchFocused ? "w-56" : "w-40",
-              )}
+              className="h-7 w-48 rounded border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
             />
             {searchQuery && (
               <button
@@ -220,19 +221,19 @@ function MailClient() {
               </button>
             )}
           </div>
-        </div>
 
-        <button
-          type="button"
-          title="Settings"
-          className={cn(
-            "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent",
-            isSettingsOpen && "text-primary",
-          )}
-          onClick={() => setIsSettingsPinned((open) => !open)}
-        >
-          <Settings size={16} />
-        </button>
+          <button
+            type="button"
+            title="Settings"
+            className={cn(
+              "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent",
+              isSettingsOpen && "text-primary",
+            )}
+            onClick={() => setIsSettingsPinned((open) => !open)}
+          >
+            <Settings size={16} />
+          </button>
+        </div>
       </header>
       {actions.errorMessage && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -300,27 +301,33 @@ function MailClient() {
   );
 }
 
-/** Toolbar button with optional text label and shortcut hint. */
+/** Toolbar button with optional text label, shortcut hint, and disabled state. */
 function ToolbarButton({
   icon,
   title,
   label,
   shortcut,
+  disabled,
   onClick,
 }: {
   icon: React.ReactNode;
   title: string;
   label?: string;
   shortcut?: string;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={disabled}
       className={cn(
-        "flex items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        "flex items-center justify-center rounded text-muted-foreground transition-colors",
         label ? "h-7 gap-1.5 px-2" : "size-7",
+        disabled
+          ? "opacity-40 cursor-not-allowed"
+          : "hover:bg-accent hover:text-foreground",
       )}
       onClick={onClick}
     >
