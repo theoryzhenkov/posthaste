@@ -10,7 +10,8 @@ use crate::{
     MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway,
     SharedStore, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId, ThreadView,
+    SmartMailboxRule, SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId,
+    ThreadView,
     EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
@@ -249,6 +250,20 @@ impl MailService {
             .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
         self.store
             .query_conversations_by_rule(&mailbox.rule, limit, cursor, sort_field, sort_direction)
+            .map_err(Into::into)
+    }
+
+    /// Query conversations matching an arbitrary rule (used by search).
+    pub fn query_conversations_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
+    ) -> Result<ConversationPage, ServiceError> {
+        self.store
+            .query_conversations_by_rule(rule, limit, cursor, sort_field, sort_direction)
             .map_err(Into::into)
     }
 

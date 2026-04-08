@@ -11,6 +11,7 @@ mod config;
 mod model;
 mod ports;
 mod push;
+pub mod search;
 mod service;
 
 pub use config::*;
