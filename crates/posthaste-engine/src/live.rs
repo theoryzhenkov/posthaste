@@ -143,6 +143,10 @@ fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayErr
     })
 }
 
+fn required_method_response<T>(response: Option<T>, method: &str) -> Result<T, GatewayError> {
+    response.ok_or_else(|| GatewayError::Rejected(format!("{method} response missing")))
+}
+
 /// Resolve the sender identity for an account before composing or sending.
 ///
 /// @spec docs/L1-jmap#methods-used
@@ -238,11 +242,8 @@ impl MailGateway for LiveJmapGateway {
             ])
             .fetch_all_body_values(true);
 
-        let mut emails = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let mut emails = required_method_response(response.pop_method_response(), "Email/get")?
             .unwrap_get_email()
             .map_err(map_gateway_error)?
             .take_list();
@@ -329,11 +330,8 @@ impl MailGateway for LiveJmapGateway {
         for keyword in &command.remove {
             update.keyword(keyword.as_str(), false);
         }
-        let response = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let response = required_method_response(response.pop_method_response(), "Email/set")?
             .unwrap_set_email()
             .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
@@ -359,11 +357,8 @@ impl MailGateway for LiveJmapGateway {
         }
         set.update(message_id.as_str())
             .mailbox_ids(mailbox_ids.iter().map(MailboxId::as_str));
-        let response = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let response = required_method_response(response.pop_method_response(), "Email/set")?
             .unwrap_set_email()
             .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
@@ -385,11 +380,8 @@ impl MailGateway for LiveJmapGateway {
             set.if_in_state(expected_state);
         }
         set.destroy([message_id.as_str()]);
-        let response = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let response = required_method_response(response.pop_method_response(), "Email/set")?
             .unwrap_set_email()
             .map_err(map_gateway_error)?;
         message_mutation_outcome(response.new_state().to_string())
@@ -406,11 +398,8 @@ impl MailGateway for LiveJmapGateway {
             identity::Property::Name,
             identity::Property::Email,
         ]);
-        let mut identities = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let mut identities = required_method_response(response.pop_method_response(), "Identity/get")?
             .unwrap_get_identity()
             .map_err(map_gateway_error)?
             .take_list();
@@ -455,11 +444,8 @@ impl MailGateway for LiveJmapGateway {
             .body_properties([email::BodyProperty::PartId, email::BodyProperty::Type])
             .fetch_all_body_values(true);
 
-        let mut emails = self
-            .send_request(request)
-            .await?
-            .pop_method_response()
-            .unwrap()
+        let mut response = self.send_request(request).await?;
+        let mut emails = required_method_response(response.pop_method_response(), "Email/get")?
             .unwrap_get_email()
             .map_err(map_gateway_error)?
             .take_list();
@@ -739,5 +725,18 @@ mod tests {
         assert_eq!(cursor.object_type, SyncObject::Message);
         assert_eq!(cursor.state, "message-9");
         assert!(!cursor.updated_at.is_empty());
+    }
+
+    #[test]
+    fn missing_method_response_becomes_gateway_rejected_error() {
+        let error = required_method_response::<()>(None, "Email/get")
+            .expect_err("missing responses should be rejected");
+
+        match error {
+            GatewayError::Rejected(message) => {
+                assert_eq!(message, "Email/get response missing");
+            }
+            other => panic!("expected rejected error, got {other:?}"),
+        }
     }
 }
