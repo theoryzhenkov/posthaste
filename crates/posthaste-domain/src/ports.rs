@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
+    AccountId, BlobId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity, MailboxId,
     MailboxSummary, MessageDetail, MessageId, MessageSummary, MutationOutcome, PushTransport,
     ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
@@ -37,6 +37,15 @@ pub trait MailGateway: Send + Sync {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError>;
+
+    /// Download an attachment or inline blob by its JMAP `blobId`.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    async fn download_blob(
+        &self,
+        account_id: &AccountId,
+        blob_id: &BlobId,
+    ) -> Result<Vec<u8>, GatewayError>;
 
     /// Update JMAP keywords on a message via `Email/set`.
     ///

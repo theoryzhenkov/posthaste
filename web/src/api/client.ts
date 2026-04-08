@@ -45,6 +45,21 @@ function resolveBaseUrl(): string {
 
 const BASE_URL = resolveBaseUrl();
 
+export function buildMessageAttachmentUrl(
+  sourceId: string,
+  messageId: string,
+  attachmentId: string,
+  options?: { download?: boolean },
+): string {
+  const url = new URL(
+    `${BASE_URL}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+  );
+  if (options?.download) {
+    url.searchParams.set("download", "1");
+  }
+  return url.toString();
+}
+
 /** Parse a non-OK response into a structured {@link ApiError}. */
 async function parseError(response: Response): Promise<never> {
   let message = response.statusText;
