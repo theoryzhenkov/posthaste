@@ -1067,6 +1067,7 @@ pub async fn stream_events(
         mailbox_id: query.mailbox_id.map(MailboxId),
         after_seq: query.after_seq,
     };
+    let receiver = state.event_sender.subscribe();
     let backlog = if filter.after_seq.is_some() {
         state
             .service
@@ -1075,7 +1076,7 @@ pub async fn stream_events(
     } else {
         Vec::new()
     };
-    let receiver = state.event_sender.subscribe();
+    let replayed_through = backlog.last().map(|event| event.seq).or(filter.after_seq);
     let backlog_filter = filter.clone();
     let backlog_stream = tokio_stream::iter(
         backlog
@@ -1087,11 +1088,20 @@ pub async fn stream_events(
     let live_stream = BroadcastStream::new(receiver).filter_map(move |message| {
         let live_filter = live_filter.clone();
         match message {
-            Ok(event) if matches_event(&event, &live_filter) => Some(event_to_sse(event)),
+            Ok(event)
+                if is_live_event_after_backlog(&event, replayed_through)
+                    && matches_event(&event, &live_filter) =>
+            {
+                Some(event_to_sse(event))
+            }
             _ => None,
         }
     });
     Ok(Sse::new(backlog_stream.chain(live_stream)).keep_alive(KeepAlive::default()))
+}
+
+fn is_live_event_after_backlog(event: &DomainEvent, replayed_through: Option<i64>) -> bool {
+    replayed_through.map_or(true, |seq| event.seq > seq)
 }
 
 /// Toggle the `enabled` flag on an account, re-persist, and restart the supervisor.
@@ -1186,6 +1196,24 @@ mod tests {
                 after_seq: Some(4),
             }
         ));
+    }
+
+    #[test]
+    fn live_events_skip_sequences_already_replayed_from_backlog() {
+        let event = DomainEvent {
+            seq: 9,
+            account_id: AccountId::from("primary"),
+            topic: EVENT_TOPIC_MESSAGE_ARRIVED.to_string(),
+            occurred_at: "2026-03-31T10:00:00Z".to_string(),
+            mailbox_id: None,
+            message_id: None,
+            payload: json!({}),
+        };
+
+        assert!(!is_live_event_after_backlog(&event, Some(9)));
+        assert!(!is_live_event_after_backlog(&event, Some(10)));
+        assert!(is_live_event_after_backlog(&event, Some(8)));
+        assert!(is_live_event_after_backlog(&event, None));
     }
 
     #[test]
