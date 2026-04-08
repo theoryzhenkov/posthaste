@@ -7,7 +7,7 @@ use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
     ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, MutationOutcome, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway,
     SharedStore, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
     SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId, ThreadView,
@@ -112,6 +112,11 @@ impl MailService {
     ///
     /// @spec docs/L1-api#account-crud-lifecycle
     pub fn delete_source(&self, id: &AccountId) -> Result<(), ServiceError> {
+        let mut settings = self.config.get_app_settings()?;
+        if settings.default_account_id.as_ref() == Some(id) {
+            settings.default_account_id = None;
+            self.config.put_app_settings(&settings)?;
+        }
         self.config.delete_source(id)?;
         self.store.delete_source_projection(id)?;
         self.store.delete_source_data(id)?;
@@ -166,6 +171,10 @@ impl MailService {
     /// @spec docs/L1-accounts#configdiff
     pub fn reload_config(&self) -> Result<ConfigDiff, ServiceError> {
         let diff = self.config.reload()?;
+        for source_id in &diff.removed_sources {
+            self.store.delete_source_projection(source_id)?;
+            self.store.delete_source_data(source_id)?;
+        }
         // Sync all source projections after reload
         self.sync_source_projections()?;
         Ok(diff)
@@ -461,40 +470,37 @@ impl MailService {
         mutation: MessageMutation<'_>,
     ) -> Result<CommandResult, ServiceError> {
         let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
-        let outcome = if let Some(gateway) = self.gateway(account_id) {
-            match mutation {
-                MessageMutation::SetKeywords(command) => {
-                    gateway
-                        .set_keywords(
-                            account_id,
-                            message_id,
-                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                            command,
-                        )
-                        .await?
-                }
-                MessageMutation::ReplaceMailboxes(command) => {
-                    gateway
-                        .replace_mailboxes(
-                            account_id,
-                            message_id,
-                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                            &command.mailbox_ids,
-                        )
-                        .await?
-                }
-                MessageMutation::Destroy => {
-                    gateway
-                        .destroy_message(
-                            account_id,
-                            message_id,
-                            expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                        )
-                        .await?
-                }
+        let gateway = self.required_gateway(account_id)?;
+        let outcome = match mutation {
+            MessageMutation::SetKeywords(command) => {
+                gateway
+                    .set_keywords(
+                        account_id,
+                        message_id,
+                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                        command,
+                    )
+                    .await?
             }
-        } else {
-            MutationOutcome::default()
+            MessageMutation::ReplaceMailboxes(command) => {
+                gateway
+                    .replace_mailboxes(
+                        account_id,
+                        message_id,
+                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                        &command.mailbox_ids,
+                    )
+                    .await?
+            }
+            MessageMutation::Destroy => {
+                gateway
+                    .destroy_message(
+                        account_id,
+                        message_id,
+                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                    )
+                    .await?
+            }
         };
 
         match mutation {
@@ -690,34 +696,56 @@ mod tests {
         SyncCursor,
     };
 
-    #[derive(Default)]
     struct TestConfig {
         smart_mailboxes: Vec<SmartMailbox>,
         sources: Vec<AccountSettings>,
+        reload_diff: ConfigDiff,
+        app_settings: Mutex<AppSettings>,
+        deleted_sources: Mutex<Vec<AccountId>>,
+    }
+
+    impl Default for TestConfig {
+        fn default() -> Self {
+            Self {
+                smart_mailboxes: Vec::new(),
+                sources: Vec::new(),
+                reload_diff: ConfigDiff {
+                    added_sources: Vec::new(),
+                    changed_sources: Vec::new(),
+                    removed_sources: Vec::new(),
+                },
+                app_settings: Mutex::new(AppSettings::default()),
+                deleted_sources: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     impl ConfigRepository for TestConfig {
         fn load_snapshot(&self) -> Result<ConfigSnapshot, ConfigError> {
             Ok(ConfigSnapshot {
-                app_settings: AppSettings::default(),
+                app_settings: self.get_app_settings()?,
                 sources: self.sources.clone(),
                 smart_mailboxes: self.smart_mailboxes.clone(),
             })
         }
 
         fn reload(&self) -> Result<ConfigDiff, ConfigError> {
-            Ok(ConfigDiff {
-                added_sources: Vec::new(),
-                changed_sources: Vec::new(),
-                removed_sources: Vec::new(),
-            })
+            Ok(self.reload_diff.clone())
         }
 
         fn get_app_settings(&self) -> Result<AppSettings, ConfigError> {
-            Ok(AppSettings::default())
+            Ok(self
+                .app_settings
+                .lock()
+                .expect("app settings lock poisoned")
+                .clone())
         }
 
-        fn put_app_settings(&self, _settings: &AppSettings) -> Result<(), ConfigError> {
+        fn put_app_settings(&self, settings: &AppSettings) -> Result<(), ConfigError> {
+            *self
+                .app_settings
+                .lock()
+                .expect("app settings lock poisoned") = settings.clone();
             Ok(())
         }
 
@@ -733,7 +761,11 @@ mod tests {
             Ok(())
         }
 
-        fn delete_source(&self, _id: &AccountId) -> Result<(), ConfigError> {
+        fn delete_source(&self, id: &AccountId) -> Result<(), ConfigError> {
+            self.deleted_sources
+                .lock()
+                .expect("deleted sources lock poisoned")
+                .push(id.clone());
             Ok(())
         }
 
@@ -769,6 +801,8 @@ mod tests {
         smart_mailbox_counts_error: Option<String>,
         list_mailboxes_error: Option<String>,
         projection_calls: Mutex<Vec<String>>,
+        projection_deletes: Mutex<Vec<String>>,
+        source_data_deletes: Mutex<Vec<String>>,
         mutation_state: Mutex<MutationStoreState>,
     }
 
@@ -778,6 +812,8 @@ mod tests {
                 smart_mailbox_counts_error: None,
                 list_mailboxes_error: None,
                 projection_calls: Mutex::new(Vec::new()),
+                projection_deletes: Mutex::new(Vec::new()),
+                source_data_deletes: Mutex::new(Vec::new()),
                 mutation_state: Mutex::new(MutationStoreState::default()),
             }
         }
@@ -1030,11 +1066,19 @@ mod tests {
             Ok(())
         }
 
-        fn delete_source_projection(&self, _source_id: &AccountId) -> Result<(), StoreError> {
+        fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError> {
+            self.projection_deletes
+                .lock()
+                .expect("projection deletes lock poisoned")
+                .push(source_id.to_string());
             Ok(())
         }
 
-        fn delete_source_data(&self, _account_id: &AccountId) -> Result<(), StoreError> {
+        fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError> {
+            self.source_data_deletes
+                .lock()
+                .expect("source data deletes lock poisoned")
+                .push(account_id.to_string());
             Ok(())
         }
     }
@@ -1195,6 +1239,7 @@ mod tests {
         let config = Arc::new(TestConfig {
             smart_mailboxes: vec![sample_smart_mailbox()],
             sources: Vec::new(),
+            ..Default::default()
         });
         let service = MailService::new(store, config);
 
@@ -1214,6 +1259,7 @@ mod tests {
         let config = Arc::new(TestConfig {
             smart_mailboxes: vec![sample_smart_mailbox()],
             sources: vec![sample_source()],
+            ..Default::default()
         });
         let service = MailService::new(store, config);
 
@@ -1347,6 +1393,133 @@ mod tests {
                 .expect("cursor should exist")
                 .state,
             "message-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn message_mutations_require_a_registered_gateway() {
+        let account = AccountId::from("primary");
+        let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+
+        let error = service
+            .set_keywords(
+                &account,
+                &MessageId::from("message-1"),
+                &SetKeywordsCommand {
+                    add: vec!["$flagged".to_string()],
+                    remove: Vec::new(),
+                },
+            )
+            .await
+            .expect_err("mutations without a gateway should fail");
+
+        assert_eq!(error.code(), "gateway_unavailable");
+        assert_eq!(
+            store
+                .get_cursor(&account, SyncObject::Message)
+                .expect("cursor lookup should succeed")
+                .expect("cursor should exist")
+                .state,
+            "message-1"
+        );
+    }
+
+    #[test]
+    fn delete_source_clears_default_account_before_removing_it() {
+        let account = sample_source();
+        let config = Arc::new(TestConfig {
+            sources: vec![account.clone()],
+            app_settings: Mutex::new(AppSettings {
+                default_account_id: Some(account.id.clone()),
+            }),
+            ..Default::default()
+        });
+        let store = Arc::new(TestStore::default());
+        let service = MailService::new(store.clone(), config.clone());
+
+        service
+            .delete_source(&account.id)
+            .expect("deleting the account should succeed");
+
+        assert_eq!(
+            config
+                .get_app_settings()
+                .expect("settings lookup should succeed")
+                .default_account_id,
+            None
+        );
+        assert_eq!(
+            config
+                .deleted_sources
+                .lock()
+                .expect("deleted sources lock poisoned")
+                .as_slice(),
+            &[account.id.clone()]
+        );
+        assert_eq!(
+            store
+                .projection_deletes
+                .lock()
+                .expect("projection deletes lock poisoned")
+                .as_slice(),
+            &[account.id.to_string()]
+        );
+        assert_eq!(
+            store
+                .source_data_deletes
+                .lock()
+                .expect("source data deletes lock poisoned")
+                .as_slice(),
+            &[account.id.to_string()]
+        );
+    }
+
+    #[test]
+    fn reload_config_cleans_up_removed_sources_before_resyncing_projections() {
+        let removed = AccountId::from("removed");
+        let remaining = sample_source();
+        let config = Arc::new(TestConfig {
+            sources: vec![remaining.clone()],
+            reload_diff: ConfigDiff {
+                added_sources: Vec::new(),
+                changed_sources: Vec::new(),
+                removed_sources: vec![removed.clone()],
+            },
+            ..Default::default()
+        });
+        let store = Arc::new(TestStore::default());
+        let service = MailService::new(store.clone(), config);
+
+        let diff = service
+            .reload_config()
+            .expect("reloading config should succeed");
+
+        assert_eq!(diff.removed_sources, vec![removed.clone()]);
+        assert_eq!(
+            store
+                .projection_deletes
+                .lock()
+                .expect("projection deletes lock poisoned")
+                .as_slice(),
+            &[removed.to_string()]
+        );
+        assert_eq!(
+            store
+                .source_data_deletes
+                .lock()
+                .expect("source data deletes lock poisoned")
+                .as_slice(),
+            &[removed.to_string()]
+        );
+        assert_eq!(
+            store
+                .projection_calls
+                .lock()
+                .expect("projection lock poisoned")
+                .as_slice(),
+            &[remaining.id.to_string()]
         );
     }
 }
