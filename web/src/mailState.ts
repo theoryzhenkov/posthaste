@@ -60,6 +60,7 @@ export const mailKeys = {
   view: (
     selection: MailViewSelection,
     sort?: { columnId: string; direction: string },
+    q?: string,
   ) => {
     const base = !selection
       ? (["conversations", "none"] as const)
@@ -71,10 +72,11 @@ export const mailKeys = {
             selection.sourceId,
             selection.mailboxId,
           ] as const);
-    if (sort) {
-      return [...base, sort.columnId, sort.direction] as const;
+    const withSort = sort ? [...base, sort.columnId, sort.direction] : base;
+    if (q) {
+      return [...withSort, "q", q] as const;
     }
-    return base;
+    return withSort;
   },
 };
 

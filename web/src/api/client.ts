@@ -226,6 +226,7 @@ export async function fetchSmartMailboxConversations(
     cursor?: string | null;
     sort?: string;
     sortDir?: string;
+    q?: string;
   },
 ): Promise<ConversationPage> {
   const params = new URLSearchParams();
@@ -240,6 +241,9 @@ export async function fetchSmartMailboxConversations(
   }
   if (input?.sortDir) {
     params.set("sortDir", input.sortDir);
+  }
+  if (input?.q) {
+    params.set("q", input.q);
   }
   const search = params.toString();
   return request<ConversationPage>(
@@ -258,6 +262,7 @@ export async function fetchConversations(input?: {
   cursor?: string | null;
   sort?: string;
   sortDir?: string;
+  q?: string;
 }): Promise<ConversationPage> {
   const params = new URLSearchParams();
   if (input?.sourceId) {
@@ -277,6 +282,9 @@ export async function fetchConversations(input?: {
   }
   if (input?.sortDir) {
     params.set("sortDir", input.sortDir);
+  }
+  if (input?.q) {
+    params.set("q", input.q);
   }
   const search = params.toString();
   return request<ConversationPage>(
