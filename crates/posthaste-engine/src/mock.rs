@@ -2,9 +2,9 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use posthaste_domain::{
-    AccountId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, MutationOutcome, PushTransport, Recipient, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
+    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
+    MessageAttachment, MessageId, MessageRecord, MutationOutcome, PushTransport, Recipient,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
 };
 
 /// In-memory `MailGateway` for tests and local development.
@@ -97,7 +97,17 @@ impl MailGateway for MockJmapGateway {
             body_html: message.body_html.clone(),
             body_text: message.body_text.clone(),
             raw_mime: message.raw_mime.clone(),
+            attachments: sample_attachments(message.id.as_str()),
         })
+    }
+
+    async fn download_blob(
+        &self,
+        _account_id: &AccountId,
+        blob_id: &BlobId,
+    ) -> Result<Vec<u8>, GatewayError> {
+        sample_attachment_bytes(blob_id.as_str())
+            .ok_or_else(|| GatewayError::Rejected("unknown blob".to_string()))
     }
 
     /// Apply keyword changes to a mock message, respecting optimistic concurrency.
@@ -336,6 +346,44 @@ fn sample_messages() -> Vec<MessageRecord> {
             references: Vec::new(),
         },
     ]
+}
+
+fn sample_attachments(message_id: &str) -> Vec<MessageAttachment> {
+    match message_id {
+        "em-001" => vec![MessageAttachment {
+            id: "attachment-1".to_string(),
+            blob_id: BlobId::from("blob-roadmap".to_string()),
+            part_id: Some("2".to_string()),
+            filename: Some("roadmap.md".to_string()),
+            mime_type: "text/markdown".to_string(),
+            size: 42,
+            disposition: Some("attachment".to_string()),
+            cid: None,
+            is_inline: false,
+        }],
+        "em-003" => vec![MessageAttachment {
+            id: "attachment-1".to_string(),
+            blob_id: BlobId::from("blob-invoice".to_string()),
+            part_id: Some("2".to_string()),
+            filename: Some("invoice-2026-0312.txt".to_string()),
+            mime_type: "text/plain".to_string(),
+            size: 58,
+            disposition: Some("attachment".to_string()),
+            cid: None,
+            is_inline: false,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+fn sample_attachment_bytes(blob_id: &str) -> Option<Vec<u8>> {
+    match blob_id {
+        "blob-roadmap" => {
+            Some(b"# Q2 roadmap\n\n- Search\n- Attachments\n- Compose polish\n".to_vec())
+        }
+        "blob-invoice" => Some(b"Invoice 2026-0312\nAmount due: $42.00\nStatus: Paid\n".to_vec()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

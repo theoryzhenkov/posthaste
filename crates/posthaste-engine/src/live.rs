@@ -5,15 +5,17 @@ use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::{email, identity};
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, FetchedBody,
-    GatewayError, Identity, MailGateway, MailboxId, MessageId, MutationOutcome, PushTransport,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch,
-    SyncCursor, SyncObject,
+    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
+    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageAttachment, MessageId,
+    MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
+    SyncBatch, SyncCursor, SyncObject,
 };
 
 use tracing::{debug, info, instrument};
 
-use crate::compose::{addresses_to_recipients, prefix_subject, recipient_to_address, render_markdown};
+use crate::compose::{
+    addresses_to_recipients, prefix_subject, recipient_to_address, render_markdown,
+};
 use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 
 /// Discover and connect to a JMAP server, returning a configured client.
@@ -218,13 +220,22 @@ impl MailGateway for LiveJmapGateway {
         let mut request = self.client.build();
         let get_request = request.get_email().ids([message_id.as_str()]).properties([
             email::Property::Id,
+            email::Property::Attachments,
             email::Property::BodyValues,
             email::Property::HtmlBody,
             email::Property::TextBody,
         ]);
         get_request
             .arguments()
-            .body_properties([email::BodyProperty::PartId, email::BodyProperty::Type])
+            .body_properties([
+                email::BodyProperty::BlobId,
+                email::BodyProperty::Cid,
+                email::BodyProperty::Disposition,
+                email::BodyProperty::Name,
+                email::BodyProperty::PartId,
+                email::BodyProperty::Size,
+                email::BodyProperty::Type,
+            ])
             .fetch_all_body_values(true);
 
         let mut emails = self
@@ -263,12 +274,34 @@ impl MailGateway for LiveJmapGateway {
             email.subject().unwrap_or("(no subject)"),
             body_text.as_deref(),
         );
+        let attachments = email
+            .attachments()
+            .map(|parts| {
+                parts
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, part)| attachment_from_part(index, part))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(FetchedBody {
             body_html,
             body_text,
             raw_mime: Some(raw_mime),
+            attachments,
         })
+    }
+
+    async fn download_blob(
+        &self,
+        _account_id: &AccountId,
+        blob_id: &BlobId,
+    ) -> Result<Vec<u8>, GatewayError> {
+        self.client
+            .download(blob_id.as_str())
+            .await
+            .map_err(map_gateway_error)
     }
 
     /// Add or remove keywords (flags) on a message via `Email/set`.
@@ -556,6 +589,27 @@ pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
     }
 }
 
+fn attachment_from_part(index: usize, part: &email::EmailBodyPart) -> Option<MessageAttachment> {
+    let blob_id = BlobId::from(part.blob_id()?.to_string());
+    let disposition = part.content_disposition().map(str::to_string);
+    let cid = part.content_id().map(str::to_string);
+    let is_inline = disposition.as_deref() == Some("inline") || cid.is_some();
+    Some(MessageAttachment {
+        id: format!("attachment-{}", index + 1),
+        blob_id,
+        part_id: part.part_id().map(str::to_string),
+        filename: part.name().map(str::to_string),
+        mime_type: part
+            .content_type()
+            .unwrap_or("application/octet-stream")
+            .to_string(),
+        size: part.size() as i64,
+        disposition,
+        cid,
+        is_inline,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -582,6 +636,14 @@ mod tests {
             _account_id: &AccountId,
             _message_id: &MessageId,
         ) -> Result<FetchedBody, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
+        async fn download_blob(
+            &self,
+            _account_id: &AccountId,
+            _blob_id: &BlobId,
+        ) -> Result<Vec<u8>, GatewayError> {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
@@ -614,10 +676,7 @@ mod tests {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
-        async fn fetch_identity(
-            &self,
-            account_id: &AccountId,
-        ) -> Result<Identity, GatewayError> {
+        async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError> {
             self.seen_account_ids
                 .lock()
                 .expect("recording lock poisoned")

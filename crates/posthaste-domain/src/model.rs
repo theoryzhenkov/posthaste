@@ -417,12 +417,30 @@ pub struct MessageSummary {
 /// @spec docs/L1-api#message-body-sanitization
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MessageAttachment {
+    pub id: String,
+    pub blob_id: BlobId,
+    pub part_id: Option<String>,
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub size: i64,
+    pub disposition: Option<String>,
+    pub cid: Option<String>,
+    pub is_inline: bool,
+}
+
+/// Full message including sanitized body content, returned by message detail endpoint.
+///
+/// @spec docs/L1-api#message-body-sanitization
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageDetail {
     #[serde(flatten)]
     pub summary: MessageSummary,
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub raw_message: Option<RawMessageRef>,
+    pub attachments: Vec<MessageAttachment>,
 }
 
 /// All messages belonging to a single JMAP thread, ordered by `receivedAt`.
@@ -794,6 +812,7 @@ pub struct FetchedBody {
     pub body_html: Option<String>,
     pub body_text: Option<String>,
     pub raw_mime: Option<String>,
+    pub attachments: Vec<MessageAttachment>,
 }
 
 /// An ordered domain event stored in `event_log` and published via SSE.

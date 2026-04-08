@@ -228,6 +228,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             get(api::get_message),
         )
         .route(
+            "/v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
+            get(api::get_message_attachment),
+        )
+        .route(
             "/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),
         )

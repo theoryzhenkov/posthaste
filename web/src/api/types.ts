@@ -141,6 +141,18 @@ export interface RawMessageRef {
   fetchedAt: string;
 }
 
+export interface MessageAttachment {
+  id: string;
+  blobId: string;
+  partId: string | null;
+  filename: string | null;
+  mimeType: string;
+  size: number;
+  disposition: string | null;
+  cid: string | null;
+  isInline: boolean;
+}
+
 /**
  * Full message detail including sanitized body HTML.
  * @spec docs/L1-api#message-body-sanitization
@@ -149,6 +161,7 @@ export interface MessageDetail extends MessageSummary {
   bodyHtml: string | null;
   bodyText: string | null;
   rawMessage: RawMessageRef | null;
+  attachments: MessageAttachment[];
 }
 
 /**

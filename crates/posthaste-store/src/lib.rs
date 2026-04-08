@@ -2,7 +2,6 @@
 /// fetching, conversation projections, smart mailbox queries, and event log.
 ///
 /// @spec docs/L1-sync#sqlite-schema
-
 mod db;
 mod mutations;
 mod projections;
@@ -43,7 +42,10 @@ use crate::mutations::{
     stage_sync_bodies,
 };
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
-use crate::query::{fetch_mailbox_ids, hydrate_message_summaries, load_message_summary_rows};
+use crate::query::{
+    fetch_mailbox_ids, fetch_message_attachments, hydrate_message_summaries,
+    load_message_summary_rows,
+};
 use crate::smart_mailboxes::{
     count_smart_mailbox_messages, query_conversations, query_conversations_by_rule,
     query_messages_by_rule,
@@ -452,6 +454,11 @@ impl MailStore for DatabaseStore {
             )
             .map_err(sql_to_store_error)?;
             tx.execute(
+                "DELETE FROM message_attachment WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
                 "DELETE FROM conversation_message WHERE account_id = ?1",
                 params![account_id.as_str()],
             )
@@ -535,12 +542,14 @@ impl MailStore for DatabaseStore {
             )
             .optional()
             .map_err(sql_to_store_error)?;
+        let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
 
         Ok(Some(MessageDetail {
             summary,
             body_html: body.as_ref().and_then(|row| row.0.clone()),
             body_text: body.as_ref().and_then(|row| row.1.clone()),
             raw_message: body.and_then(|row| row.2),
+            attachments,
         }))
     }
 

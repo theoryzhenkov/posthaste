@@ -2,7 +2,7 @@ use super::*;
 use crate::projections::{
     assign_conversation_id_tx, delete_message_tx, normalized_subject,
     refresh_conversation_projection_tx, refresh_mailbox_counters_tx, refresh_thread_projection_tx,
-    upsert_body_tx,
+    replace_attachments_tx, upsert_body_tx,
 };
 use crate::query::{
     fetch_keywords_tx, fetch_mailbox_ids_tx, query_message_detail_tx, row_to_event,
@@ -397,6 +397,7 @@ pub(crate) fn apply_message_body_tx(
         body.body_text.as_deref(),
         raw_ref,
     )?;
+    replace_attachments_tx(tx, account_id, message_id, &body.attachments)?;
     let event = insert_event_tx(
         tx,
         account_id,

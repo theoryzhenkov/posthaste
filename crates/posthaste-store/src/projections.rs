@@ -1,4 +1,5 @@
 use super::*;
+use posthaste_domain::MessageAttachment;
 
 /// Determines the conversation ID for a message using a three-tier lookup:
 /// 1. Match by RFC `Message-ID`, `In-Reply-To`, or `References` headers
@@ -304,6 +305,45 @@ pub(crate) fn upsert_body_tx(
     Ok(())
 }
 
+/// Replaces the attachment metadata cached for a message with a fresh snapshot.
+pub(crate) fn replace_attachments_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+    attachments: &[MessageAttachment],
+) -> Result<(), StoreError> {
+    tx.execute(
+        "DELETE FROM message_attachment WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id.as_str(), message_id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+
+    for attachment in attachments {
+        tx.execute(
+            "INSERT INTO message_attachment (
+                account_id, message_id, id, blob_id, part_id, filename, mime_type, size,
+                disposition, cid, is_inline
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                account_id.as_str(),
+                message_id.as_str(),
+                attachment.id.as_str(),
+                attachment.blob_id.as_str(),
+                attachment.part_id.as_deref(),
+                attachment.filename.as_deref(),
+                attachment.mime_type.as_str(),
+                attachment.size,
+                attachment.disposition.as_deref(),
+                attachment.cid.as_deref(),
+                bool_to_i64(attachment.is_inline),
+            ],
+        )
+        .map_err(sql_to_store_error)?;
+    }
+
+    Ok(())
+}
+
 /// Deletes a message and all its junction rows (keywords, mailboxes, body,
 /// conversation link).
 pub(crate) fn delete_message_tx(
@@ -323,6 +363,11 @@ pub(crate) fn delete_message_tx(
     .map_err(sql_to_store_error)?;
     tx.execute(
         "DELETE FROM message_body WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id.as_str(), message_id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+    tx.execute(
+        "DELETE FROM message_attachment WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;

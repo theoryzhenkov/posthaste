@@ -1,8 +1,10 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::header;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -10,10 +12,10 @@ use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
     AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageDetail, MessageId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef, SecretStatus,
-    SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
-    SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
+    DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageAttachment, MessageDetail,
+    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef,
+    SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox,
+    SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
     EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
@@ -31,8 +33,8 @@ use account_support::{
     store_error_to_api, validate_account_settings,
 };
 use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse,
-    matches_event, parse_conversation_cursor,
+    conversation_limit, conversation_page_response, event_to_sse, matches_event,
+    parse_conversation_cursor,
 };
 
 /// Query parameters for conversation list endpoints.
@@ -68,6 +70,12 @@ pub struct EventsQuery {
     pub topic: Option<String>,
     pub mailbox_id: Option<String>,
     pub after_seq: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAttachmentQuery {
+    pub download: Option<bool>,
 }
 
 /// Request body for `PATCH /v1/settings`.
@@ -826,9 +834,11 @@ pub async fn get_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<MessageDetail>, ApiError> {
+    let account_id = AccountId(source_id.clone());
+    let message_id_ref = MessageId(message_id.clone());
     let result = state
         .service
-        .get_message_detail(&AccountId(source_id), &MessageId(message_id))
+        .get_message_detail(&account_id, &message_id_ref)
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -842,8 +852,101 @@ pub async fn get_message(
     detail.body_html = detail
         .body_html
         .as_ref()
-        .map(|html| sanitize::sanitize_email_html(html));
+        .map(|html| sanitize::sanitize_email_html(html))
+        .map(|html| {
+            rewrite_inline_attachment_urls(&html, &source_id, &message_id, &detail.attachments)
+        });
     Ok(Json(detail))
+}
+
+/// GET /v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}
+pub async fn get_message_attachment(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, message_id, attachment_id)): Path<(String, String, String)>,
+    Query(query): Query<GetAttachmentQuery>,
+) -> Result<Response, ApiError> {
+    let account_id = AccountId(source_id);
+    let message_id = MessageId(message_id);
+    let result = state
+        .service
+        .get_message_detail(&account_id, &message_id)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    let detail = result.detail.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "message detail not available",
+        )
+    })?;
+    let attachment = detail
+        .attachments
+        .into_iter()
+        .find(|attachment| attachment.id == attachment_id)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "attachment not found"))?;
+    let bytes = state
+        .service
+        .download_blob(&account_id, &attachment.blob_id)
+        .await
+        .map_err(ApiError::from_service_error)?;
+
+    let disposition_kind = if query.download.unwrap_or(false) {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let filename = attachment.filename.as_deref().unwrap_or("attachment");
+    let content_disposition = format!(
+        "{disposition_kind}; filename=\"{}\"",
+        escape_content_disposition_filename(filename)
+    );
+
+    let mut response = Response::new(Body::from(bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(attachment.mime_type.as_str())
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&content_disposition)
+            .map_err(|_| internal_error("invalid content disposition header".to_string()))?,
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=300"),
+    );
+    Ok(response)
+}
+
+fn rewrite_inline_attachment_urls(
+    html: &str,
+    source_id: &str,
+    message_id: &str,
+    attachments: &[MessageAttachment],
+) -> String {
+    let mut rewritten = html.to_string();
+    for attachment in attachments {
+        if !attachment.is_inline {
+            continue;
+        }
+        let Some(cid) = attachment.cid.as_deref() else {
+            continue;
+        };
+        let normalized = cid.trim().trim_start_matches('<').trim_end_matches('>');
+        let url = format!(
+            "/v1/sources/{source_id}/messages/{message_id}/attachments/{}",
+            attachment.id
+        );
+        rewritten = rewritten.replace(&format!("cid:{normalized}"), &url);
+        rewritten = rewritten.replace(&format!("cid:<{normalized}>"), &url);
+    }
+    rewritten
+}
+
+fn escape_content_disposition_filename(filename: &str) -> String {
+    filename.replace('\\', "_").replace('"', "'")
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
