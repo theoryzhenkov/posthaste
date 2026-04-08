@@ -70,7 +70,7 @@ export function AccountListPane({
     <>
       <section className="border-b border-border px-4 py-4">
         <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
-          application
+          preferences
         </p>
         <div className="mt-3 grid gap-3">
           <div className="grid gap-1.5 text-sm">
@@ -178,7 +178,7 @@ export function AccountListPane({
               </div>
 
               <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                <MetaStat label="Push" value={account.push} />
+                <MetaStat label="Real-time sync" value={account.push} />
                 <MetaStat
                   label="Password"
                   value={account.transport.secret.configured ? "configured" : "missing"}

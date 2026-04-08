@@ -6,7 +6,7 @@
  * @spec docs/L0-ui#navigation-model
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
 import { Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
@@ -14,6 +14,7 @@ import type { MessageSummary } from "./api/types";
 import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ShortcutReference } from "./components/ShortcutReference";
 import { Sidebar, type SidebarSelection } from "./components/Sidebar";
 import {
   ResizableHandle,
@@ -58,6 +59,20 @@ function MailClient() {
   const [isSettingsPinned, setIsSettingsPinned] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      if (event.key === "?") {
+        setShowShortcuts((prev) => !prev);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ["accounts"],
@@ -133,6 +148,8 @@ function MailClient() {
               <ToolbarButton
                 icon={<Archive size={16} />}
                 title="Archive (e)"
+                label="Archive"
+                shortcut="e"
                 onClick={() =>
                   actions.archive({
                     sourceId: selectedMessage.sourceId,
@@ -143,6 +160,8 @@ function MailClient() {
               <ToolbarButton
                 icon={<Trash2 size={16} />}
                 title="Trash (#)"
+                label="Trash"
+                shortcut="#"
                 onClick={() =>
                   actions.trash({
                     sourceId: selectedMessage.sourceId,
@@ -275,28 +294,41 @@ function MailClient() {
           </ResizablePanel>
         </ResizablePanelGroup>
       )}
+
+      {showShortcuts && <ShortcutReference onClose={() => setShowShortcuts(false)} />}
     </div>
   );
 }
 
-/** Compact icon-only toolbar button. */
+/** Toolbar button with optional text label and shortcut hint. */
 function ToolbarButton({
   icon,
   title,
+  label,
+  shortcut,
   onClick,
 }: {
   icon: React.ReactNode;
   title: string;
+  label?: string;
+  shortcut?: string;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       title={title}
-      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className={cn(
+        "flex items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+        label ? "h-7 gap-1.5 px-2" : "size-7",
+      )}
       onClick={onClick}
     >
       {icon}
+      {label && <span className="text-xs">{label}</span>}
+      {shortcut && (
+        <kbd className="ml-1 text-[10px] text-muted-foreground/60">{shortcut}</kbd>
+      )}
     </button>
   );
 }

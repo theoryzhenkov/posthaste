@@ -243,12 +243,12 @@ export function SettingsPanel({
     <section className="flex h-full min-h-0 flex-col bg-card text-card-foreground">
       <div className="border-b border-border px-4 py-3">
         <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
-          daemon control plane
+          posthaste
         </p>
         <div className="mt-2">
           <h2 className="text-lg font-semibold tracking-tight">Settings</h2>
           <p className="text-sm text-muted-foreground">
-            Configure accounts, secure credentials, and runtime defaults.
+            Manage your mail accounts and preferences.
           </p>
         </div>
       </div>

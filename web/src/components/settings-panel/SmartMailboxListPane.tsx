@@ -40,7 +40,7 @@ export function SmartMailboxListPane({
             smart mailboxes
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Unified defaults and saved message queries.
+            Virtual mailboxes that organize mail from all your accounts.
           </p>
         </div>
         <div className="flex gap-2">
