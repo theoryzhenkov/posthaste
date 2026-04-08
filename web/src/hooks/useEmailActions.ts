@@ -8,6 +8,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { fetchSidebar, performMessageCommand } from "../api/client";
 import type {
   KnownMailboxRole,
@@ -296,18 +297,58 @@ export function useEmailActions() {
         target: toSourceMessageRef(message),
       });
     },
-    archive: (target: SourceMessageRef) =>
-      mutation.mutate({
-        conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
-        mailboxRole: "archive",
-        target,
-      }),
-    trash: (target: SourceMessageRef) =>
-      mutation.mutate({
-        conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
-        mailboxRole: "trash",
-        target,
-      }),
+    archive: (target: SourceMessageRef) => {
+      mutation.mutate(
+        {
+          conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
+          mailboxRole: "archive",
+          target,
+        },
+        {
+          onSuccess: () => {
+            toast("Message archived", {
+              duration: 5000,
+              action: {
+                label: "Undo",
+                onClick: () =>
+                  mutation.mutate({
+                    conversationId:
+                      findConversationIdForMessage(queryClient, target) ?? undefined,
+                    mailboxRole: "inbox",
+                    target,
+                  }),
+              },
+            });
+          },
+        },
+      );
+    },
+    trash: (target: SourceMessageRef) => {
+      mutation.mutate(
+        {
+          conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
+          mailboxRole: "trash",
+          target,
+        },
+        {
+          onSuccess: () => {
+            toast("Message trashed", {
+              duration: 5000,
+              action: {
+                label: "Undo",
+                onClick: () =>
+                  mutation.mutate({
+                    conversationId:
+                      findConversationIdForMessage(queryClient, target) ?? undefined,
+                    mailboxRole: "inbox",
+                    target,
+                  }),
+              },
+            });
+          },
+        },
+      );
+    },
     deletePermanently: (target: SourceMessageRef) =>
       mutation.mutate({
         command: { kind: "destroy" },

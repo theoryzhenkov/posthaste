@@ -213,13 +213,22 @@ export function AccountEditor({
                   size="xs"
                   type="button"
                   variant={form.secretMode === mode ? "default" : "outline"}
-                  onClick={() =>
+                  onClick={() => {
+                    if (
+                      mode === "clear" &&
+                      editingAccount?.transport.secret.configured &&
+                      !window.confirm(
+                        "Are you sure? The stored password will be permanently removed.",
+                      )
+                    ) {
+                      return;
+                    }
                     setForm((current) => ({
                       ...current,
                       secretMode: mode,
                       password: mode === "replace" ? current.password : "",
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   {mode}
                 </Button>
