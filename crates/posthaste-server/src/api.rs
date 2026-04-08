@@ -49,6 +49,7 @@ pub struct ListConversationsQuery {
     pub cursor: Option<String>,
     pub sort: Option<ConversationSortField>,
     pub sort_dir: Option<SortDirection>,
+    pub q: Option<String>,
 }
 
 /// Query parameters for source-scoped message listing.
@@ -766,6 +767,43 @@ pub async fn list_smart_mailbox_conversations(
     let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
+
+    // When a search query is provided, AND it with the smart mailbox rule.
+    if let Some(q) = &query.q {
+        if !q.trim().is_empty() {
+            let search_rule =
+                posthaste_domain::search::parse_query(q).map_err(|msg| {
+                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg)
+                })?;
+            let mailbox = state
+                .service
+                .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
+                .map_err(ApiError::from_service_error)?;
+            let combined = SmartMailboxRule {
+                root: posthaste_domain::SmartMailboxGroup {
+                    operator: posthaste_domain::SmartMailboxGroupOperator::All,
+                    negated: false,
+                    nodes: vec![
+                        posthaste_domain::SmartMailboxRuleNode::Group(mailbox.rule.root),
+                        posthaste_domain::SmartMailboxRuleNode::Group(search_rule.root),
+                    ],
+                },
+            };
+            return state
+                .service
+                .query_conversations_by_rule(
+                    &combined,
+                    limit,
+                    cursor.as_ref(),
+                    sort_field,
+                    sort_direction,
+                )
+                .map(conversation_page_response)
+                .map(Json)
+                .map_err(ApiError::from_service_error);
+        }
+    }
+
     state
         .service
         .list_smart_mailbox_conversations(
@@ -788,12 +826,34 @@ pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListConversationsQuery>,
 ) -> Result<Json<ConversationPageResponse>, ApiError> {
-    let source_id = query.source_id.as_deref().map(AccountId::from);
-    let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
     let limit = conversation_limit(query.limit)?;
     let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
+
+    // When a search query is provided, parse it into a rule and search globally.
+    if let Some(q) = &query.q {
+        if !q.trim().is_empty() {
+            let rule = posthaste_domain::search::parse_query(q).map_err(|msg| {
+                ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg)
+            })?;
+            return state
+                .service
+                .query_conversations_by_rule(
+                    &rule,
+                    limit,
+                    cursor.as_ref(),
+                    sort_field,
+                    sort_direction,
+                )
+                .map(conversation_page_response)
+                .map(Json)
+                .map_err(ApiError::from_service_error);
+        }
+    }
+
+    let source_id = query.source_id.as_deref().map(AccountId::from);
+    let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
     state
         .service
         .list_conversations(
