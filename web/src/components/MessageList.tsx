@@ -45,6 +45,7 @@ import {
   type ConversationPageSlice,
   type MailSelection,
 } from "../mailState";
+import { AlertCircle, Inbox, MousePointerClick } from "lucide-react";
 import type { SidebarSelection } from "./Sidebar";
 import { MessageRow } from "./MessageRow";
 import { ColumnPickerMenu } from "./thread-list/ColumnPickerMenu";
@@ -172,6 +173,7 @@ export function MessageList({
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
+    refetch,
     error,
   } = useInfiniteQuery({
     queryKey,
@@ -460,8 +462,12 @@ export function MessageList({
 
   if (!selectedView) {
     return (
-      <div className="flex items-center justify-center border-r border-border bg-background p-6">
-        <p className="text-sm text-muted-foreground">No mailbox selected</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 border-r border-border bg-background p-6">
+        <MousePointerClick size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+        <div className="text-center">
+          <p className="text-sm font-medium text-muted-foreground">No mailbox selected</p>
+          <p className="mt-1 text-xs text-muted-foreground/60">Pick a mailbox to get started</p>
+        </div>
       </div>
     );
   }
@@ -520,15 +526,46 @@ export function MessageList({
         onScroll={handleScroll}
       >
         {isLoading && (
-          <p className="px-3 py-4 text-sm text-muted-foreground">Loading threads...</p>
+          <div className="space-y-0">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="border-b border-border px-3 py-4"
+                style={{ height: ROW_HEIGHT }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
+                  <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+                </div>
+                <div className="mt-2.5 h-3 w-3/4 animate-pulse rounded bg-muted" />
+                <div className="mt-2 h-3 w-1/2 animate-pulse rounded bg-muted/60" />
+              </div>
+            ))}
+          </div>
         )}
         {error && (
-          <p className="px-3 py-4 text-sm text-destructive">Failed to load threads</p>
+          <div className="flex flex-col items-center gap-3 px-3 py-12">
+            <AlertCircle size={32} strokeWidth={1.5} className="text-destructive/50" />
+            <p className="text-sm text-destructive">Failed to load threads</p>
+            <button
+              type="button"
+              className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => void refetch()}
+            >
+              Try again
+            </button>
+          </div>
         )}
         {!isLoading && !error && conversationIds.length === 0 && (
-          <p className="px-3 py-4 text-sm text-muted-foreground">
-            No threads in this view.
-          </p>
+          <div className="flex flex-col items-center gap-3 px-3 py-12">
+            <Inbox size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+            <div className="text-center">
+              <p className="text-sm font-medium text-muted-foreground">No threads here yet</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">
+                Messages will appear as they arrive
+              </p>
+            </div>
+          </div>
         )}
         {conversationIds.length > 0 && (
           <>
