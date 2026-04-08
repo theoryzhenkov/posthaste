@@ -8,6 +8,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
+import { Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
 import type { MessageSummary } from "./api/types";
 import { MessageDetail } from "./components/MessageDetail";
@@ -308,6 +309,12 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <MailClient />
+      <Toaster
+        position="bottom-center"
+        toastOptions={{
+          className: "font-sans text-sm",
+        }}
+      />
     </QueryClientProvider>
   );
 }
