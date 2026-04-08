@@ -102,8 +102,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   date: {
     id: "date",
     label: "Date",
-    gridWidth: "100px",
-    align: "right",
+    gridWidth: "160px",
     render: (c) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
         {formatRelativeTime(c.latestReceivedAt)}
@@ -114,7 +113,6 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     id: "source",
     label: "Source",
     gridWidth: "80px",
-    align: "right",
     render: (c) => (
       <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
         {c.latestSourceName}

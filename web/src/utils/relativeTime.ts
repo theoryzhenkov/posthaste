@@ -1,41 +1,43 @@
-const MINUTE = 60;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-});
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/** Pad a number to 2 digits with a leading zero. */
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
 
 /**
- * Formats a date as a relative time string.
- * - Under 1 minute: "just now"
- * - Under 1 hour: "X min ago"
- * - Under 24 hours: "X hours ago"
- * - Under 7 days: "X days ago"
- * - Otherwise: formatted date (e.g., "Mar 25")
+ * Formats a date in MailMate style:
+ * - Today:     "Today  HH:MM"
+ * - Yesterday: "Yesterday  HH:MM"
+ * - Older:     "D Mon YYYY  HH:MM"
+ *
+ * Uses 24-hour time. A double-space separates the date and time parts
+ * for visual breathing room.
  *
  * @spec docs/L1-ui#messagelist
  */
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);
   const now = new Date();
-  const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-  if (diffSeconds < MINUTE) {
-    return "just now";
+  const time = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+
+  // Compare calendar dates in local time
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
+
+  if (date >= todayStart) {
+    return `Today  ${time}`;
   }
-  if (diffSeconds < HOUR) {
-    const minutes = Math.floor(diffSeconds / MINUTE);
-    return `${minutes} min ago`;
-  }
-  if (diffSeconds < DAY) {
-    const hours = Math.floor(diffSeconds / HOUR);
-    return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-  }
-  if (diffSeconds < 7 * DAY) {
-    const days = Math.floor(diffSeconds / DAY);
-    return `${days} ${days === 1 ? "day" : "days"} ago`;
+  if (date >= yesterdayStart) {
+    return `Yesterday  ${time}`;
   }
 
-  return DATE_FORMATTER.format(date);
+  const day = date.getDate();
+  const month = MONTHS[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}  ${time}`;
 }
