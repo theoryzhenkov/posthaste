@@ -6,7 +6,7 @@
  * @spec docs/L0-ui#navigation-model
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
 import { Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
@@ -24,6 +24,7 @@ import {
 } from "./components/ui/resizable";
 import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
+import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useEmailActions } from "./hooks/useEmailActions";
 import { mailKeys, type MailSelection } from "./mailState";
 
@@ -57,6 +58,8 @@ function MailClient() {
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(null);
   const [isSettingsPinned, setIsSettingsPinned] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
@@ -65,6 +68,10 @@ function MailClient() {
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       if (event.key === "?") {
         setShowShortcuts((prev) => !prev);
+      }
+      if (event.key === "/") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
       }
     }
 
@@ -103,6 +110,10 @@ function MailClient() {
   });
   const actions = useEmailActions();
 
+  const handleSearch = useCallback((query: string, append?: boolean) => {
+    setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query));
+  }, []);
+
   function handleSelectMessage(message: MessageSummary) {
     setSelectedMessage({
       conversationId: message.conversationId,
@@ -118,11 +129,13 @@ function MailClient() {
   function handleSelectSmartMailbox(smartMailboxId: string, name: string) {
     setSelectedView({ kind: "smart-mailbox", id: smartMailboxId, name });
     setSelectedMessage(null);
+    setSearchQuery("");
   }
 
   function handleSelectSourceMailbox(sourceId: string, mailboxId: string, name: string) {
     setSelectedView({ kind: "source-mailbox", sourceId, mailboxId, name });
     setSelectedMessage(null);
+    setSearchQuery("");
   }
 
   if (isLoading) {
@@ -205,9 +218,16 @@ function MailClient() {
           <div className="relative flex items-center">
             <Search size={14} className="absolute left-2 text-muted-foreground" />
             <input
+              ref={searchInputRef}
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                  searchInputRef.current?.blur();
+                }
+              }}
               placeholder="Search..."
               className="h-7 w-48 rounded border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
             />
@@ -284,6 +304,7 @@ function MailClient() {
               selection={selectedMessage}
               onSelectMessage={handleSelectMessageRef}
               actions={actions}
+              searchQuery={debouncedQuery}
             />
           </ResizablePanel>
           <ResizableHandle />
@@ -291,6 +312,7 @@ function MailClient() {
             <MessageDetail
               selection={selectedMessage}
               onSelectMessage={handleSelectMessage}
+              onSearch={handleSearch}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
