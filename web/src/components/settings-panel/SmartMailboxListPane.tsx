@@ -3,6 +3,7 @@
  *
  * @spec docs/L1-api#smart-mailbox-crud
  */
+import { FolderSearch } from "lucide-react";
 import type { SmartMailboxSummary } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -70,8 +71,14 @@ export function SmartMailboxListPane({
           </p>
         )}
         {smartMailboxSummaries.length === 0 && (
-          <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-            No smart mailboxes saved yet.
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-4 py-8">
+            <FolderSearch size={32} strokeWidth={1.5} className="text-muted-foreground/40" />
+            <div className="text-center">
+              <p className="text-sm font-medium text-muted-foreground">No smart mailboxes yet</p>
+              <p className="mt-1 text-xs text-muted-foreground/60">
+                Create one to organize your mail
+              </p>
+            </div>
           </div>
         )}
         {smartMailboxSummaries.map((smartMailbox) => (

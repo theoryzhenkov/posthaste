@@ -7,7 +7,7 @@
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Archive, Search, Settings, Star, Trash2, X } from "lucide-react";
+import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
 import { fetchAccounts, fetchMessage } from "./api/client";
 import type { MessageSummary } from "./api/types";
 import { MessageDetail } from "./components/MessageDetail";
@@ -112,7 +112,12 @@ function MailClient() {
   }
 
   if (isLoading) {
-    return <div className="flex h-full items-center justify-center">Loading accounts...</div>;
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <Loader2 size={24} className="animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Setting up...</p>
+      </div>
+    );
   }
 
   return (

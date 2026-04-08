@@ -9,7 +9,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { fetchSidebar } from "../api/client";
 import type { Mailbox, SidebarResponse } from "../api/types";
 import { cn } from "../lib/utils";
@@ -182,7 +182,7 @@ export function Sidebar({
   onSelectSmartMailbox,
   onSelectSourceMailbox,
 }: SidebarProps) {
-  const { data: sidebar, isLoading, error } = useQuery({
+  const { data: sidebar, isLoading, error, refetch } = useQuery({
     queryKey: ["sidebar"],
     queryFn: fetchSidebar,
   });
@@ -193,9 +193,33 @@ export function Sidebar({
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
       <nav className="flex-1 min-h-0 overflow-y-auto pt-1">
-        {isLoading && <p className="px-3 py-2 text-xs text-muted-foreground">Loading...</p>}
+        {isLoading && (
+          <div className="space-y-1 px-3 py-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2 py-1.5">
+                <div className="h-3.5 w-3.5 animate-pulse rounded bg-muted" />
+                <div
+                  className="h-3 animate-pulse rounded bg-muted"
+                  style={{ width: `${60 + ((i * 17) % 30)}%` }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
         {error && (
-          <p className="px-3 py-2 text-xs text-destructive">Failed to load sidebar</p>
+          <div className="px-3 py-4">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <AlertCircle size={20} className="text-destructive/60" />
+              <p className="text-xs text-destructive">Failed to load sidebar</p>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={() => void refetch()}
+              >
+                Try again
+              </button>
+            </div>
+          </div>
         )}
         {sidebar && (
           <>
