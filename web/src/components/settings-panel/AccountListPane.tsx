@@ -5,6 +5,7 @@
  * @spec docs/L1-api#account-crud-lifecycle
  */
 import type { UseMutationResult } from "@tanstack/react-query";
+import { UserPlus } from "lucide-react";
 import type { AccountOverview } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
@@ -112,8 +113,14 @@ export function AccountListPane({
         </div>
         <div className="mt-3 space-y-3">
           {accounts.length === 0 && (
-            <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-              No accounts configured yet. Create one on the right and save it to the daemon.
+            <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-4 py-8">
+              <UserPlus size={32} strokeWidth={1.5} className="text-muted-foreground/40" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-muted-foreground">No accounts yet</p>
+                <p className="mt-1 text-xs text-muted-foreground/60">
+                  Create one to start syncing your mail
+                </p>
+              </div>
             </div>
           )}
           {accounts.map((account) => (

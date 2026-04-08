@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, Mail } from "lucide-react";
 import { buildMessageAttachmentUrl, fetchConversation, fetchMessage } from "../api/client";
 import type { MessageAttachment, MessageSummary, SourceMessageRef } from "../api/types";
 import { cn } from "../lib/utils";
@@ -138,16 +139,32 @@ export function MessageDetail({
 
   if (!selection) {
     return (
-      <div className="flex items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Select a message</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background">
+        <Mail size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+        <div className="text-center">
+          <p className="text-sm font-medium text-muted-foreground">No conversation selected</p>
+          <p className="mt-1 text-xs text-muted-foreground/60">Select a conversation to read it</p>
+        </div>
       </div>
     );
   }
 
   if (conversationQuery.isLoading || messageQuery.isLoading) {
     return (
-      <div className="flex items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Loading...</p>
+      <div className="flex h-full flex-col bg-background">
+        <div className="shrink-0 border-b border-border px-4 py-3 space-y-3">
+          <div className="h-5 w-3/4 animate-pulse rounded bg-muted" />
+          <div className="flex items-center gap-3">
+            <div className="h-3.5 w-32 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-20 animate-pulse rounded bg-muted/60" />
+          </div>
+        </div>
+        <div className="flex-1 p-4 space-y-3">
+          <div className="h-3 w-full animate-pulse rounded bg-muted/60" />
+          <div className="h-3 w-5/6 animate-pulse rounded bg-muted/60" />
+          <div className="h-3 w-4/6 animate-pulse rounded bg-muted/40" />
+          <div className="h-3 w-3/4 animate-pulse rounded bg-muted/40" />
+        </div>
       </div>
     );
   }
@@ -157,8 +174,19 @@ export function MessageDetail({
 
   if (conversationQuery.error || messageQuery.error || !conversation || !message) {
     return (
-      <div className="flex items-center justify-center bg-background">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background">
+        <AlertCircle size={32} strokeWidth={1.5} className="text-destructive/50" />
         <p className="text-sm text-destructive">Failed to load conversation</p>
+        <button
+          type="button"
+          className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => {
+            void conversationQuery.refetch();
+            void messageQuery.refetch();
+          }}
+        >
+          Try again
+        </button>
       </div>
     );
   }
