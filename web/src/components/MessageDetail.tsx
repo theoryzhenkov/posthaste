@@ -6,14 +6,15 @@
  *
  * @spec docs/L1-ui#messagedetail-and-emailframe
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchConversation, fetchMessage } from "../api/client";
-import type { MessageSummary, SourceMessageRef } from "../api/types";
+import { buildMessageAttachmentUrl, fetchConversation, fetchMessage } from "../api/client";
+import type { MessageAttachment, MessageSummary, SourceMessageRef } from "../api/types";
 import { cn } from "../lib/utils";
 import { mergeConversationView } from "../mailState";
 import { formatRelativeTime } from "../utils/relativeTime";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 import { EmailFrame } from "./EmailFrame";
 
@@ -51,6 +52,56 @@ function dedupeConversationMessages(messages: MessageSummary[]): MessageSummary[
   });
 }
 
+function canPreviewAttachment(attachment: MessageAttachment): boolean {
+  return (
+    attachment.mimeType.startsWith("image/") ||
+    attachment.mimeType === "application/pdf" ||
+    attachment.mimeType.startsWith("text/")
+  );
+}
+
+function formatAttachmentSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function AttachmentPreview({
+  attachment,
+  messageId,
+  sourceId,
+}: {
+  attachment: MessageAttachment;
+  messageId: string;
+  sourceId: string;
+}) {
+  const attachmentUrl = buildMessageAttachmentUrl(sourceId, messageId, attachment.id);
+
+  if (attachment.mimeType.startsWith("image/")) {
+    return (
+      <div className="flex h-full items-center justify-center bg-card">
+        <img
+          alt={attachment.filename ?? "Attachment preview"}
+          className="max-h-full max-w-full object-contain"
+          src={attachmentUrl}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <iframe
+      className="h-full w-full border-0 bg-card"
+      src={attachmentUrl}
+      title={attachment.filename ?? "Attachment preview"}
+    />
+  );
+}
+
 /**
  * Message detail pane with sticky header, thread switcher, and email body.
  *
@@ -61,6 +112,7 @@ export function MessageDetail({
   onSelectMessage,
 }: MessageDetailProps) {
   const queryClient = useQueryClient();
+  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null);
   const conversationQuery = useQuery({
     queryKey: ["conversation", selection?.conversationId],
     queryFn: () => fetchConversation(selection!.conversationId),
@@ -79,6 +131,10 @@ export function MessageDetail({
     }
     mergeConversationView(queryClient, conversationQuery.data);
   }, [conversationQuery.data, queryClient]);
+
+  useEffect(() => {
+    setSelectedAttachmentId(null);
+  }, [selection?.messageId, selection?.sourceId]);
 
   if (!selection) {
     return (
@@ -111,6 +167,8 @@ export function MessageDetail({
   const senderEmail = message.fromEmail ?? "";
   const tags = userTags(message.keywords);
   const threadMessages = dedupeConversationMessages(conversation.messages);
+  const selectedAttachment =
+    message.attachments.find((attachment) => attachment.id === selectedAttachmentId) ?? null;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
@@ -149,6 +207,59 @@ export function MessageDetail({
           </div>
         )}
 
+        {message.attachments.length > 0 && (
+          <div className="space-y-2">
+            <Separator />
+            <div className="flex flex-col gap-2">
+              {message.attachments.map((attachment) => {
+                const canPreview = canPreviewAttachment(attachment);
+                const isSelected = attachment.id === selectedAttachmentId;
+                const downloadUrl = buildMessageAttachmentUrl(
+                  message.sourceId,
+                  message.id,
+                  attachment.id,
+                  { download: true },
+                );
+
+                return (
+                  <div
+                    className="flex items-center justify-between gap-3 rounded-md border border-border bg-card/70 px-3 py-2"
+                    key={attachment.id}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {attachment.filename ?? "Unnamed attachment"}
+                      </p>
+                      <p className="font-mono text-[11px] text-muted-foreground">
+                        {attachment.mimeType} · {formatAttachmentSize(attachment.size)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {canPreview && (
+                        <Button
+                          onClick={() =>
+                            setSelectedAttachmentId(isSelected ? null : attachment.id)
+                          }
+                          size="sm"
+                          type="button"
+                          variant={isSelected ? "secondary" : "outline"}
+                        >
+                          {isSelected ? "Hide" : "View"}
+                        </Button>
+                      )}
+                      <Button asChild size="sm" type="button" variant="outline">
+                        <a download href={downloadUrl}>
+                          Download
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Thread switcher */}
         {threadMessages.length > 1 && (
           <div className="space-y-2">
@@ -184,20 +295,32 @@ export function MessageDetail({
       </div>
 
       {/* Email body */}
-      <div className="min-h-0 flex-1 overflow-hidden p-4">
-        {message.bodyHtml ? (
-          <div className="h-full overflow-hidden border border-border bg-card">
-            <EmailFrame html={message.bodyHtml} />
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
+        {selectedAttachment && (
+          <div className="h-72 shrink-0 overflow-hidden rounded-md border border-border bg-card">
+            <AttachmentPreview
+              attachment={selectedAttachment}
+              messageId={message.id}
+              sourceId={message.sourceId}
+            />
           </div>
-        ) : message.bodyText ? (
-          <pre className="h-full overflow-auto whitespace-pre-wrap border border-border p-4 font-mono text-sm leading-relaxed text-foreground/90">
-            {message.bodyText}
-          </pre>
-        ) : (
-          <p className="h-full overflow-auto border border-border p-4 text-sm text-muted-foreground">
-            {message.preview ?? "No content available."}
-          </p>
         )}
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {message.bodyHtml ? (
+            <div className="h-full overflow-hidden border border-border bg-card">
+              <EmailFrame html={message.bodyHtml} />
+            </div>
+          ) : message.bodyText ? (
+            <pre className="h-full overflow-auto whitespace-pre-wrap border border-border p-4 font-mono text-sm leading-relaxed text-foreground/90">
+              {message.bodyText}
+            </pre>
+          ) : (
+            <p className="h-full overflow-auto border border-border p-4 text-sm text-muted-foreground">
+              {message.preview ?? "No content available."}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

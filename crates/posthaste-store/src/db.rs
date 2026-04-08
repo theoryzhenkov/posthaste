@@ -87,6 +87,21 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 PRIMARY KEY (account_id, message_id)
             );
 
+            CREATE TABLE IF NOT EXISTS message_attachment (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                blob_id TEXT NOT NULL,
+                part_id TEXT,
+                filename TEXT,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL DEFAULT 0,
+                disposition TEXT,
+                cid TEXT,
+                is_inline INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, message_id, id)
+            );
+
             CREATE TABLE IF NOT EXISTS thread_view (
                 account_id TEXT NOT NULL,
                 id TEXT NOT NULL,
@@ -127,6 +142,8 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 ON message_mailbox (account_id, mailbox_id);
             CREATE INDEX IF NOT EXISTS idx_message_keyword
                 ON message_keyword (account_id, keyword);
+            CREATE INDEX IF NOT EXISTS idx_message_attachment_blob
+                ON message_attachment (account_id, blob_id);
             CREATE INDEX IF NOT EXISTS idx_event_log_lookup
                 ON event_log (account_id, topic, mailbox_id, seq);
             CREATE INDEX IF NOT EXISTS idx_conversation_message_lookup

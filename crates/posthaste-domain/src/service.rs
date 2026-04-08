@@ -316,7 +316,14 @@ impl MailService {
         sort_direction: SortDirection,
     ) -> Result<ConversationPage, ServiceError> {
         self.store
-            .list_conversations(account_id, mailbox_id, limit, cursor, sort_field, sort_direction)
+            .list_conversations(
+                account_id,
+                mailbox_id,
+                limit,
+                cursor,
+                sort_field,
+                sort_direction,
+            )
             .map_err(Into::into)
     }
 
@@ -354,7 +361,9 @@ impl MailService {
             .get_message_detail(account_id, message_id)?
             .not_found("message", message_id.as_str())?;
 
-        if detail.body_html.is_some() || detail.body_text.is_some() {
+        let body_loaded = detail.body_html.is_some() || detail.body_text.is_some();
+        let attachments_loaded = !detail.summary.has_attachment || !detail.attachments.is_empty();
+        if body_loaded && attachments_loaded {
             return Ok(CommandResult {
                 detail: Some(detail),
                 events: Vec::new(),
@@ -371,6 +380,18 @@ impl MailService {
         let fetched = gateway.fetch_message_body(account_id, message_id).await?;
         self.store
             .apply_message_body(account_id, message_id, &fetched)
+            .map_err(Into::into)
+    }
+
+    /// Download a blob for a specific account via the registered gateway.
+    pub async fn download_blob(
+        &self,
+        account_id: &AccountId,
+        blob_id: &crate::BlobId,
+    ) -> Result<Vec<u8>, ServiceError> {
+        self.required_gateway(account_id)?
+            .download_blob(account_id, blob_id)
+            .await
             .map_err(Into::into)
     }
 
@@ -1100,6 +1121,14 @@ mod tests {
             _account_id: &AccountId,
             _message_id: &MessageId,
         ) -> Result<FetchedBody, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
+        }
+
+        async fn download_blob(
+            &self,
+            _account_id: &AccountId,
+            _blob_id: &crate::BlobId,
+        ) -> Result<Vec<u8>, GatewayError> {
             Err(GatewayError::Rejected("unused".to_string()))
         }
 
