@@ -108,7 +108,7 @@ export function AccountEditor({
               : editingAccount?.name ?? "Edit account"}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Save first, then verify against the configured daemon secret store.
+            Save first, then verify to confirm the connection works.
           </p>
         </div>
         {editorTarget !== "new" && (
@@ -187,7 +187,7 @@ export function AccountEditor({
               <p className="text-xs text-muted-foreground">
                 {editingAccount?.transport.secret.configured
                   ? "A password is already stored securely. You can keep, replace, or clear it."
-                  : "Passwords are write-only and stored through the OS credential store."}
+                  : "Passwords are stored securely and can't be read back."}
               </p>
             </div>
             {editingAccount?.transport.secret.configured && (
