@@ -32,3 +32,39 @@ test *args:
 build:
     just backend build
     just frontend build
+
+# --- Local Stalwart dev server (end-to-end testing) ---
+# See dev/stalwart/ for config and seed script. Typical flow:
+#   terminal 1: just stalwart-up
+#   terminal 2: just stalwart-seed
+#   terminal 3: eval $(just stalwart-dev) && just backend run
+
+# Admin password for Stalwart's fallback-admin + dev mailbox password.
+# Override with `just stalwart-up admin=... user=...` or set env vars directly.
+STALWART_ADMIN_PASSWORD := env_var_or_default("POSTHASTE_STALWART_ADMIN_PASSWORD", "devadmin")
+STALWART_USER_PASSWORD := env_var_or_default("POSTHASTE_STALWART_USER_PASSWORD", "devpass")
+STALWART_DATA := justfile_directory() / "dev/stalwart/data"
+STALWART_LOGS := justfile_directory() / "dev/stalwart/logs"
+
+# Start Stalwart in the foreground. Ctrl-C to stop.
+stalwart-up:
+    POSTHASTE_STALWART_DATA={{ STALWART_DATA }} \
+    POSTHASTE_STALWART_LOGS={{ STALWART_LOGS }} \
+    POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
+        stalwart -c dev/stalwart/config.toml
+
+# Provision the dev domain + mailbox user. Idempotent.
+stalwart-seed:
+    POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
+    POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }} \
+        bash dev/stalwart/seed.sh
+
+# Wipe Stalwart data + logs for a clean slate.
+stalwart-reset:
+    rm -rf {{ STALWART_DATA }} {{ STALWART_LOGS }}
+
+# Print export lines that point posthaste-daemon at the local Stalwart.
+# Usage: eval $(just stalwart-dev)
+stalwart-dev:
+    @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/dev/bootstrap.stalwart.toml'
+    @echo 'export POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }}'

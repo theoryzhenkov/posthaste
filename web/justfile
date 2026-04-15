@@ -1,7 +1,11 @@
 # Frontend (React/Vite) recipes
 
-# Start dev server
+# Start the full dev stack (stalwart + daemon + vite) in a zellij session.
 dev:
+    bash ../dev/zellij/launch.sh web
+
+# Start the vite dev server alone. Assumes the backend is already running.
+dev-frontend:
     bun run dev
 
 # Production build

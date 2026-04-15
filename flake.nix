@@ -39,6 +39,12 @@
             pkgs.nodejs_22
             pkgs.bun
 
+            # Local JMAP server for end-to-end dev/testing
+            pkgs.stalwart
+
+            # Dev-stack process orchestrator (stalwart + daemon + vite in panes)
+            pkgs.zellij
+
             # Docs (mkdocs-material via Python)
             pkgs.python3
             pkgs.python3Packages.mkdocs-material
