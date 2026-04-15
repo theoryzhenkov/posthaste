@@ -39,4 +39,8 @@ Thumbs.db
 # legacy
 /swift/MailClient/.build
 .env
+.envrc
+.direnv/
 /crates/data/
+.claude/
+src-tauri/gen/schemas/
