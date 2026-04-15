@@ -1,7 +1,11 @@
 # Desktop (Tauri) recipes
 
-# Run in dev mode
+# Start the full dev stack (stalwart + tauri, which embeds daemon + vite) in a zellij session.
 dev:
+    bash ../dev/zellij/launch.sh desktop
+
+# Run tauri alone (backend embedded, vite via beforeDevCommand). Does NOT start stalwart.
+dev-solo:
     cargo tauri dev
 
 # Build for release

@@ -1,0 +1,20 @@
+# Posthaste bootstrap pointing at the local Stalwart dev server.
+# Used via POSTHASTE_BOOTSTRAP_PATH. The dev mailbox password is read from
+# POSTHASTE_STALWART_USER_PASSWORD via env-backed secretRef (never the keyring).
+
+[seed.app]
+defaultAccountId = "local-stalwart"
+
+[[seed.accounts]]
+id = "local-stalwart"
+name = "Local Stalwart"
+driver = "jmap"
+enabled = true
+
+[seed.accounts.transport]
+baseUrl = "http://127.0.0.1:8080"
+username = "dev"
+
+[seed.accounts.transport.secretRef]
+kind = "env"
+key = "POSTHASTE_STALWART_USER_PASSWORD"

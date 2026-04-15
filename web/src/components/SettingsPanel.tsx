@@ -232,12 +232,12 @@ export function SettingsPanel({
 
   const editorKey =
     effectiveEditorTarget === "new"
-      ? "new"
-      : `${effectiveEditorTarget}:${editingAccount?.updatedAt ?? "pending"}`;
+      ? "account:new"
+      : `account:${effectiveEditorTarget}:${editingAccount?.updatedAt ?? "pending"}`;
   const smartMailboxEditorKey =
     effectiveSmartMailboxTarget === "new"
-      ? "new"
-      : `${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? "pending"}`;
+      ? "mailbox:new"
+      : `mailbox:${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? "pending"}`;
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-card text-card-foreground">

@@ -1,0 +1,39 @@
+# Stalwart Mail Server — local dev config for Posthaste end-to-end testing.
+# NOT FOR PRODUCTION USE. Plaintext admin password, no TLS, loopback only.
+
+[server]
+hostname = "127.0.0.1"
+
+[server.listener.http]
+protocol = "http"
+bind = "127.0.0.1:8080"
+url = "http://127.0.0.1:8080"
+
+[storage]
+data = "rocksdb"
+fts = "rocksdb"
+blob = "rocksdb"
+lookup = "rocksdb"
+directory = "internal"
+
+[store.rocksdb]
+type = "rocksdb"
+path = "%{env:POSTHASTE_STALWART_DATA}%"
+compression = "lz4"
+
+[directory.internal]
+type = "internal"
+store = "rocksdb"
+
+[tracer.log]
+type = "log"
+level = "info"
+path = "%{env:POSTHASTE_STALWART_LOGS}%"
+prefix = "stalwart.log"
+rotate = "daily"
+ansi = false
+enable = true
+
+[authentication.fallback-admin]
+user = "admin"
+secret = "%{env:POSTHASTE_STALWART_ADMIN_PASSWORD}%"

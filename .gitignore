@@ -43,4 +43,7 @@ Thumbs.db
 .direnv/
 /crates/data/
 .claude/
+/dev/stalwart/data/
+/dev/stalwart/logs/
+/dev/posthaste/
 src-tauri/gen/schemas/
