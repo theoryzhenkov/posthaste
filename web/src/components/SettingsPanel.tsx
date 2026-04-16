@@ -1,14 +1,14 @@
 /**
  * Full-screen settings panel for account and smart mailbox administration.
  *
- * Two-column layout: left pane lists accounts and smart mailboxes;
- * right pane shows the active editor form.
+ * Left nav rail selects a category; detail area renders the active view.
  *
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#smart-mailbox-crud
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { FolderSearch, Mailbox, Settings as SettingsIcon } from "lucide-react";
+import { useState } from "react";
 import {
   deleteAccount,
   deleteSmartMailbox,
@@ -27,14 +27,25 @@ import type {
   AccountOverview,
   SmartMailboxSummary,
 } from "../api/types";
-import { AccountEditor } from "./settings-panel/AccountEditor";
-import { AccountListPane } from "./settings-panel/AccountListPane";
-import { SmartMailboxEditor } from "./settings-panel/SmartMailboxEditor";
-import { SmartMailboxListPane } from "./settings-panel/SmartMailboxListPane";
+import { AccountsPane } from "./settings-panel/AccountsPane";
+import { GeneralPane } from "./settings-panel/GeneralPane";
+import {
+  SettingsNav,
+  type SettingsNavItem,
+} from "./settings-panel/SettingsNav";
+import { SmartMailboxesPane } from "./settings-panel/SmartMailboxesPane";
 import type {
   EditorTarget,
   SmartMailboxEditorTarget,
 } from "./settings-panel/types";
+
+type SettingsCategory = "general" | "accounts" | "mailboxes";
+
+const NAV_ITEMS: ReadonlyArray<SettingsNavItem<SettingsCategory>> = [
+  { id: "general", label: "General", icon: SettingsIcon },
+  { id: "accounts", label: "Accounts", icon: Mailbox },
+  { id: "mailboxes", label: "Smart Mailboxes", icon: FolderSearch },
+];
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 interface SettingsPanelProps {
@@ -44,7 +55,7 @@ interface SettingsPanelProps {
 }
 
 /**
- * Settings panel with account CRUD, smart mailbox CRUD, and default-account selection.
+ * Settings panel shell: nav rail plus routed detail view.
  *
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#smart-mailbox-crud
@@ -55,6 +66,8 @@ export function SettingsPanel({
   onActiveAccountChange,
 }: SettingsPanelProps) {
   const queryClient = useQueryClient();
+
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("accounts");
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(
     accounts[0]?.id ?? "new",
   );
@@ -62,7 +75,8 @@ export function SettingsPanel({
     useState<SmartMailboxEditorTarget>("new");
   const [smartMailboxActionPendingKey, setSmartMailboxActionPendingKey] =
     useState<string | null>(null);
-  const [smartMailboxActionError, setSmartMailboxActionError] = useState<string | null>(null);
+  const [smartMailboxActionError, setSmartMailboxActionError] =
+    useState<string | null>(null);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -91,7 +105,7 @@ export function SettingsPanel({
   const smartMailboxSummaries = smartMailboxListQuery.data ?? [];
   const effectiveSmartMailboxTarget =
     smartMailboxEditorTarget !== "new" &&
-    !smartMailboxSummaries.some((smartMailbox) => smartMailbox.id === smartMailboxEditorTarget)
+    !smartMailboxSummaries.some((mailbox) => mailbox.id === smartMailboxEditorTarget)
       ? "new"
       : smartMailboxEditorTarget;
   const editingSmartMailboxId =
@@ -103,22 +117,8 @@ export function SettingsPanel({
   });
   const editingSmartMailbox =
     smartMailboxQuery.data ??
-    smartMailboxSummaries.find((smartMailbox) => smartMailbox.id === editingSmartMailboxId) ??
+    smartMailboxSummaries.find((mailbox) => mailbox.id === editingSmartMailboxId) ??
     null;
-
-  const enabledAccounts = useMemo(
-    () => accounts.filter((account) => account.enabled),
-    [accounts],
-  );
-  const accountSummary = useMemo(() => {
-    const readyCount = accounts.filter((account) => account.status === "ready").length;
-    return {
-      total: accounts.length,
-      readyCount,
-      degradedCount: accounts.length - readyCount,
-      enabledCount: enabledAccounts.length,
-    };
-  }, [accounts, enabledAccounts.length]);
 
   const invalidateAccountQueries = async (accountId?: string) => {
     await Promise.all([
@@ -170,12 +170,12 @@ export function SettingsPanel({
   };
 
   const handleReorderSmartMailbox = (
-    smartMailbox: SmartMailboxSummary,
+    mailbox: SmartMailboxSummary,
     position: number,
   ) => {
-    void runSmartMailboxAction(`reorder:${smartMailbox.id}`, async () => {
-      await updateSmartMailbox(smartMailbox.id, { position });
-      await invalidateSmartMailboxQueries(smartMailbox.id);
+    void runSmartMailboxAction(`reorder:${mailbox.id}`, async () => {
+      await updateSmartMailbox(mailbox.id, { position });
+      await invalidateSmartMailboxQueries(mailbox.id);
     });
   };
 
@@ -241,69 +241,78 @@ export function SettingsPanel({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-card text-card-foreground">
-      <div className="border-b border-border px-4 py-3">
+      <header className="border-b border-border px-6 py-3">
         <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
           posthaste
         </p>
-        <div className="mt-2">
-          <h2 className="text-lg font-semibold tracking-tight">Settings</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage your mail accounts and preferences.
-          </p>
-        </div>
-      </div>
+        <h2 className="mt-1 text-lg font-semibold tracking-tight">Settings</h2>
+      </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)]">
-        <div className="min-h-0 overflow-y-auto border-r border-border">
-          <AccountListPane
-            accounts={accounts}
-            selectedAccountId={effectiveEditorTarget}
-            defaultAccountId={settingsQuery.data?.defaultAccountId}
-            accountSummary={accountSummary}
-            onDefaultAccountChange={(accountId) => defaultMutation.mutate(accountId)}
-            onCreateAccount={() => setEditorTarget("new")}
-            onSelectAccount={(accountId) => setEditorTarget(accountId)}
-            onCommand={(action, account) => commandMutation.mutate({ action, account })}
-            defaultMutation={defaultMutation}
-          />
+      <div className="grid min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)]">
+        <SettingsNav
+          items={NAV_ITEMS}
+          activeId={activeCategory}
+          onSelect={setActiveCategory}
+        />
 
-          <SmartMailboxListPane
-            smartMailboxSummaries={smartMailboxSummaries}
-            selectedSmartMailboxId={effectiveSmartMailboxTarget}
-            smartMailboxActionPendingKey={smartMailboxActionPendingKey}
-            smartMailboxActionError={smartMailboxActionError}
-            onResetDefaults={handleResetSmartMailboxes}
-            onCreateMailbox={() => setSmartMailboxEditorTarget("new")}
-            onSelectMailbox={(smartMailboxId) => setSmartMailboxEditorTarget(smartMailboxId)}
-            onReorderMailbox={handleReorderSmartMailbox}
-          />
-        </div>
+        <div className="min-h-0 overflow-hidden">
+          {activeCategory === "general" && (
+            <div className="h-full min-h-0 overflow-y-auto px-6 py-6">
+              <GeneralPane
+                accounts={accounts}
+                smartMailboxes={smartMailboxSummaries}
+                defaultAccountId={settingsQuery.data?.defaultAccountId}
+                onDefaultAccountChange={(accountId) =>
+                  defaultMutation.mutate(accountId)
+                }
+                isPending={defaultMutation.isPending}
+              />
+            </div>
+          )}
 
-        <div className="min-h-0 space-y-4 overflow-y-auto px-4 py-4">
-          <AccountEditor
-            key={editorKey}
-            editorTarget={effectiveEditorTarget}
-            editingAccount={editingAccount}
-            onSaved={async (account) => {
-              await invalidateAccountQueries(account.id);
-              setEditorTarget(account.id);
-            }}
-            onVerified={() => invalidateAccountQueries(editorAccountId ?? undefined)}
-          />
-          <SmartMailboxEditor
-            key={smartMailboxEditorKey}
-            editorTarget={effectiveSmartMailboxTarget}
-            editingSmartMailbox={editingSmartMailbox}
-            onSaved={async (smartMailbox) => {
-              await invalidateSmartMailboxQueries(smartMailbox.id);
-              setSmartMailboxEditorTarget(smartMailbox.id);
-            }}
-            onDeleted={async (smartMailboxId) => {
-              await deleteSmartMailbox(smartMailboxId);
-              await invalidateSmartMailboxQueries();
-              setSmartMailboxEditorTarget("new");
-            }}
-          />
+          {activeCategory === "accounts" && (
+            <AccountsPane
+              accounts={accounts}
+              selectedAccountId={effectiveEditorTarget}
+              editingAccount={editingAccount}
+              editorKey={editorKey}
+              onSelectAccount={(accountId) => setEditorTarget(accountId)}
+              onCreateAccount={() => setEditorTarget("new")}
+              onCommand={(action, account) =>
+                commandMutation.mutate({ action, account })
+              }
+              onSaved={async (account) => {
+                await invalidateAccountQueries(account.id);
+                setEditorTarget(account.id);
+              }}
+              onVerified={() => invalidateAccountQueries(editorAccountId ?? undefined)}
+              commandMutation={commandMutation}
+            />
+          )}
+
+          {activeCategory === "mailboxes" && (
+            <SmartMailboxesPane
+              smartMailboxes={smartMailboxSummaries}
+              selectedMailboxId={effectiveSmartMailboxTarget}
+              editingSmartMailbox={editingSmartMailbox}
+              editorKey={smartMailboxEditorKey}
+              actionPendingKey={smartMailboxActionPendingKey}
+              actionError={smartMailboxActionError}
+              onSelectMailbox={(mailboxId) => setSmartMailboxEditorTarget(mailboxId)}
+              onCreateMailbox={() => setSmartMailboxEditorTarget("new")}
+              onResetDefaults={handleResetSmartMailboxes}
+              onReorderMailbox={handleReorderSmartMailbox}
+              onSaved={async (mailbox) => {
+                await invalidateSmartMailboxQueries(mailbox.id);
+                setSmartMailboxEditorTarget(mailbox.id);
+              }}
+              onDeleted={async (mailboxId) => {
+                await deleteSmartMailbox(mailboxId);
+                await invalidateSmartMailboxQueries();
+                setSmartMailboxEditorTarget("new");
+              }}
+            />
+          )}
         </div>
       </div>
     </section>
