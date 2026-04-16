@@ -1,0 +1,3 @@
+# Per-project age key for sops encryption.
+# Generated automatically by: just setup
+# DO NOT commit the real .age-key file.
