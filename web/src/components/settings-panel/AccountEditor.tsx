@@ -6,20 +6,17 @@
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { createAccount, updateAccount, verifyAccount } from "../../api/client";
-import type {
-  AccountOverview,
-  VerificationResponse,
-} from "../../api/types";
 import {
-  buildCreateAccountPayload,
-  buildUpdateAccountPayload,
-  EMPTY_FORM,
-  formFromAccount,
-  parseAccountDriver,
-} from "./helpers";
-import { Field, MetaStat } from "./shared";
-import type { EditorTarget } from "./types";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
@@ -31,12 +28,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { createAccount, updateAccount, verifyAccount } from "../../api/client";
+import type {
+  AccountOverview,
+  VerificationResponse,
+} from "../../api/types";
+import { cn } from "../../lib/utils";
+import { formatRelativeTime } from "../../utils/relativeTime";
+import {
+  buildCreateAccountPayload,
+  buildUpdateAccountPayload,
+  EMPTY_FORM,
+  formFromAccount,
+  parseAccountDriver,
+  statusTone,
+} from "./helpers";
+import {
+  Field,
+  MetaStat,
+  SectionHeader,
+  StatusDot,
+} from "./shared";
+import type { EditorTarget } from "./types";
 
 /**
  * Account editor form: create new or edit existing accounts.
  *
- * Supports the tri-state secret write mode (keep/replace/clear) and
- * post-save JMAP session verification.
+ * Supports the tri-state secret write mode (keep/replace/clear), post-save
+ * JMAP session verification, and account-level actions (sync, enable/disable, delete).
  *
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#secret-management
@@ -46,11 +65,18 @@ export function AccountEditor({
   editingAccount,
   onSaved,
   onVerified,
+  onCommand,
+  isCommandPending,
 }: {
   editorTarget: EditorTarget;
   editingAccount: AccountOverview | null;
   onSaved: (account: AccountOverview) => Promise<void>;
   onVerified: () => Promise<void>;
+  onCommand: (
+    action: "enable" | "disable" | "delete" | "sync",
+    account: AccountOverview,
+  ) => void;
+  isCommandPending: boolean;
 }) {
   const [form, setForm] = useState(() =>
     editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
@@ -95,51 +121,55 @@ export function AccountEditor({
     },
   });
 
+  const isEditing = editorTarget !== "new" && editingAccount !== null;
+
   return (
-    <section className="rounded-xl border border-border bg-background/70 p-4">
-      <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
-        {editorTarget === "new" ? "new account" : "account editor"}
-      </p>
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold tracking-tight">
-            {editorTarget === "new"
-              ? "Create account"
-              : editingAccount?.name ?? "Edit account"}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Save first, then verify to confirm the connection works.
-          </p>
-        </div>
-        {editorTarget !== "new" && (
-          <Button
-            size="sm"
-            variant="outline"
-            type="button"
-            onClick={() => verifyMutation.mutate(editorTarget)}
-          >
-            Verify saved account
-          </Button>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <SectionHeader
+          title={
+            editorTarget === "new"
+              ? "New account"
+              : editingAccount?.name ?? "Account"
+          }
+          description={
+            editorTarget === "new"
+              ? "Configure transport details, then save and verify the connection."
+              : "Update credentials or run account-level actions."
+          }
+          actions={
+            isEditing && editingAccount ? (
+              <AccountActions
+                account={editingAccount}
+                onCommand={onCommand}
+                onVerify={() => verifyMutation.mutate(editingAccount.id)}
+                isVerifying={verifyMutation.isPending}
+                isCommandPending={isCommandPending}
+              />
+            ) : null
+          }
+        />
+
+        {isEditing && editingAccount && (
+          <AccountStatusStrip account={editingAccount} />
         )}
       </div>
 
-      <div className="mt-4 grid gap-4">
+      <div className="grid gap-4">
         <Field
           label="Account ID"
           value={form.id}
           disabled={editorTarget !== "new"}
-          onChange={(value) =>
-            setForm((current) => ({ ...current, id: value }))
-          }
+          onChange={(value) => setForm((current) => ({ ...current, id: value }))}
         />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Account name"
             value={form.name}
             onChange={(value) => setForm((current) => ({ ...current, name: value }))}
           />
-          <div className="grid gap-1.5 text-sm">
+          <label className="grid gap-1.5 text-sm">
             <span className="text-muted-foreground">Driver</span>
             <Select
               value={form.driver}
@@ -158,36 +188,32 @@ export function AccountEditor({
                 <SelectItem value="mock">Mock</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Base URL"
             value={form.baseUrl}
             placeholder="https://mail.example.com/jmap"
-            onChange={(value) =>
-              setForm((current) => ({ ...current, baseUrl: value }))
-            }
+            onChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
           />
           <Field
             label="Username"
             value={form.username}
             placeholder="you@example.com"
-            onChange={(value) =>
-              setForm((current) => ({ ...current, username: value }))
-            }
+            onChange={(value) => setForm((current) => ({ ...current, username: value }))}
           />
         </div>
 
-        <div className="rounded-lg border border-border bg-card/60 p-3">
-          <div className="flex items-center justify-between gap-3">
+        <fieldset className="rounded-lg border border-border bg-background/40 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-medium">Secure password</p>
+              <legend className="text-sm font-medium">Password</legend>
               <p className="text-xs text-muted-foreground">
                 {editingAccount?.transport.secret.configured
-                  ? "A password is already stored securely. You can keep, replace, or clear it."
-                  : "Passwords are stored securely and can't be read back."}
+                  ? "A password is already stored securely. Keep, replace, or clear it."
+                  : "Stored securely; the saved value can't be read back."}
               </p>
             </div>
             {editingAccount?.transport.secret.configured && (
@@ -257,16 +283,13 @@ export function AccountEditor({
               }
             />
           </div>
-        </div>
+        </fieldset>
 
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <Checkbox
             checked={form.enabled}
             onCheckedChange={(checked) =>
-              setForm((current) => ({
-                ...current,
-                enabled: checked === true,
-              }))
+              setForm((current) => ({ ...current, enabled: checked === true }))
             }
           />
           Account enabled
@@ -283,7 +306,7 @@ export function AccountEditor({
           </p>
         )}
         {verification && (
-          <dl className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-card/60 px-3 py-3 text-sm">
+          <dl className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 text-sm">
             <MetaStat label="Identity" value={verification.identityEmail ?? "Unknown"} />
             <MetaStat
               label="Push"
@@ -311,6 +334,113 @@ export function AccountEditor({
           </Button>
         </div>
       </div>
-    </section>
+    </div>
+  );
+}
+
+function AccountActions({
+  account,
+  onCommand,
+  onVerify,
+  isVerifying,
+  isCommandPending,
+}: {
+  account: AccountOverview;
+  onCommand: (
+    action: "enable" | "disable" | "delete" | "sync",
+    account: AccountOverview,
+  ) => void;
+  onVerify: () => void;
+  isVerifying: boolean;
+  isCommandPending: boolean;
+}) {
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        type="button"
+        onClick={onVerify}
+        disabled={isVerifying}
+      >
+        Verify
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        type="button"
+        onClick={() => onCommand("sync", account)}
+        disabled={isCommandPending}
+      >
+        Sync
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        type="button"
+        onClick={() =>
+          onCommand(account.enabled ? "disable" : "enable", account)
+        }
+        disabled={isCommandPending}
+      >
+        {account.enabled ? "Disable" : "Enable"}
+      </Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button size="sm" variant="destructive" type="button">
+            Delete
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove &ldquo;{account.name}&rdquo; and all synced
+              data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => onCommand("delete", account)}
+            >
+              Delete account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function AccountStatusStrip({ account }: { account: AccountOverview }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <StatusDot status={account.status} />
+          <span
+            className={cn(
+              "font-mono uppercase tracking-wider",
+              statusTone(account.status).split(" ")[0],
+            )}
+          >
+            {account.status}
+          </span>
+        </span>
+        <span>
+          Last sync:{" "}
+          {account.lastSyncAt ? formatRelativeTime(account.lastSyncAt) : "never"}
+        </span>
+        <span>Real-time: {account.push}</span>
+        <span>{account.driver.toUpperCase()}</span>
+      </div>
+      {account.lastSyncError && (
+        <p className="rounded border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
+          {account.lastSyncError}
+        </p>
+      )}
+    </>
   );
 }
