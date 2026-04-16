@@ -6,6 +6,7 @@
  */
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import {
   createSmartMailbox,
   updateSmartMailbox,
@@ -21,7 +22,7 @@ import {
   formFromSmartMailbox,
 } from "./helpers";
 import { RuleGroupEditor } from "./RuleGroupEditor";
-import { Field } from "./shared";
+import { Field, SectionHeader } from "./shared";
 import type { SmartMailboxEditorTarget } from "./types";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -37,13 +38,19 @@ import { Input } from "../ui/input";
 export function SmartMailboxEditor({
   editorTarget,
   editingSmartMailbox,
+  summary,
   onSaved,
   onDeleted,
+  onReorder,
+  reorderPendingKey,
 }: {
   editorTarget: SmartMailboxEditorTarget;
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null;
+  summary: SmartMailboxSummary | null;
   onSaved: (smartMailbox: SmartMailbox) => Promise<void>;
   onDeleted: (smartMailboxId: string) => Promise<void>;
+  onReorder: (mailbox: SmartMailboxSummary, position: number) => void;
+  reorderPendingKey: string | null;
 }) {
   const [form, setForm] = useState(() =>
     editingSmartMailbox ? formFromSmartMailbox(editingSmartMailbox) : EMPTY_SMART_MAILBOX_FORM,
@@ -80,36 +87,63 @@ export function SmartMailboxEditor({
     },
   });
 
-  return (
-    <section className="rounded-xl border border-border bg-background/70 p-4">
-      <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
-        {editorTarget === "new" ? "new smart mailbox" : "smart mailbox editor"}
-      </p>
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold tracking-tight">
-            {editorTarget === "new"
-              ? "Create smart mailbox"
-              : editingSmartMailbox?.name ?? "Edit smart mailbox"}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Saved message queries power unified mailboxes and custom filtered views.
-          </p>
-        </div>
-        {editorTarget !== "new" && (
-          <Button
-            size="sm"
-            variant="destructive"
-            type="button"
-            onClick={() => onDeleted(editorTarget)}
-          >
-            Delete mailbox
-          </Button>
-        )}
-      </div>
+  const isEditing = editorTarget !== "new";
 
-      <div className="mt-4 grid gap-4">
-        <div className="grid grid-cols-2 gap-4">
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        title={
+          editorTarget === "new"
+            ? "New smart mailbox"
+            : editingSmartMailbox?.name ?? "Smart mailbox"
+        }
+        description={
+          editorTarget === "new"
+            ? "A saved message query that powers a virtual mailbox."
+            : "Saved queries power unified mailboxes and custom filtered views."
+        }
+        actions={
+          isEditing ? (
+            <>
+              {summary && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => onReorder(summary, Math.max(0, summary.position - 1))}
+                    disabled={reorderPendingKey !== null}
+                    aria-label="Move up"
+                  >
+                    <ArrowUp size={14} strokeWidth={1.75} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    type="button"
+                    onClick={() => onReorder(summary, summary.position + 1)}
+                    disabled={reorderPendingKey !== null}
+                    aria-label="Move down"
+                  >
+                    <ArrowDown size={14} strokeWidth={1.75} />
+                  </Button>
+                </>
+              )}
+              <Button
+                size="sm"
+                variant="destructive"
+                type="button"
+                onClick={() => onDeleted(editorTarget)}
+              >
+                Delete
+              </Button>
+            </>
+          ) : null
+        }
+      />
+
+      <div className="grid gap-4">
+        <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
           <Field
             label="Mailbox name"
             value={form.name}
@@ -132,10 +166,10 @@ export function SmartMailboxEditor({
           </label>
         </div>
 
-        <div className="rounded-lg border border-border bg-card/60 p-3">
-          <div className="flex items-center justify-between gap-3">
+        <fieldset className="rounded-lg border border-border bg-background/40 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-medium">Rule builder</p>
+              <legend className="text-sm font-medium">Rule builder</legend>
               <p className="text-xs text-muted-foreground">
                 Smart mailboxes match individual messages, not whole threads.
               </p>
@@ -156,7 +190,7 @@ export function SmartMailboxEditor({
               onChange={(root) => setForm((current) => ({ ...current, rule: { root } }))}
             />
           </div>
-        </div>
+        </fieldset>
 
         {feedback && (
           <p className="rounded border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-700">
@@ -170,7 +204,11 @@ export function SmartMailboxEditor({
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+          <Button
+            type="button"
+            onClick={() => saveMutation.mutate(form)}
+            disabled={saveMutation.isPending}
+          >
             {editorTarget === "new" ? "Create mailbox" : "Save mailbox"}
           </Button>
           <Button
@@ -188,6 +226,6 @@ export function SmartMailboxEditor({
           </Button>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
