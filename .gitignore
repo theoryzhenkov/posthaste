@@ -1,0 +1,21 @@
+# direnv / nix
+.direnv/
+result
+
+# jj
+.jj/
+
+# secrets
+.env
+.envrc
+.age-key
+
+# editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

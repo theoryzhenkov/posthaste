@@ -1,0 +1,2 @@
+root = "README"
+paths = ["docs"]
