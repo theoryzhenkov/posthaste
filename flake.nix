@@ -10,6 +10,10 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        docsPython = pkgs.python3.withPackages (pythonPackages: [
+          pythonPackages.mkdocs
+          pythonPackages."mkdocs-material"
+        ]);
       in
       {
         devShells.default = pkgs.mkShell {
@@ -19,6 +23,7 @@
             just
             sops
             age
+            docsPython
           ];
 
           shellHook = ''

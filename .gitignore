@@ -1,6 +1,7 @@
 # direnv / nix
 .direnv/
 result
+site/
 
 # jj
 .jj/
