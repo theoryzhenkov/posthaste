@@ -12,6 +12,7 @@ update remote=template_remote template_bookmark=template_bookmark local_bookmark
     tmp="$(mktemp)"
     trap 'rm -f "$tmp"' EXIT
 
+    jj bookmark untrack "{{template_bookmark}}" --remote "{{remote}}" || true
     jj git fetch --remote "{{remote}}"
     jj bookmark untrack "{{template_bookmark}}" --remote "{{remote}}" || true
 
