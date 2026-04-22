@@ -1,3 +1,5 @@
+mod template
+
 default:
     @just --list
 
