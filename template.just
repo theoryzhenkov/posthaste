@@ -14,8 +14,8 @@ update remote=template_remote template_bookmark=template_bookmark local_bookmark
     jj git fetch --remote "{{remote}}"
 
     if jj log -r "$local_ref & ::$target" --no-graph -T commit_id > "$tmp" && [ -s "$tmp" ]; then
-        jj bookmark set "$local_ref" -r "$target"
-        jj rebase -r "($target..@) & mutable()" -d "$target"
+        jj --ignore-immutable bookmark set "$local_ref" -r "$target"
+        jj --ignore-immutable rebase --skip-emptied -r "($target..@) & mutable()" -d "$target"
     else
-        jj rebase -b "$local_ref" -d "$target"
+        jj --ignore-immutable rebase --skip-emptied -b "$local_ref" -d "$target"
     fi
