@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Phase 2: project setup. Requires the flake devShell to be active
-# (age, sops, jj in PATH). Run `./bootstrap.sh` first.
+# (age, git, sops, jj in PATH). Run `./bootstrap.sh` first.
 set -euo pipefail
+
+TEMPLATE_REMOTE_NAME="${TEMPLATE_REMOTE_NAME:-template}"
+TEMPLATE_REMOTE_URL="${TEMPLATE_REMOTE_URL:-}"
 
 # -- tool check --
 missing=()
-for tool in age-keygen sops jj; do
+for tool in age-keygen git sops jj; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 if [ ${#missing[@]} -gt 0 ]; then
@@ -32,6 +35,16 @@ if [ ! -d .jj ]; then
     echo "Initialized colocated jj repository"
 else
     echo "jj repository already exists, skipping"
+fi
+
+# -- template remote --
+if [ -n "$TEMPLATE_REMOTE_URL" ]; then
+    if git remote get-url "$TEMPLATE_REMOTE_NAME" >/dev/null 2>&1; then
+        echo "$TEMPLATE_REMOTE_NAME remote already exists, skipping"
+    else
+        git remote add "$TEMPLATE_REMOTE_NAME" "$TEMPLATE_REMOTE_URL"
+        echo "Added $TEMPLATE_REMOTE_NAME remote: $TEMPLATE_REMOTE_URL"
+    fi
 fi
 
 echo "Done."
