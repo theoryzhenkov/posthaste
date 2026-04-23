@@ -18,6 +18,7 @@ import {
 interface MessageRowProps {
   message: ConversationSummary;
   isSelected: boolean;
+  isStriped: boolean;
   onSelect: () => void;
   columns: ColumnId[];
   layout: ThreadListLayout;
@@ -32,6 +33,7 @@ interface MessageRowProps {
 export function MessageRow({
   message,
   isSelected,
+  isStriped,
   onSelect,
   columns,
   layout,
@@ -44,7 +46,10 @@ export function MessageRow({
         "ph-focus-ring",
         isSelected &&
           "bg-[var(--list-selection)] text-[var(--list-selection-foreground)]",
-        !isSelected && "bg-transparent text-panel-foreground hover:bg-[var(--list-hover)]",
+        !isSelected &&
+          (isStriped
+            ? "bg-[var(--list-zebra-alt)] text-panel-foreground hover:bg-[var(--list-hover)]"
+            : "bg-[var(--list-zebra)] text-panel-foreground hover:bg-[var(--list-hover)]"),
       )}
       style={layout.gridStyle}
       onClick={onSelect}
