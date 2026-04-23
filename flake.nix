@@ -42,8 +42,9 @@
             # Local JMAP server for end-to-end dev/testing
             pkgs.stalwart
 
-            # Dev-stack process orchestrator (stalwart + daemon + vite in panes)
-            pkgs.zellij
+            # Dev-stack process orchestrator (stalwart + daemon + vite/tauri)
+            pkgs.tmux
+            pkgs.overmind
 
             # Docs (mkdocs-material via Python)
             pkgs.python3

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the posthaste dev stack in a zellij session.
+# Launch the PostHaste dev stack with Overmind.
 #
 # Usage: launch.sh <web|desktop>
 #
@@ -32,4 +32,9 @@ mkdir -p \
   "$POSTHASTE_STALWART_DATA" "$POSTHASTE_STALWART_LOGS" \
   "$POSTHASTE_CONFIG_ROOT" "$POSTHASTE_STATE_ROOT"
 
-exec zellij --layout "dev/zellij/$layout.kdl"
+if ! command -v overmind >/dev/null 2>&1; then
+  echo "overmind is not on PATH; reload the Nix dev shell with 'direnv reload' or 'nix develop'." >&2
+  exit 127
+fi
+
+exec overmind start -d "$root" -N -c seed -f "dev/Procfile.$layout"
