@@ -1,7 +1,7 @@
 /**
  * Paginated, virtualized conversation list with live prepend and keyboard navigation.
  *
- * Uses manual fixed-row virtualization (no library), seek-based cursor pagination,
+ * Uses TanStack Virtual fixed-row virtualization, seek-based cursor pagination,
  * and anchored scroll adjustment on live prepends.
  *
  * @spec docs/L1-ui#messagelist
@@ -13,6 +13,7 @@ import {
   useQueries,
   type InfiniteData,
 } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchConversations,
@@ -120,7 +121,7 @@ function eventMayAffectView(
 /**
  * Conversation list panel: the middle column of the three-column layout.
  *
- * Handles pagination, manual virtualization, live prepend on domain events,
+ * Handles pagination, virtualization, live prepend on domain events,
  * per-view scroll restoration, and keyboard shortcuts (j/k, arrows, archive, trash).
  *
  * @spec docs/L1-ui#messagelist
@@ -151,7 +152,6 @@ export function MessageList({
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
   const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
   const [isRefreshingTop, setIsRefreshingTop] = useState(false);
 
   const {
@@ -355,21 +355,6 @@ export function MessageList({
     setScrollTop(savedOffset);
   }, [viewKey, conversationIds.length]);
 
-  // Track viewport height for virtualization.
-  useEffect(() => {
-    const node = scrollContainerRef.current;
-    if (!node) {
-      return;
-    }
-
-    const updateViewportHeight = () => setViewportHeight(node.clientHeight);
-    updateViewportHeight();
-
-    const resizeObserver = new ResizeObserver(updateViewportHeight);
-    resizeObserver.observe(node);
-    return () => resizeObserver.disconnect();
-  }, []);
-
   // Fetch next page when near the bottom.
   useEffect(() => {
     const node = scrollContainerRef.current;
@@ -387,7 +372,6 @@ export function MessageList({
     hasNextPage,
     isFetchingNextPage,
     scrollTop,
-    viewportHeight,
   ]);
 
   // Listen for domain events and refresh the first page.
@@ -415,27 +399,32 @@ export function MessageList({
   }, [viewKey]);
 
   const totalRows = conversationIds.length;
-  const safeViewportHeight = viewportHeight || ROW_HEIGHT * 8;
-  const startIndex = Math.max(
-    0,
-    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS,
-  );
-  const endIndex = Math.min(
-    totalRows,
-    Math.ceil((scrollTop + safeViewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
-  );
-  const topSpacerHeight = startIndex * ROW_HEIGHT;
-  const bottomSpacerHeight = (totalRows - endIndex) * ROW_HEIGHT;
-  const visibleConversationIds = conversationIds.slice(startIndex, endIndex);
-  const visibleConversations = useQueries({
-    queries: visibleConversationIds.map((conversationId) => ({
-      queryKey: mailKeys.conversationSummary(conversationId),
-    })),
-    combine: (results) =>
-      results
-        .map((result) => result.data)
-        .filter((conversation): conversation is ConversationSummary => !!conversation),
+  const rowVirtualizer = useVirtualizer({
+    count: totalRows,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: OVERSCAN_ROWS,
+    getItemKey: (index) => conversationIds[index] ?? index,
   });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const visibleConversations = useQueries({
+    queries: virtualRows.map((virtualRow) => ({
+      queryKey: mailKeys.conversationSummary(conversationIds[virtualRow.index]),
+      enabled: conversationIds[virtualRow.index] !== undefined,
+    })),
+  });
+  const visibleConversationByIndex = useMemo(() => {
+    const byIndex = new Map<number, ConversationSummary>();
+    virtualRows.forEach((virtualRow, queryIndex) => {
+      const conversation = visibleConversations[queryIndex]?.data as
+        | ConversationSummary
+        | undefined;
+      if (conversation) {
+        byIndex.set(virtualRow.index, conversation);
+      }
+    });
+    return byIndex;
+  }, [virtualRows, visibleConversations]);
   useEffect(() => {
     if (!selectedView || selection || conversationIds.length === 0) {
       return;
@@ -467,10 +456,14 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
-      <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">
-        <div className="flex h-full min-h-0 flex-col" style={tableLayout.tableStyle}>
+      <div
+        ref={scrollContainerRef}
+        className="ph-scroll ph-thread-list-scroll min-h-0 flex-1 overflow-auto bg-[var(--list-zebra)]"
+        onScroll={handleScroll}
+      >
+        <div className="min-h-full" style={tableLayout.tableStyle}>
           <div
-            className="shrink-0 border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
+            className="sticky top-0 z-30 border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
             aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
           >
             <ThreadListHeader
@@ -486,11 +479,7 @@ export function MessageList({
             />
           </div>
 
-          <div
-            ref={scrollContainerRef}
-            className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[var(--list-zebra)]"
-            onScroll={handleScroll}
-          >
+          <div>
             {isLoading && (
               <div className="space-y-0 bg-[var(--list-zebra)]">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -534,28 +523,46 @@ export function MessageList({
               </div>
             )}
             {conversationIds.length > 0 && (
-              <>
-                <div style={{ height: topSpacerHeight }} />
-                {visibleConversations.map((conversation, index) => (
-                  <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
-                    <MessageRow
-                      message={conversation}
-                      isSelected={conversation.id === selection?.conversationId}
-                      isStriped={(startIndex + index) % 2 === 1}
-                      columns={columns}
-                      layout={tableLayout}
-                      onSelect={() =>
-                        onSelectMessage({
-                          conversationId: conversation.id,
-                          sourceId: conversation.latestMessage.sourceId,
-                          messageId: conversation.latestMessage.messageId,
-                        })
-                      }
-                    />
-                  </div>
-                ))}
-                <div style={{ height: bottomSpacerHeight }} />
-              </>
+              <div
+                className="relative"
+                style={{ height: rowVirtualizer.getTotalSize() }}
+              >
+                <div
+                  aria-hidden
+                  className="ph-message-list-zebra-plane sticky left-0 z-0 h-full"
+                />
+                {virtualRows.map((virtualRow) => {
+                  const conversation = visibleConversationByIndex.get(virtualRow.index);
+                  if (!conversation) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      className="absolute left-0 right-0 top-0 z-10"
+                      style={{
+                        height: virtualRow.size,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <MessageRow
+                        message={conversation}
+                        isSelected={conversation.id === selection?.conversationId}
+                        columns={columns}
+                        layout={tableLayout}
+                        onSelect={() =>
+                          onSelectMessage({
+                            conversationId: conversation.id,
+                            sourceId: conversation.latestMessage.sourceId,
+                            messageId: conversation.latestMessage.messageId,
+                          })
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             )}
             {(isFetchingNextPage || isRefreshingTop) && (
               <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
