@@ -31,6 +31,7 @@ interface ActionBarProps {
   onFocusSearch: () => void;
   onOpenCommandPalette: () => void;
   onPlaceholderAction: (label: string) => void;
+  onReply: () => void;
   onSearchBlur: () => void;
   onSearchQueryChange: (query: string) => void;
   onShowShortcuts: () => void;
@@ -177,6 +178,7 @@ export function ActionBar({
   onFocusSearch,
   onOpenCommandPalette,
   onPlaceholderAction,
+  onReply,
   onSearchBlur,
   onSearchQueryChange,
   onShowShortcuts,
@@ -200,12 +202,14 @@ export function ActionBar({
       <Divider />
       <ToolbarChip
         hint="⌘R"
+        disabled={!isMessageSelected}
         icon={<Reply size={14} strokeWidth={1.6} />}
-        onClick={() => onPlaceholderAction("Reply")}
+        onClick={onReply}
         title="Reply"
       />
       <ToolbarChip
         hint="⇧⌘R"
+        disabled={!isMessageSelected}
         icon={<ReplyAll size={14} strokeWidth={1.6} />}
         onClick={() => onPlaceholderAction("Reply all")}
         title="Reply all"

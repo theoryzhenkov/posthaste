@@ -399,10 +399,11 @@ impl MailGateway for LiveJmapGateway {
             identity::Property::Email,
         ]);
         let mut response = self.send_request(request).await?;
-        let mut identities = required_method_response(response.pop_method_response(), "Identity/get")?
-            .unwrap_get_identity()
-            .map_err(map_gateway_error)?
-            .take_list();
+        let mut identities =
+            required_method_response(response.pop_method_response(), "Identity/get")?
+                .unwrap_get_identity()
+                .map_err(map_gateway_error)?
+                .take_list();
         let identity = identities
             .pop()
             .ok_or_else(|| GatewayError::Rejected("no identity available".to_string()))?;
@@ -532,7 +533,21 @@ impl MailGateway for LiveJmapGateway {
         let submission = request.set_email_submission().create();
         submission.email_id("#c0");
         submission.identity_id(identity.id.as_str());
-        self.send_request(request).await?;
+        let response = self.send_request(request).await?;
+        let mut responses = response.unwrap_method_responses();
+        if responses.len() != 2 {
+            return Err(GatewayError::Rejected(
+                "send response missing method results".to_string(),
+            ));
+        }
+        responses
+            .remove(0)
+            .unwrap_set_email()
+            .map_err(map_gateway_error)?;
+        responses
+            .remove(0)
+            .unwrap_set_email_submission()
+            .map_err(map_gateway_error)?;
         Ok(())
     }
 
