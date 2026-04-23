@@ -68,7 +68,7 @@ export function ThreadListHeader({
       onReset={onResetColumns}
     >
       <div
-        className="grid h-[26px] items-center gap-0 px-0 font-mono text-[11px] font-medium uppercase text-muted-foreground"
+        className="grid h-[26px] items-center gap-0 px-0 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground"
         style={layout.gridStyle}
       >
         <DndContext

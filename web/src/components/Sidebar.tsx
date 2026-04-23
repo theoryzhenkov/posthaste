@@ -341,11 +341,11 @@ function SectionHeader({
   return (
     <button
       type="button"
-      className="ph-focus-ring flex h-7 w-full items-center px-3 text-left font-sans text-[10px] font-semibold tracking-[0.2em] text-[var(--sidebar-section-label)] transition-colors hover:text-sidebar-foreground"
+      className="ph-focus-ring flex h-7 w-full items-center px-3 text-left font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--sidebar-section-label)] transition-colors hover:text-sidebar-foreground"
       onClick={onToggle}
       aria-expanded={!collapsed}
     >
-      <span className="uppercase">{label}</span>
+      <span>{label}</span>
     </button>
   );
 }

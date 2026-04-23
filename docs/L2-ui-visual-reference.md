@@ -193,7 +193,7 @@ Section headers:
 - Padding: `14px 14px 6px`.
 - Font: Geist Mono `11px`, weight `600`.
 - Color: `fgFaint`.
-- Letter spacing: `0.6px`.
+- Letter spacing: `0.06em`.
 - Text transform: uppercase.
 - Display: flex, align center, justify between.
 - `Accounts` header adds `margin-top: 8px`.
@@ -344,7 +344,7 @@ Header cells:
 - Resizable cells reserve right padding for the resize divider.
 - Font: Geist Mono `11px`, weight `600`.
 - Text transform: uppercase.
-- Letter spacing: `0.5px`.
+- Letter spacing: `0.06em`.
 - Default color: `fgFaint`.
 - Sorted color: `fg`.
 - Sortable hover color: `fgMuted`.
@@ -384,6 +384,7 @@ Row cells:
 - Display: flex, align center.
 - Gap: `6px`.
 - Overflow hidden; all text and badges truncate or clip inside the cell. No row content may visually overlap an adjacent column.
+- Sender, subject, account/source, and tag text use the same row body typography. Account/source labels are not smaller mono metadata.
 
 Unread dot:
 
