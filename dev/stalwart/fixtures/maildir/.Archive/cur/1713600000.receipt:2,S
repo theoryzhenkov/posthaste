@@ -1,0 +1,23 @@
+Return-Path: <receipts@northwind.test>
+Delivered-To: dev@localhost
+From: Northwind Receipts <receipts@northwind.test>
+To: Dev User <dev@localhost>
+Subject: April reimbursement receipt
+Date: Mon, 14 Apr 2026 16:40:00 +0000
+Message-ID: <receipt-april@northwind.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="receipt-boundary"
+
+--receipt-boundary
+Content-Type: text/plain; charset="UTF-8"
+
+Your reimbursement receipt is attached for archiving.
+
+--receipt-boundary
+Content-Type: text/csv; name="receipt.csv"
+Content-Disposition: attachment; filename="receipt.csv"
+
+category,amount,currency
+travel,128.40,USD
+
+--receipt-boundary--

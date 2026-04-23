@@ -1,0 +1,14 @@
+Return-Path: <dev@localhost>
+From: Dev User <dev@localhost>
+To: Maya Chen <maya@orbitalsystems.test>
+Cc: Luca Vega <luca@orbitalsystems.test>
+Subject: Re: Launch checklist for Friday
+Date: Tue, 22 Apr 2026 12:05:00 +0000
+Message-ID: <launch-thread-3@localhost>
+In-Reply-To: <launch-thread-2@orbitalsystems.test>
+References: <launch-thread-1@orbitalsystems.test> <launch-thread-2@orbitalsystems.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+
+Reviewed. Attachment rendering looks good and the archive counts are stable.
+I still want to tweak row density in the message list once the redesign lands.

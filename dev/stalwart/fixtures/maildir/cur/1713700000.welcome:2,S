@@ -1,0 +1,26 @@
+Return-Path: <welcome@posthaste.test>
+Delivered-To: dev@localhost
+From: Posthaste Team <welcome@posthaste.test>
+To: Dev User <dev@localhost>
+Subject: Welcome to the Posthaste sandbox
+Date: Tue, 22 Apr 2026 09:15:00 +0000
+Message-ID: <welcome-1@posthaste.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="welcome-boundary"
+
+--welcome-boundary
+Content-Type: text/plain; charset="UTF-8"
+
+Hi Dev,
+
+This mailbox is seeded for local UI testing. You should see threads, attachments,
+drafts, sent mail, archive mail, trash, and junk.
+
+- Posthaste Team
+
+--welcome-boundary
+Content-Type: text/html; charset="UTF-8"
+
+<html><body><p>Hi Dev,</p><p>This mailbox is seeded for local UI testing. You should see threads, attachments, drafts, sent mail, archive mail, trash, and junk.</p><p>- Posthaste Team</p></body></html>
+
+--welcome-boundary--
