@@ -299,6 +299,8 @@ Pane:
 - Header and rows live in one table-width layout inside a horizontal `ph-scroll` wrapper.
 - When enabled columns exceed the pane width, the entire message list table scrolls horizontally as one unit.
 - When enabled columns fit within the pane, the table stretches to the full pane width so the left edge and right edge align with the pane edges.
+- Horizontal overscroll uses the base list surface `bgList`; zebra striping is only painted by actual row elements so it ends with the real message list content.
+- `bgListAlt` is intentionally brighter than `bgList`; it is a subtle zebra contrast inside the list palette, not the neutral app background.
 
 Columns have two layout types:
 
