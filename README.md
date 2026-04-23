@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-04-01
-reviewed: 2026-04-01
+modified: 2026-04-23
+reviewed: 2026-04-23
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-jmap

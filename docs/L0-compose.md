@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why Markdown composition, MIME strategy, borrowed components"
 modified: 2026-03-29
-reviewed: 2026-03-29
+reviewed: 2026-04-23
 depends:
   - path: README
   - path: docs/L0-jmap
