@@ -10,8 +10,7 @@ import type { ConversationSummary } from "../api/types";
 import { cn } from "../lib/utils";
 import {
   type ColumnId,
-  type ColumnWidths,
-  buildGridTemplate,
+  type ThreadListLayout,
   getColumnDef,
 } from "./thread-list/columns";
 
@@ -22,7 +21,7 @@ interface MessageRowProps {
   isStriped: boolean;
   onSelect: () => void;
   columns: ColumnId[];
-  widths?: ColumnWidths;
+  layout: ThreadListLayout;
 }
 
 /**
@@ -37,7 +36,7 @@ export function MessageRow({
   isStriped,
   onSelect,
   columns,
-  widths,
+  layout,
 }: MessageRowProps) {
   return (
     <button
@@ -52,7 +51,7 @@ export function MessageRow({
             ? "bg-[var(--list-zebra-alt)] text-panel-foreground hover:bg-[var(--list-hover)]"
             : "bg-[var(--list-zebra)] text-panel-foreground hover:bg-[var(--list-hover)]"),
       )}
-      style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
+      style={layout.gridStyle}
       onClick={onSelect}
       type="button"
     >

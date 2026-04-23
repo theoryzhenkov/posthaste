@@ -12,6 +12,7 @@ interface SortableColumnHeaderProps {
   align?: "left" | "right" | "center";
   icon?: ReactNode;
   sortDirection?: SortDirection;
+  isSortable?: boolean;
   onSort: () => void;
   onResize?: (width: number) => void;
 }
@@ -22,6 +23,7 @@ export function SortableColumnHeader({
   align,
   icon,
   sortDirection,
+  isSortable = true,
   onSort,
   onResize,
 }: SortableColumnHeaderProps) {
@@ -38,7 +40,6 @@ export function SortableColumnHeader({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    cursor: "pointer",
   };
 
   return (
@@ -49,13 +50,18 @@ export function SortableColumnHeader({
       }}
       type="button"
       className={cn(
-        "relative flex h-full min-w-0 items-center gap-1 select-none overflow-hidden px-2 text-[11px]",
+        "relative flex h-full min-w-0 items-center gap-1 select-none overflow-visible px-2 text-[11px]",
+        isSortable ? "cursor-pointer" : "cursor-grab",
         align === "right" && "justify-end",
         align === "center" && "justify-center px-0",
         isDragging && "z-10 opacity-60",
       )}
       style={style}
-      onClick={onSort}
+      onClick={() => {
+        if (isSortable) {
+          onSort();
+        }
+      }}
       {...attributes}
       {...listeners}
     >

@@ -1,5 +1,5 @@
 import { Paperclip, Star } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { ConversationSummary } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
@@ -19,17 +19,26 @@ export type ColumnId =
 export interface ColumnDef {
   id: ColumnId;
   label: string;
-  gridWidth: string;
+  width: number;
+  minWidth?: number;
+  grow?: number;
   align?: "left" | "right" | "center";
   header?: ReactNode;
   render: (conversation: ConversationSummary) => ReactNode;
+}
+
+export interface ThreadListLayout {
+  gridTemplateColumns: string;
+  minWidth: number;
+  tableStyle: CSSProperties;
+  gridStyle: CSSProperties;
 }
 
 const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   unread: {
     id: "unread",
     label: "Unread",
-    gridWidth: "28px",
+    width: 28,
     align: "center",
     header: <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />,
     render: (c) =>
@@ -40,7 +49,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   flagged: {
     id: "flagged",
     label: "Flag",
-    gridWidth: "28px",
+    width: 28,
     align: "center",
     header: <Star size={11} className="text-muted-foreground" />,
     render: (c) =>
@@ -51,7 +60,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   attachment: {
     id: "attachment",
     label: "Attachment",
-    gridWidth: "28px",
+    width: 28,
     align: "center",
     header: <Paperclip size={11} className="text-muted-foreground" />,
     render: (c) =>
@@ -62,7 +71,8 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   from: {
     id: "from",
     label: "From",
-    gridWidth: "180px",
+    width: 180,
+    minWidth: 80,
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
       const sender = c.fromName ?? c.fromEmail ?? "Unknown";
@@ -85,7 +95,9 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   subject: {
     id: "subject",
     label: "Subject",
-    gridWidth: "320px",
+    width: 320,
+    minWidth: 120,
+    grow: 1,
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
       return (
@@ -110,7 +122,9 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   preview: {
     id: "preview",
     label: "Preview",
-    gridWidth: "minmax(0, 1fr)",
+    width: 220,
+    minWidth: 160,
+    grow: 1,
     render: (c) => (
       <span className="truncate text-xs text-muted-foreground">
         {c.preview ?? ""}
@@ -120,7 +134,8 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   date: {
     id: "date",
     label: "Date Received",
-    gridWidth: "128px",
+    width: 128,
+    minWidth: 80,
     render: (c) => (
       <span className="whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatRelativeTime(c.latestReceivedAt)}
@@ -130,7 +145,8 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   source: {
     id: "source",
     label: "Account",
-    gridWidth: "72px",
+    width: 72,
+    minWidth: 54,
     render: (c) => (
       <span className="truncate font-mono text-[10px] text-muted-foreground/75">
         {c.latestSourceName}
@@ -140,7 +156,8 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   tags: {
     id: "tags",
     label: "Tags",
-    gridWidth: "140px",
+    width: 140,
+    minWidth: 60,
     render: () => (
       <span className="truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
     ),
@@ -148,7 +165,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   threadSize: {
     id: "threadSize",
     label: "Size",
-    gridWidth: "50px",
+    width: 50,
     align: "right",
     render: (c) => (
       <span className="font-mono text-xs tabular-nums text-muted-foreground">
@@ -189,16 +206,45 @@ export function getColumnDef(id: ColumnId): ColumnDef {
 
 export type ColumnWidths = Partial<Record<ColumnId, number>>;
 
+function columnWidth(id: ColumnId, widths?: ColumnWidths): number {
+  const def = COLUMN_DEFS[id];
+  return Math.max(def.minWidth ?? def.width, widths?.[id] ?? def.width);
+}
+
 export function buildGridTemplate(
   columns: ColumnId[],
   widths?: ColumnWidths,
 ): string {
   return columns
     .map((id) => {
-      const override = widths?.[id];
-      return override !== undefined ? `${override}px` : COLUMN_DEFS[id].gridWidth;
+      const def = COLUMN_DEFS[id];
+      const width = columnWidth(id, widths);
+      return def.grow ? `minmax(${width}px, ${def.grow}fr)` : `${width}px`;
     })
     .join(" ");
+}
+
+export function buildThreadListLayout(
+  columns: ColumnId[],
+  widths?: ColumnWidths,
+): ThreadListLayout {
+  const minWidth = columns.reduce(
+    (sum, id) => sum + columnWidth(id, widths),
+    0,
+  );
+  const gridTemplateColumns = buildGridTemplate(columns, widths);
+
+  return {
+    gridTemplateColumns,
+    minWidth,
+    tableStyle: {
+      minWidth,
+      width: "100%",
+    },
+    gridStyle: {
+      gridTemplateColumns,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

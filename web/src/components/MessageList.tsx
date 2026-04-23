@@ -8,19 +8,6 @@
  * @spec docs/L1-ui#keyboard-shortcuts
  */
 import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  horizontalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import {
   useInfiniteQuery,
   useQueryClient,
   useQueries,
@@ -48,14 +35,11 @@ import {
 import { AlertCircle, Inbox, MousePointerClick } from "lucide-react";
 import type { SidebarSelection } from "./Sidebar";
 import { MessageRow } from "./MessageRow";
-import { ColumnPickerMenu } from "./thread-list/ColumnPickerMenu";
-import { SortableColumnHeader } from "./thread-list/SortableColumnHeader";
 import {
-  type ColumnId,
   type SortConfig,
-  buildGridTemplate,
-  getColumnDef,
+  buildThreadListLayout,
 } from "./thread-list/columns";
+import { ThreadListHeader } from "./thread-list/ThreadListHeader";
 import { useColumnConfig } from "./thread-list/useColumnConfig";
 
 /** @spec docs/L1-ui#messagelist */
@@ -153,8 +137,9 @@ export function MessageList({
   const queryClient = useQueryClient();
   const { columns, sort, widths, toggleColumn, reorderColumns, resetColumns, toggleSort, setColumnWidth } =
     useColumnConfig();
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  const tableLayout = useMemo(
+    () => buildThreadListLayout(columns, widths),
+    [columns, widths],
   );
   const queryKey = useMemo(
     () => mailKeys.view(selectedView, sort, searchQuery),
@@ -190,15 +175,6 @@ export function MessageList({
   });
 
   const conversationIds = useMemo(() => readConversationIds(data), [data]);
-
-  function handleColumnDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      const oldIndex = columns.indexOf(active.id as ColumnId);
-      const newIndex = columns.indexOf(over.id as ColumnId);
-      reorderColumns(arrayMove(columns, oldIndex, newIndex));
-    }
-  }
 
   /**
    * Refetch the first page and prepend any new conversations, adjusting
@@ -491,127 +467,102 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel">
-      <div
-        className="border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
-        aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
-      >
-        <ColumnPickerMenu
-          activeColumns={columns}
-          onToggle={toggleColumn}
-          onReset={resetColumns}
-        >
+      <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-panel">
+        <div className="flex h-full min-h-0 flex-col" style={tableLayout.tableStyle}>
           <div
-            className="grid h-[26px] items-center gap-0 px-0 font-mono text-[11px] font-medium uppercase text-muted-foreground"
-            style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
+            className="shrink-0 border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
+            aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
           >
-            <DndContext
-              sensors={dndSensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleColumnDragEnd}
-            >
-              <SortableContext
-                items={columns}
-                strategy={horizontalListSortingStrategy}
-              >
-                {columns.map((colId) => {
-                  const def = getColumnDef(colId);
-                  return (
-                    <SortableColumnHeader
-                      key={colId}
-                      id={colId}
-                      label={def.label}
-                      icon={def.header}
-                      align={def.align}
-                      sortDirection={
-                        sort.columnId === colId ? sort.direction : undefined
-                      }
-                      onSort={() => toggleSort(colId)}
-                      onResize={(w) => setColumnWidth(colId, w)}
-                    />
-                  );
-                })}
-              </SortableContext>
-            </DndContext>
+            <ThreadListHeader
+              columns={columns}
+              layout={tableLayout}
+              sort={sort}
+              onResetColumns={resetColumns}
+              onResizeColumn={setColumnWidth}
+              onReorderColumns={reorderColumns}
+              onToggleColumn={toggleColumn}
+              onToggleSort={toggleSort}
+            />
           </div>
-        </ColumnPickerMenu>
-      </div>
 
-      <div
-        ref={scrollContainerRef}
-        className="ph-scroll min-h-0 flex-1 overflow-y-auto bg-panel"
-        onScroll={handleScroll}
-      >
-        {isLoading && (
-          <div className="space-y-0 bg-[var(--list-zebra)]">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="border-b border-[var(--list-divider)] px-4 py-3"
-                style={{ height: ROW_HEIGHT }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
-                  <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+          <div
+            ref={scrollContainerRef}
+            className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-panel"
+            onScroll={handleScroll}
+          >
+            {isLoading && (
+              <div className="space-y-0 bg-[var(--list-zebra)]">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="border-b border-[var(--list-divider)] px-4 py-3"
+                    style={{ height: ROW_HEIGHT }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-3.5 w-28 animate-pulse rounded bg-muted" />
+                      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+                    </div>
+                    <div className="mt-2.5 h-3 w-3/4 animate-pulse rounded bg-muted" />
+                    <div className="mt-2 h-3 w-1/2 animate-pulse rounded bg-muted/60" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && (
+              <div className="flex flex-col items-center gap-3 px-3 py-12">
+                <AlertCircle size={32} strokeWidth={1.5} className="text-destructive/50" />
+                <p className="text-sm text-destructive">Failed to load threads</p>
+                <button
+                  type="button"
+                  className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={() => void refetch()}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {!isLoading && !error && conversationIds.length === 0 && (
+              <div className="flex flex-col items-center gap-3 px-3 py-12">
+                <Inbox size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+                <div className="text-center">
+                  <p className="text-sm font-medium text-muted-foreground">No threads here yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground/60">
+                    Messages will appear as they arrive
+                  </p>
                 </div>
-                <div className="mt-2.5 h-3 w-3/4 animate-pulse rounded bg-muted" />
-                <div className="mt-2 h-3 w-1/2 animate-pulse rounded bg-muted/60" />
               </div>
-            ))}
-          </div>
-        )}
-        {error && (
-          <div className="flex flex-col items-center gap-3 px-3 py-12">
-            <AlertCircle size={32} strokeWidth={1.5} className="text-destructive/50" />
-            <p className="text-sm text-destructive">Failed to load threads</p>
-            <button
-              type="button"
-              className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => void refetch()}
-            >
-              Try again
-            </button>
-          </div>
-        )}
-        {!isLoading && !error && conversationIds.length === 0 && (
-          <div className="flex flex-col items-center gap-3 px-3 py-12">
-            <Inbox size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
-            <div className="text-center">
-              <p className="text-sm font-medium text-muted-foreground">No threads here yet</p>
-              <p className="mt-1 text-xs text-muted-foreground/60">
-                Messages will appear as they arrive
+            )}
+            {conversationIds.length > 0 && (
+              <>
+                <div style={{ height: topSpacerHeight }} />
+                {visibleConversations.map((conversation, index) => (
+                  <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
+                    <MessageRow
+                      message={conversation}
+                      isSelected={conversation.id === selection?.conversationId}
+                      isStriped={(startIndex + index) % 2 === 1}
+                      columns={columns}
+                      layout={tableLayout}
+                      onSelect={() =>
+                        onSelectMessage({
+                          conversationId: conversation.id,
+                          sourceId: conversation.latestMessage.sourceId,
+                          messageId: conversation.latestMessage.messageId,
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+                <div style={{ height: bottomSpacerHeight }} />
+              </>
+            )}
+            {(isFetchingNextPage || isRefreshingTop) && (
+              <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
+                {isRefreshingTop ? "Refreshing threads..." : "Loading more threads..."}
               </p>
-            </div>
+            )}
           </div>
-        )}
-        {conversationIds.length > 0 && (
-          <>
-            <div style={{ height: topSpacerHeight }} />
-            {visibleConversations.map((conversation, index) => (
-              <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
-                <MessageRow
-                  message={conversation}
-                  isSelected={conversation.id === selection?.conversationId}
-                  isStriped={(startIndex + index) % 2 === 1}
-                  columns={columns}
-                  widths={widths}
-                  onSelect={() =>
-                    onSelectMessage({
-                      conversationId: conversation.id,
-                      sourceId: conversation.latestMessage.sourceId,
-                      messageId: conversation.latestMessage.messageId,
-                    })
-                  }
-                />
-              </div>
-            ))}
-            <div style={{ height: bottomSpacerHeight }} />
-          </>
-        )}
-        {(isFetchingNextPage || isRefreshingTop) && (
-          <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
-            {isRefreshingTop ? "Refreshing threads..." : "Loading more threads..."}
-          </p>
-        )}
+        </div>
       </div>
     </div>
   );
