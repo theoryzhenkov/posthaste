@@ -1,181 +1,301 @@
 import {
   Archive,
-  Keyboard,
+  Clock3,
+  Flag,
+  Forward,
+  Moon,
+  PenSquare,
+  Reply,
+  ReplyAll,
   Search,
   Settings,
-  Star,
+  SunMedium,
+  Tag,
   Trash2,
-  X,
 } from "lucide-react";
-import type { RefObject, ReactNode } from "react";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { cn } from "../lib/utils";
+import type { RefObject } from "react";
+
+import { cn } from "@/lib/utils";
 
 interface ActionBarProps {
+  isDarkMode: boolean;
   isFlagged: boolean;
   isMessageSelected: boolean;
+  isSearchActive: boolean;
   isSettingsOpen: boolean;
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
   onArchive: () => void;
   onClearSearch: () => void;
+  onCompose: () => void;
+  onFocusSearch: () => void;
+  onOpenCommandPalette: () => void;
+  onPlaceholderAction: (label: string) => void;
+  onSearchBlur: () => void;
   onSearchQueryChange: (query: string) => void;
   onShowShortcuts: () => void;
   onToggleFlag: () => void;
   onToggleSettings: () => void;
+  onToggleTheme: () => void;
   onTrash: () => void;
 }
 
-interface ActionButtonProps {
-  children: ReactNode;
+interface ToolbarChipProps {
+  active?: boolean;
   disabled?: boolean;
-  isActive?: boolean;
+  hint?: string;
+  icon: React.ReactNode;
   label?: string;
   onClick: () => void;
-  shortcut?: string;
   title: string;
 }
 
-function ActionButton({
-  children,
+function TrafficLights() {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="size-3 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
+      <span className="size-3 rounded-full bg-[#febc2e] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
+      <span className="size-3 rounded-full bg-[#28c940] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
+    </div>
+  );
+}
+
+function Divider() {
+  return <div className="mx-1.5 h-[18px] w-px bg-border/80" />;
+}
+
+function ToolbarChip({
+  active,
   disabled,
-  isActive,
+  hint,
+  icon,
   label,
   onClick,
-  shortcut,
   title,
-}: ActionButtonProps) {
+}: ToolbarChipProps) {
   return (
-    <Button
-      aria-pressed={isActive}
-      className={cn(
-        "h-7 rounded-md px-2 text-muted-foreground hover:bg-panel-muted hover:text-foreground",
-        !label && "w-7 px-0",
-        isActive && "bg-brand-coral-soft text-brand-coral",
-      )}
+    <button
+      type="button"
+      title={title}
       disabled={disabled}
       onClick={onClick}
-      size={label ? "sm" : "icon-sm"}
-      title={title}
-      type="button"
-      variant="ghost"
-    >
-      {children}
-      {label && <span className="text-xs">{label}</span>}
-      {shortcut && label && (
-        <kbd className="ml-1 rounded border border-border/70 bg-background/70 px-1 font-mono text-[10px] text-muted-foreground">
-          {shortcut}
-        </kbd>
+      className={cn(
+        "ph-focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[12px] font-medium text-chrome-foreground/70 transition-colors",
+        "hover:bg-white/12 hover:text-chrome-foreground disabled:opacity-35",
+        label ? "pr-2.5" : "w-7 justify-center px-0",
+        active && "bg-[color-mix(in_oklab,var(--brand-coral)_18%,transparent)] text-brand-coral",
       )}
-    </Button>
+    >
+      <span className="shrink-0">{icon}</span>
+      {label && <span>{label}</span>}
+      {label && hint && (
+        <span className="rounded-[4px] bg-black/6 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-chrome-foreground/52">
+          {hint}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function SearchField({
+  isActive,
+  searchInputRef,
+  searchQuery,
+  onClearSearch,
+  onFocus,
+  onBlur,
+  onOpenCommandPalette,
+  onSearchQueryChange,
+}: {
+  isActive: boolean;
+  searchInputRef: RefObject<HTMLInputElement | null>;
+  searchQuery: string;
+  onClearSearch: () => void;
+  onFocus: () => void;
+  onBlur: () => void;
+  onOpenCommandPalette: () => void;
+  onSearchQueryChange: (query: string) => void;
+}) {
+  const expanded = isActive || searchQuery.length > 0;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onOpenCommandPalette}
+        className="ph-focus-ring flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border border-border/70 bg-panel/75 px-2 text-left text-[12px] text-muted-foreground transition-[width,box-shadow,border-color] hover:border-border"
+      >
+        <Search size={13} strokeWidth={1.75} className="text-muted-foreground/70" />
+        <span className="flex-1">Search mail</span>
+        <span className="rounded-[4px] border border-border/80 bg-background/85 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
+          ⌘K
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex h-[26px] w-[340px] items-center gap-2 rounded-[6px] border border-ring/65 bg-panel px-2 shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_22%,transparent)] transition-[width,box-shadow,border-color]">
+      <Search size={13} strokeWidth={1.75} className="text-muted-foreground/70" />
+      <input
+        ref={searchInputRef}
+        autoFocus
+        type="text"
+        value={searchQuery}
+        onFocus={onFocus}
+        onBlur={() => {
+          if (!searchQuery) {
+            onBlur();
+          }
+        }}
+        onChange={(event) => onSearchQueryChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            onClearSearch();
+            onBlur();
+            searchInputRef.current?.blur();
+          }
+        }}
+        placeholder="from:maya tag:work date:>2026-04-01"
+        className="h-full flex-1 border-0 bg-transparent font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70"
+      />
+    </div>
   );
 }
 
 export function ActionBar({
+  isDarkMode,
   isFlagged,
   isMessageSelected,
+  isSearchActive,
   isSettingsOpen,
   searchInputRef,
   searchQuery,
   onArchive,
   onClearSearch,
+  onCompose,
+  onFocusSearch,
+  onOpenCommandPalette,
+  onPlaceholderAction,
+  onSearchBlur,
   onSearchQueryChange,
   onShowShortcuts,
   onToggleFlag,
   onToggleSettings,
+  onToggleTheme,
   onTrash,
 }: ActionBarProps) {
   return (
-    <header className="flex h-[var(--density-toolbar-height)] shrink-0 items-center gap-2 border-b border-border bg-chrome px-3 text-chrome-foreground shadow-[var(--shadow-pane)]">
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand-coral text-[11px] font-bold text-brand-coral-foreground">
-          PH
-        </div>
-        <span className="mr-1 text-sm font-semibold select-none">PostHaste</span>
-      </div>
+    <header className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border/80 bg-chrome px-3 text-chrome-foreground">
+      <TrafficLights />
+      <div className="w-4" />
 
-      <div className="h-5 w-px bg-border" />
-
-      <div className="flex items-center gap-0.5">
-        <ActionButton
-          disabled={!isMessageSelected}
-          label="Archive"
-          onClick={onArchive}
-          shortcut="e"
-          title="Archive selected conversation (e)"
-        >
-          <Archive size={16} strokeWidth={1.5} />
-        </ActionButton>
-        <ActionButton
-          disabled={!isMessageSelected}
-          label="Trash"
-          onClick={onTrash}
-          shortcut="#"
-          title="Move selected conversation to trash (#)"
-        >
-          <Trash2 size={16} strokeWidth={1.5} />
-        </ActionButton>
-        <ActionButton
-          disabled={!isMessageSelected}
-          isActive={isFlagged}
-          onClick={onToggleFlag}
-          title="Toggle flag"
-        >
-          <Star
-            size={16}
-            strokeWidth={1.5}
-            className={isFlagged ? "fill-current" : undefined}
-          />
-        </ActionButton>
-      </div>
+      <ToolbarChip
+        hint="⌘N"
+        icon={<PenSquare size={14} strokeWidth={1.6} />}
+        label="Compose"
+        onClick={onCompose}
+        title="Compose"
+      />
+      <Divider />
+      <ToolbarChip
+        hint="⌘R"
+        icon={<Reply size={14} strokeWidth={1.6} />}
+        onClick={() => onPlaceholderAction("Reply")}
+        title="Reply"
+      />
+      <ToolbarChip
+        hint="⇧⌘R"
+        icon={<ReplyAll size={14} strokeWidth={1.6} />}
+        onClick={() => onPlaceholderAction("Reply all")}
+        title="Reply all"
+      />
+      <ToolbarChip
+        hint="⇧⌘F"
+        icon={<Forward size={14} strokeWidth={1.6} />}
+        onClick={() => onPlaceholderAction("Forward")}
+        title="Forward"
+      />
+      <Divider />
+      <ToolbarChip
+        hint="E"
+        disabled={!isMessageSelected}
+        icon={<Archive size={14} strokeWidth={1.6} />}
+        onClick={onArchive}
+        title="Archive"
+      />
+      <ToolbarChip
+        hint="⌫"
+        disabled={!isMessageSelected}
+        icon={<Trash2 size={14} strokeWidth={1.6} />}
+        onClick={onTrash}
+        title="Trash"
+      />
+      <ToolbarChip
+        active={isFlagged}
+        hint="⇧⌘L"
+        disabled={!isMessageSelected}
+        icon={<Flag size={14} strokeWidth={1.6} />}
+        onClick={onToggleFlag}
+        title="Flag"
+      />
+      <ToolbarChip
+        hint="H"
+        icon={<Clock3 size={14} strokeWidth={1.6} />}
+        onClick={() => onPlaceholderAction("Snooze")}
+        title="Snooze"
+      />
+      <ToolbarChip
+        hint="L"
+        icon={<Tag size={14} strokeWidth={1.6} />}
+        onClick={() => onPlaceholderAction("Tag")}
+        title="Tag"
+      />
 
       <div className="flex-1" />
 
-      <div className="relative flex w-[min(26rem,36vw)] min-w-48 items-center">
-        <Search
-          size={14}
-          strokeWidth={1.5}
-          className="pointer-events-none absolute left-2.5 text-muted-foreground"
-        />
-        <Input
-          ref={searchInputRef}
-          type="text"
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              onClearSearch();
-              searchInputRef.current?.blur();
-            }
-          }}
-          placeholder="Search mail"
-          className="h-7 rounded-md border-border bg-panel pl-7 pr-7 font-mono text-xs shadow-none placeholder:font-sans"
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            className="absolute right-2 text-muted-foreground transition-colors hover:text-foreground"
-            onClick={onClearSearch}
-            title="Clear search"
-          >
-            <X size={14} strokeWidth={1.5} />
-          </button>
-        )}
-      </div>
+      <SearchField
+        isActive={isSearchActive}
+        searchInputRef={searchInputRef}
+        searchQuery={searchQuery}
+        onClearSearch={onClearSearch}
+        onFocus={onFocusSearch}
+        onBlur={onSearchBlur}
+        onOpenCommandPalette={onOpenCommandPalette}
+        onSearchQueryChange={onSearchQueryChange}
+      />
 
-      <div className="flex items-center gap-0.5">
-        <ActionButton onClick={onShowShortcuts} title="Keyboard shortcuts (?)">
-          <Keyboard size={16} strokeWidth={1.5} />
-        </ActionButton>
-        <ActionButton
-          isActive={isSettingsOpen}
-          onClick={onToggleSettings}
-          title="Settings"
-        >
-          <Settings size={16} strokeWidth={1.5} />
-        </ActionButton>
-      </div>
+      <button
+        type="button"
+        className="ph-focus-ring ml-1 flex size-7 items-center justify-center rounded-[6px] text-[13px] font-bold text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground"
+        onClick={onShowShortcuts}
+        title="Keyboard shortcuts (?)"
+      >
+        ?
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground",
+          isSettingsOpen && "bg-white/10 text-chrome-foreground",
+        )}
+        onClick={onToggleSettings}
+        title="Settings (⌘,)"
+      >
+        <Settings size={14} strokeWidth={1.6} />
+      </button>
+      <button
+        type="button"
+        className="ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground"
+        onClick={onToggleTheme}
+        title="Toggle theme"
+      >
+        {isDarkMode ? (
+          <SunMedium size={14} strokeWidth={1.6} />
+        ) : (
+          <Moon size={14} strokeWidth={1.6} />
+        )}
+      </button>
     </header>
   );
 }

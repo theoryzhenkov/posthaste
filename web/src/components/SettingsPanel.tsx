@@ -8,7 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderSearch, Mailbox, Settings as SettingsIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   deleteAccount,
   deleteSmartMailbox,
@@ -34,6 +34,7 @@ import {
   type SettingsNavItem,
 } from "./settings-panel/SettingsNav";
 import { SmartMailboxesPane } from "./settings-panel/SmartMailboxesPane";
+import { cn } from "../lib/utils";
 import type {
   EditorTarget,
   SmartMailboxEditorTarget,
@@ -51,7 +52,9 @@ const NAV_ITEMS: ReadonlyArray<SettingsNavItem<SettingsCategory>> = [
 interface SettingsPanelProps {
   accounts: AccountOverview[];
   activeAccountId: string | null;
+  initialCategory?: SettingsCategory;
   onActiveAccountChange: (accountId: string | null) => void;
+  shell?: "page" | "overlay";
 }
 
 /**
@@ -63,11 +66,13 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   accounts,
   activeAccountId,
+  initialCategory = "accounts",
   onActiveAccountChange,
+  shell = "page",
 }: SettingsPanelProps) {
   const queryClient = useQueryClient();
 
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("accounts");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(initialCategory);
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(
     accounts[0]?.id ?? "new",
   );
@@ -77,6 +82,10 @@ export function SettingsPanel({
     useState<string | null>(null);
   const [smartMailboxActionError, setSmartMailboxActionError] =
     useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveCategory(initialCategory);
+  }, [initialCategory]);
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -240,31 +249,34 @@ export function SettingsPanel({
       : `mailbox:${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? "pending"}`;
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-card text-card-foreground">
-      <header className="border-b border-border px-6 py-3">
-        <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
-          posthaste
-        </p>
-        <h2 className="mt-1 text-lg font-semibold tracking-tight">Settings</h2>
-      </header>
-
-      <div className="grid min-h-0 flex-1 grid-cols-[180px_minmax(0,1fr)]">
+    <section
+      className={cn(
+        "flex h-full min-h-0 flex-col text-card-foreground",
+        shell === "overlay" ? "bg-panel" : "bg-card",
+      )}
+    >
+      <div
+        className={cn(
+          "grid min-h-0 flex-1",
+          shell === "overlay"
+            ? "grid-cols-[220px_minmax(0,1fr)]"
+            : "grid-cols-[13.5rem_minmax(0,1fr)]",
+        )}
+      >
         <SettingsNav
           items={NAV_ITEMS}
           activeId={activeCategory}
           onSelect={setActiveCategory}
         />
 
-        <div className="min-h-0 overflow-hidden">
+        <div className="min-h-0 overflow-hidden bg-panel">
           {activeCategory === "general" && (
-            <div className="h-full min-h-0 overflow-y-auto px-6 py-6">
+            <div className="ph-scroll h-full min-h-0 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
               <GeneralPane
                 accounts={accounts}
                 smartMailboxes={smartMailboxSummaries}
                 defaultAccountId={settingsQuery.data?.defaultAccountId}
-                onDefaultAccountChange={(accountId) =>
-                  defaultMutation.mutate(accountId)
-                }
+                onDefaultAccountChange={(accountId) => defaultMutation.mutate(accountId)}
                 isPending={defaultMutation.isPending}
               />
             </div>

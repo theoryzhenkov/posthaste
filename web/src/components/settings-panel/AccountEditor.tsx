@@ -44,8 +44,10 @@ import {
   statusTone,
 } from "./helpers";
 import {
+  FeedbackBanner,
   Field,
   MetaStat,
+  SectionCard,
   SectionHeader,
   StatusDot,
 } from "./shared";
@@ -124,9 +126,10 @@ export function AccountEditor({
   const isEditing = editorTarget !== "new" && editingAccount !== null;
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
+    <div className="space-y-5">
+      <SectionCard className="space-y-4">
         <SectionHeader
+          eyebrow="Account editor"
           title={
             editorTarget === "new"
               ? "New account"
@@ -135,7 +138,7 @@ export function AccountEditor({
           description={
             editorTarget === "new"
               ? "Configure transport details, then save and verify the connection."
-              : "Update credentials or run account-level actions."
+              : "Update credentials, review sync status, or run account-level actions."
           }
           actions={
             isEditing && editingAccount ? (
@@ -150,188 +153,233 @@ export function AccountEditor({
           }
         />
 
-        {isEditing && editingAccount && (
-          <AccountStatusStrip account={editingAccount} />
-        )}
-      </div>
+        {isEditing && editingAccount && <AccountStatusStrip account={editingAccount} />}
+      </SectionCard>
 
-      <div className="grid gap-4">
-        <Field
-          label="Account ID"
-          value={form.id}
-          disabled={editorTarget !== "new"}
-          onChange={(value) => setForm((current) => ({ ...current, id: value }))}
-        />
+      <div className="grid gap-4 min-[1600px]:grid-cols-[minmax(0,1.35fr)_18rem]">
+        <div className="space-y-4">
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              eyebrow="Identity"
+              title="Mailbox source"
+              description="Name the source, set its stable identifier, and choose the transport driver."
+            />
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Account name"
-            value={form.name}
-            onChange={(value) => setForm((current) => ({ ...current, name: value }))}
-          />
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-muted-foreground">Driver</span>
-            <Select
-              value={form.driver}
-              onValueChange={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  driver: parseAccountDriver(value, current.driver),
-                }))
-              }
-            >
-              <SelectTrigger className="h-9 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="jmap">JMAP</SelectItem>
-                <SelectItem value="mock">Mock</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Base URL"
-            value={form.baseUrl}
-            placeholder="https://mail.example.com/jmap"
-            onChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
-          />
-          <Field
-            label="Username"
-            value={form.username}
-            placeholder="you@example.com"
-            onChange={(value) => setForm((current) => ({ ...current, username: value }))}
-          />
-        </div>
-
-        <fieldset className="rounded-lg border border-border bg-background/40 p-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <legend className="text-sm font-medium">Password</legend>
-              <p className="text-xs text-muted-foreground">
-                {editingAccount?.transport.secret.configured
-                  ? "A password is already stored securely. Keep, replace, or clear it."
-                  : "Stored securely; the saved value can't be read back."}
-              </p>
-            </div>
-            {editingAccount?.transport.secret.configured && (
-              <Badge
-                variant="outline"
-                className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] uppercase tracking-wider text-emerald-700"
-              >
-                configured
-              </Badge>
-            )}
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(["keep", "replace", "clear"] as const).map((mode) => {
-              const showKeep =
-                mode !== "keep" || Boolean(editingAccount?.transport.secret.configured);
-              if (!showKeep) {
-                return null;
-              }
-              return (
-                <Button
-                  key={mode}
-                  size="xs"
-                  type="button"
-                  variant={form.secretMode === mode ? "default" : "outline"}
-                  onClick={() => {
-                    if (
-                      mode === "clear" &&
-                      editingAccount?.transport.secret.configured &&
-                      !window.confirm(
-                        "Are you sure? The stored password will be permanently removed.",
-                      )
-                    ) {
-                      return;
-                    }
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_11rem]">
+              <Field
+                label="Account ID"
+                value={form.id}
+                disabled={editorTarget !== "new"}
+                onChange={(value) => setForm((current) => ({ ...current, id: value }))}
+              />
+              <label className="grid gap-2 text-sm">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  Driver
+                </span>
+                <Select
+                  value={form.driver}
+                  onValueChange={(value) =>
                     setForm((current) => ({
                       ...current,
-                      secretMode: mode,
-                      password: mode === "replace" ? current.password : "",
-                    }));
-                  }}
+                      driver: parseAccountDriver(value, current.driver),
+                    }))
+                  }
                 >
-                  {mode}
-                </Button>
-              );
-            })}
-          </div>
+                  <SelectTrigger className="h-9 w-full border-border/80 bg-panel shadow-none">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="jmap">JMAP</SelectItem>
+                    <SelectItem value="mock">Mock</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
 
-          <div className="mt-3 grid gap-1.5">
-            <label className="text-sm text-muted-foreground" htmlFor="account-password">
-              Password
+            <Field
+              label="Account name"
+              value={form.name}
+              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+            />
+          </SectionCard>
+
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              eyebrow="Connection"
+              title="Server details"
+              description="Point this account at its JMAP endpoint and identify the signing user."
+            />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Base URL"
+                value={form.baseUrl}
+                placeholder="https://mail.example.com/jmap"
+                onChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
+              />
+              <Field
+                label="Username"
+                value={form.username}
+                placeholder="you@example.com"
+                onChange={(value) => setForm((current) => ({ ...current, username: value }))}
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              eyebrow="Credentials"
+              title="Stored secret"
+              description={
+                editingAccount?.transport.secret.configured
+                  ? "A password is already stored securely. Keep it, replace it, or clear it."
+                  : "Passwords are stored securely. Existing values are never shown back."
+              }
+              actions={
+                editingAccount?.transport.secret.configured ? (
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-700"
+                  >
+                    configured
+                  </Badge>
+                ) : null
+              }
+            />
+
+            <div className="flex flex-wrap gap-2">
+              {(["keep", "replace", "clear"] as const).map((mode) => {
+                const showKeep =
+                  mode !== "keep" || Boolean(editingAccount?.transport.secret.configured);
+                if (!showKeep) {
+                  return null;
+                }
+                return (
+                  <Button
+                    key={mode}
+                    size="sm"
+                    type="button"
+                    variant={form.secretMode === mode ? "default" : "outline"}
+                    onClick={() => {
+                      if (
+                        mode === "clear" &&
+                        editingAccount?.transport.secret.configured &&
+                        !window.confirm(
+                          "Are you sure? The stored password will be permanently removed.",
+                        )
+                      ) {
+                        return;
+                      }
+                      setForm((current) => ({
+                        ...current,
+                        secretMode: mode,
+                        password: mode === "replace" ? current.password : "",
+                      }));
+                    }}
+                  >
+                    {mode}
+                  </Button>
+                );
+              })}
+            </div>
+
+            <div className="grid gap-2">
+              <label className="text-[11px] font-medium text-muted-foreground" htmlFor="account-password">
+                Password
+              </label>
+              <Input
+                id="account-password"
+                type="password"
+                className="h-9 border-border/80 bg-panel shadow-none"
+                value={form.password}
+                disabled={form.secretMode !== "replace"}
+                placeholder={
+                  form.secretMode === "replace" ? "Enter a new password" : "Password hidden"
+                }
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    password: event.target.value,
+                  }))
+                }
+              />
+            </div>
+          </SectionCard>
+        </div>
+
+        <div className="space-y-4">
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              eyebrow="State"
+              title="Runtime"
+              description="Keep the account enabled and review the latest verification details."
+            />
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Checkbox
+                checked={form.enabled}
+                onCheckedChange={(checked) =>
+                  setForm((current) => ({ ...current, enabled: checked === true }))
+                }
+              />
+              Account enabled
             </label>
-            <Input
-              id="account-password"
-              type="password"
-              className="h-9"
-              value={form.password}
-              disabled={form.secretMode !== "replace"}
-              placeholder={
-                form.secretMode === "replace" ? "Enter a new password" : "Password hidden"
-              }
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  password: event.target.value,
-                }))
-              }
+
+            {editingAccount && (
+              <dl className="grid grid-cols-2 gap-4 rounded-lg border border-border/70 bg-panel-muted/45 px-4 py-4">
+                <MetaStat label="Driver" value={editingAccount.driver.toUpperCase()} />
+                <MetaStat label="Push" value={editingAccount.push} />
+                <MetaStat
+                  label="Default"
+                  value={editingAccount.isDefault ? "yes" : "no"}
+                />
+                <MetaStat
+                  label="Updated"
+                  value={formatRelativeTime(editingAccount.updatedAt)}
+                />
+              </dl>
+            )}
+
+            {verification && (
+              <dl className="grid grid-cols-2 gap-4 rounded-lg border border-border/70 bg-panel-muted/45 px-4 py-4">
+                <MetaStat label="Identity" value={verification.identityEmail ?? "Unknown"} />
+                <MetaStat
+                  label="Push"
+                  value={verification.pushSupported ? "supported" : "unsupported"}
+                />
+              </dl>
+            )}
+          </SectionCard>
+
+          <SectionCard className="space-y-4">
+            <SectionHeader
+              eyebrow="Changes"
+              title="Apply updates"
+              description="Save the current form or reset back to the last loaded account state."
             />
-          </div>
-        </fieldset>
 
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Checkbox
-            checked={form.enabled}
-            onCheckedChange={(checked) =>
-              setForm((current) => ({ ...current, enabled: checked === true }))
-            }
-          />
-          Account enabled
-        </label>
+            {feedback && <FeedbackBanner tone="success">{feedback}</FeedbackBanner>}
+            {errorMessage && <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>}
 
-        {feedback && (
-          <p className="rounded border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-700">
-            {feedback}
-          </p>
-        )}
-        {errorMessage && (
-          <p className="rounded border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            {errorMessage}
-          </p>
-        )}
-        {verification && (
-          <dl className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 text-sm">
-            <MetaStat label="Identity" value={verification.identityEmail ?? "Unknown"} />
-            <MetaStat
-              label="Push"
-              value={verification.pushSupported ? "supported" : "unsupported"}
-            />
-          </dl>
-        )}
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            onClick={() => saveMutation.mutate(form)}
-            disabled={saveMutation.isPending}
-          >
-            {editorTarget === "new" ? "Create account" : "Save changes"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              setForm(editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM)
-            }
-          >
-            Reset form
-          </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => saveMutation.mutate(form)}
+                disabled={saveMutation.isPending}
+              >
+                {editorTarget === "new" ? "Create account" : "Save changes"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setForm(editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM)
+                }
+              >
+                Reset form
+              </Button>
+            </div>
+          </SectionCard>
         </div>
       </div>
     </div>
@@ -355,7 +403,7 @@ function AccountActions({
   isCommandPending: boolean;
 }) {
   return (
-    <>
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         size="sm"
         variant="outline"
@@ -410,14 +458,14 @@ function AccountActions({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </div>
   );
 }
 
 function AccountStatusStrip({ account }: { account: AccountOverview }) {
   return (
     <>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border/70 bg-panel-muted/45 px-4 py-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <StatusDot status={account.status} />
           <span
@@ -437,7 +485,7 @@ function AccountStatusStrip({ account }: { account: AccountOverview }) {
         <span>{account.driver.toUpperCase()}</span>
       </div>
       {account.lastSyncError && (
-        <p className="rounded border border-destructive/20 bg-destructive/5 px-2 py-1.5 text-xs text-destructive">
+        <p className="mt-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {account.lastSyncError}
         </p>
       )}

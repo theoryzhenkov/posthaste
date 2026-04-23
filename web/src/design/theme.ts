@@ -4,7 +4,7 @@ export const resolvedThemeModes = ["light", "dark"] as const;
 export type ThemeMode = (typeof themeModes)[number];
 export type ResolvedThemeMode = (typeof resolvedThemeModes)[number];
 
-export const defaultThemeMode = "light" as const satisfies ThemeMode;
+export const defaultThemeMode = "dark" as const satisfies ThemeMode;
 
 export const palettePresetIds = [
   "neutral",

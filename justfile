@@ -33,6 +33,20 @@ build:
     just backend build
     just frontend build
 
+# Print the browser automation environment exposed by the dev shell.
+browser-env:
+    @echo "PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-}"
+    @echo "PLAYWRIGHT_NODEJS_PATH=${PLAYWRIGHT_NODEJS_PATH:-}"
+    @echo "POSTHASTE_PLAYWRIGHT_CLI=${POSTHASTE_PLAYWRIGHT_CLI:-}"
+
+# Run Playwright through the Nix-provided CLI/runtime from the current dev shell.
+browser-playwright *args:
+    node "${POSTHASTE_PLAYWRIGHT_CLI}" {{ args }}
+
+# Capture a browser screenshot using the shared Playwright runtime.
+browser-screenshot url file *args:
+    node "${POSTHASTE_PLAYWRIGHT_CLI}" screenshot {{ args }} {{ url }} {{ file }}
+
 # Start Stalwart + seed + daemon + Vite with Overmind.
 dev-web:
     bash dev/overmind/launch.sh web

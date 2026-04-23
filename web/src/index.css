@@ -42,6 +42,9 @@
   --color-panel: var(--panel);
   --color-panel-foreground: var(--panel-foreground);
   --color-panel-muted: var(--panel-muted);
+  --color-bg-elev: var(--bg-elev);
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
   --color-signal-unread: var(--signal-unread);
   --color-signal-flag: var(--signal-flag);
   --color-brand-coral: var(--brand-coral);
@@ -119,11 +122,22 @@
   --panel: #FFFFFF;
   --panel-foreground: #141618;
   --panel-muted: #F2F5F7;
+  --bg-elev: #EEF1F4;
+  --border-soft: #E4E9EE;
+  --border-strong: #BAC4CC;
   --signal-unread: #2B7EC2;
   --signal-flag: #D96A42;
   --brand-coral: #D96A42;
   --brand-coral-foreground: #FFFFFF;
   --brand-coral-soft: #F6DED3;
+  --sidebar-section-label: #697180;
+  --list-header: #EFE5E0;
+  --list-zebra: #FFFFFF;
+  --list-zebra-alt: #F6F1EE;
+  --list-hover: #E8E0DB;
+  --list-selection: #D7D1CF;
+  --list-selection-foreground: #141618;
+  --list-divider: #D6CEC9;
   --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
   --shadow-popover: 0 20px 48px rgb(21 28 36 / 0.16);
   --shadow-pane: 0 1px 2px rgb(21 28 36 / 0.06), 0 8px 24px rgb(21 28 36 / 0.05);
@@ -140,72 +154,83 @@
 
   --density-toolbar-height: 2.625rem;
   --density-sidebar-row-height: 1.75rem;
-  --density-message-row-height: 4.875rem;
+  --density-message-row-height: 1.875rem;
   --density-pane-padding: 0.75rem;
 }
 
 .dark {
   color-scheme: dark;
 
-  --background: #24221E;
-  --foreground: #F0EDE7;
-  --card: #2D2A25;
-  --card-foreground: #F0EDE7;
-  --popover: #2D2A25;
-  --popover-foreground: #F0EDE7;
-  --primary: #79B7EA;
-  --primary-foreground: #101418;
-  --secondary: #343029;
-  --secondary-foreground: #D7D0C5;
-  --muted: #343029;
-  --muted-foreground: #B2A99C;
-  --accent: #3A352D;
-  --accent-foreground: #F0EDE7;
+  --background: oklch(0.22 0.008 60);
+  --foreground: oklch(0.94 0.005 80);
+  --card: oklch(0.25 0.008 60);
+  --card-foreground: oklch(0.94 0.005 80);
+  --popover: oklch(0.25 0.008 60);
+  --popover-foreground: oklch(0.94 0.005 80);
+  --primary: oklch(0.65 0.13 245);
+  --primary-foreground: oklch(0.18 0.008 55);
+  --secondary: oklch(0.27 0.008 60);
+  --secondary-foreground: oklch(0.82 0.008 72);
+  --muted: oklch(0.27 0.008 60);
+  --muted-foreground: oklch(0.72 0.008 70);
+  --accent: oklch(0.29 0.008 60);
+  --accent-foreground: oklch(0.94 0.005 80);
   --destructive: #F87171;
-  --border: #454038;
-  --input: #454038;
-  --ring: #79B7EA;
-  --sidebar: #211F1B;
-  --sidebar-foreground: #DCD5CA;
-  --sidebar-primary: #79B7EA;
-  --sidebar-primary-foreground: #101418;
-  --sidebar-accent: #343029;
-  --sidebar-accent-foreground: #F0EDE7;
-  --sidebar-border: #454038;
-  --sidebar-ring: #79B7EA;
-  --chrome: #1D1B18;
-  --chrome-foreground: #E8E2D8;
-  --panel: #292621;
-  --panel-foreground: #F0EDE7;
-  --panel-muted: #302C26;
-  --signal-unread: #79B7EA;
-  --signal-flag: #FF8A5F;
-  --brand-coral: #FF8A5F;
-  --brand-coral-foreground: #1D120C;
-  --brand-coral-soft: #4A2B22;
-  --focus-soft: color-mix(in oklab, var(--ring) 30%, transparent);
-  --shadow-popover: 0 24px 72px rgb(0 0 0 / 0.5);
-  --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.28), 0 12px 36px rgb(0 0 0 / 0.22);
+  --border: oklch(0.32 0.008 60);
+  --input: oklch(0.32 0.008 60);
+  --ring: oklch(0.68 0.15 250);
+  --sidebar: oklch(0.195 0.008 55);
+  --sidebar-foreground: oklch(0.9 0.005 78);
+  --sidebar-primary: #6FADE8;
+  --sidebar-primary-foreground: #0E1114;
+  --sidebar-accent: oklch(0.26 0.008 58);
+  --sidebar-accent-foreground: oklch(0.94 0.005 80);
+  --sidebar-border: oklch(0.28 0.008 60);
+  --sidebar-ring: #77B1EC;
+  --chrome: oklch(0.185 0.008 55);
+  --chrome-foreground: oklch(0.9 0.005 78);
+  --panel: oklch(0.27 0.008 60);
+  --panel-foreground: oklch(0.94 0.005 80);
+  --panel-muted: oklch(0.25 0.008 60);
+  --bg-elev: oklch(0.26 0.008 60);
+  --border-soft: oklch(0.28 0.008 60);
+  --border-strong: oklch(0.4 0.01 60);
+  --signal-unread: oklch(0.65 0.13 245);
+  --signal-flag: oklch(0.68 0.17 45);
+  --brand-coral: oklch(0.68 0.17 45);
+  --brand-coral-foreground: oklch(0.18 0.008 55);
+  --brand-coral-soft: oklch(0.92 0.055 50);
+  --sidebar-section-label: oklch(0.55 0.008 65);
+  --list-header: oklch(0.205 0.008 55);
+  --list-zebra: oklch(0.235 0.008 60);
+  --list-zebra-alt: oklch(0.255 0.008 60);
+  --list-hover: oklch(0.29 0.008 60);
+  --list-selection: oklch(0.34 0.06 250);
+  --list-selection-foreground: oklch(0.98 0.01 250);
+  --list-divider: oklch(0.28 0.008 60);
+  --focus-soft: color-mix(in oklab, var(--ring) 34%, transparent);
+  --shadow-popover: 0 32px 96px rgb(0 0 0 / 0.58);
+  --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.32), 0 18px 44px rgb(0 0 0 / 0.24);
 }
 
 [data-ui-density="compact"] {
   --density-toolbar-height: 2.375rem;
   --density-sidebar-row-height: 1.5rem;
-  --density-message-row-height: 4rem;
+  --density-message-row-height: 1.5rem;
   --density-pane-padding: 0.625rem;
 }
 
 [data-ui-density="cozy"] {
   --density-toolbar-height: 2.625rem;
   --density-sidebar-row-height: 1.75rem;
-  --density-message-row-height: 4.875rem;
+  --density-message-row-height: 1.875rem;
   --density-pane-padding: 0.75rem;
 }
 
 [data-ui-density="comfortable"] {
   --density-toolbar-height: 2.875rem;
   --density-sidebar-row-height: 2rem;
-  --density-message-row-height: 5.75rem;
+  --density-message-row-height: 3rem;
   --density-pane-padding: 1rem;
 }
 

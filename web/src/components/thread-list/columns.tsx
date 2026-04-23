@@ -5,48 +5,75 @@ import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../utils/relativeTime";
 
 export type ColumnId =
+  | "unread"
+  | "flagged"
+  | "attachment"
   | "from"
   | "subject"
   | "preview"
   | "date"
   | "source"
-  | "threadSize"
-  | "flagged"
-  | "attachment";
+  | "tags"
+  | "threadSize";
 
 export interface ColumnDef {
   id: ColumnId;
   label: string;
   gridWidth: string;
   align?: "left" | "right" | "center";
+  header?: ReactNode;
   render: (conversation: ConversationSummary) => ReactNode;
 }
 
 const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
+  unread: {
+    id: "unread",
+    label: "Unread",
+    gridWidth: "28px",
+    align: "center",
+    header: <span className="size-1.5 rounded-full border border-muted-foreground/55" />,
+    render: (c) =>
+      c.unreadCount > 0 ? (
+        <span className="size-2 rounded-full bg-signal-unread" />
+      ) : null,
+  },
+  flagged: {
+    id: "flagged",
+    label: "Flag",
+    gridWidth: "28px",
+    align: "center",
+    header: <Star size={11} className="text-muted-foreground" />,
+    render: (c) =>
+      c.isFlagged ? (
+        <Star size={12} className="fill-signal-flag text-signal-flag" />
+      ) : null,
+  },
+  attachment: {
+    id: "attachment",
+    label: "Attachment",
+    gridWidth: "28px",
+    align: "center",
+    header: <Paperclip size={11} className="text-muted-foreground" />,
+    render: (c) =>
+      c.hasAttachment ? (
+        <Paperclip size={12} className="text-muted-foreground" />
+      ) : null,
+  },
   from: {
     id: "from",
     label: "From",
-    gridWidth: "minmax(120px, 1fr)",
+    gridWidth: "180px",
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
       const sender = c.fromName ?? c.fromEmail ?? "Unknown";
       return (
-        <div className="flex min-w-0 items-center gap-1.5">
-          {hasUnread && (
-            <span className="size-1.5 shrink-0 rounded-full bg-signal-unread" />
-          )}
-          {c.isFlagged && (
-            <Star
-              size={12}
-              className="shrink-0 fill-signal-flag text-signal-flag"
-            />
-          )}
+        <div className="min-w-0">
           <span
             className={cn(
-              "truncate",
+              "block truncate",
               hasUnread
-                ? "font-semibold text-foreground"
-                : "text-muted-foreground",
+                ? "font-medium text-foreground"
+                : "text-muted-foreground/85",
             )}
           >
             {sender}
@@ -58,33 +85,24 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   subject: {
     id: "subject",
     label: "Subject",
-    gridWidth: "minmax(0, 2fr)",
+    gridWidth: "320px",
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
-      const threadLabel =
-        c.messageCount > 1 ? `${c.messageCount} in thread` : null;
       return (
-        <div className="min-w-0 overflow-hidden">
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "shrink-0 truncate",
-                hasUnread ? "font-semibold" : "text-muted-foreground",
-              )}
-            >
-              {c.subject ?? "(no subject)"}
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+          {c.messageCount > 1 && (
+            <span className="rounded-[3px] border border-[var(--border-strong)] bg-background/45 px-1 font-mono text-[10px] font-medium leading-4 tabular-nums text-muted-foreground">
+              {c.messageCount}
             </span>
-            {c.preview && (
-              <span className="truncate text-xs text-muted-foreground">
-                {c.preview}
-              </span>
-            )}
-          </div>
-          {threadLabel && (
-            <div className="mt-0.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70">
-              {threadLabel}
-            </div>
           )}
+          <span
+            className={cn(
+              "block truncate leading-none",
+              hasUnread ? "font-semibold text-foreground" : "text-foreground/92",
+            )}
+          >
+            {c.subject ?? "(no subject)"}
+          </span>
         </div>
       );
     },
@@ -101,22 +119,30 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   date: {
     id: "date",
-    label: "Date",
-    gridWidth: "160px",
+    label: "Date Received",
+    gridWidth: "128px",
     render: (c) => (
-      <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatRelativeTime(c.latestReceivedAt)}
       </span>
     ),
   },
   source: {
     id: "source",
-    label: "Source",
-    gridWidth: "80px",
+    label: "Account",
+    gridWidth: "72px",
     render: (c) => (
-      <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+      <span className="truncate font-mono text-[10px] text-muted-foreground/75">
         {c.latestSourceName}
       </span>
+    ),
+  },
+  tags: {
+    id: "tags",
+    label: "Tags",
+    gridWidth: "140px",
+    render: () => (
+      <span className="truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
     ),
   },
   threadSize: {
@@ -130,45 +156,31 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       </span>
     ),
   },
-  flagged: {
-    id: "flagged",
-    label: "Flag",
-    gridWidth: "32px",
-    align: "center",
-    render: (c) =>
-      c.isFlagged ? (
-        <Star size={12} className="fill-signal-flag text-signal-flag" />
-      ) : null,
-  },
-  attachment: {
-    id: "attachment",
-    label: "Attach",
-    gridWidth: "32px",
-    align: "center",
-    render: (c) =>
-      c.hasAttachment ? (
-        <Paperclip size={12} className="text-muted-foreground" />
-      ) : null,
-  },
 };
 
 /** All available columns in picker display order */
 export const ALL_COLUMNS: ColumnId[] = [
+  "unread",
   "flagged",
   "attachment",
-  "from",
   "subject",
-  "preview",
+  "from",
   "date",
   "source",
+  "tags",
+  "preview",
   "threadSize",
 ];
 
 export const DEFAULT_COLUMNS: ColumnId[] = [
-  "from",
+  "unread",
+  "flagged",
+  "attachment",
   "subject",
+  "from",
   "date",
   "source",
+  "tags",
 ];
 
 export function getColumnDef(id: ColumnId): ColumnDef {
