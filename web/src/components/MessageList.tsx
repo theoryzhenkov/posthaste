@@ -477,6 +477,7 @@ export function MessageList({
               columns={columns}
               layout={tableLayout}
               sort={sort}
+              widths={widths}
               onResetColumns={resetColumns}
               onResizeColumn={setColumnWidth}
               onReorderColumns={reorderColumns}
