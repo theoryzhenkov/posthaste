@@ -293,9 +293,12 @@ The message list is a tabular conversation list in standard and compact densitie
 Pane:
 
 - Background: `bgList`.
-- Right border: `1px solid border`.
-- Overflow hidden.
+- Pane borders are supplied by the resizable splitters, not by an internal message-list border.
+- Overflow hidden at the pane boundary.
 - Role: `listbox`.
+- Header and rows live in one table-width layout inside a horizontal `ph-scroll` wrapper.
+- When enabled columns exceed the pane width, the entire message list table scrolls horizontally as one unit.
+- When enabled columns fit within the pane, the table stretches to the full pane width so the left edge and right edge align with the pane edges.
 
 Default columns:
 
@@ -318,17 +321,15 @@ Minimum widths:
 - `account`: `54px`
 - `tags`: `60px`
 
-The last column stretches to absorb extra pane width when the pane is wider than the raw column total plus dividers.
+Growable columns absorb extra pane width when the pane is wider than the raw column total. The default grow column is `subject`; right-side columns remain aligned to the right edge because the table itself stretches to the pane.
 
 Header:
 
 - Height: `26px`.
-- Display: flex.
+- Display: grid with the same column template as rows.
 - Background: `bgTitlebar`.
 - Bottom border: `1px solid borderStrong`.
-- Sticky at top.
-- Z-index: `3`.
-- Width equals total effective column width.
+- Width equals the table width.
 
 Header cells:
 
@@ -348,18 +349,18 @@ Header cells:
 
 Column dividers:
 
-- Width: `1px`.
-- Height: `60%` of header.
-- Background: `borderSoft`.
+- Width: `2px`.
+- Height: `100%` of header.
+- Background: `borderStrong`.
 - Cursor: `col-resize`.
-- Hit area: `4px` on each side and `50%` above/below.
-- Hover/active highlight: `3px` coral line, extending `20%` beyond divider height.
+- Hit area: `4px` total, centered on the visible divider.
+- Hover/active highlight: same-height `2px` coral line. Dividers do not grow or stretch on hover.
 
 Rows:
 
 - Height: `24px` compact, `30px` standard, `48px` roomy.
-- Width: total effective column width.
-- Display: flex.
+- Width equals the table width.
+- Display: grid with the same column template as the header.
 - Background: selected `selBg`; hover `hoverBg`; zebra odd `bgListAlt`; otherwise `bgList`.
 - Text color: selected `selFg`; unread `fg`; read `fgMuted`.
 - Font: Geist `13px` standard, `12px` compact.

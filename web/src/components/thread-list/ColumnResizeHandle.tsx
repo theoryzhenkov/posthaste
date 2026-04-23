@@ -47,11 +47,11 @@ export function ColumnResizeHandle({
 
   return (
     <div
-      className="group absolute -right-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-center justify-center"
+      className="group absolute -right-1 top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-center"
       onPointerDown={handlePointerDown}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="h-3 w-px bg-border transition-all group-hover:h-full group-hover:w-0.5 group-hover:bg-brand-coral" />
+      <div className="h-full w-0.5 bg-[var(--border-strong)] transition-colors group-hover:bg-brand-coral group-active:bg-brand-coral" />
     </div>
   );
 }
