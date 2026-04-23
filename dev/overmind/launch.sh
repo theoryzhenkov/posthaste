@@ -31,6 +31,7 @@ export POSTHASTE_CORS_ORIGIN="${POSTHASTE_CORS_ORIGIN:-http://localhost:5173}"
 mkdir -p \
   "$POSTHASTE_STALWART_DATA" "$POSTHASTE_STALWART_LOGS" \
   "$POSTHASTE_CONFIG_ROOT" "$POSTHASTE_STATE_ROOT"
+rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 
 log_path="$("$root/dev/overmind/daemon-log-path.sh")"
 echo "Persisted daemon log: $log_path (tail with 'just daemon-log-tail')"
