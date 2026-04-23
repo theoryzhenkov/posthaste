@@ -172,7 +172,6 @@ export function MessageList({
   const {
     data,
     isLoading,
-    isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
@@ -480,7 +479,7 @@ export function MessageList({
 
   if (!selectedView) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 border-r border-border bg-panel p-6">
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6">
         <MousePointerClick size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
         <div className="text-center">
           <p className="text-sm font-medium text-muted-foreground">No mailbox selected</p>
@@ -491,7 +490,7 @@ export function MessageList({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-panel">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel">
       <div
         className="border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
         aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
@@ -611,11 +610,6 @@ export function MessageList({
         {(isFetchingNextPage || isRefreshingTop) && (
           <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
             {isRefreshingTop ? "Refreshing threads..." : "Loading more threads..."}
-          </p>
-        )}
-        {!hasNextPage && conversationIds.length > 0 && !isFetching && (
-          <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
-            End of thread list
           </p>
         )}
       </div>

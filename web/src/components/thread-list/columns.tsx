@@ -31,10 +31,10 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     label: "Unread",
     gridWidth: "28px",
     align: "center",
-    header: <span className="size-1.5 rounded-full border border-muted-foreground/55" />,
+    header: <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />,
     render: (c) =>
       c.unreadCount > 0 ? (
-        <span className="size-2 rounded-full bg-signal-unread" />
+        <span aria-hidden className="size-2 rounded-full bg-signal-unread" />
       ) : null,
   },
   flagged: {
