@@ -300,18 +300,24 @@ Pane:
 - When enabled columns exceed the pane width, the entire message list table scrolls horizontally as one unit.
 - When enabled columns fit within the pane, the table stretches to the full pane width so the left edge and right edge align with the pane edges.
 
+Columns have two layout types:
+
+- Fixed columns render as a fixed pixel basis and do not absorb surplus pane width.
+- Stretch columns render as `minmax(basis, grow)` and absorb surplus pane width after fixed columns keep their basis.
+- Resize always changes the stored logical basis, never the rendered width after stretch has been applied.
+
 Default columns:
 
-| ID | Width | Resizable | Label | Alignment |
-|---|---:|---|---|---|
-| `unread` | `28px` | No | empty | center |
-| `flag` | `28px` | No | flag icon | center |
-| `attach` | `28px` | No | attachment icon | center |
-| `subject` | `320px` | Yes | `Subject` | left |
-| `from` | `180px` | Yes | `From` | left |
-| `date` | `128px` | Yes | `Date Received` | left |
-| `account` | `72px` | Yes | `Account` | right |
-| `tags` | `140px` | Yes | `Tags` | left |
+| ID | Type | Basis | Resizable | Label | Alignment |
+|---|---|---:|---|---|---|
+| `unread` | fixed | `28px` | No | empty | center |
+| `flag` | fixed | `28px` | No | flag icon | center |
+| `attach` | fixed | `28px` | No | attachment icon | center |
+| `subject` | stretch, grow `1` | `320px` | Yes | `Subject` | left |
+| `from` | fixed | `180px` | Yes | `From` | left |
+| `date` | fixed | `128px` | Yes | `Date Received` | left |
+| `account` | fixed | `72px` | Yes | `Account` | right |
+| `tags` | stretch, grow `0.5` | `140px` | Yes | `Tags` | left |
 
 Minimum widths:
 
@@ -321,7 +327,7 @@ Minimum widths:
 - `account`: `54px`
 - `tags`: `60px`
 
-Growable columns absorb extra pane width when the pane is wider than the raw column total. The default grow column is `subject`; right-side columns remain aligned to the right edge because the table itself stretches to the pane.
+Stretch columns absorb extra pane width when the pane is wider than the raw column total. In the default set, `subject` is the primary stretch column and `tags` is the secondary stretch column. Right-side columns remain aligned to the right edge because the table itself stretches to the pane.
 
 Header:
 

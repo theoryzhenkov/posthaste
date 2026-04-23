@@ -16,16 +16,27 @@ export type ColumnId =
   | "tags"
   | "threadSize";
 
-export interface ColumnDef {
+interface BaseColumnDef {
   id: ColumnId;
   label: string;
-  width: number;
+  basis: number;
   minWidth?: number;
-  grow?: number;
   align?: "left" | "right" | "center";
   header?: ReactNode;
+  resizable?: boolean;
   render: (conversation: ConversationSummary) => ReactNode;
 }
+
+export interface FixedColumnDef extends BaseColumnDef {
+  kind: "fixed";
+}
+
+export interface StretchColumnDef extends BaseColumnDef {
+  kind: "stretch";
+  grow: number;
+}
+
+export type ColumnDef = FixedColumnDef | StretchColumnDef;
 
 export interface ThreadListLayout {
   gridTemplateColumns: string;
@@ -37,8 +48,9 @@ export interface ThreadListLayout {
 const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   unread: {
     id: "unread",
+    kind: "fixed",
     label: "Unread",
-    width: 28,
+    basis: 28,
     align: "center",
     header: <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />,
     render: (c) =>
@@ -48,8 +60,9 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   flagged: {
     id: "flagged",
+    kind: "fixed",
     label: "Flag",
-    width: 28,
+    basis: 28,
     align: "center",
     header: <Star size={11} className="text-muted-foreground" />,
     render: (c) =>
@@ -59,8 +72,9 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   attachment: {
     id: "attachment",
+    kind: "fixed",
     label: "Attachment",
-    width: 28,
+    basis: 28,
     align: "center",
     header: <Paperclip size={11} className="text-muted-foreground" />,
     render: (c) =>
@@ -70,9 +84,11 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   from: {
     id: "from",
+    kind: "fixed",
     label: "From",
-    width: 180,
+    basis: 180,
     minWidth: 80,
+    resizable: true,
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
       const sender = c.fromName ?? c.fromEmail ?? "Unknown";
@@ -94,10 +110,12 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   subject: {
     id: "subject",
+    kind: "stretch",
     label: "Subject",
-    width: 320,
+    basis: 320,
     minWidth: 120,
     grow: 1,
+    resizable: true,
     render: (c) => {
       const hasUnread = c.unreadCount > 0;
       return (
@@ -121,10 +139,12 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   preview: {
     id: "preview",
+    kind: "stretch",
     label: "Preview",
-    width: 220,
+    basis: 220,
     minWidth: 160,
     grow: 1,
+    resizable: true,
     render: (c) => (
       <span className="truncate text-xs text-muted-foreground">
         {c.preview ?? ""}
@@ -133,9 +153,11 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   date: {
     id: "date",
+    kind: "fixed",
     label: "Date Received",
-    width: 128,
+    basis: 128,
     minWidth: 80,
+    resizable: true,
     render: (c) => (
       <span className="whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatRelativeTime(c.latestReceivedAt)}
@@ -144,9 +166,11 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   source: {
     id: "source",
+    kind: "fixed",
     label: "Account",
-    width: 72,
+    basis: 72,
     minWidth: 54,
+    resizable: true,
     render: (c) => (
       <span className="truncate font-mono text-[10px] text-muted-foreground/75">
         {c.latestSourceName}
@@ -155,18 +179,23 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   },
   tags: {
     id: "tags",
+    kind: "stretch",
     label: "Tags",
-    width: 140,
+    basis: 140,
     minWidth: 60,
+    grow: 0.5,
+    resizable: true,
     render: () => (
       <span className="truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
     ),
   },
   threadSize: {
     id: "threadSize",
+    kind: "fixed",
     label: "Size",
-    width: 50,
+    basis: 50,
     align: "right",
+    resizable: true,
     render: (c) => (
       <span className="font-mono text-xs tabular-nums text-muted-foreground">
         {c.messageCount > 1 ? String(c.messageCount) : ""}
@@ -206,9 +235,9 @@ export function getColumnDef(id: ColumnId): ColumnDef {
 
 export type ColumnWidths = Partial<Record<ColumnId, number>>;
 
-function columnWidth(id: ColumnId, widths?: ColumnWidths): number {
+export function getColumnBasis(id: ColumnId, widths?: ColumnWidths): number {
   const def = COLUMN_DEFS[id];
-  return Math.max(def.minWidth ?? def.width, widths?.[id] ?? def.width);
+  return Math.max(def.minWidth ?? def.basis, widths?.[id] ?? def.basis);
 }
 
 export function buildGridTemplate(
@@ -218,8 +247,10 @@ export function buildGridTemplate(
   return columns
     .map((id) => {
       const def = COLUMN_DEFS[id];
-      const width = columnWidth(id, widths);
-      return def.grow ? `minmax(${width}px, ${def.grow}fr)` : `${width}px`;
+      const basis = getColumnBasis(id, widths);
+      return def.kind === "stretch"
+        ? `minmax(${basis}px, ${def.grow}fr)`
+        : `${basis}px`;
     })
     .join(" ");
 }
@@ -229,7 +260,7 @@ export function buildThreadListLayout(
   widths?: ColumnWidths,
 ): ThreadListLayout {
   const minWidth = columns.reduce(
-    (sum, id) => sum + columnWidth(id, widths),
+    (sum, id) => sum + getColumnBasis(id, widths),
     0,
   );
   const gridTemplateColumns = buildGridTemplate(columns, widths);
