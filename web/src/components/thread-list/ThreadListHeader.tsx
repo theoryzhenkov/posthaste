@@ -97,6 +97,7 @@ export function ThreadListHeader({
                   resizeMinWidth={def.minWidth ?? def.basis}
                   sortDirection={sort.columnId === colId ? sort.direction : undefined}
                   showResizeDivider={!isLastColumn}
+                  resizePlacement={isLastColumn ? "table-end" : "between-columns"}
                   onSort={() => onToggleSort(colId)}
                   onResize={canResize ? (width) => onResizeColumn(colId, width) : undefined}
                 />
