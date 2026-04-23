@@ -8,6 +8,7 @@ import type { SmartMailbox, SmartMailboxSummary } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { SmartMailboxEditor } from "./SmartMailboxEditor";
+import { SectionHeader } from "./shared";
 import type { SmartMailboxEditorTarget } from "./types";
 
 export function SmartMailboxesPane({
@@ -43,27 +44,31 @@ export function SmartMailboxesPane({
       : smartMailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col border-r border-border bg-background/30">
-        <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-            mailboxes
-          </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            type="button"
-            onClick={onCreateMailbox}
-            className="-mr-1 h-6 gap-1 px-1.5 text-xs"
-            aria-label="New smart mailbox"
-          >
-            <Plus size={13} strokeWidth={2} />
-            New
-          </Button>
+    <div className="grid h-full min-h-0 gap-5 px-5 py-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-6 lg:py-6">
+      <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
+        <header className="border-b border-border/80 px-4 py-4">
+          <SectionHeader
+            eyebrow="Smart mailboxes"
+            title="Saved views"
+            description="Virtual mailboxes powered by message-level rules."
+            actions={
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onClick={onCreateMailbox}
+                className="h-8"
+                aria-label="New smart mailbox"
+              >
+                <Plus size={13} strokeWidth={2} />
+                New
+              </Button>
+            }
+          />
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        <div className="ph-scroll min-h-0 flex-1 overflow-y-auto p-2">
           {smartMailboxes.length === 0 && selectedMailboxId !== "new" && (
-            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-4 py-8 text-center text-xs leading-5 text-muted-foreground">
               No smart mailboxes.
             </p>
           )}
@@ -86,12 +91,12 @@ export function SmartMailboxesPane({
             />
           ))}
         </div>
-        <footer className="border-t border-border p-2">
+        <footer className="border-t border-border/80 p-2">
           <Button
-            size="xs"
-            variant="ghost"
+            size="sm"
+            variant="outline"
             type="button"
-            className="w-full justify-start text-xs text-muted-foreground"
+            className="w-full justify-start"
             onClick={onResetDefaults}
             disabled={actionPendingKey !== null}
           >
@@ -100,9 +105,10 @@ export function SmartMailboxesPane({
         </footer>
       </aside>
 
-      <div className="min-h-0 overflow-y-auto px-6 py-6">
+      <section className="ph-scroll min-h-0 overflow-y-auto rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
+        <div className="px-5 py-5 sm:px-6 sm:py-6">
         {actionError && (
-          <p className="mb-4 rounded border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <p className="mb-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive shadow-[var(--shadow-pane)]">
             {actionError}
           </p>
         )}
@@ -120,7 +126,8 @@ export function SmartMailboxesPane({
         ) : (
           <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
         )}
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -143,10 +150,10 @@ function MailboxListRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors",
+        "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-all",
         isActive
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-accent/50",
+          ? "border-primary/25 bg-accent/80 text-accent-foreground shadow-[var(--shadow-pane)]"
+          : "border-transparent hover:border-border/80 hover:bg-panel-muted/70",
       )}
     >
       <span className="min-w-0 flex-1">
@@ -154,7 +161,7 @@ function MailboxListRow({
           <span className="truncate text-sm font-medium">{label}</span>
           {isDefault && (
             <span
-              className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-muted-foreground"
+              className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] text-muted-foreground"
               title="Built-in smart mailbox"
             >
               default
@@ -177,15 +184,21 @@ function SmartMailboxesEmptyState({
   onCreateMailbox: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-4 text-center">
+    <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-panel-muted/40 px-6 text-center">
       <FolderSearch size={36} strokeWidth={1.5} className="text-muted-foreground/40" />
-      <div>
+      <div className="mt-4">
         <p className="text-sm font-medium">No mailbox selected</p>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground">
           Pick a mailbox on the left, or create a new one.
         </p>
       </div>
-      <Button size="sm" variant="outline" type="button" onClick={onCreateMailbox}>
+      <Button
+        size="sm"
+        variant="outline"
+        type="button"
+        onClick={onCreateMailbox}
+        className="mt-4"
+      >
         <Plus size={13} strokeWidth={2} />
         New mailbox
       </Button>

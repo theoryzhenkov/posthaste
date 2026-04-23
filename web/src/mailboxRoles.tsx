@@ -43,7 +43,7 @@ export function renderMailboxRoleIcon(
   fallback: LucideIcon = Folder,
 ): React.ReactNode {
   const Icon = role ? ROLE_ICON_MAP[role] : fallback;
-  return <Icon size={size} className="shrink-0 text-muted-foreground" />;
+  return <Icon size={size} className="shrink-0" />;
 }
 
 /** Choose a fallback icon for smart mailboxes ("All Mail" gets a Mail icon). */

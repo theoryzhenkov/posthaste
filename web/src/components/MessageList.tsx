@@ -70,7 +70,7 @@ interface MessageListProps {
 /** @spec docs/L1-ui#messagelist */
 const PAGE_SIZE = 100;
 /** @spec docs/L1-ui#messagelist */
-const ROW_HEIGHT = 78;
+const ROW_HEIGHT = 30;
 const OVERSCAN_ROWS = 6;
 const LOAD_MORE_THRESHOLD_PX = 800;
 const TOP_REFRESH_THRESHOLD_PX = 24;
@@ -461,11 +461,26 @@ export function MessageList({
         .map((result) => result.data)
         .filter((conversation): conversation is ConversationSummary => !!conversation),
   });
-  const countLabel = hasNextPage ? `${totalRows} loaded` : `${totalRows} threads`;
+  useEffect(() => {
+    if (!selectedView || selection || conversationIds.length === 0) {
+      return;
+    }
+
+    const firstConversation = getConversationSummary(queryClient, conversationIds[0]);
+    if (!firstConversation) {
+      return;
+    }
+
+    onSelectMessage({
+      conversationId: firstConversation.id,
+      sourceId: firstConversation.latestMessage.sourceId,
+      messageId: firstConversation.latestMessage.messageId,
+    });
+  }, [conversationIds, onSelectMessage, queryClient, selectedView, selection]);
 
   if (!selectedView) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 border-r border-border bg-background p-6">
+      <div className="flex h-full flex-col items-center justify-center gap-3 border-r border-border bg-panel p-6">
         <MousePointerClick size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
         <div className="text-center">
           <p className="text-sm font-medium text-muted-foreground">No mailbox selected</p>
@@ -477,28 +492,17 @@ export function MessageList({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-panel">
-      <div className="border-b border-border bg-panel-muted pt-3">
-        <div className="flex items-baseline gap-2 px-3">
-          {searchQuery ? (
-            <>
-              <h2 className="text-sm font-semibold tracking-tight">Search results</h2>
-              <code className="text-xs text-muted-foreground">{searchQuery}</code>
-            </>
-          ) : (
-            <>
-              <h2 className="text-sm font-semibold tracking-tight">{selectedView.name}</h2>
-              <span className="text-xs text-muted-foreground">{countLabel}</span>
-            </>
-          )}
-        </div>
-
+      <div
+        className="border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
+        aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
+      >
         <ColumnPickerMenu
           activeColumns={columns}
           onToggle={toggleColumn}
           onReset={resetColumns}
         >
           <div
-            className="mt-2 grid gap-3 border-t border-border px-3 pb-2 pt-1.5 font-mono text-[10px] font-semibold uppercase text-muted-foreground"
+            className="grid h-[26px] items-center gap-0 px-0 font-mono text-[11px] font-medium uppercase text-muted-foreground"
             style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
           >
             <DndContext
@@ -517,6 +521,7 @@ export function MessageList({
                       key={colId}
                       id={colId}
                       label={def.label}
+                      icon={def.header}
                       align={def.align}
                       sortDirection={
                         sort.columnId === colId ? sort.direction : undefined
@@ -538,11 +543,11 @@ export function MessageList({
         onScroll={handleScroll}
       >
         {isLoading && (
-          <div className="space-y-0">
+          <div className="space-y-0 bg-[var(--list-zebra)]">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="border-b border-border px-3 py-4"
+                className="border-b border-[var(--list-divider)] px-4 py-3"
                 style={{ height: ROW_HEIGHT }}
               >
                 <div className="flex items-center gap-3">
@@ -582,11 +587,12 @@ export function MessageList({
         {conversationIds.length > 0 && (
           <>
             <div style={{ height: topSpacerHeight }} />
-            {visibleConversations.map((conversation) => (
+            {visibleConversations.map((conversation, index) => (
               <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
                 <MessageRow
                   message={conversation}
                   isSelected={conversation.id === selection?.conversationId}
+                  isStriped={(startIndex + index) % 2 === 1}
                   columns={columns}
                   widths={widths}
                   onSelect={() =>
@@ -603,12 +609,14 @@ export function MessageList({
           </>
         )}
         {(isFetchingNextPage || isRefreshingTop) && (
-          <p className="px-3 py-3 text-xs text-muted-foreground">
+          <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
             {isRefreshingTop ? "Refreshing threads..." : "Loading more threads..."}
           </p>
         )}
         {!hasNextPage && conversationIds.length > 0 && !isFetching && (
-          <p className="px-3 py-3 text-xs text-muted-foreground">End of thread list</p>
+          <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
+            End of thread list
+          </p>
         )}
       </div>
     </div>

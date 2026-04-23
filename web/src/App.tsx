@@ -9,13 +9,14 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
-import type { MessageSummary } from "./api/types";
+import type { ConversationSummary, MessageSummary } from "./api/types";
 import { ActionBar } from "./components/ActionBar";
+import { CommandPalette } from "./components/CommandPalette";
 import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
-import { SettingsPanel } from "./components/SettingsPanel";
+import { SettingsOverlay } from "./components/SettingsOverlay";
 import { ShortcutReference } from "./components/ShortcutReference";
 import { Sidebar, type SidebarSelection } from "./components/Sidebar";
 import { DesignThemeProvider } from "./components/ThemeProvider";
@@ -26,6 +27,7 @@ import {
 } from "./components/ui/resizable";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
+import { useDesignTheme } from "./hooks/useDesignTheme";
 import { useEmailActions } from "./hooks/useEmailActions";
 import { mailKeys, type MailSelection } from "./mailState";
 
@@ -57,28 +59,23 @@ const DEFAULT_VIEW: SidebarSelection = {
 function MailClient() {
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(DEFAULT_VIEW);
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(null);
-  const [isSettingsPinned, setIsSettingsPinned] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] = useState<"general" | "accounts" | "mailboxes">("accounts");
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const theme = useDesignTheme();
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-      if (event.key === "?") {
-        setShowShortcuts((prev) => !prev);
-      }
-      if (event.key === "/") {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+  const handlePlaceholderAction = useCallback((label: string) => {
+    toast(`${label} is not available yet.`);
   }, []);
+
+  const handleToggleTheme = useCallback(() => {
+    theme.setMode(theme.resolvedMode === "dark" ? "light" : "dark");
+  }, [theme]);
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ["accounts"],
@@ -93,7 +90,8 @@ function MailClient() {
   const effectiveView = hasEnabledSources ? (selectedView ?? DEFAULT_VIEW) : null;
   const focusedSourceId =
     effectiveView?.kind === "source-mailbox" ? effectiveView.sourceId : null;
-  const isSettingsOpen = isSettingsPinned || accounts.length === 0;
+  const shouldForceSettings = accounts.length === 0;
+  const showSettings = isSettingsOpen || shouldForceSettings;
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
@@ -111,8 +109,114 @@ function MailClient() {
   });
   const actions = useEmailActions();
 
+  const handleToggleFlag = useCallback(() => {
+    if (!selectedMessage) {
+      return;
+    }
+    actions.toggleFlag({
+      conversationId: selectedMessage.conversationId,
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+      isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
+      isRead: selectedMessageQuery.data?.isRead,
+      keywords: selectedMessageQuery.data?.keywords,
+    });
+  }, [actions, selectedMessage, selectedMessageQuery.data]);
+
+  const handleArchive = useCallback(() => {
+    if (!selectedMessage) {
+      return;
+    }
+    actions.archive({
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    });
+  }, [actions, selectedMessage]);
+
+  const handleTrash = useCallback(() => {
+    if (!selectedMessage) {
+      return;
+    }
+    actions.trash({
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    });
+  }, [actions, selectedMessage]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      const isTypingTarget =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+
+      if ((event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "K")) {
+        event.preventDefault();
+        setIsCommandPaletteOpen(true);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        setSettingsCategory("accounts");
+        setIsSettingsOpen(true);
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && (event.key === "n" || event.key === "N")) {
+        event.preventDefault();
+        handlePlaceholderAction("Compose");
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        if (selectedMessage) {
+          handleToggleFlag();
+        }
+        return;
+      }
+      if (isTypingTarget) return;
+      if (event.key === "?") {
+        event.preventDefault();
+        setShowShortcuts((prev) => !prev);
+        return;
+      }
+      if (event.key === "/") {
+        event.preventDefault();
+        setIsSearchActive(true);
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handlePlaceholderAction, handleToggleFlag, selectedMessage]);
+
   const handleSearch = useCallback((query: string, append?: boolean) => {
     setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query));
+    setIsSearchActive(true);
+  }, []);
+
+  const handleOpenSettings = useCallback(
+    (category: "general" | "accounts" | "mailboxes" = "accounts") => {
+      setSettingsCategory(category);
+      setIsSettingsOpen(true);
+      setIsCommandPaletteOpen(false);
+    },
+    [],
+  );
+
+  const handleApplySearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    setIsSearchActive(true);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  const handleSelectConversation = useCallback((conversation: ConversationSummary) => {
+    setSelectedMessage({
+      conversationId: conversation.id,
+      sourceId: conversation.latestMessage.sourceId,
+      messageId: conversation.latestMessage.messageId,
+    });
   }, []);
 
   function handleSelectMessage(message: MessageSummary) {
@@ -131,12 +235,14 @@ function MailClient() {
     setSelectedView({ kind: "smart-mailbox", id: smartMailboxId, name });
     setSelectedMessage(null);
     setSearchQuery("");
+    setIsSearchActive(false);
   }
 
   function handleSelectSourceMailbox(sourceId: string, mailboxId: string, name: string) {
     setSelectedView({ kind: "source-mailbox", sourceId, mailboxId, name });
     setSelectedMessage(null);
     setSearchQuery("");
+    setIsSearchActive(false);
   }
 
   if (isLoading) {
@@ -151,40 +257,29 @@ function MailClient() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ActionBar
+        isDarkMode={theme.resolvedMode === "dark"}
         isFlagged={selectedMessageQuery.data?.isFlagged ?? false}
         isMessageSelected={selectedMessage !== null}
-        isSettingsOpen={isSettingsOpen}
+        isSearchActive={isSearchActive}
+        isSettingsOpen={showSettings}
         searchInputRef={searchInputRef}
         searchQuery={searchQuery}
-        onArchive={() =>
-          selectedMessage &&
-          actions.archive({
-            sourceId: selectedMessage.sourceId,
-            messageId: selectedMessage.messageId,
-          })
-        }
-        onClearSearch={() => setSearchQuery("")}
+        onArchive={handleArchive}
+        onClearSearch={() => {
+          setSearchQuery("");
+          setIsSearchActive(false);
+        }}
+        onCompose={() => handlePlaceholderAction("Compose")}
+        onFocusSearch={() => setIsSearchActive(true)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onPlaceholderAction={handlePlaceholderAction}
+        onSearchBlur={() => setIsSearchActive(false)}
         onSearchQueryChange={setSearchQuery}
         onShowShortcuts={() => setShowShortcuts(true)}
-        onToggleFlag={() =>
-          selectedMessage &&
-          actions.toggleFlag({
-            conversationId: selectedMessage.conversationId,
-            sourceId: selectedMessage.sourceId,
-            messageId: selectedMessage.messageId,
-            isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
-            isRead: selectedMessageQuery.data?.isRead,
-            keywords: selectedMessageQuery.data?.keywords,
-          })
-        }
-        onToggleSettings={() => setIsSettingsPinned((open) => !open)}
-        onTrash={() =>
-          selectedMessage &&
-          actions.trash({
-            sourceId: selectedMessage.sourceId,
-            messageId: selectedMessage.messageId,
-          })
-        }
+        onToggleFlag={handleToggleFlag}
+        onToggleSettings={() => setIsSettingsOpen((open) => !open)}
+        onToggleTheme={handleToggleTheme}
+        onTrash={handleTrash}
       />
       {actions.errorMessage && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -193,60 +288,80 @@ function MailClient() {
       )}
 
       {/* Main content */}
-      {isSettingsOpen ? (
-        <div className="min-h-0 flex-1">
-          <SettingsPanel
-            accounts={accounts}
-            activeAccountId={focusedSourceId}
-            onActiveAccountChange={() => {
-              setSelectedView(DEFAULT_VIEW);
-              setSelectedMessage(null);
-            }}
-          />
-        </div>
-      ) : (
-        <ResizablePanelGroup
-          orientation="horizontal"
-          defaultLayout={defaultLayout}
-          onLayoutChanged={onLayoutChanged}
-          className="min-h-0 flex-1"
+      <ResizablePanelGroup
+        orientation="horizontal"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
+        className="min-h-0 flex-1"
+      >
+        <ResizablePanel
+          id="sidebar"
+          defaultSize="210px"
+          minSize="190px"
+          maxSize="420px"
         >
-          <ResizablePanel
-            id="sidebar"
-            defaultSize="220px"
-            minSize="160px"
-            maxSize="400px"
-          >
-            <Sidebar
-              selectedView={effectiveView}
-              onSelectSmartMailbox={handleSelectSmartMailbox}
-              onSelectSourceMailbox={handleSelectSourceMailbox}
-            />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel
-            id="message-list"
-            defaultSize="420px"
-            minSize="280px"
-            maxSize="800px"
-          >
-            <MessageList
-              selectedView={effectiveView}
-              selection={selectedMessage}
-              onSelectMessage={handleSelectMessageRef}
-              actions={actions}
-              searchQuery={debouncedQuery}
-            />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id="message-detail" minSize="300px">
-            <MessageDetail
-              selection={selectedMessage}
-              onSelectMessage={handleSelectMessage}
-              onSearch={handleSearch}
-            />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          <Sidebar
+            selectedView={effectiveView}
+            onSelectSmartMailbox={handleSelectSmartMailbox}
+            onSelectSourceMailbox={handleSelectSourceMailbox}
+          />
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel
+          id="message-list"
+          defaultSize="420px"
+          minSize="360px"
+          maxSize="960px"
+        >
+          <MessageList
+            selectedView={effectiveView}
+            selection={selectedMessage}
+            onSelectMessage={handleSelectMessageRef}
+            actions={actions}
+            searchQuery={debouncedQuery}
+          />
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel id="message-detail" minSize="300px">
+          <MessageDetail
+            selection={selectedMessage}
+            onSelectMessage={handleSelectMessage}
+            onSearch={handleSearch}
+          />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {showSettings && (
+        <SettingsOverlay
+          accounts={accounts}
+          activeAccountId={focusedSourceId}
+          initialCategory={settingsCategory}
+          onActiveAccountChange={() => {
+            setSelectedView(DEFAULT_VIEW);
+            setSelectedMessage(null);
+          }}
+          onClose={() => {
+            if (!shouldForceSettings) {
+              setIsSettingsOpen(false);
+            }
+          }}
+        />
+      )}
+
+      {isCommandPaletteOpen && (
+        <CommandPalette
+          hasSelectedMessage={selectedMessage !== null}
+          onApplySearch={handleApplySearch}
+          onArchive={handleArchive}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          onOpenSettings={handleOpenSettings}
+          onOpenShortcuts={() => setShowShortcuts(true)}
+          onPlaceholderAction={handlePlaceholderAction}
+          onSelectConversation={handleSelectConversation}
+          onSelectSmartMailbox={handleSelectSmartMailbox}
+          onSelectSourceMailbox={handleSelectSourceMailbox}
+          onToggleFlag={handleToggleFlag}
+        />
       )}
 
       {showShortcuts && <ShortcutReference onClose={() => setShowShortcuts(false)} />}

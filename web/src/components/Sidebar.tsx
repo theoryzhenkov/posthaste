@@ -8,10 +8,10 @@
  * @spec docs/L0-ui#navigation-model
  */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { fetchSidebar } from "../api/client";
-import type { Mailbox, SidebarResponse } from "../api/types";
+import type { Mailbox, SidebarResponse, SidebarSmartMailbox } from "../api/types";
 import { cn } from "../lib/utils";
 import {
   mailboxRoleFromName,
@@ -38,6 +38,46 @@ function roleIcon(role: Mailbox["role"], size = 14): React.ReactNode {
   return renderMailboxRoleIcon(role, size);
 }
 
+function mailboxRoleAccent(role: Mailbox["role"]): string {
+  switch (role) {
+    case "inbox":
+      return "#2B7EC2";
+    case "archive":
+      return "#3D8B6D";
+    case "drafts":
+      return "#8B5CF6";
+    case "sent":
+      return "#D96A42";
+    case "junk":
+      return "#C5A100";
+    case "trash":
+      return "#8A5B4B";
+    default:
+      return "#7E8691";
+  }
+}
+
+const SOURCE_SWATCHES = [
+  "#2B7EC2",
+  "#D96A42",
+  "#3D8B6D",
+  "#8B5CF6",
+  "#C5A100",
+] as const;
+
+function sourceStamp(sourceName: string): string {
+  return sourceName.trim().charAt(0).toUpperCase() || "?";
+}
+
+function sourceAccent(sourceId: string, sourceName: string): string {
+  const seed = `${sourceId}:${sourceName}`;
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return SOURCE_SWATCHES[hash % SOURCE_SWATCHES.length];
+}
+
 /** Icon for smart mailboxes based on the name heuristic. */
 function smartMailboxIcon(name: string, size = 14): React.ReactNode {
   return renderMailboxRoleIcon(
@@ -47,12 +87,74 @@ function smartMailboxIcon(name: string, size = 14): React.ReactNode {
   );
 }
 
-function itemButtonClass(isSelected: boolean): string {
+function smartMailboxAccent(name: string): string | undefined {
+  switch (mailboxRoleFromName(name)) {
+    case "inbox":
+      return "#2B7EC2";
+    case "archive":
+      return "#2B7EC2";
+    case "junk":
+      return "#C5A100";
+    case "trash":
+      return "#8A5B4B";
+    default:
+      return undefined;
+  }
+}
+
+function smartMailboxPriority(name: string): number {
+  const normalized = name.trim().toLowerCase();
+  switch (normalized) {
+    case "inbox":
+    case "all inboxes":
+      return 0;
+    case "flagged":
+      return 1;
+    default:
+      return 99;
+  }
+}
+
+function displaySmartMailboxName(name: string): string {
+  return name.trim().toLowerCase() === "inbox" ? "All Inboxes" : name;
+}
+
+function partitionSmartMailboxes(smartMailboxes: SidebarSmartMailbox[]) {
+  const quick: SidebarSmartMailbox[] = [];
+  const smart: SidebarSmartMailbox[] = [];
+  const tags: SidebarSmartMailbox[] = [];
+
+  for (const mailbox of smartMailboxes) {
+    const priority = smartMailboxPriority(mailbox.name);
+    if (priority !== 99) {
+      quick.push(mailbox);
+      continue;
+    }
+
+    const role = mailboxRoleFromName(mailbox.name);
+    if (role === null) {
+      tags.push(mailbox);
+      continue;
+    }
+
+    smart.push(mailbox);
+  }
+
+  quick.sort((left, right) => smartMailboxPriority(left.name) - smartMailboxPriority(right.name));
+  smart.sort((left, right) => left.name.localeCompare(right.name));
+  tags.sort((left, right) => left.name.localeCompare(right.name));
+
+  return { quick, smart, tags };
+}
+
+function itemButtonClass(isSelected: boolean, depth = 0): string {
   return cn(
-    "mx-1.5 flex h-[var(--density-sidebar-row-height)] w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium transition-colors",
-    "ph-focus-ring hover:bg-sidebar-accent/80",
-    isSelected && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
-    !isSelected && "text-sidebar-foreground/90",
+    "mx-1.5 flex h-[28px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] pr-2 text-left text-[13px] font-medium transition-colors",
+    "ph-focus-ring hover:bg-[var(--sidebar-accent)]",
+    isSelected &&
+      "bg-[var(--list-selection)] text-[var(--list-selection-foreground)]",
+    !isSelected && "text-sidebar-foreground/92",
+    depth > 0 ? "pl-[22px]" : "pl-2",
   );
 }
 
@@ -60,20 +162,27 @@ function itemButtonClass(isSelected: boolean): string {
 function ViewItem({
   name,
   unreadMessages,
+  accent,
   isSelected,
   onSelect,
 }: {
   name: string;
   unreadMessages?: number;
+  accent?: string;
   isSelected: boolean;
   onSelect: () => void;
 }) {
   return (
     <button className={itemButtonClass(isSelected)} onClick={onSelect} type="button">
-      {smartMailboxIcon(name)}
-      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <span className="flex w-4 justify-center" style={accent ? { color: accent } : undefined}>
+        {smartMailboxIcon(name)}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{displaySmartMailboxName(name)}</span>
       {unreadMessages != null && unreadMessages > 0 && (
-        <span className="rounded bg-background/60 px-1.5 font-mono text-[10px] font-semibold tabular-nums text-signal-unread">
+        <span className={cn(
+          "font-mono text-[11px] font-medium tabular-nums",
+          isSelected ? "text-[var(--list-selection-foreground)]" : "text-muted-foreground/80",
+        )}>
           {unreadMessages}
         </span>
       )}
@@ -85,18 +194,32 @@ function ViewItem({
 function MailboxItem({
   mailbox,
   isSelected,
+  depth = 0,
   onSelect,
 }: {
   mailbox: Mailbox;
   isSelected: boolean;
+  depth?: number;
   onSelect: () => void;
 }) {
   return (
-    <button className={itemButtonClass(isSelected)} onClick={onSelect} type="button">
-      {roleIcon(mailbox.role)}
+    <button
+      className={itemButtonClass(isSelected, depth)}
+      onClick={onSelect}
+      type="button"
+    >
+      <span
+        className="flex w-4 justify-center"
+        style={{ color: mailboxRoleAccent(mailbox.role) }}
+      >
+        {roleIcon(mailbox.role)}
+      </span>
       <span className="min-w-0 flex-1 truncate">{mailbox.name}</span>
       {mailbox.unreadEmails > 0 && (
-        <span className="rounded bg-background/60 px-1.5 font-mono text-[10px] font-semibold tabular-nums text-signal-unread">
+        <span className={cn(
+          "font-mono text-[11px] font-medium tabular-nums",
+          isSelected ? "text-[var(--list-selection-foreground)]" : "text-muted-foreground/80",
+        )}>
           {mailbox.unreadEmails}
         </span>
       )}
@@ -115,33 +238,58 @@ function SourceSection({
   onSelectSourceMailbox: (sourceId: string, mailboxId: string, name: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const accent = useMemo(
+    () => sourceAccent(source.id, source.name),
+    [source.id, source.name],
+  );
+  const unreadTotal = useMemo(
+    () => source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
+    [source.mailboxes],
+  );
 
   return (
     <div>
       <button
         type="button"
-        className="ph-focus-ring mt-1 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left font-mono text-[10px] font-semibold uppercase text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+        className="ph-focus-ring mx-1.5 mt-1 flex h-[30px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] px-2 text-left transition-colors hover:bg-[var(--sidebar-accent)]"
         onClick={() => setCollapsed((prev) => !prev)}
       >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        <span>{source.name}</span>
+        {collapsed ? (
+          <ChevronRight size={12} strokeWidth={1.5} className="text-muted-foreground" />
+        ) : (
+          <ChevronDown size={12} strokeWidth={1.5} className="text-muted-foreground" />
+        )}
+        <span
+          className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] font-bold text-white"
+          style={{ backgroundColor: accent }}
+        >
+          {sourceStamp(source.name)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
+          {source.name}
+        </span>
+        {unreadTotal > 0 && (
+          <span className="rounded-[4px] bg-signal-unread px-1.5 font-mono text-[11px] font-semibold tabular-nums text-white">
+            {unreadTotal}
+          </span>
+        )}
       </button>
       {!collapsed && (
         <div className="space-y-0.5">
           {source.mailboxes.map((mailbox) => (
-            <div key={`${source.id}:${mailbox.id}`} className="pl-2">
-              <MailboxItem
-                mailbox={mailbox}
-                isSelected={
-                  selectedView?.kind === "source-mailbox" &&
-                  selectedView.sourceId === source.id &&
-                  selectedView.mailboxId === mailbox.id
-                }
-                onSelect={() =>
-                  onSelectSourceMailbox(source.id, mailbox.id, `${source.name} / ${mailbox.name}`)
-                }
-              />
-            </div>
+            <MailboxItem
+              key={`${source.id}:${mailbox.id}`}
+              mailbox={mailbox}
+              depth={1}
+              isSelected={
+                selectedView?.kind === "source-mailbox" &&
+                selectedView.sourceId === source.id &&
+                selectedView.mailboxId === mailbox.id
+              }
+              onSelect={() =>
+                onSelectSourceMailbox(source.id, mailbox.id, `${source.name} / ${mailbox.name}`)
+              }
+            />
           ))}
         </div>
       )}
@@ -162,11 +310,11 @@ function SectionHeader({
   return (
     <button
       type="button"
-      className="ph-focus-ring flex h-8 w-full items-center gap-1.5 border-b border-sidebar-border/80 px-3 text-left font-mono text-[10px] font-semibold uppercase text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+      className="ph-focus-ring flex h-7 w-full items-center px-3 text-left font-sans text-[10px] font-semibold tracking-[0.2em] text-[var(--sidebar-section-label)] transition-colors hover:text-sidebar-foreground"
       onClick={onToggle}
+      aria-expanded={!collapsed}
     >
-      {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-      <span>{label}</span>
+      <span className="uppercase">{label}</span>
     </button>
   );
 }
@@ -189,15 +337,19 @@ export function Sidebar({
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
+  const groupedSmartMailboxes = useMemo(
+    () => partitionSmartMailboxes(sidebar?.smartMailboxes ?? []),
+    [sidebar?.smartMailboxes],
+  );
 
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <nav className="ph-scroll min-h-0 flex-1 overflow-y-auto pt-1">
+      <nav className="ph-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-3">
         {isLoading && (
-          <div className="space-y-1 px-3 py-2">
+          <div className="space-y-3 px-1 py-1">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2 py-1.5">
-                <div className="h-3.5 w-3.5 animate-pulse rounded bg-muted" />
+                <div className="h-4 w-4 animate-pulse rounded-[4px] bg-muted" />
                 <div
                   className="h-3 animate-pulse rounded bg-muted"
                   style={{ width: `${60 + ((i * 17) % 30)}%` }}
@@ -223,18 +375,36 @@ export function Sidebar({
         )}
         {sidebar && (
           <>
-            <SectionHeader
-              label="Mailboxes"
-              collapsed={mailboxesCollapsed}
-              onToggle={() => setMailboxesCollapsed((prev) => !prev)}
-            />
-            {!mailboxesCollapsed && (
-              <div className="py-1">
-                {sidebar.smartMailboxes.map((smartMailbox) => (
+            {groupedSmartMailboxes.quick.length > 0 && (
+              <div className="space-y-0.5 pb-3">
+                {groupedSmartMailboxes.quick.map((smartMailbox) => (
                   <ViewItem
                     key={smartMailbox.id}
                     name={smartMailbox.name}
                     unreadMessages={smartMailbox.unreadMessages}
+                    accent={smartMailboxAccent(smartMailbox.name)}
+                    isSelected={
+                      selectedView?.kind === "smart-mailbox" &&
+                      selectedView.id === smartMailbox.id
+                    }
+                    onSelect={() => onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)}
+                  />
+                ))}
+              </div>
+            )}
+            <SectionHeader
+              label="Smart"
+              collapsed={mailboxesCollapsed}
+              onToggle={() => setMailboxesCollapsed((prev) => !prev)}
+            />
+            {!mailboxesCollapsed && (
+              <div className="space-y-0.5 py-1">
+                {groupedSmartMailboxes.smart.map((smartMailbox) => (
+                  <ViewItem
+                    key={smartMailbox.id}
+                    name={smartMailbox.name}
+                    unreadMessages={smartMailbox.unreadMessages}
+                    accent={smartMailboxAccent(smartMailbox.name)}
                     isSelected={
                       selectedView?.kind === "smart-mailbox" &&
                       selectedView.id === smartMailbox.id
@@ -245,13 +415,38 @@ export function Sidebar({
               </div>
             )}
 
+            {groupedSmartMailboxes.tags.length > 0 && (
+              <>
+                <SectionHeader
+                  label="Tags"
+                  collapsed={false}
+                  onToggle={() => {}}
+                />
+                <div className="space-y-0.5 py-1">
+                  {groupedSmartMailboxes.tags.map((smartMailbox) => (
+                    <ViewItem
+                      key={smartMailbox.id}
+                      name={smartMailbox.name}
+                      unreadMessages={smartMailbox.unreadMessages}
+                      accent={smartMailboxAccent(smartMailbox.name)}
+                      isSelected={
+                        selectedView?.kind === "smart-mailbox" &&
+                        selectedView.id === smartMailbox.id
+                      }
+                      onSelect={() => onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+
             <SectionHeader
-              label="Sources"
+              label="Accounts"
               collapsed={sourcesCollapsed}
               onToggle={() => setSourcesCollapsed((prev) => !prev)}
             />
             {!sourcesCollapsed && (
-              <div className="space-y-1 py-1">
+              <div className="space-y-2 py-1">
                 {sidebar.sources.map((source) => (
                   <SourceSection
                     key={source.id}

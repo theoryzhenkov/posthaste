@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { SectionHeader, SummaryCard } from "./shared";
+import { SectionCard, SectionHeader, SummaryCard } from "./shared";
 
 export function GeneralPane({
   accounts,
@@ -30,49 +30,65 @@ export function GeneralPane({
   const enabledCount = accounts.filter((account) => account.enabled).length;
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <SectionHeader
-          title="General"
-          description="Defaults that apply across all accounts."
-        />
+    <div className="mx-auto flex max-w-[56rem] flex-col gap-5">
+      <SectionHeader
+        eyebrow="Workspace defaults"
+        title="General settings"
+        description="Choose the account PostHaste should fall back to and keep a quick read on account and mailbox coverage."
+      />
 
-        <label className="grid max-w-md gap-1.5 text-sm">
-          <span className="text-muted-foreground">Default account</span>
-          <Select
-            value={defaultAccountId ?? "__none__"}
-            onValueChange={(value) =>
-              onDefaultAccountChange(value === "__none__" ? null : value)
-            }
-            disabled={isPending}
-          >
-            <SelectTrigger className="h-9 w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">No default</SelectItem>
-              {accounts.map((account) => (
-                <SelectItem key={account.id} value={account.id}>
-                  {account.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-xs text-muted-foreground">
-            Used as the sending account for new messages when no context is set.
-          </span>
-        </label>
-      </section>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+        <SectionCard className="space-y-4">
+          <SectionHeader
+            eyebrow="Sending"
+            title="Default account"
+            description="Used when a compose flow does not already have account context."
+          />
 
-      <section className="space-y-4">
-        <SectionHeader title="At a glance" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryCard label="Accounts" value={String(accounts.length)} />
-          <SummaryCard label="Ready" value={String(readyCount)} />
-          <SummaryCard label="Enabled" value={String(enabledCount)} />
-          <SummaryCard label="Mailboxes" value={String(smartMailboxes.length)} />
-        </div>
-      </section>
+          <label className="grid gap-2 text-sm">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              Account
+            </span>
+            <Select
+              value={defaultAccountId ?? "__none__"}
+              onValueChange={(value) =>
+                onDefaultAccountChange(value === "__none__" ? null : value)
+              }
+              disabled={isPending}
+            >
+              <SelectTrigger className="h-9 w-full border-border/80 bg-panel shadow-none">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No default</SelectItem>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-xs leading-5 text-muted-foreground">
+              New messages use this account unless the current mailbox or thread
+              already implies another source.
+            </span>
+          </label>
+        </SectionCard>
+
+        <SectionCard className="space-y-4">
+          <SectionHeader
+            eyebrow="Overview"
+            title="At a glance"
+            description="Current connected-source and smart-mailbox coverage."
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <SummaryCard label="Accounts" value={String(accounts.length)} />
+            <SummaryCard label="Ready" value={String(readyCount)} />
+            <SummaryCard label="Enabled" value={String(enabledCount)} />
+            <SummaryCard label="Mailboxes" value={String(smartMailboxes.length)} />
+          </div>
+        </SectionCard>
+      </div>
     </div>
   );
 }

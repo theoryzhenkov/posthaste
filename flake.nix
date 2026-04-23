@@ -19,6 +19,31 @@
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
         };
+
+        playwrightBrowsers = pkgs.playwright-driver.browsers;
+        linuxBrowserRuntime = with pkgs; [
+          glib
+          nspr
+          nss
+          dbus
+          atk
+          at-spi2-atk
+          cups
+          expat
+          libxkbcommon
+          pango
+          cairo
+          alsa-lib
+          udev
+          mesa
+          libx11
+          libxcomposite
+          libxdamage
+          libxext
+          libxfixes
+          libxrandr
+          libxcb
+        ];
       in
       {
         devShells.default = pkgs.mkShell {
@@ -38,6 +63,8 @@
             # Node / frontend
             pkgs.nodejs_22
             pkgs.bun
+            pkgs.playwright-driver
+            playwrightBrowsers
 
             # Local JMAP server for end-to-end dev/testing
             pkgs.stalwart
@@ -51,21 +78,21 @@
             pkgs.python3Packages.mkdocs-material
 
             # Tauri 2 build deps (Linux)
-          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux ([
             pkgs.webkitgtk_4_1
             pkgs.libsoup_3
             pkgs.gtk3
             pkgs.glib-networking
             pkgs.openssl
             pkgs.libayatana-appindicator
-          ];
+          ] ++ linuxBrowserRuntime);
 
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux ([
             pkgs.webkitgtk_4_1
             pkgs.libsoup_3
             pkgs.gtk3
             pkgs.openssl
-          ];
+          ] ++ linuxBrowserRuntime);
 
           shellHook = ''
             FLAKE_ROOT="$PWD"
@@ -81,6 +108,10 @@
             export SOPS_AGE_KEY_FILE="$FLAKE_ROOT/.age-key"
             export GIO_EXTRA_MODULES="${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux
               "${pkgs.glib-networking}/lib/gio/modules"}"
+            export PLAYWRIGHT_BROWSERS_PATH="${playwrightBrowsers}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+            export PLAYWRIGHT_NODEJS_PATH="${pkgs.nodejs_22}/bin/node"
+            export POSTHASTE_PLAYWRIGHT_CLI="${pkgs.playwright-driver}/cli.js"
           '';
         };
       }

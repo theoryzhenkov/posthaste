@@ -45,10 +45,10 @@ export function RuleGroupEditor({
   onChange: (group: SmartMailboxGroup) => void;
 }) {
   return (
-    <div className="space-y-3 rounded-lg border border-border/70 bg-background/60 p-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Match</span>
+    <div className="space-y-4 rounded-lg border border-border/80 bg-panel-muted/40 p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="grid gap-2 text-sm">
+          <span className="text-[11px] font-medium text-muted-foreground">Match</span>
           <Select
             value={group.operator}
             onValueChange={(value) =>
@@ -58,7 +58,7 @@ export function RuleGroupEditor({
               })
             }
           >
-            <SelectTrigger className="h-8">
+            <SelectTrigger className="h-9 min-w-32 border-border/80 bg-panel shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -71,19 +71,19 @@ export function RuleGroupEditor({
           </Select>
         </div>
 
-        <label className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-          <Checkbox
-            checked={group.negated}
-            onCheckedChange={(checked) =>
-              onChange({ ...group, negated: checked === true })
-            }
-          />
-          Negate group
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox
+              checked={group.negated}
+              onCheckedChange={(checked) =>
+                onChange({ ...group, negated: checked === true })
+              }
+            />
+            Negate group
+          </label>
 
-        <div className="mt-5 flex gap-2">
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             type="button"
             onClick={() => onChange({ ...group, nodes: [...group.nodes, defaultCondition()] })}
@@ -91,7 +91,7 @@ export function RuleGroupEditor({
             Add condition
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             type="button"
             onClick={() => onChange({ ...group, nodes: [...group.nodes, defaultGroup()] })}
@@ -101,14 +101,17 @@ export function RuleGroupEditor({
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {group.nodes.length === 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="rounded-lg border border-dashed border-border/80 bg-background/55 px-4 py-4 text-sm text-muted-foreground">
             No conditions yet. An empty group matches all messages.
           </p>
         )}
         {group.nodes.map((node, index) => (
-          <div key={index} className="rounded border border-border bg-card/70 p-3">
+          <div
+            key={index}
+            className="rounded-lg border border-border/80 bg-background/80 p-4 shadow-[var(--shadow-pane)]"
+          >
             {node.type === "condition" ? (
               <ConditionEditor
                 condition={node}
@@ -128,10 +131,10 @@ export function RuleGroupEditor({
                 }
               />
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex justify-end">
                   <Button
-                    size="xs"
+                    size="sm"
                     variant="outline"
                     type="button"
                     onClick={() =>
@@ -185,10 +188,10 @@ function ConditionEditor({
     condition.field === "hasAttachment";
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto] gap-3">
+    <div className="space-y-4">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto]">
         <div className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Field</span>
+          <span className="text-[11px] font-medium text-muted-foreground">Field</span>
           <Select
             value={condition.field}
             onValueChange={(value) => {
@@ -200,7 +203,7 @@ function ConditionEditor({
               });
             }}
           >
-            <SelectTrigger className="h-8">
+            <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -214,7 +217,9 @@ function ConditionEditor({
         </div>
 
         <div className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Operator</span>
+          <span className="text-[11px] font-medium text-muted-foreground">
+            Operator
+          </span>
           <Select
             value={condition.operator}
             onValueChange={(value) => {
@@ -230,7 +235,7 @@ function ConditionEditor({
               });
             }}
           >
-            <SelectTrigger className="h-8">
+            <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -244,7 +249,7 @@ function ConditionEditor({
         </div>
 
         <div className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Value</span>
+          <span className="text-[11px] font-medium text-muted-foreground">Value</span>
           {isBooleanField ? (
             <Select
               value={String(Boolean(condition.value))}
@@ -255,7 +260,7 @@ function ConditionEditor({
                 })
               }
             >
-              <SelectTrigger className="h-8">
+              <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -265,7 +270,7 @@ function ConditionEditor({
             </Select>
           ) : (
             <Input
-              className="h-8"
+              className="h-9 border-border/80 bg-panel shadow-none"
               value={
                 Array.isArray(condition.value)
                   ? condition.value.join(", ")
@@ -288,7 +293,7 @@ function ConditionEditor({
         </div>
 
         <div className="flex items-end">
-          <Button size="xs" variant="outline" type="button" onClick={onRemove}>
+          <Button size="sm" variant="outline" type="button" onClick={onRemove}>
             Remove
           </Button>
         </div>
