@@ -66,6 +66,14 @@ All endpoints are prefixed with `/v1`.
 | GET | `/sources/{source_id}/messages` | `list_source_messages` | `ListSourceMessagesQuery` | `MessageSummary[]` |
 | GET | `/sources/{source_id}/messages/{id}` | `get_message` | -- | `MessageDetail` |
 
+### Compose
+
+| Method | Path | Handler | Request | Response |
+|--------|------|---------|---------|----------|
+| GET | `/sources/{source_id}/identity` | `get_identity` | -- | `Identity` |
+| GET | `/sources/{source_id}/messages/{id}/reply-context` | `get_reply_context` | -- | `ReplyContext` |
+| POST | `/sources/{source_id}/commands/send` | `send_message` | `SendMessageRequest` | `OkResponse` |
+
 ### Message commands
 
 | Method | Path | Handler | Request | Response |
@@ -106,7 +114,7 @@ All error responses are JSON objects with three fields:
 | `config_io` | 500 |
 | (other) | 500 |
 
-Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`.
+Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_compose`.
 
 ## Cursor pagination
 

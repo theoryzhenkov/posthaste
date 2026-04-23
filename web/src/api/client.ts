@@ -15,12 +15,15 @@ import type {
   ConversationView,
   CreateAccountInput,
   CreateSmartMailboxInput,
+  Identity,
   Mailbox,
   MessageCommand,
   MessageCommandResult,
   MessageDetail,
   MessageSummary,
   OkResponse,
+  ReplyContext,
+  SendMessageInput,
   SidebarResponse,
   SmartMailbox,
   SmartMailboxSummary,
@@ -317,6 +320,29 @@ export async function fetchSourceMessages(
 ): Promise<MessageSummary[]> {
   const search = mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : "";
   return request<MessageSummary[]>(`/sources/${sourceId}/messages${search}`);
+}
+
+/** @spec docs/L1-api#compose */
+export async function fetchIdentity(sourceId: string): Promise<Identity> {
+  return request<Identity>(`/sources/${sourceId}/identity`);
+}
+
+/** @spec docs/L1-api#compose */
+export async function fetchReplyContext(
+  sourceId: string,
+  messageId: string,
+): Promise<ReplyContext> {
+  return request<ReplyContext>(
+    `/sources/${sourceId}/messages/${messageId}/reply-context`,
+  );
+}
+
+/** @spec docs/L1-api#compose */
+export async function sendMessage(
+  sourceId: string,
+  input: SendMessageInput,
+): Promise<OkResponse> {
+  return jsonRequest<OkResponse>(`/sources/${sourceId}/commands/send`, "POST", input);
 }
 
 /**

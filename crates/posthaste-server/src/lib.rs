@@ -231,6 +231,15 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             "/v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
             get(api::get_message_attachment),
         )
+        .route("/v1/sources/{source_id}/identity", get(api::get_identity))
+        .route(
+            "/v1/sources/{source_id}/messages/{message_id}/reply-context",
+            get(api::get_reply_context),
+        )
+        .route(
+            "/v1/sources/{source_id}/commands/send",
+            post(api::send_message),
+        )
         .route(
             "/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),

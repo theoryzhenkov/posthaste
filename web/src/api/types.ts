@@ -93,6 +93,41 @@ export interface VerificationResponse {
   pushSupported: boolean;
 }
 
+/** @spec docs/L1-api#compose */
+export interface Identity {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** @spec docs/L1-api#compose */
+export interface Recipient {
+  name: string | null;
+  email: string;
+}
+
+/** @spec docs/L1-api#compose */
+export interface ReplyContext {
+  to: Recipient[];
+  cc: Recipient[];
+  replySubject: string;
+  forwardSubject: string;
+  quotedBody: string | null;
+  inReplyTo: string | null;
+  references: string | null;
+}
+
+/** @spec docs/L1-api#compose */
+export interface SendMessageInput {
+  to: Recipient[];
+  cc: Recipient[];
+  bcc: Recipient[];
+  subject: string;
+  body: string;
+  inReplyTo: string | null;
+  references: string | null;
+}
+
 /** @spec docs/L1-api#error-format */
 export interface OkResponse {
   ok: boolean;

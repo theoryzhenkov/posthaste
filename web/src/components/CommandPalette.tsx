@@ -76,9 +76,11 @@ interface CommandPaletteProps {
   onApplySearch: (query: string) => void;
   onArchive: () => void;
   onClose: () => void;
+  onCompose: () => void;
   onOpenSettings: (category?: SettingsCategory) => void;
   onOpenShortcuts: () => void;
   onPlaceholderAction: (label: string) => void;
+  onReply: () => void;
   onSelectConversation: (conversation: ConversationSummary) => void;
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void;
   onSelectSourceMailbox: (sourceId: string, mailboxId: string, name: string) => void;
@@ -131,9 +133,11 @@ export function CommandPalette({
   onApplySearch,
   onArchive,
   onClose,
+  onCompose,
   onOpenSettings,
   onOpenShortcuts,
   onPlaceholderAction,
+  onReply,
   onSelectConversation,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
@@ -172,7 +176,7 @@ export function CommandPalette({
         shortcut: "⌘N",
         keywords: "compose new message draft",
         icon: commandIcon("compose"),
-        onSelect: () => onPlaceholderAction("Compose"),
+        onSelect: onCompose,
       },
       {
         id: "reply",
@@ -181,7 +185,7 @@ export function CommandPalette({
         shortcut: "⌘R",
         keywords: "reply respond answer",
         icon: commandIcon("reply"),
-        onSelect: () => onPlaceholderAction("Reply"),
+        onSelect: onReply,
       },
       {
         id: "archive",
@@ -255,7 +259,7 @@ export function CommandPalette({
     ].filter(
       (entry) =>
         matchesQuery(normalized, `${entry.label} ${entry.keywords}`) &&
-        (hasSelectedMessage || !["archive", "flag"].includes(entry.id)),
+        (hasSelectedMessage || !["archive", "flag", "reply"].includes(entry.id)),
     );
 
     const messages = cachedConversations
@@ -341,9 +345,11 @@ export function CommandPalette({
     hasSelectedMessage,
     onApplySearch,
     onArchive,
+    onCompose,
     onOpenSettings,
     onOpenShortcuts,
     onPlaceholderAction,
+    onReply,
     onSelectConversation,
     onSelectSmartMailbox,
     onSelectSourceMailbox,

@@ -14,6 +14,7 @@ import { fetchAccounts, fetchMessage } from "./api/client";
 import type { ConversationSummary, MessageSummary } from "./api/types";
 import { ActionBar } from "./components/ActionBar";
 import { CommandPalette } from "./components/CommandPalette";
+import { ComposeOverlay, type ComposeIntent } from "./components/ComposeOverlay";
 import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
 import { SettingsOverlay } from "./components/SettingsOverlay";
@@ -62,6 +63,7 @@ function MailClient() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<"general" | "accounts" | "mailboxes">("accounts");
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
@@ -143,6 +145,36 @@ function MailClient() {
     });
   }, [actions, selectedMessage]);
 
+  const resolveComposeSourceId = useCallback(() => {
+    return (
+      selectedMessage?.sourceId ??
+      (effectiveView?.kind === "source-mailbox" ? effectiveView.sourceId : null) ??
+      enabledAccounts[0]?.id ??
+      null
+    );
+  }, [effectiveView, enabledAccounts, selectedMessage]);
+
+  const handleCompose = useCallback(() => {
+    const sourceId = resolveComposeSourceId();
+    if (!sourceId) {
+      setSettingsCategory("accounts");
+      setIsSettingsOpen(true);
+      return;
+    }
+    setComposeIntent({ kind: "new", sourceId });
+  }, [resolveComposeSourceId]);
+
+  const handleReply = useCallback(() => {
+    if (!selectedMessage) {
+      return;
+    }
+    setComposeIntent({
+      kind: "reply",
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    });
+  }, [selectedMessage]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
@@ -164,7 +196,12 @@ function MailClient() {
       }
       if ((event.metaKey || event.ctrlKey) && (event.key === "n" || event.key === "N")) {
         event.preventDefault();
-        handlePlaceholderAction("Compose");
+        handleCompose();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && (event.key === "r" || event.key === "R")) {
+        event.preventDefault();
+        handleReply();
         return;
       }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "l") {
@@ -189,7 +226,7 @@ function MailClient() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handlePlaceholderAction, handleToggleFlag, selectedMessage]);
+  }, [handleCompose, handleReply, handleToggleFlag, selectedMessage]);
 
   const handleSearch = useCallback((query: string, append?: boolean) => {
     setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query));
@@ -269,10 +306,11 @@ function MailClient() {
           setSearchQuery("");
           setIsSearchActive(false);
         }}
-        onCompose={() => handlePlaceholderAction("Compose")}
+        onCompose={handleCompose}
         onFocusSearch={() => setIsSearchActive(true)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onPlaceholderAction={handlePlaceholderAction}
+        onReply={handleReply}
         onSearchBlur={() => setIsSearchActive(false)}
         onSearchQueryChange={setSearchQuery}
         onShowShortcuts={() => setShowShortcuts(true)}
@@ -354,9 +392,11 @@ function MailClient() {
           onApplySearch={handleApplySearch}
           onArchive={handleArchive}
           onClose={() => setIsCommandPaletteOpen(false)}
+          onCompose={handleCompose}
           onOpenSettings={handleOpenSettings}
           onOpenShortcuts={() => setShowShortcuts(true)}
           onPlaceholderAction={handlePlaceholderAction}
+          onReply={handleReply}
           onSelectConversation={handleSelectConversation}
           onSelectSmartMailbox={handleSelectSmartMailbox}
           onSelectSourceMailbox={handleSelectSourceMailbox}
@@ -365,6 +405,12 @@ function MailClient() {
       )}
 
       {showShortcuts && <ShortcutReference onClose={() => setShowShortcuts(false)} />}
+      {composeIntent && (
+        <ComposeOverlay
+          intent={composeIntent}
+          onClose={() => setComposeIntent(null)}
+        />
+      )}
     </div>
   );
 }

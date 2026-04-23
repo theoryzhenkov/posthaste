@@ -12,10 +12,11 @@ use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
     AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, MailboxId, MailboxSummary, MessageAttachment, MessageDetail,
-    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretKind, SecretRef,
-    SecretStatus, SecretStorage, ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox,
-    SmartMailboxId, SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
+    DomainEvent, EventFilter, Identity, MailboxId, MailboxSummary, MessageAttachment,
+    MessageDetail, MessageId, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
+    SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
     EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
@@ -771,10 +772,8 @@ pub async fn list_smart_mailbox_conversations(
     // When a search query is provided, AND it with the smart mailbox rule.
     if let Some(q) = &query.q {
         if !q.trim().is_empty() {
-            let search_rule =
-                posthaste_domain::search::parse_query(q).map_err(|msg| {
-                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg)
-                })?;
+            let search_rule = posthaste_domain::search::parse_query(q)
+                .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))?;
             let mailbox = state
                 .service
                 .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
@@ -834,9 +833,8 @@ pub async fn list_conversations(
     // When a search query is provided, parse it into a rule and search globally.
     if let Some(q) = &query.q {
         if !q.trim().is_empty() {
-            let rule = posthaste_domain::search::parse_query(q).map_err(|msg| {
-                ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg)
-            })?;
+            let rule = posthaste_domain::search::parse_query(q)
+                .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))?;
             return state
                 .service
                 .query_conversations_by_rule(
@@ -980,6 +978,55 @@ pub async fn get_message_attachment(
     Ok(response)
 }
 
+/// GET /v1/sources/{source_id}/identity
+///
+/// @spec docs/L1-api#compose
+pub async fn get_identity(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+) -> Result<Json<Identity>, ApiError> {
+    state
+        .service
+        .fetch_identity(&AccountId(source_id))
+        .await
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+/// GET /v1/sources/{source_id}/messages/{id}/reply-context
+///
+/// @spec docs/L1-api#compose
+/// @spec docs/L1-compose#reply-quoting
+pub async fn get_reply_context(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, message_id)): Path<(String, String)>,
+) -> Result<Json<ReplyContext>, ApiError> {
+    state
+        .service
+        .fetch_reply_context(&AccountId(source_id), &MessageId(message_id))
+        .await
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
+/// POST /v1/sources/{source_id}/commands/send
+///
+/// @spec docs/L1-api#compose
+/// @spec docs/L1-compose#no-send-empty-to
+pub async fn send_message(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Json(request): Json<SendMessageRequest>,
+) -> Result<Json<OkResponse>, ApiError> {
+    validate_send_message_request(&request)?;
+    state
+        .service
+        .send_message(&AccountId(source_id), &request)
+        .await
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(OkResponse { ok: true }))
+}
+
 fn rewrite_inline_attachment_urls(
     html: &str,
     source_id: &str,
@@ -1007,6 +1054,48 @@ fn rewrite_inline_attachment_urls(
 
 fn escape_content_disposition_filename(filename: &str) -> String {
     filename.replace('\\', "_").replace('"', "'")
+}
+
+fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), ApiError> {
+    if request.to.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compose",
+            "at least one To recipient is required",
+        ));
+    }
+    if request.subject.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compose",
+            "subject is required",
+        ));
+    }
+    if request.body.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compose",
+            "message body is required",
+        ));
+    }
+    if request
+        .to
+        .iter()
+        .chain(request.cc.iter())
+        .chain(request.bcc.iter())
+        .any(recipient_email_is_empty)
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compose",
+            "recipient email addresses cannot be empty",
+        ));
+    }
+    Ok(())
+}
+
+fn recipient_email_is_empty(recipient: &Recipient) -> bool {
+    recipient.email.trim().is_empty()
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
@@ -1282,6 +1371,23 @@ mod tests {
 
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert_eq!(error.body.code, "state_mismatch");
+    }
+
+    #[test]
+    fn send_message_rejects_missing_to_recipient() {
+        let error = validate_send_message_request(&SendMessageRequest {
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Hello".to_string(),
+            body: "Body".to_string(),
+            in_reply_to: None,
+            references: None,
+        })
+        .expect_err("empty To should be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_compose");
     }
 
     #[test]
