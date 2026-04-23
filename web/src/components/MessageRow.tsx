@@ -42,9 +42,9 @@ export function MessageRow({
       className={cn(
         "grid h-full w-full items-center gap-3",
         "border-b border-border px-3 py-2 text-left text-sm transition-colors",
-        "hover:bg-accent/50",
-        isSelected && "border-l-2 border-l-primary bg-accent",
-        !isSelected && "border-l-2 border-l-transparent",
+        "ph-focus-ring",
+        isSelected && "border-l-2 border-l-brand-coral bg-sidebar-accent text-sidebar-accent-foreground",
+        !isSelected && "border-l-2 border-l-transparent bg-panel hover:bg-panel-muted",
       )}
       style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
       onClick={onSelect}

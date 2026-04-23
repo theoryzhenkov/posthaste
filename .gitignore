@@ -19,6 +19,10 @@ site/
 /web/dist/
 /web/node_modules/
 
+# local design handoff blobs
+/.claude-design/Posthaste-handoff.zip
+/.claude-design/handoff/posthaste/project/uploads/
+
 # local app/dev data
 /crates/data/
 /dev/stalwart/data/

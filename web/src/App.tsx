@@ -7,22 +7,23 @@
  */
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
 import type { MessageSummary } from "./api/types";
+import { ActionBar } from "./components/ActionBar";
 import { MessageDetail } from "./components/MessageDetail";
 import { MessageList } from "./components/MessageList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ShortcutReference } from "./components/ShortcutReference";
 import { Sidebar, type SidebarSelection } from "./components/Sidebar";
+import { DesignThemeProvider } from "./components/ThemeProvider";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "./components/ui/resizable";
-import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";
 import { useDebouncedValue } from "./hooks/useDebouncedValue";
 import { useEmailActions } from "./hooks/useEmailActions";
@@ -149,112 +150,42 @@ function MailClient() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Toolbar */}
-      <header className="flex items-center border-b border-border bg-card px-3 py-1.5">
-        {/* Left group: branding + action buttons */}
-        <div className="flex items-center gap-1">
-          <span className="mr-2 text-sm font-semibold tracking-tight select-none">PostHaste</span>
-
-          <ToolbarButton
-            icon={<Archive size={16} />}
-            title="Archive (e)"
-            label="Archive"
-            shortcut="e"
-            disabled={!selectedMessage}
-            onClick={() =>
-              selectedMessage &&
-              actions.archive({
-                sourceId: selectedMessage.sourceId,
-                messageId: selectedMessage.messageId,
-              })
-            }
-          />
-          <ToolbarButton
-            icon={<Trash2 size={16} />}
-            title="Trash (#)"
-            label="Trash"
-            shortcut="#"
-            disabled={!selectedMessage}
-            onClick={() =>
-              selectedMessage &&
-              actions.trash({
-                sourceId: selectedMessage.sourceId,
-                messageId: selectedMessage.messageId,
-              })
-            }
-          />
-          <ToolbarButton
-            icon={
-              <Star
-                size={16}
-                className={
-                  selectedMessageQuery.data?.isFlagged
-                    ? "fill-amber-400 text-amber-400"
-                    : undefined
-                }
-              />
-            }
-            title="Flag"
-            disabled={!selectedMessage}
-            onClick={() =>
-              selectedMessage &&
-              actions.toggleFlag({
-                conversationId: selectedMessage.conversationId,
-                sourceId: selectedMessage.sourceId,
-                messageId: selectedMessage.messageId,
-                isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
-                isRead: selectedMessageQuery.data?.isRead,
-                keywords: selectedMessageQuery.data?.keywords,
-              })
-            }
-          />
-        </div>
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Right group: search + settings */}
-        <div className="flex items-center gap-1">
-          <div className="relative flex items-center">
-            <Search size={14} className="absolute left-2 text-muted-foreground" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setSearchQuery("");
-                  searchInputRef.current?.blur();
-                }
-              }}
-              placeholder="Search..."
-              className="h-7 w-48 rounded border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                className="absolute right-1.5 text-muted-foreground hover:text-foreground"
-                onClick={() => setSearchQuery("")}
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          <button
-            type="button"
-            title="Settings"
-            className={cn(
-              "flex size-7 items-center justify-center rounded transition-colors hover:bg-accent",
-              isSettingsOpen && "text-primary",
-            )}
-            onClick={() => setIsSettingsPinned((open) => !open)}
-          >
-            <Settings size={16} />
-          </button>
-        </div>
-      </header>
+      <ActionBar
+        isFlagged={selectedMessageQuery.data?.isFlagged ?? false}
+        isMessageSelected={selectedMessage !== null}
+        isSettingsOpen={isSettingsOpen}
+        searchInputRef={searchInputRef}
+        searchQuery={searchQuery}
+        onArchive={() =>
+          selectedMessage &&
+          actions.archive({
+            sourceId: selectedMessage.sourceId,
+            messageId: selectedMessage.messageId,
+          })
+        }
+        onClearSearch={() => setSearchQuery("")}
+        onSearchQueryChange={setSearchQuery}
+        onShowShortcuts={() => setShowShortcuts(true)}
+        onToggleFlag={() =>
+          selectedMessage &&
+          actions.toggleFlag({
+            conversationId: selectedMessage.conversationId,
+            sourceId: selectedMessage.sourceId,
+            messageId: selectedMessage.messageId,
+            isFlagged: selectedMessageQuery.data?.isFlagged ?? false,
+            isRead: selectedMessageQuery.data?.isRead,
+            keywords: selectedMessageQuery.data?.keywords,
+          })
+        }
+        onToggleSettings={() => setIsSettingsPinned((open) => !open)}
+        onTrash={() =>
+          selectedMessage &&
+          actions.trash({
+            sourceId: selectedMessage.sourceId,
+            messageId: selectedMessage.messageId,
+          })
+        }
+      />
       {actions.errorMessage && (
         <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {actions.errorMessage}
@@ -323,59 +254,22 @@ function MailClient() {
   );
 }
 
-/** Toolbar button with optional text label, shortcut hint, and disabled state. */
-function ToolbarButton({
-  icon,
-  title,
-  label,
-  shortcut,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  label?: string;
-  shortcut?: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      className={cn(
-        "flex items-center justify-center rounded text-muted-foreground transition-colors",
-        label ? "h-7 gap-1.5 px-2" : "size-7",
-        disabled
-          ? "opacity-40 cursor-not-allowed"
-          : "hover:bg-accent hover:text-foreground",
-      )}
-      onClick={onClick}
-    >
-      {icon}
-      {label && <span className="text-xs">{label}</span>}
-      {shortcut && (
-        <kbd className="ml-1 text-[10px] text-muted-foreground/60">{shortcut}</kbd>
-      )}
-    </button>
-  );
-}
-
 /**
  * Root App component: wraps `MailClient` in a `QueryClientProvider`.
  * @spec docs/L1-ui#component-hierarchy
  */
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <MailClient />
-      <Toaster
-        position="bottom-center"
-        toastOptions={{
-          className: "font-sans text-sm",
-        }}
-      />
-    </QueryClientProvider>
+    <DesignThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <MailClient />
+        <Toaster
+          position="bottom-center"
+          toastOptions={{
+            className: "font-sans text-sm",
+          }}
+        />
+      </QueryClientProvider>
+    </DesignThemeProvider>
   );
 }
