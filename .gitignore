@@ -30,6 +30,8 @@ site/
 /dev/stalwart/data/
 /dev/stalwart/logs/
 /dev/posthaste/
+/dev/instances/
+/.overmind.*.sock
 src-tauri/gen/schemas/
 
 # editor
