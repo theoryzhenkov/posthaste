@@ -14,6 +14,8 @@ EMAIL="${USER}@${DOMAIN}"
 STALWART_DATA_ROOT="${POSTHASTE_STALWART_DATA:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/data}"
 FIXTURE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fixtures/maildir"
 FIXTURE_MARKER="$STALWART_DATA_ROOT/.posthaste-fixtures-v1-imported"
+STATE_ROOT="${POSTHASTE_STATE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../posthaste/state}"
+SEED_READY_MARKER="$STATE_ROOT/.stalwart-seed-ready"
 
 wait_for_stalwart() {
   for _ in $(seq 1 60); do
@@ -115,5 +117,7 @@ wait_for_stalwart
 ensure_domain
 ensure_user
 import_fixture_messages
+mkdir -p "$STATE_ROOT"
+touch "$SEED_READY_MARKER"
 
 echo "seeded: login as '$USER' with POSTHASTE_STALWART_USER_PASSWORD at $BASE"
