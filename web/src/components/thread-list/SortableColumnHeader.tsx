@@ -3,7 +3,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
-import { ColumnResizeHandle } from "./ColumnResizeHandle";
+import {
+  ColumnResizeHandle,
+  type ColumnResizeHandlePlacement,
+} from "./ColumnResizeHandle";
 import type { SortDirection } from "./columns";
 
 interface SortableColumnHeaderProps {
@@ -16,7 +19,8 @@ interface SortableColumnHeaderProps {
   sortDirection?: SortDirection;
   isSortable?: boolean;
   showResizeDivider?: boolean;
-  resizePlacement?: "between-columns" | "table-end";
+  resizePlacement?: ColumnResizeHandlePlacement;
+  showStartResizeHandle?: boolean;
   onSort: () => void;
   onResize?: (width: number) => void;
 }
@@ -31,7 +35,8 @@ export function SortableColumnHeader({
   sortDirection,
   isSortable = true,
   showResizeDivider = true,
-  resizePlacement = "between-columns",
+  resizePlacement = "interior",
+  showStartResizeHandle = false,
   onSort,
   onResize,
 }: SortableColumnHeaderProps) {
@@ -68,11 +73,21 @@ export function SortableColumnHeader({
       {...attributes}
       {...listeners}
     >
+      {hasResizeHandle && showStartResizeHandle && (
+        <ColumnResizeHandle
+          basis={resizeBasis}
+          minWidth={resizeMinWidth}
+          showDivider={false}
+          placement="start-edge"
+          onResize={onResize}
+        />
+      )}
       <span
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden px-2.5",
+          hasResizeHandle && showStartResizeHandle && "pl-5",
           hasResizeHandle && "pr-4",
-          resizePlacement === "table-end" && "pr-5",
+          resizePlacement === "end-edge" && "pr-5",
           align === "right" && "justify-end",
           align === "center" && "justify-center px-0",
         )}
