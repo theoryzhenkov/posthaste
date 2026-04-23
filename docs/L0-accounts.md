@@ -2,7 +2,7 @@
 scope: L0
 summary: "Multi-account scoping invariant and deferral rationale"
 modified: 2026-03-31
-reviewed: 2026-03-31
+reviewed: 2026-04-23
 depends:
   - path: README
   - path: docs/L0-jmap
