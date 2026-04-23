@@ -470,7 +470,7 @@ export function MessageList({
       <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">
         <div className="flex h-full min-h-0 flex-col" style={tableLayout.tableStyle}>
           <div
-            className="shrink-0 border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
+            className="shrink-0 border-b border-border/80 bg-[var(--list-header)] text-panel-foreground"
             aria-label={searchQuery ? `Search results for ${searchQuery}` : selectedView.name}
           >
             <ThreadListHeader

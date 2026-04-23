@@ -299,6 +299,7 @@ Pane:
 - Header and rows live in one table-width layout inside a horizontal `ph-scroll` wrapper.
 - When enabled columns exceed the pane width, the entire message list table scrolls horizontally as one unit.
 - When enabled columns fit within the pane, the table stretches to the full pane width so the left edge and right edge align with the pane edges.
+- The header bottom separator uses the shared app separator color `border / 80%`, matching the main pane splitters and toolbar separator.
 - Horizontal overscroll uses the base list surface `bgList`; zebra striping is only painted by actual row elements so it ends with the real message list content.
 - `bgListAlt` is intentionally brighter than `bgList`; it is a subtle zebra contrast inside the list palette, not the neutral app background.
 
@@ -363,12 +364,13 @@ Header cells:
 
 Column dividers:
 
-- Width: `2px`.
+- Width: `1px`.
 - Height: `100%` of header.
-- Background: `borderStrong`.
+- Background: shared app separator color `border / 80%`.
 - Cursor: `col-resize`.
-- Hit area: `4px` total, centered on the visible divider.
-- Hover/active highlight: same-height `2px` coral line. Dividers do not grow or stretch on hover.
+- Hit area: `8px` total, centered on the visible divider.
+- Hover/active highlight: same-height `1px` coral line. Dividers do not grow or stretch on hover.
+- The last visible column keeps its resize hit area when resizable, but its normal divider is transparent so it does not draw beyond the message-list header into the pane splitter.
 
 Rows:
 

@@ -4,12 +4,14 @@ interface ColumnResizeHandleProps {
   onResize: (width: number) => void;
   basis: number;
   minWidth?: number;
+  showDivider?: boolean;
 }
 
 export function ColumnResizeHandle({
   onResize,
   basis,
   minWidth = 32,
+  showDivider = true,
 }: ColumnResizeHandleProps) {
   const draggingRef = useRef(false);
 
@@ -46,11 +48,17 @@ export function ColumnResizeHandle({
 
   return (
     <div
-      className="group absolute -right-1 top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-center"
+      className="group absolute right-0 top-0 z-20 flex h-full w-2 translate-x-1/2 cursor-col-resize items-center justify-center"
       onPointerDown={handlePointerDown}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="h-full w-0.5 bg-[var(--border-strong)] transition-colors group-hover:bg-brand-coral group-active:bg-brand-coral" />
+      <div
+        className={
+          showDivider
+            ? "h-full w-px bg-border/80 transition-colors group-hover:bg-brand-coral/70 group-active:bg-brand-coral"
+            : "h-full w-px bg-transparent transition-colors group-hover:bg-brand-coral/70 group-active:bg-brand-coral"
+        }
+      />
     </div>
   );
 }

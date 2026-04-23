@@ -82,6 +82,7 @@ export function ThreadListHeader({
           >
             {columns.map((colId) => {
               const def = getColumnDef(colId);
+              const isLastColumn = colId === columns[columns.length - 1];
               const isSortable = SORTABLE_COLUMNS.has(colId);
               const canResize = def.resizable === true;
               return (
@@ -95,6 +96,7 @@ export function ThreadListHeader({
                   resizeBasis={canResize ? getColumnBasis(colId, widths) : undefined}
                   resizeMinWidth={def.minWidth ?? def.basis}
                   sortDirection={sort.columnId === colId ? sort.direction : undefined}
+                  showResizeDivider={!isLastColumn}
                   onSort={() => onToggleSort(colId)}
                   onResize={canResize ? (width) => onResizeColumn(colId, width) : undefined}
                 />
