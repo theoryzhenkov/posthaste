@@ -1,4 +1,4 @@
-import { Paperclip, Star } from "lucide-react";
+import { Circle, Paperclip, Star } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import type { ConversationSummary } from "../../api/types";
 import { cn } from "../../lib/utils";
@@ -52,7 +52,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     label: "Unread",
     basis: 28,
     align: "center",
-    header: <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />,
+    header: <Circle aria-hidden size={11} className="text-muted-foreground" />,
     render: (c) =>
       c.unreadCount > 0 ? (
         <span aria-hidden className="size-2 rounded-full bg-signal-unread" />
@@ -120,11 +120,6 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       const hasUnread = c.unreadCount > 0;
       return (
         <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-          {c.messageCount > 1 && (
-            <span className="shrink-0 rounded-[3px] border border-[var(--border-strong)] bg-background/45 px-1 font-mono text-[10px] font-medium leading-4 tabular-nums text-muted-foreground">
-              {c.messageCount}
-            </span>
-          )}
           <span
             className={cn(
               "block min-w-0 truncate leading-none",
@@ -202,13 +197,14 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
   threadSize: {
     id: "threadSize",
     kind: "fixed",
-    label: "Size",
-    basis: 50,
+    label: "Count",
+    basis: 72,
+    minWidth: 56,
     align: "right",
     resizable: true,
     render: (c) => (
       <span className="min-w-0 truncate font-mono text-xs tabular-nums text-muted-foreground">
-        {c.messageCount > 1 ? String(c.messageCount) : ""}
+        {c.messageCount}
       </span>
     ),
   },
@@ -219,19 +215,20 @@ export const ALL_COLUMNS: ColumnId[] = [
   "unread",
   "flagged",
   "attachment",
+  "threadSize",
   "subject",
   "from",
   "date",
   "source",
   "tags",
   "preview",
-  "threadSize",
 ];
 
 export const DEFAULT_COLUMNS: ColumnId[] = [
   "unread",
   "flagged",
   "attachment",
+  "threadSize",
   "subject",
   "from",
   "date",

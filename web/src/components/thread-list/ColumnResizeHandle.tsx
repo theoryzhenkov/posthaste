@@ -1,11 +1,13 @@
 import { useCallback, useRef } from "react";
 
+export type ColumnResizeHandlePlacement = "interior" | "start-edge" | "end-edge";
+
 interface ColumnResizeHandleProps {
   onResize: (width: number) => void;
   basis: number;
   minWidth?: number;
   showDivider?: boolean;
-  placement?: "between-columns" | "table-end";
+  placement?: ColumnResizeHandlePlacement;
 }
 
 export function ColumnResizeHandle({
@@ -13,9 +15,10 @@ export function ColumnResizeHandle({
   basis,
   minWidth = 32,
   showDivider = true,
-  placement = "between-columns",
+  placement = "interior",
 }: ColumnResizeHandleProps) {
   const draggingRef = useRef(false);
+  const isStartEdge = placement === "start-edge";
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -32,7 +35,8 @@ export function ColumnResizeHandle({
       function onPointerMove(ev: PointerEvent) {
         if (!draggingRef.current) return;
         const delta = ev.clientX - startX;
-        const newWidth = Math.max(minWidth, startWidth + delta);
+        const nextDelta = isStartEdge ? -delta : delta;
+        const newWidth = Math.max(minWidth, startWidth + nextDelta);
         onResize(newWidth);
       }
 
@@ -45,13 +49,15 @@ export function ColumnResizeHandle({
       target.addEventListener("pointermove", onPointerMove);
       target.addEventListener("pointerup", onPointerUp);
     },
-    [basis, minWidth, onResize],
+    [basis, isStartEdge, minWidth, onResize],
   );
 
   return (
     <div
       className={
-        placement === "table-end"
+        placement === "start-edge"
+          ? "group absolute left-0 top-0 z-20 flex h-full w-4 cursor-col-resize items-center justify-start"
+          : placement === "end-edge"
           ? "group absolute right-0 top-0 z-20 flex h-full w-4 cursor-col-resize items-center justify-end"
           : "group absolute right-0 top-0 z-20 flex h-full w-2 translate-x-1/2 cursor-col-resize items-center justify-center"
       }

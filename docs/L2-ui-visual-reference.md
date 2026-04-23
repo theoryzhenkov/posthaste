@@ -317,9 +317,10 @@ Default columns:
 
 | ID | Type | Basis | Resizable | Label | Alignment |
 |---|---|---:|---|---|---|
-| `unread` | fixed | `28px` | No | empty | center |
+| `unread` | fixed | `28px` | No | circle icon | center |
 | `flag` | fixed | `28px` | No | flag icon | center |
 | `attach` | fixed | `28px` | No | attachment icon | center |
+| `threadSize` | fixed | `72px` | Yes | `Count` | right |
 | `subject` | stretch, grow `1` | `320px` | Yes | `Subject` | left |
 | `from` | fixed | `180px` | Yes | `From` | left |
 | `date` | fixed | `128px` | Yes | `Date Received` | left |
@@ -329,6 +330,7 @@ Default columns:
 Minimum widths:
 
 - `subject`: `120px`
+- `threadSize`: `56px`
 - `from`: `80px`
 - `date`: `80px`
 - `account`: `54px`
@@ -370,7 +372,10 @@ Column dividers:
 - Cursor: `col-resize`.
 - Hit area: `8px` total, centered on the visible divider.
 - Hover/active highlight: same-height `1px` coral line. Dividers do not grow or stretch on hover.
-- The last visible column keeps its resize hit area when resizable, but the hit area is expanded inward inside the table edge and its normal divider is transparent so it remains selectable without creating extra horizontal scroll width or drawing into the pane splitter.
+- Header resize handles have three placements: `interior`, `start-edge`, and `end-edge`.
+- `interior` handles are centered between columns and use an `8px` hit area.
+- The first resizable column also gets a `start-edge` handle when it is at the table edge; it expands inward, uses a `16px` hit area, and reverses drag delta so dragging left grows the column.
+- The last visible column uses an `end-edge` handle when resizable; it expands inward, uses a `16px` hit area, and its normal divider is transparent so it remains selectable without creating extra horizontal scroll width or drawing into the pane splitter.
 
 Rows:
 
@@ -413,22 +418,16 @@ Attachment icon:
 - Unselected color: `fgFaint`.
 - Selected color: `selFg`.
 
-Thread badge:
+Thread count column:
 
 - Font: Geist Mono `11px`, weight `600`.
 - Text color: selected `selFg`, otherwise `fgMuted`.
-- Background: selected `rgba(255,255,255,0.15)`, otherwise `bgElev`.
-- Border: selected transparent, otherwise `1px solid borderSoft`.
-- Padding: `0 5px`.
-- Radius: `3px`.
-- Line height: `14px`.
-- Minimum width: `18px`.
-- Centered text.
-- Appears before the subject when `threadCount > 1`.
+- Text is right-aligned and tabular.
+- Shows the conversation message count as plain table text, including `1`.
+- Appears immediately before `subject` in the default column order.
 
 Subject column:
 
-- Shows thread badge first when present.
 - Subject text truncates.
 - Subject uses row font and row weight.
 - The standard tabular handoff does not show preview text in the same row.
