@@ -1,5 +1,6 @@
 # direnv / nix
 .direnv/
+.venv/
 result
 site/
 
@@ -38,12 +39,3 @@ Thumbs.db
 
 # legacy
 /swift/MailClient/.build
-.env
-.envrc
-.direnv/
-/crates/data/
-.claude/
-/dev/stalwart/data/
-/dev/stalwart/logs/
-/dev/posthaste/
-src-tauri/gen/schemas/

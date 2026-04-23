@@ -2,7 +2,7 @@
 scope: L0
 summary: "PostHaste brand identity — name, palette, typography, logo direction"
 modified: 2026-04-01
-reviewed: 2026-04-01
+reviewed: 2026-04-23
 depends:
   - path: README
 dependents:

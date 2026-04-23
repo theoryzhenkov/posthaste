@@ -18,7 +18,7 @@ update remote=template_remote template_bookmark=template_bookmark local_bookmark
 
     if jj log -r "$local_ref & ::$target" --no-graph -T commit_id > "$tmp" && [ -s "$tmp" ]; then
         jj --ignore-immutable bookmark set "$local_name" -r "$target"
-        jj --ignore-immutable rebase --skip-emptied -r "($target..@) & mutable()" -d "$target"
+        jj --ignore-immutable rebase --skip-emptied -r "($target..@) & mutable()" -o "$target"
     else
-        jj --ignore-immutable rebase --skip-emptied -b "$local_ref" -d "$target"
+        jj --ignore-immutable rebase --skip-emptied -b "$local_ref" -o "$target"
     fi

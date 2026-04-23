@@ -2,7 +2,7 @@
 scope: L0
 summary: "Junior developer onboarding tasks — frontend, backend, and project infrastructure"
 modified: 2026-04-02
-reviewed: 2026-04-02
+reviewed: 2026-04-23
 depends:
   - path: README
   - path: docs/L0-ui

@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why local replica, sync model decisions, online-first strategy"
 modified: 2026-04-01
-reviewed: 2026-04-01
+reviewed: 2026-04-23
 depends:
   - path: README
   - path: docs/L0-jmap

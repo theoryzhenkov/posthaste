@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why React, thin-frontend principle, navigation model, rendering approach"
 modified: 2026-04-01
-reviewed: 2026-04-01
+reviewed: 2026-04-23
 depends:
   - path: README
   - path: docs/L0-api

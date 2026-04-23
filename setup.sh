@@ -4,7 +4,7 @@
 set -euo pipefail
 
 TEMPLATE_REMOTE_NAME="${TEMPLATE_REMOTE_NAME:-template}"
-TEMPLATE_REMOTE_URL="${TEMPLATE_REMOTE_URL:-git@github.com:theoryzhenkov/repo_template.base.git}"
+TEMPLATE_REMOTE_URL="${TEMPLATE_REMOTE_URL:-git@github.com:theoryzhenkov/repo_template.base_mkdocs.git}"
 
 # -- tool check --
 missing=()

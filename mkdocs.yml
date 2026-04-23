@@ -2,8 +2,8 @@ site_name: PostHaste
 site_description: JMAP mail client with MailMate-grade search and conversation-first web UI
 docs_dir: docs
 site_dir: site
-repo_url: https://github.com/user/posthaste
-repo_name: posthaste
+repo_url: https://github.com/theoryzhenkov/posthaste
+repo_name: theoryzhenkov/posthaste
 
 theme:
   name: material
@@ -62,9 +62,15 @@ nav:
       - API: L0-api.md
       - Accounts: L0-accounts.md
       - Branding: L0-branding.md
+      - Logging: L0-logging.md
   - Design (L1):
       - JMAP: L1-jmap.md
       - Sync: L1-sync.md
       - Search: L1-search.md
       - Compose: L1-compose.md
       - UI: L1-ui.md
+      - API: L1-api.md
+      - Accounts: L1-accounts.md
+      - Logging: L1-logging.md
+  - Implementation (L2):
+      - Transport: L2-transport.md

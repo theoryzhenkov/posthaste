@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why JMAP, protocol scope, target server decisions"
 modified: 2026-03-29
-reviewed: 2026-03-29
+reviewed: 2026-04-23
 depends:
   - path: README
 dependents:

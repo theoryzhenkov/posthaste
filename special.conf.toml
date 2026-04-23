@@ -1,2 +1,2 @@
 root = "README"
-paths = [".", "docs"]
+paths = ["docs"]
