@@ -5,6 +5,7 @@ interface ColumnResizeHandleProps {
   basis: number;
   minWidth?: number;
   showDivider?: boolean;
+  placement?: "between-columns" | "table-end";
 }
 
 export function ColumnResizeHandle({
@@ -12,6 +13,7 @@ export function ColumnResizeHandle({
   basis,
   minWidth = 32,
   showDivider = true,
+  placement = "between-columns",
 }: ColumnResizeHandleProps) {
   const draggingRef = useRef(false);
 
@@ -48,7 +50,11 @@ export function ColumnResizeHandle({
 
   return (
     <div
-      className="group absolute right-0 top-0 z-20 flex h-full w-2 translate-x-1/2 cursor-col-resize items-center justify-center"
+      className={
+        placement === "table-end"
+          ? "group absolute right-0 top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-end"
+          : "group absolute right-0 top-0 z-20 flex h-full w-2 translate-x-1/2 cursor-col-resize items-center justify-center"
+      }
       onPointerDown={handlePointerDown}
       onClick={(e) => e.stopPropagation()}
     >
