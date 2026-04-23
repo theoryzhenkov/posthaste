@@ -171,11 +171,21 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     basis: 72,
     minWidth: 54,
     resizable: true,
-    render: (c) => (
-      <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/75">
-        {c.latestSourceName}
-      </span>
-    ),
+    render: (c) => {
+      const hasUnread = c.unreadCount > 0;
+      return (
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            hasUnread
+              ? "font-medium text-foreground"
+              : "text-muted-foreground/85",
+          )}
+        >
+          {c.latestSourceName}
+        </span>
+      );
+    },
   },
   tags: {
     id: "tags",
