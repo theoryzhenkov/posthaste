@@ -72,6 +72,7 @@ export function SortableColumnHeader({
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden px-2.5",
           hasResizeHandle && "pr-4",
+          resizePlacement === "table-end" && "pr-5",
           align === "right" && "justify-end",
           align === "center" && "justify-center px-0",
         )}

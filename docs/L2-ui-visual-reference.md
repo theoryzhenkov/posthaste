@@ -370,7 +370,7 @@ Column dividers:
 - Cursor: `col-resize`.
 - Hit area: `8px` total, centered on the visible divider.
 - Hover/active highlight: same-height `1px` coral line. Dividers do not grow or stretch on hover.
-- The last visible column keeps its resize hit area when resizable, but the hit area is inset inside the table edge and its normal divider is transparent so it does not create extra horizontal scroll width or draw into the pane splitter.
+- The last visible column keeps its resize hit area when resizable, but the hit area is expanded inward inside the table edge and its normal divider is transparent so it remains selectable without creating extra horizontal scroll width or drawing into the pane splitter.
 
 Rows:
 

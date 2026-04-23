@@ -52,7 +52,7 @@ export function ColumnResizeHandle({
     <div
       className={
         placement === "table-end"
-          ? "group absolute right-0 top-0 z-20 flex h-full w-2 cursor-col-resize items-center justify-end"
+          ? "group absolute right-0 top-0 z-20 flex h-full w-4 cursor-col-resize items-center justify-end"
           : "group absolute right-0 top-0 z-20 flex h-full w-2 translate-x-1/2 cursor-col-resize items-center justify-center"
       }
       onPointerDown={handlePointerDown}
