@@ -62,8 +62,8 @@
 
 /*
  * PostHaste light theme.
- * Cool sky whites + sky blue (#2B7EC2) accent.
- * "Gentle brutalist" — dense and serious, but airy and approachable.
+ * Mirrors the handoff light token set: warm neutral surfaces, slate selection,
+ * coral brand/flag, and blue unread signals.
  */
 :root {
   --radius: 0.25rem;
@@ -71,76 +71,78 @@
   color-scheme: light;
 
   /* Surfaces */
-  --background: #F8FAFB;
-  --foreground: #141618;
-  --card: #EEF1F4;
-  --card-foreground: #141618;
-  --popover: #FFFFFF;
-  --popover-foreground: #141618;
+  --background: oklch(0.985 0.005 80);
+  --foreground: oklch(0.22 0.01 60);
+  --card: oklch(0.97 0.006 75);
+  --card-foreground: oklch(0.22 0.01 60);
+  --popover: #fff;
+  --popover-foreground: oklch(0.22 0.01 60);
 
-  /* Primary = sky blue */
-  --primary: #2B7EC2;
-  --primary-foreground: #FFFFFF;
+  /* Primary = brand coral */
+  --primary: oklch(0.68 0.17 45);
+  --primary-foreground: #fff;
 
-  /* Secondary = cloud panel */
-  --secondary: #EEF1F4;
-  --secondary-foreground: #5A6370;
+  /* Secondary = raised neutral */
+  --secondary: oklch(0.97 0.006 75);
+  --secondary-foreground: oklch(0.46 0.01 60);
 
   /* Muted = subdued elements */
-  --muted: #EEF1F4;
-  --muted-foreground: #5A6370;
+  --muted: oklch(0.97 0.006 75);
+  --muted-foreground: oklch(0.46 0.01 60);
 
-  /* Accent = cloud wash (interactive highlight) */
-  --accent: #EBF3FB;
-  --accent-foreground: #141618;
+  /* Accent = hover wash */
+  --accent: oklch(0.94 0.008 70);
+  --accent-foreground: oklch(0.22 0.01 60);
 
   /* Destructive */
-  --destructive: #DC2626;
+  --destructive: oklch(0.58 0.22 25);
 
   /* Borders & inputs */
-  --border: #D4DAE0;
-  --input: #D4DAE0;
-  --ring: #2B7EC2;
+  --border: oklch(0.88 0.008 70);
+  --input: oklch(0.88 0.008 70);
+  --ring: oklch(0.62 0.15 250);
 
-  /* Sidebar — tinted blue-gray */
-  --sidebar: #E4E9EE;
-  --sidebar-foreground: #2C3540;
-  --sidebar-primary: #2B7EC2;
-  --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #D0DBE5;
-  --sidebar-accent-foreground: #2C3540;
-  --sidebar-border: #D4DAE0;
-  --sidebar-ring: #2B7EC2;
+  /* Sidebar */
+  --sidebar: oklch(0.955 0.008 70);
+  --sidebar-foreground: oklch(0.22 0.01 60);
+  --sidebar-primary: oklch(0.68 0.17 45);
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: oklch(0.94 0.008 70);
+  --sidebar-accent-foreground: oklch(0.22 0.01 60);
+  --sidebar-border: oklch(0.88 0.008 70);
+  --sidebar-ring: oklch(0.62 0.15 250);
 
   /*
    * PostHaste application tokens.
    * These sit above shadcn's generic tokens and give the mail client stable
    * names for dense shell/chrome work without coupling components to a preset.
    */
-  --chrome: #EAF0F5;
-  --chrome-foreground: #202832;
-  --panel: #FFFFFF;
-  --panel-foreground: #141618;
-  --panel-muted: #F2F5F7;
-  --bg-elev: #EEF1F4;
-  --border-soft: #E4E9EE;
-  --border-strong: #BAC4CC;
-  --signal-unread: #2B7EC2;
-  --signal-flag: #D96A42;
-  --brand-coral: #D96A42;
-  --brand-coral-foreground: #FFFFFF;
-  --brand-coral-soft: #F6DED3;
-  --sidebar-section-label: #697180;
-  --list-header: #EFE5E0;
-  --list-zebra: #FFFFFF;
-  --list-zebra-alt: #F6F1EE;
-  --list-hover: #E8E0DB;
-  --list-selection: #D7D1CF;
-  --list-selection-foreground: #141618;
-  --list-divider: #D6CEC9;
+  --chrome: oklch(0.945 0.008 70);
+  --chrome-foreground: oklch(0.22 0.01 60);
+  --panel: #fff;
+  --panel-foreground: oklch(0.22 0.01 60);
+  --panel-muted: oklch(0.97 0.006 75);
+  --bg-elev: oklch(0.97 0.006 75);
+  --border-soft: oklch(0.93 0.006 70);
+  --border-strong: oklch(0.78 0.01 70);
+  --signal-unread: oklch(0.65 0.13 245);
+  --signal-flag: oklch(0.68 0.17 45);
+  --brand-coral: oklch(0.68 0.17 45);
+  --brand-coral-foreground: #fff;
+  --brand-coral-soft: oklch(0.92 0.055 50);
+  --brand-coral-deep: oklch(0.52 0.18 38);
+  --sidebar-section-label: oklch(0.65 0.008 60);
+  --list-header: oklch(0.945 0.008 70);
+  --list-zebra: oklch(0.98 0.005 80);
+  --list-zebra-alt: oklch(0.965 0.006 75);
+  --list-hover: oklch(0.94 0.008 70);
+  --list-selection: oklch(0.88 0.02 250);
+  --list-selection-foreground: oklch(0.22 0.05 250);
+  --list-divider: oklch(0.93 0.006 70);
+  --hover-bg: oklch(0.94 0.008 70);
   --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
-  --shadow-popover: 0 20px 48px rgb(21 28 36 / 0.16);
-  --shadow-pane: 0 1px 2px rgb(21 28 36 / 0.06), 0 8px 24px rgb(21 28 36 / 0.05);
+  --shadow-popover: 0 20px 48px rgb(40 30 20 / 0.14);
+  --shadow-pane: 0 1px 2px rgb(40 30 20 / 0.06), 0 4px 16px rgb(40 30 20 / 0.04);
 
   --ph-font-size-meta: 0.6875rem;
   --ph-font-size-ui: 0.75rem;
@@ -200,6 +202,7 @@
   --brand-coral: oklch(0.68 0.17 45);
   --brand-coral-foreground: oklch(0.18 0.008 55);
   --brand-coral-soft: oklch(0.92 0.055 50);
+  --brand-coral-deep: oklch(0.52 0.18 38);
   --sidebar-section-label: oklch(0.55 0.008 65);
   --list-header: oklch(0.205 0.008 55);
   --list-zebra: oklch(0.235 0.008 60);
@@ -208,6 +211,7 @@
   --list-selection: oklch(0.34 0.06 250);
   --list-selection-foreground: oklch(0.98 0.01 250);
   --list-divider: oklch(0.28 0.008 60);
+  --hover-bg: oklch(0.29 0.008 60);
   --focus-soft: color-mix(in oklab, var(--ring) 34%, transparent);
   --shadow-popover: 0 32px 96px rgb(0 0 0 / 0.58);
   --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.32), 0 18px 44px rgb(0 0 0 / 0.24);
