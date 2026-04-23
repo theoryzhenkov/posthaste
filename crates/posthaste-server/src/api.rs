@@ -1161,7 +1161,7 @@ pub async fn stream_events(
 }
 
 fn is_live_event_after_backlog(event: &DomainEvent, replayed_through: Option<i64>) -> bool {
-    replayed_through.map_or(true, |seq| event.seq > seq)
+    replayed_through.is_none_or(|seq| event.seq > seq)
 }
 
 /// Toggle the `enabled` flag on an account, re-persist, and restart the supervisor.

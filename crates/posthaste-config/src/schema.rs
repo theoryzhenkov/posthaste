@@ -31,21 +31,11 @@ pub struct LoggingToml {
 /// interval).
 ///
 /// @spec docs/L1-accounts#apptoml
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DaemonToml {
     pub bind: Option<String>,
     pub cors_origin: Option<String>,
     pub poll_interval_seconds: Option<u64>,
-}
-
-impl Default for DaemonToml {
-    fn default() -> Self {
-        Self {
-            bind: None,
-            cors_origin: None,
-            poll_interval_seconds: None,
-        }
-    }
 }
 
 impl AppToml {

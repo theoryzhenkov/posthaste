@@ -115,7 +115,15 @@ export function MessageDetail({
   onSearch,
 }: MessageDetailProps) {
   const queryClient = useQueryClient();
-  const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null);
+  const selectionKey = selection ? `${selection.sourceId}:${selection.messageId}` : null;
+  const [attachmentSelection, setAttachmentSelection] = useState<{
+    attachmentId: string | null;
+    selectionKey: string | null;
+  }>({ attachmentId: null, selectionKey: null });
+  const selectedAttachmentId =
+    attachmentSelection.selectionKey === selectionKey
+      ? attachmentSelection.attachmentId
+      : null;
   const conversationQuery = useQuery({
     queryKey: ["conversation", selection?.conversationId],
     queryFn: () => fetchConversation(selection!.conversationId),
@@ -134,10 +142,6 @@ export function MessageDetail({
     }
     mergeConversationView(queryClient, conversationQuery.data);
   }, [conversationQuery.data, queryClient]);
-
-  useEffect(() => {
-    setSelectedAttachmentId(null);
-  }, [selection?.messageId, selection?.sourceId]);
 
   if (!selection) {
     return (
@@ -299,7 +303,10 @@ export function MessageDetail({
                       {canPreview && (
                         <Button
                           onClick={() =>
-                            setSelectedAttachmentId(isSelected ? null : attachment.id)
+                            setAttachmentSelection({
+                              attachmentId: isSelected ? null : attachment.id,
+                              selectionKey,
+                            })
                           }
                           size="sm"
                           type="button"
