@@ -1,0 +1,21 @@
+Return-Path: <maya@orbitalsystems.test>
+Delivered-To: dev@localhost
+From: Maya Chen <maya@orbitalsystems.test>
+To: Dev User <dev@localhost>
+Cc: Luca Vega <luca@orbitalsystems.test>
+Subject: Launch checklist for Friday
+Date: Tue, 22 Apr 2026 10:03:00 +0000
+Message-ID: <launch-thread-1@orbitalsystems.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+
+Morning,
+
+Can you review the launch checklist before Friday?
+
+1. Validate the mailbox counts in archive and junk.
+2. Confirm attachments render in the message panel.
+3. Make sure long subjects wrap correctly.
+
+Thanks,
+Maya

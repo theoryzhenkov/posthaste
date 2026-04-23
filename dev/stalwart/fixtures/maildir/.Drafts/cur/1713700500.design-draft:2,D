@@ -1,0 +1,14 @@
+Return-Path: <dev@localhost>
+From: Dev User <dev@localhost>
+To: design@localhost
+Subject: Draft: reader header polish
+Date: Tue, 22 Apr 2026 12:42:00 +0000
+Message-ID: <draft-reader-header@localhost>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+
+Open questions for the next UI pass:
+
+- tighten action bar spacing
+- reduce reader title line-height
+- add a clearer empty-state for archived threads

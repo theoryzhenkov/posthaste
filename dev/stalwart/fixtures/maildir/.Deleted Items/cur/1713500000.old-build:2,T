@@ -1,0 +1,11 @@
+Return-Path: <ci@buildkite.test>
+Delivered-To: dev@localhost
+From: Buildkite CI <ci@buildkite.test>
+To: Dev User <dev@localhost>
+Subject: Build failure on obsolete branch
+Date: Fri, 10 Apr 2026 07:55:00 +0000
+Message-ID: <old-build-failure@buildkite.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="UTF-8"
+
+This branch was deleted last week. Safe to ignore and keep in trash.
