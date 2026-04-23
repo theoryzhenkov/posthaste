@@ -1,11 +1,7 @@
 # Desktop (Tauri) recipes
 
-# Start the full dev stack (stalwart + tauri, which embeds daemon + vite) with Overmind.
-dev:
-    bash ../dev/overmind/launch.sh desktop
-
 # Run tauri alone (backend embedded, vite via beforeDevCommand). Does NOT start stalwart.
-dev-solo:
+dev:
     cargo tauri dev
 
 # Build for release

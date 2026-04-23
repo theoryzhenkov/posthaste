@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Launch the PostHaste dev stack with Overmind.
 #
-# Usage: launch.sh <web|desktop>
+# Usage: launch.sh <web|desktop|services>
 #
 # Defaults point the daemon at an isolated dev-only config/state root
 # (dev/posthaste/) so the real ~/.config/posthaste is never touched.
 # Override any POSTHASTE_* env var before invoking to change behavior.
 set -euo pipefail
 
-layout="${1:?usage: launch.sh <web|desktop>}"
+layout="${1:?usage: launch.sh <web|desktop|services>}"
 case "$layout" in
-  web|desktop) ;;
-  *) echo "unknown layout: $layout (expected web|desktop)" >&2; exit 2 ;;
+  web|desktop|services) ;;
+  *) echo "unknown layout: $layout (expected web|desktop|services)" >&2; exit 2 ;;
 esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

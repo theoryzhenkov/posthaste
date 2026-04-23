@@ -1,11 +1,7 @@
 # Frontend (React/Vite) recipes
 
-# Start the full dev stack (stalwart + daemon + vite) with Overmind.
+# Start the Vite dev server alone. Assumes the backend is already running.
 dev:
-    bash ../dev/overmind/launch.sh web
-
-# Start the vite dev server alone. Assumes the backend is already running.
-dev-frontend:
     bun run dev
 
 # Production build
