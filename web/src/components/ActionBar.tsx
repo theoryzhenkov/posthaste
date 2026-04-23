@@ -62,7 +62,7 @@ function TrafficLights() {
 }
 
 function Divider() {
-  return <div className="mx-1.5 h-[18px] w-px bg-border/80" />;
+  return <div className="mx-1.5 h-[18px] w-px bg-border-soft" />;
 }
 
 function ToolbarChip({
@@ -82,9 +82,9 @@ function ToolbarChip({
       onClick={onClick}
       className={cn(
         "ph-focus-ring inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[12px] font-medium text-chrome-foreground/70 transition-colors",
-        "hover:bg-white/12 hover:text-chrome-foreground disabled:opacity-35",
+        "hover:bg-[var(--hover-bg)] hover:text-chrome-foreground disabled:opacity-35",
         label ? "pr-2.5" : "w-7 justify-center px-0",
-        active && "bg-[color-mix(in_oklab,var(--brand-coral)_18%,transparent)] text-brand-coral",
+        active && "bg-brand-coral-soft text-[var(--brand-coral-deep)]",
       )}
     >
       <span className="shrink-0">{icon}</span>
@@ -124,7 +124,7 @@ function SearchField({
       <button
         type="button"
         onClick={onOpenCommandPalette}
-        className="ph-focus-ring flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border border-border/70 bg-panel/75 px-2 text-left text-[12px] text-muted-foreground transition-[width,box-shadow,border-color] hover:border-border"
+        className="ph-focus-ring flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border border-border-soft bg-[var(--bg-elev)] px-2 text-left text-[12px] text-muted-foreground transition-[width,box-shadow,border-color] hover:border-border"
       >
         <Search size={13} strokeWidth={1.75} className="text-muted-foreground/70" />
         <span className="flex-1">Search mail</span>
@@ -136,7 +136,7 @@ function SearchField({
   }
 
   return (
-    <div className="flex h-[26px] w-[340px] items-center gap-2 rounded-[6px] border border-ring/65 bg-panel px-2 shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_22%,transparent)] transition-[width,box-shadow,border-color]">
+    <div className="flex h-[26px] w-[340px] items-center gap-2 rounded-[6px] border border-ring bg-panel px-2 shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_30%,transparent)] transition-[width,box-shadow,border-color]">
       <Search size={13} strokeWidth={1.75} className="text-muted-foreground/70" />
       <input
         ref={searchInputRef}
@@ -188,7 +188,7 @@ export function ActionBar({
   onTrash,
 }: ActionBarProps) {
   return (
-    <header className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border/80 bg-chrome px-3 text-chrome-foreground">
+    <header className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
       <TrafficLights />
       <div className="w-4" />
 
@@ -271,7 +271,7 @@ export function ActionBar({
 
       <button
         type="button"
-        className="ph-focus-ring ml-1 flex size-7 items-center justify-center rounded-[6px] text-[13px] font-bold text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground"
+        className="ph-focus-ring ml-1 flex size-7 items-center justify-center rounded-[6px] text-[13px] font-bold text-chrome-foreground/60 transition-colors hover:bg-[var(--hover-bg)] hover:text-chrome-foreground"
         onClick={onShowShortcuts}
         title="Keyboard shortcuts (?)"
       >
@@ -280,8 +280,8 @@ export function ActionBar({
       <button
         type="button"
         className={cn(
-          "ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground",
-          isSettingsOpen && "bg-white/10 text-chrome-foreground",
+          "ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-[var(--hover-bg)] hover:text-chrome-foreground",
+          isSettingsOpen && "bg-[var(--hover-bg)] text-chrome-foreground",
         )}
         onClick={onToggleSettings}
         title="Settings (⌘,)"
@@ -290,7 +290,7 @@ export function ActionBar({
       </button>
       <button
         type="button"
-        className="ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-white/10 hover:text-chrome-foreground"
+        className="ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-chrome-foreground/60 transition-colors hover:bg-[var(--hover-bg)] hover:text-chrome-foreground"
         onClick={onToggleTheme}
         title="Toggle theme"
       >
