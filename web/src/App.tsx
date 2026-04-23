@@ -61,7 +61,8 @@ function MailClient() {
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(DEFAULT_VIEW);
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<"general" | "accounts" | "mailboxes">("accounts");
+  const [settingsCategory, setSettingsCategory] =
+    useState<"general" | "accounts" | "mailboxes" | null>(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const [isSearchActive, setIsSearchActive] = useState(false);
@@ -190,7 +191,7 @@ function MailClient() {
       }
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
-        setSettingsCategory("accounts");
+        setSettingsCategory(null);
         setIsSettingsOpen(true);
         return;
       }
@@ -234,8 +235,8 @@ function MailClient() {
   }, []);
 
   const handleOpenSettings = useCallback(
-    (category: "general" | "accounts" | "mailboxes" = "accounts") => {
-      setSettingsCategory(category);
+    (category?: "general" | "accounts" | "mailboxes") => {
+      setSettingsCategory(category ?? null);
       setIsSettingsOpen(true);
       setIsCommandPaletteOpen(false);
     },
@@ -315,7 +316,10 @@ function MailClient() {
         onSearchQueryChange={setSearchQuery}
         onShowShortcuts={() => setShowShortcuts(true)}
         onToggleFlag={handleToggleFlag}
-        onToggleSettings={() => setIsSettingsOpen((open) => !open)}
+        onToggleSettings={() => {
+          setSettingsCategory(null);
+          setIsSettingsOpen((open) => !open);
+        }}
         onToggleTheme={handleToggleTheme}
         onTrash={handleTrash}
       />
@@ -373,7 +377,7 @@ function MailClient() {
         <SettingsOverlay
           accounts={accounts}
           activeAccountId={focusedSourceId}
-          initialCategory={settingsCategory}
+          initialCategory={shouldForceSettings ? "accounts" : settingsCategory ?? undefined}
           onActiveAccountChange={() => {
             setSelectedView(DEFAULT_VIEW);
             setSelectedMessage(null);

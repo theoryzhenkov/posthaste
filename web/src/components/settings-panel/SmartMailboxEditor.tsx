@@ -18,7 +18,6 @@ import type {
   UpdateSmartMailboxInput,
 } from "../../api/types";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import {
   EMPTY_SMART_MAILBOX_FORM,
   formFromSmartMailbox,
@@ -27,7 +26,6 @@ import { RuleGroupEditor } from "./RuleGroupEditor";
 import {
   FeedbackBanner,
   Field,
-  MetaStat,
   SectionCard,
   SectionHeader,
 } from "./shared";
@@ -96,8 +94,8 @@ export function SmartMailboxEditor({
   const isEditing = editorTarget !== "new";
 
   return (
-    <div className="space-y-5">
-      <SectionCard className="space-y-4">
+    <div>
+      <SectionCard>
         <SectionHeader
           eyebrow="Mailbox editor"
           title={
@@ -112,7 +110,7 @@ export function SmartMailboxEditor({
           }
           actions={
             isEditing ? (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {summary && (
                   <>
                     <Button
@@ -151,42 +149,23 @@ export function SmartMailboxEditor({
         />
       </SectionCard>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_17rem]">
-        <div className="space-y-4">
-          <SectionCard className="space-y-4">
+      <div>
+        <div>
+          <SectionCard>
             <SectionHeader
               eyebrow="Definition"
-              title="Mailbox metadata"
-              description="Name the mailbox and choose where it lands in the saved-view order."
+              title="Mailbox name"
             />
 
-            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8.5rem]">
-              <Field
-                label="Mailbox name"
-                value={form.name}
-                placeholder="Important"
-                onChange={(value) => setForm((current) => ({ ...current, name: value }))}
-              />
-              <label className="grid gap-2 text-sm">
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  Position
-                </span>
-                <Input
-                  type="number"
-                  className="h-9 border-border/80 bg-panel shadow-none"
-                  value={form.position}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      position: Number(event.target.value) || 0,
-                    }))
-                  }
-                />
-              </label>
-            </div>
+            <Field
+              label="Name"
+              value={form.name}
+              placeholder="Important"
+              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+            />
           </SectionCard>
 
-          <SectionCard className="space-y-4">
+          <SectionCard>
             <SectionHeader
               eyebrow="Rules"
               title="Rule builder"
@@ -210,32 +189,8 @@ export function SmartMailboxEditor({
           </SectionCard>
         </div>
 
-        <div className="space-y-4">
-          <SectionCard className="space-y-4">
-            <SectionHeader
-              eyebrow="State"
-              title="Mailbox summary"
-              description="Counts and placement for the currently selected saved view."
-            />
-
-            {summary ? (
-              <dl className="grid grid-cols-2 gap-4 rounded-lg border border-border/70 bg-panel-muted/45 px-4 py-4">
-                <MetaStat label="Unread" value={String(summary.unreadMessages)} />
-                <MetaStat label="Total" value={String(summary.totalMessages)} />
-                <MetaStat label="Position" value={String(summary.position)} />
-                <MetaStat
-                  label="Kind"
-                  value={summary.kind === "default" ? "default" : "custom"}
-                />
-              </dl>
-            ) : (
-              <p className="rounded-lg border border-dashed border-border/80 bg-panel-muted/35 px-4 py-4 text-sm text-muted-foreground">
-                This mailbox will appear here once it has been saved.
-              </p>
-            )}
-          </SectionCard>
-
-          <SectionCard className="space-y-4">
+        <div>
+          <SectionCard>
             <SectionHeader
               eyebrow="Changes"
               title="Apply updates"
@@ -245,11 +200,12 @@ export function SmartMailboxEditor({
             {feedback && <FeedbackBanner tone="success">{feedback}</FeedbackBanner>}
             {errorMessage && <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>}
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               <Button
                 type="button"
                 onClick={() => saveMutation.mutate(form)}
                 disabled={saveMutation.isPending}
+                className="bg-brand-coral text-white hover:bg-brand-coral/90"
               >
                 {editorTarget === "new" ? "Create mailbox" : "Save mailbox"}
               </Button>

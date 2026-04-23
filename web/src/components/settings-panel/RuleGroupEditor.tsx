@@ -45,10 +45,10 @@ export function RuleGroupEditor({
   onChange: (group: SmartMailboxGroup) => void;
 }) {
   return (
-    <div className="space-y-4 rounded-lg border border-border/80 bg-panel-muted/40 p-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid gap-2 text-sm">
-          <span className="text-[11px] font-medium text-muted-foreground">Match</span>
+    <div className="space-y-3 rounded-md border border-border-soft bg-bg-elev/55 p-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="grid gap-1.5 text-[13px]">
+          <span className="text-[12px] font-medium text-muted-foreground">Match</span>
           <Select
             value={group.operator}
             onValueChange={(value) =>
@@ -58,7 +58,7 @@ export function RuleGroupEditor({
               })
             }
           >
-            <SelectTrigger className="h-9 min-w-32 border-border/80 bg-panel shadow-none">
+            <SelectTrigger className="h-8 min-w-32 rounded-md border-border bg-background text-[13px] shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -71,8 +71,8 @@ export function RuleGroupEditor({
           </Select>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <Checkbox
               checked={group.negated}
               onCheckedChange={(checked) =>
@@ -101,16 +101,16 @@ export function RuleGroupEditor({
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {group.nodes.length === 0 && (
-          <p className="rounded-lg border border-dashed border-border/80 bg-background/55 px-4 py-4 text-sm text-muted-foreground">
+          <p className="rounded-md border border-dashed border-border-soft bg-background/55 px-3 py-2.5 text-[12px] text-muted-foreground">
             No conditions yet. An empty group matches all messages.
           </p>
         )}
         {group.nodes.map((node, index) => (
           <div
             key={index}
-            className="rounded-lg border border-border/80 bg-background/80 p-4 shadow-[var(--shadow-pane)]"
+            className="rounded-md border border-border-soft bg-background/80 p-3"
           >
             {node.type === "condition" ? (
               <ConditionEditor
@@ -131,7 +131,7 @@ export function RuleGroupEditor({
                 }
               />
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex justify-end">
                   <Button
                     size="sm"
@@ -188,10 +188,10 @@ function ConditionEditor({
     condition.field === "hasAttachment";
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto]">
-        <div className="grid gap-1 text-sm">
-          <span className="text-[11px] font-medium text-muted-foreground">Field</span>
+    <div className="space-y-3">
+      <div className="grid gap-2 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto]">
+        <div className="grid gap-1 text-[13px]">
+          <span className="text-[12px] font-medium text-muted-foreground">Field</span>
           <Select
             value={condition.field}
             onValueChange={(value) => {
@@ -203,7 +203,7 @@ function ConditionEditor({
               });
             }}
           >
-            <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
+            <SelectTrigger className="h-8 rounded-md border-border bg-background text-[13px] shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -216,8 +216,8 @@ function ConditionEditor({
           </Select>
         </div>
 
-        <div className="grid gap-1 text-sm">
-          <span className="text-[11px] font-medium text-muted-foreground">
+        <div className="grid gap-1 text-[13px]">
+          <span className="text-[12px] font-medium text-muted-foreground">
             Operator
           </span>
           <Select
@@ -235,7 +235,7 @@ function ConditionEditor({
               });
             }}
           >
-            <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
+            <SelectTrigger className="h-8 rounded-md border-border bg-background text-[13px] shadow-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -248,8 +248,8 @@ function ConditionEditor({
           </Select>
         </div>
 
-        <div className="grid gap-1 text-sm">
-          <span className="text-[11px] font-medium text-muted-foreground">Value</span>
+        <div className="grid gap-1 text-[13px]">
+          <span className="text-[12px] font-medium text-muted-foreground">Value</span>
           {isBooleanField ? (
             <Select
               value={String(Boolean(condition.value))}
@@ -260,7 +260,7 @@ function ConditionEditor({
                 })
               }
             >
-              <SelectTrigger className="h-9 border-border/80 bg-panel shadow-none">
+              <SelectTrigger className="h-8 rounded-md border-border bg-background text-[13px] shadow-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -270,7 +270,7 @@ function ConditionEditor({
             </Select>
           ) : (
             <Input
-              className="h-9 border-border/80 bg-panel shadow-none"
+              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
               value={
                 Array.isArray(condition.value)
                   ? condition.value.join(", ")
@@ -299,7 +299,7 @@ function ConditionEditor({
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+      <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
         <Checkbox
           checked={condition.negated}
           onCheckedChange={(checked) =>
