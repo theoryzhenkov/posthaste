@@ -93,7 +93,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       const hasUnread = c.unreadCount > 0;
       const sender = c.fromName ?? c.fromEmail ?? "Unknown";
       return (
-        <div className="min-w-0">
+        <div className="min-w-0 overflow-hidden">
           <span
             className={cn(
               "block truncate",
@@ -121,13 +121,13 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       return (
         <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           {c.messageCount > 1 && (
-            <span className="rounded-[3px] border border-[var(--border-strong)] bg-background/45 px-1 font-mono text-[10px] font-medium leading-4 tabular-nums text-muted-foreground">
+            <span className="shrink-0 rounded-[3px] border border-[var(--border-strong)] bg-background/45 px-1 font-mono text-[10px] font-medium leading-4 tabular-nums text-muted-foreground">
               {c.messageCount}
             </span>
           )}
           <span
             className={cn(
-              "block truncate leading-none",
+              "block min-w-0 truncate leading-none",
               hasUnread ? "font-semibold text-foreground" : "text-foreground/92",
             )}
           >
@@ -146,7 +146,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     grow: 1,
     resizable: true,
     render: (c) => (
-      <span className="truncate text-xs text-muted-foreground">
+      <span className="min-w-0 truncate text-xs text-muted-foreground">
         {c.preview ?? ""}
       </span>
     ),
@@ -159,7 +159,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     minWidth: 80,
     resizable: true,
     render: (c) => (
-      <span className="whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
+      <span className="min-w-0 truncate whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
         {formatRelativeTime(c.latestReceivedAt)}
       </span>
     ),
@@ -172,7 +172,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     minWidth: 54,
     resizable: true,
     render: (c) => (
-      <span className="truncate font-mono text-[10px] text-muted-foreground/75">
+      <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/75">
         {c.latestSourceName}
       </span>
     ),
@@ -186,7 +186,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     grow: 0.5,
     resizable: true,
     render: () => (
-      <span className="truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
+      <span className="min-w-0 truncate font-mono text-[10px] uppercase text-muted-foreground/40" />
     ),
   },
   threadSize: {
@@ -197,7 +197,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     align: "right",
     resizable: true,
     render: (c) => (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="min-w-0 truncate font-mono text-xs tabular-nums text-muted-foreground">
         {c.messageCount > 1 ? String(c.messageCount) : ""}
       </span>
     ),
