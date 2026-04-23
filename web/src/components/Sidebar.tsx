@@ -65,6 +65,16 @@ const SOURCE_SWATCHES = [
   "#C5A100",
 ] as const;
 
+const SIDEBAR_ACCENT = {
+  blue: "oklch(0.65 0.13 245)",
+  coral: "oklch(0.68 0.17 45)",
+  sage: "oklch(0.68 0.08 145)",
+  amber: "oklch(0.78 0.13 78)",
+  violet: "oklch(0.65 0.13 295)",
+  rose: "oklch(0.70 0.15 12)",
+  muted: "oklch(0.60 0.008 70)",
+} as const;
+
 function sourceStamp(sourceName: string): string {
   return sourceName.trim().charAt(0).toUpperCase() || "?";
 }
@@ -88,17 +98,38 @@ function smartMailboxIcon(name: string, size = 14): React.ReactNode {
 }
 
 function smartMailboxAccent(name: string): string | undefined {
-  switch (mailboxRoleFromName(name)) {
+  const normalized = name.trim().toLowerCase();
+  switch (normalized) {
     case "inbox":
-      return "#2B7EC2";
-    case "archive":
-      return "#2B7EC2";
+    case "all inboxes":
+    case "all mail":
+    case "today":
+      return SIDEBAR_ACCENT.blue;
+    case "flagged":
+    case "relevant":
+    case "sent":
+    case "follow-up":
+      return SIDEBAR_ACCENT.coral;
+    case "read later":
+    case "read-later":
     case "junk":
-      return "#C5A100";
+    case "spam":
+      return SIDEBAR_ACCENT.amber;
+    case "bills":
+    case "billing":
+    case "drafts":
+      return SIDEBAR_ACCENT.violet;
+    case "newsletters":
+    case "personal":
+      return SIDEBAR_ACCENT.sage;
     case "trash":
-      return "#8A5B4B";
+      return SIDEBAR_ACCENT.rose;
+    case "archive":
+      return SIDEBAR_ACCENT.blue;
+    case "work":
+      return SIDEBAR_ACCENT.blue;
     default:
-      return undefined;
+      return SIDEBAR_ACCENT.muted;
   }
 }
 
@@ -343,7 +374,7 @@ export function Sidebar({
   );
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col bg-sidebar text-sidebar-foreground">
       <nav className="ph-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-3">
         {isLoading && (
           <div className="space-y-3 px-1 py-1">
