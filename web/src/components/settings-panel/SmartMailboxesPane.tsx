@@ -1,15 +1,58 @@
 /**
- * Smart mailboxes view: slim list paired with the mailbox editor.
+ * Smart mailboxes view: centered list with drill-in mailbox editing.
  *
  * @spec docs/L1-api#smart-mailbox-crud
  */
-import { FolderSearch, Plus } from "lucide-react";
+import { ArrowLeft, FolderSearch, Plus } from "lucide-react";
 import type { SmartMailbox, SmartMailboxSummary } from "../../api/types";
-import { cn } from "../../lib/utils";
+import { brandAccents } from "../../design/tokens";
 import { Button } from "../ui/button";
 import { SmartMailboxEditor } from "./SmartMailboxEditor";
-import { SectionHeader } from "./shared";
 import type { SmartMailboxEditorTarget } from "./types";
+
+const MAILBOX_ACCENTS = {
+  blue: brandAccents.blue,
+  coral: brandAccents.coral,
+  sage: brandAccents.sage,
+  amber: brandAccents.amber,
+  violet: brandAccents.violet,
+  rose: brandAccents.rose,
+  muted: "oklch(0.60 0.008 70)",
+} as const;
+
+function smartMailboxAccent(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  switch (normalized) {
+    case "inbox":
+    case "all inboxes":
+    case "all mail":
+    case "today":
+    case "archive":
+    case "work":
+      return MAILBOX_ACCENTS.blue;
+    case "flagged":
+    case "relevant":
+    case "sent":
+    case "follow-up":
+      return MAILBOX_ACCENTS.coral;
+    case "read later":
+    case "read-later":
+    case "junk":
+    case "spam":
+      return MAILBOX_ACCENTS.amber;
+    case "bills":
+    case "billing":
+    case "drafts":
+      return MAILBOX_ACCENTS.violet;
+    case "newsletters":
+    case "personal":
+      return MAILBOX_ACCENTS.sage;
+    case "trash":
+      return MAILBOX_ACCENTS.rose;
+    default:
+      return MAILBOX_ACCENTS.muted;
+  }
+}
 
 export function SmartMailboxesPane({
   smartMailboxes,
@@ -19,6 +62,7 @@ export function SmartMailboxesPane({
   actionPendingKey,
   actionError,
   onSelectMailbox,
+  onBackToMailboxes,
   onCreateMailbox,
   onResetDefaults,
   onReorderMailbox,
@@ -26,12 +70,13 @@ export function SmartMailboxesPane({
   onDeleted,
 }: {
   smartMailboxes: SmartMailboxSummary[];
-  selectedMailboxId: SmartMailboxEditorTarget;
+  selectedMailboxId: SmartMailboxEditorTarget | null;
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null;
   editorKey: string;
   actionPendingKey: string | null;
   actionError: string | null;
   onSelectMailbox: (mailboxId: string) => void;
+  onBackToMailboxes: () => void;
   onCreateMailbox: () => void;
   onResetDefaults: () => void;
   onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void;
@@ -39,107 +84,129 @@ export function SmartMailboxesPane({
   onDeleted: (mailboxId: string) => Promise<void>;
 }) {
   const selectedMailbox =
-    selectedMailboxId === "new"
+    selectedMailboxId === null || selectedMailboxId === "new"
       ? null
       : smartMailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
 
-  return (
-    <div className="grid h-full min-h-0 gap-5 px-5 py-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-6 lg:py-6">
-      <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
-        <header className="border-b border-border/80 px-4 py-4">
-          <SectionHeader
-            eyebrow="Smart mailboxes"
-            title="Saved views"
-            description="Virtual mailboxes powered by message-level rules."
-            actions={
-              <Button
-                size="sm"
-                variant="outline"
-                type="button"
-                onClick={onCreateMailbox}
-                className="h-8"
-                aria-label="New smart mailbox"
-              >
-                <Plus size={13} strokeWidth={2} />
-                New
-              </Button>
-            }
-          />
-        </header>
-        <div className="ph-scroll min-h-0 flex-1 overflow-y-auto p-2">
-          {smartMailboxes.length === 0 && selectedMailboxId !== "new" && (
-            <p className="px-4 py-8 text-center text-xs leading-5 text-muted-foreground">
-              No smart mailboxes.
+  if (selectedMailboxId !== null) {
+    return (
+      <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+        <div className="mx-auto max-w-[760px]">
+          <Button
+            aria-label="Back to mailboxes"
+            size="sm"
+            variant="ghost"
+            type="button"
+            onClick={onBackToMailboxes}
+            className="mb-3 h-7 rounded-md px-2 text-[12px] text-muted-foreground hover:bg-[var(--list-hover)] hover:text-foreground"
+          >
+            <ArrowLeft size={14} strokeWidth={1.5} />
+            Mailboxes & Rules
+          </Button>
+
+          {actionError && (
+            <p className="mb-4 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+              {actionError}
             </p>
           )}
-          {selectedMailboxId === "new" && (
-            <MailboxListRow
-              isActive
-              label="New mailbox"
-              sublabel="Unsaved"
-              onClick={() => undefined}
-            />
-          )}
-          {smartMailboxes.map((mailbox) => (
-            <MailboxListRow
-              key={mailbox.id}
-              isActive={selectedMailboxId === mailbox.id}
-              label={mailbox.name}
-              sublabel={`${mailbox.totalMessages} · ${mailbox.unreadMessages} unread`}
-              isDefault={mailbox.kind === "default"}
-              onClick={() => onSelectMailbox(mailbox.id)}
-            />
-          ))}
-        </div>
-        <footer className="border-t border-border/80 p-2">
-          <Button
-            size="sm"
-            variant="outline"
-            type="button"
-            className="w-full justify-start"
-            onClick={onResetDefaults}
-            disabled={actionPendingKey !== null}
-          >
-            Reset to defaults
-          </Button>
-        </footer>
-      </aside>
 
-      <section className="ph-scroll min-h-0 overflow-y-auto rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
-        <div className="px-5 py-5 sm:px-6 sm:py-6">
+          {selectedMailboxId === "new" || editingSmartMailbox ? (
+            <SmartMailboxEditor
+              key={editorKey}
+              editorTarget={selectedMailboxId}
+              editingSmartMailbox={editingSmartMailbox}
+              summary={selectedMailbox}
+              onSaved={onSaved}
+              onDeleted={onDeleted}
+              onReorder={onReorderMailbox}
+              reorderPendingKey={actionPendingKey}
+            />
+          ) : (
+            <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+      <div className="mx-auto flex max-w-[760px] flex-col">
+        <header>
+          <h1 className="text-[24px] font-semibold leading-tight text-foreground">
+            Smart mailboxes
+          </h1>
+          <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
+            Saved views filter messages into focused mailboxes without changing
+            source accounts. Use them for inboxes, rules, and repeat workflows.
+          </p>
+        </header>
+
         {actionError && (
-          <p className="mb-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive shadow-[var(--shadow-pane)]">
+          <p className="mt-6 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
             {actionError}
           </p>
         )}
-        {selectedMailboxId === "new" || editingSmartMailbox ? (
-          <SmartMailboxEditor
-            key={editorKey}
-            editorTarget={selectedMailboxId}
-            editingSmartMailbox={editingSmartMailbox}
-            summary={selectedMailbox}
-            onSaved={onSaved}
-            onDeleted={onDeleted}
-            onReorder={onReorderMailbox}
-            reorderPendingKey={actionPendingKey}
-          />
+
+        {smartMailboxes.length === 0 ? (
+          <div className="mt-10">
+            <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
+          </div>
         ) : (
-          <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
+          <div className="mt-7 overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
+            <div className="flex min-h-[48px] items-center justify-between gap-3 border-b border-border-soft px-4">
+              <h2 className="text-[13px] font-semibold text-foreground">
+                {smartMailboxes.length} saved{" "}
+                {smartMailboxes.length === 1 ? "view" : "views"}
+              </h2>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  className="h-7 rounded-[5px] border-border bg-background px-2 text-[12px]"
+                  onClick={onResetDefaults}
+                  disabled={actionPendingKey !== null}
+                >
+                  Reset defaults
+                </Button>
+                <Button
+                  aria-label="New smart mailbox"
+                  size="icon-sm"
+                  variant="outline"
+                  type="button"
+                  onClick={onCreateMailbox}
+                  className="size-7 rounded-[5px] border-border bg-background text-muted-foreground hover:text-foreground"
+                >
+                  <Plus size={14} strokeWidth={1.8} />
+                </Button>
+              </div>
+            </div>
+            {smartMailboxes.map((mailbox) => (
+              <MailboxListRow
+                key={mailbox.id}
+                accent={smartMailboxAccent(mailbox.name)}
+                label={mailbox.name}
+                sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}
+                isDefault={mailbox.kind === "default"}
+                onClick={() => onSelectMailbox(mailbox.id)}
+              />
+            ))}
+          </div>
         )}
-        </div>
-      </section>
-    </div>
+      </div>
+    </section>
   );
 }
 
 function MailboxListRow({
-  isActive,
+  accent,
   label,
   sublabel,
   isDefault,
   onClick,
 }: {
-  isActive: boolean;
+  accent: string;
   label: string;
   sublabel?: string;
   isDefault?: boolean;
@@ -149,19 +216,26 @@ function MailboxListRow({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-all",
-        isActive
-          ? "border-primary/25 bg-accent/80 text-accent-foreground shadow-[var(--shadow-pane)]"
-          : "border-transparent hover:border-border/80 hover:bg-panel-muted/70",
-      )}
+      className="group flex min-h-[56px] w-full items-center gap-3 border-b border-border-soft px-4 text-left transition-colors last:border-b-0 hover:bg-[var(--list-hover)]"
     >
+      <span
+        className="flex size-8 shrink-0 items-center justify-center rounded-[5px] border"
+        style={{
+          backgroundColor: `color-mix(in oklab, ${accent} 14%, transparent)`,
+          borderColor: `color-mix(in oklab, ${accent} 26%, transparent)`,
+          color: accent,
+        }}
+      >
+        <FolderSearch size={15} strokeWidth={1.45} />
+      </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{label}</span>
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-medium text-foreground">
+            {label}
+          </span>
           {isDefault && (
             <span
-              className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] text-muted-foreground"
+              className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground"
               title="Built-in smart mailbox"
             >
               default
@@ -169,10 +243,13 @@ function MailboxListRow({
           )}
         </span>
         {sublabel && (
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
             {sublabel}
           </span>
         )}
+      </span>
+      <span className="text-[12px] text-muted-foreground group-hover:text-foreground">
+        Edit
       </span>
     </button>
   );
@@ -184,12 +261,12 @@ function SmartMailboxesEmptyState({
   onCreateMailbox: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-panel-muted/40 px-6 text-center">
+    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border-soft bg-bg-elev/45 px-6 text-center">
       <FolderSearch size={36} strokeWidth={1.5} className="text-muted-foreground/40" />
       <div className="mt-4">
-        <p className="text-sm font-medium">No mailbox selected</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pick a mailbox on the left, or create a new one.
+        <p className="text-[13px] font-medium">No smart mailboxes yet</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Create a saved view to keep important mail easy to find.
         </p>
       </div>
       <Button
@@ -197,7 +274,7 @@ function SmartMailboxesEmptyState({
         variant="outline"
         type="button"
         onClick={onCreateMailbox}
-        className="mt-4"
+        className="mt-4 rounded-md border-border bg-bg-elev"
       >
         <Plus size={13} strokeWidth={2} />
         New mailbox

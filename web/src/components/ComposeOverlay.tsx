@@ -6,7 +6,14 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Mail, Reply, Send, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type SetStateAction,
+} from "react";
 import { toast } from "sonner";
 
 import { fetchIdentity, fetchReplyContext, sendMessage } from "@/api/client";
@@ -82,8 +89,6 @@ function buildSendInput(form: ComposeForm): SendMessageInput {
 export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const [form, setForm] = useState<ComposeForm>(EMPTY_FORM);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const identityQuery = useQuery({
     queryKey: ["identity", intent.sourceId],
@@ -105,26 +110,66 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const composeKey =
     intent.kind === "reply" ? `${intent.sourceId}:${intent.messageId}` : intent.sourceId;
 
-  useEffect(() => {
-    setErrorMessage(null);
+  const initialForm = useMemo<ComposeForm>(() => {
     if (intent.kind === "new") {
-      setForm(EMPTY_FORM);
-      return;
+      return EMPTY_FORM;
     }
     if (!replyContextQuery.data) {
-      return;
+      return EMPTY_FORM;
     }
     const quoted = replyContextQuery.data.quotedBody
       ? `\n\n${replyContextQuery.data.quotedBody}`
       : "";
-    setForm({
+    return {
       to: formatRecipients(replyContextQuery.data.to),
       cc: "",
       bcc: "",
       subject: replyContextQuery.data.replySubject,
       body: quoted,
+    };
+  }, [intent.kind, replyContextQuery.data]);
+  const formResetKey =
+    intent.kind === "reply"
+      ? `${composeKey}:${replyContextQuery.data ? "ready" : "loading"}`
+      : composeKey;
+  const [composeState, setComposeState] = useState(() => ({
+    errorMessage: null as string | null,
+    form: initialForm,
+    resetKey: formResetKey,
+  }));
+
+  if (composeState.resetKey !== formResetKey) {
+    setComposeState({
+      errorMessage: null,
+      form: initialForm,
+      resetKey: formResetKey,
     });
-    requestAnimationFrame(() => bodyRef.current?.focus());
+  }
+
+  const form =
+    composeState.resetKey === formResetKey ? composeState.form : initialForm;
+  const errorMessage =
+    composeState.resetKey === formResetKey ? composeState.errorMessage : null;
+  const setForm = useCallback((nextForm: SetStateAction<ComposeForm>) => {
+    setComposeState((current) => ({
+      ...current,
+      form:
+        typeof nextForm === "function"
+          ? nextForm(current.form)
+          : nextForm,
+    }));
+  }, []);
+  const setErrorMessage = useCallback((message: string | null) => {
+    setComposeState((current) => ({
+      ...current,
+      errorMessage: message,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (intent.kind === "reply" && replyContextQuery.data) {
+      requestAnimationFrame(() => bodyRef.current?.focus());
+    }
   }, [composeKey, intent.kind, replyContextQuery.data]);
 
   const sendMutation = useMutation({
@@ -184,7 +229,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     }
     setErrorMessage(null);
     sendMutation.mutate(input);
-  }, [form, intent.kind, replyContextQuery.data, sendMutation]);
+  }, [form, intent.kind, replyContextQuery.data, sendMutation, setErrorMessage]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

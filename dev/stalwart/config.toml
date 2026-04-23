@@ -6,8 +6,8 @@ hostname = "127.0.0.1"
 
 [server.listener.http]
 protocol = "http"
-bind = "127.0.0.1:8080"
-url = "http://127.0.0.1:8080"
+bind = "%{env:POSTHASTE_STALWART_BIND}%"
+url = "%{env:POSTHASTE_STALWART_URL}%"
 
 [storage]
 data = "rocksdb"
