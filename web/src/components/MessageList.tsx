@@ -466,8 +466,8 @@ export function MessageList({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel">
-      <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-panel">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
+      <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">
         <div className="flex h-full min-h-0 flex-col" style={tableLayout.tableStyle}>
           <div
             className="shrink-0 border-b border-[var(--border-strong)] bg-[var(--list-header)] text-panel-foreground"
@@ -488,7 +488,7 @@ export function MessageList({
 
           <div
             ref={scrollContainerRef}
-            className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-panel"
+            className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[var(--list-zebra)]"
             onScroll={handleScroll}
           >
             {isLoading && (
