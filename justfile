@@ -1,4 +1,4 @@
-# Root justfile - orchestrates backend, frontend, desktop, docs, and template tasks
+# Root justfile - orchestrates backend, frontend, desktop, docs, and dev stacks
 
 mod template
 mod mkdocs
@@ -33,10 +33,25 @@ build:
     just backend build
     just frontend build
 
+# Start Stalwart + seed + daemon + Vite with Overmind.
+dev-web:
+    bash dev/overmind/launch.sh web
+
+# Start Stalwart + seed + Tauri with Overmind.
+dev-desktop:
+    bash dev/overmind/launch.sh desktop
+
+# Start Stalwart + seed + daemon with Overmind.
+dev-services:
+    bash dev/overmind/launch.sh services
+
 # --- Local Stalwart dev server (end-to-end testing) ---
 # See dev/stalwart/ for config and seed script.
-# Full-stack browser dev: just frontend dev
-# Full-stack desktop dev: just desktop dev
+# Full-stack browser dev: just dev-web
+# Full-stack desktop dev: just dev-desktop
+# Services only: just dev-services
+# Vite only: just frontend dev
+# Tauri only: just desktop dev
 
 # Admin password for Stalwart's fallback-admin + dev mailbox password.
 # Override with `just stalwart-up admin=... user=...` or set env vars directly.
