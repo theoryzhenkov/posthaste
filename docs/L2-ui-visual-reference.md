@@ -296,13 +296,15 @@ Pane:
 - Pane borders are supplied by the resizable splitters, not by an internal message-list border.
 - Overflow hidden at the pane boundary.
 - Role: `listbox`.
-- Header and rows live in one table-width layout inside a single native `ph-scroll` viewport that scrolls both axes.
+- Header and rows live in one table-width layout inside a horizontal `ph-scroll` wrapper.
 - When enabled columns exceed the pane width, the entire message list table scrolls horizontally as one unit.
 - When enabled columns fit within the pane, the table stretches to the full pane width so the left edge and right edge align with the pane edges.
-- The header is sticky at the top of the same scroll viewport; it must not use a separately synced horizontal scroll position.
-- Rows are rendered over a virtual row surface. The surface owns zebra striping and is clipped to the virtualized row extent, so the stripe pattern ends with the real message list content.
-- Horizontal overscroll is backed by a sticky zebra plane inside the row surface. The plane sizes to the scroll viewport with container query units, not by JavaScript width measurement.
+- Horizontal overscroll uses the base list surface `bgList`; zebra striping is only painted by actual row elements so it ends with the real message list content.
 - `bgListAlt` is intentionally brighter than `bgList`; it is a subtle zebra contrast inside the list palette, not the neutral app background.
+
+Known unresolved issue:
+
+- Native horizontal elastic overscroll exposes the scroll container surface, so it does not currently continue the row zebra pattern. A sticky row-surface zebra plane was rejected because it misaligned with virtual rows and did not reliably paint native overscroll. Until a cleaner browser-owned or component-owned model is found, row-owned zebra striping with neutral overscroll is the accepted behavior.
 
 Columns have two layout types:
 
@@ -373,7 +375,7 @@ Rows:
 - Height: `24px` compact, `30px` standard, `48px` roomy.
 - Width equals the table width.
 - Display: grid with the same column template as the header.
-- Background: selected `selBg`; hover `hoverBg`; otherwise transparent over the row-surface zebra plane.
+- Background: selected `selBg`; hover `hoverBg`; zebra odd `bgListAlt`; otherwise `bgList`.
 - Text color: selected `selFg`; unread `fg`; read `fgMuted`.
 - Font: Geist `13px` standard, `12px` compact.
 - Weight: `600` unread, `400` read.
