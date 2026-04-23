@@ -1,0 +1,28 @@
+Return-Path: <billing@harborfreight.test>
+Delivered-To: dev@localhost
+From: Harbor Freight Billing <billing@harborfreight.test>
+To: Dev User <dev@localhost>
+Subject: Invoice 2048 attached
+Date: Tue, 22 Apr 2026 11:02:00 +0000
+Message-ID: <invoice-2048@harborfreight.test>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="invoice-boundary"
+
+--invoice-boundary
+Content-Type: text/plain; charset="UTF-8"
+
+Hi,
+
+Attached is invoice 2048 for the mailbox migration work.
+
+Regards,
+Billing
+
+--invoice-boundary
+Content-Type: application/pdf; name="invoice-2048.pdf"
+Content-Disposition: attachment; filename="invoice-2048.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJUZha2UgUERGIGZvciBsb2NhbCBkZXYgdGVzdGluZwo=
+
+--invoice-boundary--
