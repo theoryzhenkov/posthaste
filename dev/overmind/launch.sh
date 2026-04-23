@@ -32,6 +32,9 @@ mkdir -p \
   "$POSTHASTE_STALWART_DATA" "$POSTHASTE_STALWART_LOGS" \
   "$POSTHASTE_CONFIG_ROOT" "$POSTHASTE_STATE_ROOT"
 
+log_path="$("$root/dev/overmind/daemon-log-path.sh")"
+echo "Persisted daemon log: $log_path (tail with 'just daemon-log-tail')"
+
 if ! command -v overmind >/dev/null 2>&1; then
   echo "overmind is not on PATH; reload the Nix dev shell with 'direnv reload' or 'nix develop'." >&2
   exit 127

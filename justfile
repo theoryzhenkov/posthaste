@@ -44,6 +44,7 @@ STALWART_ADMIN_PASSWORD := env_var_or_default("POSTHASTE_STALWART_ADMIN_PASSWORD
 STALWART_USER_PASSWORD := env_var_or_default("POSTHASTE_STALWART_USER_PASSWORD", "devpass")
 STALWART_DATA := justfile_directory() / "dev/stalwart/data"
 STALWART_LOGS := justfile_directory() / "dev/stalwart/logs"
+DAEMON_LOG_PATH_SCRIPT := justfile_directory() / "dev/overmind/daemon-log-path.sh"
 
 # Start Stalwart in the foreground. Ctrl-C to stop.
 stalwart-up:
@@ -67,3 +68,11 @@ stalwart-reset:
 stalwart-dev:
     @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/dev/bootstrap.stalwart.toml'
     @echo 'export POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }}'
+
+# Print the current or expected persisted daemon log path for dev.
+daemon-log-path:
+    @{{ DAEMON_LOG_PATH_SCRIPT }}
+
+# Follow the persisted daemon log file used by the dev stack.
+daemon-log-tail:
+    @tail -F "$({{ DAEMON_LOG_PATH_SCRIPT }})"
