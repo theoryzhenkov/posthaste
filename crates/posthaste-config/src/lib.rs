@@ -1,6 +1,6 @@
-/// TOML-backed configuration persistence for accounts and smart mailboxes.
-///
-/// @spec docs/L1-accounts#config-directory-layout
+//! TOML-backed configuration persistence for accounts and smart mailboxes.
+//!
+//! @spec docs/L1-accounts#config-directory-layout
 
 mod atomic;
 mod defaults;

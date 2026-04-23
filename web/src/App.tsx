@@ -8,6 +8,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Loader2, Search, Settings, Star, Trash2, X } from "lucide-react";
+import { useDefaultLayout } from "react-resizable-panels";
 import { Toaster } from "sonner";
 import { fetchAccounts, fetchMessage } from "./api/client";
 import type { MessageSummary } from "./api/types";
@@ -20,7 +21,6 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  useDefaultLayout,
 } from "./components/ui/resizable";
 import { cn } from "./lib/utils";
 import { useDaemonEvents } from "./hooks/useDaemonEvents";

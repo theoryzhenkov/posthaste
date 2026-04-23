@@ -71,7 +71,7 @@ function readFromStorage(): StoredConfig {
       }
     }
 
-    let widths: ColumnWidths = {};
+    const widths: ColumnWidths = {};
     if (typeof obj.widths === "object" && obj.widths !== null && !Array.isArray(obj.widths)) {
       const w = obj.widths as Record<string, unknown>;
       for (const [key, val] of Object.entries(w)) {
@@ -116,9 +116,10 @@ export function useColumnConfig() {
 
   const toggleColumn = useCallback((columnId: ColumnId) => {
     const { columns, sort, widths } = getSnapshot();
-    if (columns.includes(columnId)) {
-      if (columns.length <= 1) return;
-      const { [columnId]: _, ...rest } = widths;
+      if (columns.includes(columnId)) {
+        if (columns.length <= 1) return;
+      const rest = { ...widths };
+      delete rest[columnId];
       persist({ columns: columns.filter((id) => id !== columnId), sort, widths: rest });
     } else {
       persist({ columns: [...columns, columnId], sort, widths });

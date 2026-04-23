@@ -156,18 +156,10 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 /// Global application settings shared across all accounts.
 ///
 /// @spec docs/L1-accounts#toml-schema
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            default_account_id: None,
-        }
-    }
 }
 
 /// Backend driver type for an account.

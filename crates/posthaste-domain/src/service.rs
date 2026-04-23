@@ -1471,7 +1471,7 @@ mod tests {
                 .lock()
                 .expect("deleted sources lock poisoned")
                 .as_slice(),
-            &[account.id.clone()]
+            std::slice::from_ref(&account.id)
         );
         assert_eq!(
             store
