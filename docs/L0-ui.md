@@ -1,7 +1,7 @@
 ---
 scope: L0
-summary: "Why React, thin-frontend principle, navigation model, rendering approach"
-modified: 2026-04-01
+summary: "Why the frontend owns interaction, the handoff-led UI direction, and shell model"
+modified: 2026-04-23
 reviewed: 2026-04-23
 depends:
   - path: README
@@ -11,45 +11,104 @@ dependents:
   - path: docs/L1-ui
 ---
 
-# UI domain -- L0
+# UI Domain -- L0
 
-## Thin frontend principle
+## Thin Frontend Principle
 
-The React frontend is still a thin client, but "thin" here means protocol-thin and storage-thin, not interaction-free. Rust owns JMAP, sync, sanitization, persistence, and authoritative reconciliation. The frontend owns UI interaction state: selected view, selected message, per-view scroll offsets, keyboard routing, paginated list state, and anchored live-update behavior. React Query manages server state; local React state handles transient view concerns.
+The React frontend is protocol-thin and storage-thin, not interaction-thin. Rust owns JMAP, sync, persistence, sanitization, and authoritative reconciliation. React owns interface behavior: selected view, selected message, per-view scroll offsets, keyboard routing, paginated list state, pane sizes, overlays, command palette state, and anchored live-update behavior.
+
+React Query manages server state. Local React state manages transient UI state.
+
+## Reference Direction
+
+The exported handoff is the visual source of truth. It is not just inspiration. The app should converge toward the standalone reference except where backend functionality is missing.
+
+Reference files:
+
+- `.claude-design/Posthaste.standalone.bundled.html`
+- `.claude-design/handoff/posthaste/project/src/tokens.jsx`
+- `.claude-design/handoff/posthaste/project/src/prototype.jsx`
+- `.claude-design/handoff/posthaste/project/src/window-chrome.jsx`
+- `.claude-design/handoff/posthaste/project/src/sidebar.jsx`
+- `.claude-design/handoff/posthaste/project/src/message-list.jsx`
+- `.claude-design/handoff/posthaste/project/src/reader.jsx`
+- `.claude-design/handoff/posthaste/project/src/settings.jsx`
+- `.claude-design/handoff/posthaste/project/src/modal.jsx`
+- `.claude-design/handoff/posthaste/project/src/command-palette.jsx`
+- `.claude-design/handoff/posthaste/project/src/mailbox-editor.jsx`
+- `.claude-design/handoff/posthaste/project/src/compose.jsx`
 
 ## Why React + TypeScript
 
-React's component model handles complex UI state well: keyboard routing, multi-panel layouts, paginated lists, and live list updates. TypeScript provides type safety for the API contract. The ecosystem offers mature solutions for the kinds of interaction density a mail client needs.
+React's component model fits a dense mail UI with cross-pane selection, overlays, keyboard routing, column resizing, and long-lived interactive state. TypeScript makes API contracts and UI variants explicit.
 
-## Why web-first
+The frontend stack should use modern React, TypeScript, Tailwind, shadcn/ui, and focused dependencies where they reduce implementation risk. Familiarity is secondary to matching the reference cleanly.
 
-A browser-based UI eliminates platform-specific code entirely. The same frontend works on macOS, Windows, and Linux. Later, Tauri can wrap it in a native window for desktop distribution. The tradeoff is losing some native OS integration, but those integrations can be layered on without changing the frontend's data model.
+## Navigation Model
 
-## Navigation model
+The primary view is a three-pane desktop mail shell:
 
-Three-column CSS Grid layout. Left: mailbox sidebar. Center: conversation list. Right: message detail. Selection flows left-to-right: choosing a mailbox or smart mailbox loads paginated conversations, then choosing a conversation selects its latest message by default.
+- Left: sidebar with quick filters, smart mailboxes, tags, and accounts.
+- Center: tabular conversation list with resizable columns.
+- Right: reader pane with message header, tags, attachment strip, and body.
 
-## HTML email rendering
+Selection flows left-to-right. Choosing a mailbox updates the conversation list. Choosing a conversation updates the reader. The reader must not sit blank when conversations are available unless no selection can be derived.
 
-Email HTML is sanitized in Rust via `ammonia` before reaching the frontend, with tracking pixels stripped as part of the sanitization pass. The frontend renders sanitized HTML in a sandboxed `srcdoc` iframe with `sandbox="allow-same-origin"`. Scripts remain disabled because `allow-scripts` is never granted. The iframe itself forms the scroll viewport for long messages, which avoids auto-height measurement bugs and keeps the detail pane layout stable. HTTPS and `cid:` images that survive sanitization render directly; there is no separate "load remote images" flow yet.
+## Layout Modes
 
-## Keyboard-first design
+The reference supports layout modes, with `layout = 3` as the default. The production target is the three-pane mode first.
 
-Same philosophy as the native spec: list navigation and core message actions are keyboard-accessible. The current implementation supports `j/k` and arrow keys for list navigation plus destructive and archive shortcuts from the list/detail context. More of the original keyboard plan can be layered on later without changing the API boundary.
+Default pane sizes in standard density:
 
-## Live updates
+- Sidebar: `210px`
+- Message list: `420px`
+- Reader: flexes to fill the remainder, with a minimum usable width of `280px`
 
-The UI listens to the daemon's EventSource stream and reacts in two ways:
+Compact density changes defaults to:
 
-- regular React Query invalidation for sidebar and detail data
-- custom list-level merge logic for the paginated conversation pane
+- Sidebar: `180px`
+- Message list: `360px`
 
-This split exists because a paginated, virtualized conversation list cannot be handled well by broad invalidation alone without causing unnecessary refetches or scroll jumps.
+Pane splitters are visible `1px` vertical rules with an invisible `8px` hit area. Hover and active states show a `3px` coral line.
 
 ## Theme
 
-Light mode first. The color palette, sidebar treatment, and accent colors are defined in [L0-branding](L0-branding.md). Dark mode is deferred — it will be designed later as an inversion of the light theme.
+Dark neutral is the default theme. Light mode remains supported by the token system, but it is not the primary design target for the first parity pass.
 
-## What we don't build for v1
+The default shell should use layered pane fills and thin separators. It should not use a decorative mesh, radial glow, or large frosted background. Glass blur is reserved for overlays and modals.
 
-Offline mutation queue, drag-and-drop, custom themes, print, and mobile-first layout. Desktop-first, always-connected.
+## HTML Email Rendering
+
+Email HTML is sanitized in Rust via `ammonia` before reaching the frontend. The frontend renders sanitized HTML in a sandboxed `srcdoc` iframe with `sandbox="allow-same-origin"`. Scripts remain disabled because `allow-scripts` is never granted.
+
+The reader visual contract is set by the handoff. Plain text messages render directly in the reader body with `13px` Geist text and `1.6` line height. HTML messages may use an iframe, but the iframe's outer treatment must preserve the reference reader feel: header first, optional tags, optional attachment strip, then body content on `bgReader` with a `720px` maximum readable body width.
+
+## Keyboard-First Design
+
+The UI is keyboard-first:
+
+- `Cmd/Ctrl+K` opens the command palette.
+- `Cmd/Ctrl+,` opens settings.
+- `Cmd/Ctrl+N` opens compose.
+- `?` opens shortcuts.
+- List navigation uses `j/k` and arrow keys.
+
+Shortcut handlers must not fire while an input, textarea, or contenteditable element has focus.
+
+## Live Updates
+
+The UI listens to the daemon EventSource stream and reacts through React Query invalidation plus list-level merge logic.
+
+The conversation list remains paginated and virtualized. Live top-of-list inserts must preserve the visible viewport when the user is scrolled down.
+
+## Backend Gaps
+
+When the handoff includes UI for missing backend capability, the production UI may show a disabled control, placeholder action, or omit the control. The visual structure should still anticipate the handoff target.
+
+Known gaps include schedule send, tracking toggles, AI compose actions, full automation settings, raw JMAP filter editing, and mailbox-attached rule actions.
+
+## What We Do Not Build Into The Shell
+
+The main app view is not a marketing page, dashboard, or onboarding surface. It opens directly into the mail shell.
+
+Mobile-first layout, print styling, plugin UI, full custom theme editing, and offline mutation queue are outside the current UI parity pass.
