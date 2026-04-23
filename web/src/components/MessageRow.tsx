@@ -61,11 +61,10 @@ export function MessageRow({
           <div
             key={columnId}
             className={cn(
-              "min-w-0 px-2",
+              "flex h-full min-w-0 items-center gap-2 overflow-hidden px-2.5 pr-4",
               columnId === "subject" && "pl-3",
-              columnId === "tags" && "pr-3",
-              def.align === "right" && "text-right",
-              def.align === "center" && "flex justify-center px-0",
+              def.align === "right" && "justify-end text-right",
+              def.align === "center" && "justify-center px-0",
             )}
           >
             {def.render(message)}

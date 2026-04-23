@@ -341,6 +341,7 @@ Header cells:
 
 - Width: column width.
 - Padding: `0 10px`.
+- Resizable cells reserve right padding for the resize divider.
 - Font: Geist Mono `11px`, weight `600`.
 - Text transform: uppercase.
 - Letter spacing: `0.5px`.
@@ -350,6 +351,7 @@ Header cells:
 - Sortable hover background: `hoverBg`.
 - Display: flex, align center, gap `4px`.
 - Justification follows alignment.
+- Header content is clipped inside the cell and truncates with ellipsis; labels, icons, and sort indicators must not paint beyond their column bounds.
 - Sorted indicator is `↑` or `↓` with opacity `0.8`.
 - Flag and attachment headers render icons at `12px`.
 
@@ -378,10 +380,10 @@ Row cells:
 
 - Width equals header column width.
 - Fixed columns `unread`, `flag`, `attach` have no horizontal padding.
-- Other cells use `0 10px`.
+- Other cells use `0 10px` plus right padding for divider breathing room.
 - Display: flex, align center.
 - Gap: `6px`.
-- Overflow hidden; text truncates.
+- Overflow hidden; all text and badges truncate or clip inside the cell. No row content may visually overlap an adjacent column.
 
 Unread dot:
 
