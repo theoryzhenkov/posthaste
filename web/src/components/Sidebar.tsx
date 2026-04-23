@@ -49,10 +49,10 @@ function smartMailboxIcon(name: string, size = 14): React.ReactNode {
 
 function itemButtonClass(isSelected: boolean): string {
   return cn(
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
-    "hover:bg-accent",
-    isSelected && "border-l-2 border-l-primary bg-accent text-accent-foreground",
-    !isSelected && "border-l-2 border-l-transparent",
+    "mx-1.5 flex h-[var(--density-sidebar-row-height)] w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium transition-colors",
+    "ph-focus-ring hover:bg-sidebar-accent/80",
+    isSelected && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
+    !isSelected && "text-sidebar-foreground/90",
   );
 }
 
@@ -73,7 +73,7 @@ function ViewItem({
       {smartMailboxIcon(name)}
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {unreadMessages != null && unreadMessages > 0 && (
-        <span className="font-mono text-xs tabular-nums text-primary">
+        <span className="rounded bg-background/60 px-1.5 font-mono text-[10px] font-semibold tabular-nums text-signal-unread">
           {unreadMessages}
         </span>
       )}
@@ -96,7 +96,7 @@ function MailboxItem({
       {roleIcon(mailbox.role)}
       <span className="min-w-0 flex-1 truncate">{mailbox.name}</span>
       {mailbox.unreadEmails > 0 && (
-        <span className="font-mono text-xs tabular-nums text-primary">
+        <span className="rounded bg-background/60 px-1.5 font-mono text-[10px] font-semibold tabular-nums text-signal-unread">
           {mailbox.unreadEmails}
         </span>
       )}
@@ -120,7 +120,7 @@ function SourceSection({
     <div>
       <button
         type="button"
-        className="flex w-full items-center gap-1.5 px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+        className="ph-focus-ring mt-1 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left font-mono text-[10px] font-semibold uppercase text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
         onClick={() => setCollapsed((prev) => !prev)}
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
@@ -162,7 +162,7 @@ function SectionHeader({
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+      className="ph-focus-ring flex h-8 w-full items-center gap-1.5 border-b border-sidebar-border/80 px-3 text-left font-mono text-[10px] font-semibold uppercase text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
       onClick={onToggle}
     >
       {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
@@ -191,8 +191,8 @@ export function Sidebar({
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
-      <nav className="flex-1 min-h-0 overflow-y-auto pt-1">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      <nav className="ph-scroll min-h-0 flex-1 overflow-y-auto pt-1">
         {isLoading && (
           <div className="space-y-1 px-3 py-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -251,7 +251,7 @@ export function Sidebar({
               onToggle={() => setSourcesCollapsed((prev) => !prev)}
             />
             {!sourcesCollapsed && (
-              <div className="space-y-2 py-1">
+              <div className="space-y-1 py-1">
                 {sidebar.sources.map((source) => (
                   <SourceSection
                     key={source.id}

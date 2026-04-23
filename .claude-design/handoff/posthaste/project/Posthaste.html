@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Posthaste — JMAP client</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #1a1815; font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #eee; overflow: hidden; }
+  * { box-sizing: border-box; }
+  #root { width: 100vw; height: 100vh; }
+  /* hide scrollbars inside artboards */
+  .ph-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .ph-scroll::-webkit-scrollbar-track { background: transparent; }
+  .ph-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.25); border-radius: 4px; }
+  .ph-scroll::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,0.4); }
+  button { font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Lucide icons (UMD, exposes window.lucide with icon node defs) -->
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+
+<script type="text/babel" src="components/design-canvas.jsx"></script>
+<script type="text/babel" src="src/tokens.jsx"></script>
+<script type="text/babel" src="src/themes.jsx"></script>
+<script type="text/babel" src="src/icons.jsx"></script>
+<script type="text/babel" src="src/modal.jsx"></script>
+<script type="text/babel" src="src/data.jsx"></script>
+<script type="text/babel" src="src/shortcuts.jsx"></script>
+<script type="text/babel" src="src/mailbox-editor.jsx"></script>
+<script type="text/babel" src="src/settings.jsx"></script>
+<script type="text/babel" src="src/command-palette.jsx"></script>
+<script type="text/babel" src="src/onboarding.jsx"></script>
+<script type="text/babel" src="src/window-chrome.jsx"></script>
+<script type="text/babel" src="src/sidebar.jsx"></script>
+<script type="text/babel" src="src/message-list.jsx"></script>
+<script type="text/babel" src="src/reader.jsx"></script>
+<script type="text/babel" src="src/compose.jsx"></script>
+<script type="text/babel" src="src/prototype.jsx"></script>
+<script type="text/babel" src="src/tweaks.jsx"></script>
+<script type="text/babel" src="src/variations.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
+</body>
+</html>

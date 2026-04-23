@@ -33,12 +33,12 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
       return (
         <div className="flex min-w-0 items-center gap-1.5">
           {hasUnread && (
-            <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+            <span className="size-1.5 shrink-0 rounded-full bg-signal-unread" />
           )}
           {c.isFlagged && (
             <Star
               size={12}
-              className="shrink-0 fill-amber-400 text-amber-400"
+              className="shrink-0 fill-signal-flag text-signal-flag"
             />
           )}
           <span
@@ -137,7 +137,7 @@ const COLUMN_DEFS: Record<ColumnId, ColumnDef> = {
     align: "center",
     render: (c) =>
       c.isFlagged ? (
-        <Star size={12} className="fill-amber-400 text-amber-400" />
+        <Star size={12} className="fill-signal-flag text-signal-flag" />
       ) : null,
   },
   attachment: {
