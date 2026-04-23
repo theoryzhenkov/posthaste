@@ -21,6 +21,8 @@ site/
 
 # local design handoff blobs
 /.claude-design/Posthaste-handoff.zip
+/.claude-design/Posthaste.standalone.bundled.html
+/.claude-design/compare/
 /.claude-design/handoff/posthaste/project/uploads/
 
 # local app/dev data
