@@ -8,9 +8,10 @@ import {
   DEFAULT_COLUMNS,
   DEFAULT_SORT,
   SORTABLE_COLUMNS,
+  getColumnDef,
 } from "./columns";
 
-const STORAGE_KEY = "posthaste-thread-columns-v4";
+const STORAGE_KEY = "posthaste-thread-columns-v5";
 
 interface StoredConfig {
   columns: ColumnId[];
@@ -76,7 +77,10 @@ function readFromStorage(): StoredConfig {
       const w = obj.widths as Record<string, unknown>;
       for (const [key, val] of Object.entries(w)) {
         if (isValidColumnId(key) && typeof val === "number" && val > 0) {
-          widths[key] = val;
+          const def = getColumnDef(key);
+          if (def.resizable === true) {
+            widths[key] = Math.max(def.minWidth ?? def.basis, Math.round(val));
+          }
         }
       }
     }
@@ -116,8 +120,8 @@ export function useColumnConfig() {
 
   const toggleColumn = useCallback((columnId: ColumnId) => {
     const { columns, sort, widths } = getSnapshot();
-      if (columns.includes(columnId)) {
-        if (columns.length <= 1) return;
+    if (columns.includes(columnId)) {
+      if (columns.length <= 1) return;
       const rest = { ...widths };
       delete rest[columnId];
       persist({ columns: columns.filter((id) => id !== columnId), sort, widths: rest });
@@ -136,8 +140,13 @@ export function useColumnConfig() {
   }, []);
 
   const setColumnWidth = useCallback((columnId: ColumnId, width: number) => {
+    const def = getColumnDef(columnId);
+    if (def.resizable !== true) {
+      return;
+    }
     const { columns, sort, widths } = getSnapshot();
-    persist({ columns, sort, widths: { ...widths, [columnId]: Math.round(width) } });
+    const nextWidth = Math.max(def.minWidth ?? def.basis, Math.round(width));
+    persist({ columns, sort, widths: { ...widths, [columnId]: nextWidth } });
   }, []);
 
   const toggleSort = useCallback((columnId: ColumnId) => {

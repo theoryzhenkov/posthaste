@@ -16,8 +16,10 @@ import { SortableColumnHeader } from "./SortableColumnHeader";
 import {
   SORTABLE_COLUMNS,
   type ColumnId,
+  type ColumnWidths,
   type SortConfig,
   type ThreadListLayout,
+  getColumnBasis,
   getColumnDef,
 } from "./columns";
 
@@ -25,6 +27,7 @@ interface ThreadListHeaderProps {
   columns: ColumnId[];
   layout: ThreadListLayout;
   sort: SortConfig;
+  widths: ColumnWidths;
   onResetColumns: () => void;
   onResizeColumn: (columnId: ColumnId, width: number) => void;
   onReorderColumns: (columns: ColumnId[]) => void;
@@ -36,6 +39,7 @@ export function ThreadListHeader({
   columns,
   layout,
   sort,
+  widths,
   onResetColumns,
   onResizeColumn,
   onReorderColumns,
@@ -79,6 +83,7 @@ export function ThreadListHeader({
             {columns.map((colId) => {
               const def = getColumnDef(colId);
               const isSortable = SORTABLE_COLUMNS.has(colId);
+              const canResize = def.resizable === true;
               return (
                 <SortableColumnHeader
                   key={colId}
@@ -87,9 +92,11 @@ export function ThreadListHeader({
                   icon={def.header}
                   align={def.align}
                   isSortable={isSortable}
+                  resizeBasis={canResize ? getColumnBasis(colId, widths) : undefined}
+                  resizeMinWidth={def.minWidth ?? def.basis}
                   sortDirection={sort.columnId === colId ? sort.direction : undefined}
                   onSort={() => onToggleSort(colId)}
-                  onResize={(width) => onResizeColumn(colId, width)}
+                  onResize={canResize ? (width) => onResizeColumn(colId, width) : undefined}
                 />
               );
             })}

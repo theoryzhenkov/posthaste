@@ -2,14 +2,13 @@ import { useCallback, useRef } from "react";
 
 interface ColumnResizeHandleProps {
   onResize: (width: number) => void;
-  /** Ref to the parent column header element to measure its current width. */
-  columnRef: React.RefObject<HTMLElement | null>;
+  basis: number;
   minWidth?: number;
 }
 
 export function ColumnResizeHandle({
   onResize,
-  columnRef,
+  basis,
   minWidth = 32,
 }: ColumnResizeHandleProps) {
   const draggingRef = useRef(false);
@@ -20,7 +19,7 @@ export function ColumnResizeHandle({
       e.stopPropagation();
 
       const startX = e.clientX;
-      const startWidth = columnRef.current?.getBoundingClientRect().width ?? 100;
+      const startWidth = basis;
       draggingRef.current = true;
 
       const target = e.currentTarget as HTMLElement;
@@ -42,7 +41,7 @@ export function ColumnResizeHandle({
       target.addEventListener("pointermove", onPointerMove);
       target.addEventListener("pointerup", onPointerUp);
     },
-    [columnRef, minWidth, onResize],
+    [basis, minWidth, onResize],
   );
 
   return (

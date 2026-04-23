@@ -1,7 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { ColumnResizeHandle } from "./ColumnResizeHandle";
 import type { SortDirection } from "./columns";
@@ -11,6 +11,8 @@ interface SortableColumnHeaderProps {
   label: string;
   align?: "left" | "right" | "center";
   icon?: ReactNode;
+  resizeBasis?: number;
+  resizeMinWidth?: number;
   sortDirection?: SortDirection;
   isSortable?: boolean;
   onSort: () => void;
@@ -22,12 +24,13 @@ export function SortableColumnHeader({
   label,
   align,
   icon,
+  resizeBasis,
+  resizeMinWidth,
   sortDirection,
   isSortable = true,
   onSort,
   onResize,
 }: SortableColumnHeaderProps) {
-  const columnRef = useRef<HTMLButtonElement>(null);
   const {
     attributes,
     listeners,
@@ -44,10 +47,7 @@ export function SortableColumnHeader({
 
   return (
     <button
-      ref={(node) => {
-        setNodeRef(node);
-        (columnRef as React.MutableRefObject<HTMLButtonElement | null>).current = node;
-      }}
+      ref={setNodeRef}
       type="button"
       className={cn(
         "relative flex h-full min-w-0 items-center gap-1 select-none overflow-visible px-2 text-[11px]",
@@ -76,8 +76,12 @@ export function SortableColumnHeader({
       {sortDirection === "desc" && (
         <ArrowDown size={10} className="shrink-0 text-foreground" />
       )}
-      {onResize && (
-        <ColumnResizeHandle onResize={onResize} columnRef={columnRef} />
+      {onResize && resizeBasis !== undefined && (
+        <ColumnResizeHandle
+          basis={resizeBasis}
+          minWidth={resizeMinWidth}
+          onResize={onResize}
+        />
       )}
     </button>
   );
