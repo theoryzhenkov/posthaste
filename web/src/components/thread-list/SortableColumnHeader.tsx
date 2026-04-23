@@ -75,7 +75,7 @@ export function SortableColumnHeader({
         {icon ? (
           <span className="min-w-0 shrink-0 overflow-hidden">{icon}</span>
         ) : (
-          <span className="min-w-0 truncate">{label}</span>
+          <span className="min-w-0 truncate">{label.toUpperCase()}</span>
         )}
         {sortDirection === "asc" && (
           <ArrowUp size={10} className="shrink-0 text-foreground" />
