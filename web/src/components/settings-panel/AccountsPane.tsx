@@ -9,7 +9,7 @@ import type { AccountOverview } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { AccountEditor } from "./AccountEditor";
 import { Button } from "../ui/button";
-import { StatusDot } from "./shared";
+import { SectionHeader, StatusDot } from "./shared";
 import type { EditorTarget } from "./types";
 
 export function AccountsPane({
@@ -44,27 +44,31 @@ export function AccountsPane({
   >;
 }) {
   return (
-    <div className="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="flex min-h-0 flex-col border-r border-border bg-background/30">
-        <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-            accounts
-          </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            type="button"
-            onClick={onCreateAccount}
-            className="-mr-1 h-6 gap-1 px-1.5 text-xs"
-            aria-label="New account"
-          >
-            <Plus size={13} strokeWidth={2} />
-            New
-          </Button>
+    <div className="grid h-full min-h-0 gap-5 px-5 py-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-6 lg:py-6">
+      <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
+        <header className="border-b border-border/80 px-4 py-4">
+          <SectionHeader
+            eyebrow="Accounts"
+            title="Connected sources"
+            description="Manage JMAP endpoints, credentials, and sync status."
+            actions={
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onClick={onCreateAccount}
+                className="h-8"
+                aria-label="New account"
+              >
+                <Plus size={13} strokeWidth={2} />
+                New
+              </Button>
+            }
+          />
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        <div className="ph-scroll min-h-0 flex-1 overflow-y-auto p-2">
           {accounts.length === 0 && selectedAccountId !== "new" && (
-            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            <p className="px-4 py-8 text-center text-xs leading-5 text-muted-foreground">
               No accounts yet.
             </p>
           )}
@@ -97,7 +101,8 @@ export function AccountsPane({
         </div>
       </aside>
 
-      <div className="min-h-0 overflow-y-auto px-6 py-6">
+      <section className="ph-scroll min-h-0 overflow-y-auto rounded-lg border border-border/80 bg-background/78 shadow-[var(--shadow-pane)]">
+        <div className="px-5 py-5 sm:px-6 sm:py-6">
         {selectedAccountId === "new" || editingAccount ? (
           <AccountEditor
             key={editorKey}
@@ -111,7 +116,8 @@ export function AccountsPane({
         ) : (
           <AccountsEmptyState onCreateAccount={onCreateAccount} />
         )}
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -136,10 +142,10 @@ function AccountListRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors",
+        "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-all",
         isActive
-          ? "bg-accent text-accent-foreground"
-          : "hover:bg-accent/50",
+          ? "border-primary/25 bg-accent/80 text-accent-foreground shadow-[var(--shadow-pane)]"
+          : "border-transparent hover:border-border/80 hover:bg-panel-muted/70",
       )}
     >
       {leading}
@@ -148,7 +154,7 @@ function AccountListRow({
           <span className="truncate text-sm font-medium">{label}</span>
           {isDefault && (
             <span
-              className="shrink-0 text-[9px] font-mono uppercase tracking-wider text-muted-foreground"
+              className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em] text-muted-foreground"
               title="Default account"
             >
               default
@@ -171,15 +177,15 @@ function AccountsEmptyState({
   onCreateAccount: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-4 text-center">
+    <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-panel-muted/40 px-6 text-center">
       <UserPlus size={36} strokeWidth={1.5} className="text-muted-foreground/40" />
-      <div>
+      <div className="mt-4">
         <p className="text-sm font-medium">No accounts yet</p>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground">
           Add one to start syncing your mail.
         </p>
       </div>
-      <Button size="sm" variant="outline" type="button" onClick={onCreateAccount}>
+      <Button size="sm" variant="outline" type="button" onClick={onCreateAccount} className="mt-4">
         <Plus size={13} strokeWidth={2} />
         New account
       </Button>

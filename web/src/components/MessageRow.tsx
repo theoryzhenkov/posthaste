@@ -19,6 +19,7 @@ import {
 interface MessageRowProps {
   message: ConversationSummary;
   isSelected: boolean;
+  isStriped: boolean;
   onSelect: () => void;
   columns: ColumnId[];
   widths?: ColumnWidths;
@@ -33,6 +34,7 @@ interface MessageRowProps {
 export function MessageRow({
   message,
   isSelected,
+  isStriped,
   onSelect,
   columns,
   widths,
@@ -40,11 +42,15 @@ export function MessageRow({
   return (
     <button
       className={cn(
-        "grid h-full w-full items-center gap-3",
-        "border-b border-border px-3 py-2 text-left text-sm transition-colors",
+        "grid h-full w-full items-center gap-0",
+        "text-left text-[13px] transition-colors",
         "ph-focus-ring",
-        isSelected && "border-l-2 border-l-brand-coral bg-sidebar-accent text-sidebar-accent-foreground",
-        !isSelected && "border-l-2 border-l-transparent bg-panel hover:bg-panel-muted",
+        isSelected &&
+          "bg-[var(--list-selection)] text-[var(--list-selection-foreground)]",
+        !isSelected &&
+          (isStriped
+            ? "bg-[var(--list-zebra-alt)] text-panel-foreground hover:bg-[var(--list-hover)]"
+            : "bg-[var(--list-zebra)] text-panel-foreground hover:bg-[var(--list-hover)]"),
       )}
       style={{ gridTemplateColumns: buildGridTemplate(columns, widths) }}
       onClick={onSelect}
@@ -56,9 +62,11 @@ export function MessageRow({
           <div
             key={columnId}
             className={cn(
-              "min-w-0",
+              "min-w-0 px-2",
+              columnId === "subject" && "pl-3",
+              columnId === "tags" && "pr-3",
               def.align === "right" && "text-right",
-              def.align === "center" && "flex justify-center",
+              def.align === "center" && "flex justify-center px-0",
             )}
           >
             {def.render(message)}

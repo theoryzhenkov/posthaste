@@ -10,7 +10,7 @@ import {
   SORTABLE_COLUMNS,
 } from "./columns";
 
-const STORAGE_KEY = "posthaste-thread-columns";
+const STORAGE_KEY = "posthaste-thread-columns-v4";
 
 interface StoredConfig {
   columns: ColumnId[];
