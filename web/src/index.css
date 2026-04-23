@@ -37,6 +37,17 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-chrome: var(--chrome);
+  --color-chrome-foreground: var(--chrome-foreground);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
+  --color-signal-unread: var(--signal-unread);
+  --color-signal-flag: var(--signal-flag);
+  --color-brand-coral: var(--brand-coral);
+  --color-brand-coral-foreground: var(--brand-coral-foreground);
+  --color-brand-coral-soft: var(--brand-coral-soft);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -53,6 +64,8 @@
  */
 :root {
   --radius: 0.25rem;
+
+  color-scheme: light;
 
   /* Surfaces */
   --background: #F8FAFB;
@@ -95,6 +108,105 @@
   --sidebar-accent-foreground: #2C3540;
   --sidebar-border: #D4DAE0;
   --sidebar-ring: #2B7EC2;
+
+  /*
+   * PostHaste application tokens.
+   * These sit above shadcn's generic tokens and give the mail client stable
+   * names for dense shell/chrome work without coupling components to a preset.
+   */
+  --chrome: #EAF0F5;
+  --chrome-foreground: #202832;
+  --panel: #FFFFFF;
+  --panel-foreground: #141618;
+  --panel-muted: #F2F5F7;
+  --signal-unread: #2B7EC2;
+  --signal-flag: #D96A42;
+  --brand-coral: #D96A42;
+  --brand-coral-foreground: #FFFFFF;
+  --brand-coral-soft: #F6DED3;
+  --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
+  --shadow-popover: 0 20px 48px rgb(21 28 36 / 0.16);
+  --shadow-pane: 0 1px 2px rgb(21 28 36 / 0.06), 0 8px 24px rgb(21 28 36 / 0.05);
+
+  --ph-font-size-meta: 0.6875rem;
+  --ph-font-size-ui: 0.75rem;
+  --ph-font-size-body: 0.8125rem;
+  --ph-font-size-emphasis: 0.875rem;
+  --ph-font-size-heading: 1.0625rem;
+  --ph-icon-xs: 0.75rem;
+  --ph-icon-sm: 0.875rem;
+  --ph-icon-md: 1rem;
+  --ph-icon-lg: 1.25rem;
+
+  --density-toolbar-height: 2.625rem;
+  --density-sidebar-row-height: 1.75rem;
+  --density-message-row-height: 4.875rem;
+  --density-pane-padding: 0.75rem;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #24221E;
+  --foreground: #F0EDE7;
+  --card: #2D2A25;
+  --card-foreground: #F0EDE7;
+  --popover: #2D2A25;
+  --popover-foreground: #F0EDE7;
+  --primary: #79B7EA;
+  --primary-foreground: #101418;
+  --secondary: #343029;
+  --secondary-foreground: #D7D0C5;
+  --muted: #343029;
+  --muted-foreground: #B2A99C;
+  --accent: #3A352D;
+  --accent-foreground: #F0EDE7;
+  --destructive: #F87171;
+  --border: #454038;
+  --input: #454038;
+  --ring: #79B7EA;
+  --sidebar: #211F1B;
+  --sidebar-foreground: #DCD5CA;
+  --sidebar-primary: #79B7EA;
+  --sidebar-primary-foreground: #101418;
+  --sidebar-accent: #343029;
+  --sidebar-accent-foreground: #F0EDE7;
+  --sidebar-border: #454038;
+  --sidebar-ring: #79B7EA;
+  --chrome: #1D1B18;
+  --chrome-foreground: #E8E2D8;
+  --panel: #292621;
+  --panel-foreground: #F0EDE7;
+  --panel-muted: #302C26;
+  --signal-unread: #79B7EA;
+  --signal-flag: #FF8A5F;
+  --brand-coral: #FF8A5F;
+  --brand-coral-foreground: #1D120C;
+  --brand-coral-soft: #4A2B22;
+  --focus-soft: color-mix(in oklab, var(--ring) 30%, transparent);
+  --shadow-popover: 0 24px 72px rgb(0 0 0 / 0.5);
+  --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.28), 0 12px 36px rgb(0 0 0 / 0.22);
+}
+
+[data-ui-density="compact"] {
+  --density-toolbar-height: 2.375rem;
+  --density-sidebar-row-height: 1.5rem;
+  --density-message-row-height: 4rem;
+  --density-pane-padding: 0.625rem;
+}
+
+[data-ui-density="cozy"] {
+  --density-toolbar-height: 2.625rem;
+  --density-sidebar-row-height: 1.75rem;
+  --density-message-row-height: 4.875rem;
+  --density-pane-padding: 0.75rem;
+}
+
+[data-ui-density="comfortable"] {
+  --density-toolbar-height: 2.875rem;
+  --density-sidebar-row-height: 2rem;
+  --density-message-row-height: 5.75rem;
+  --density-pane-padding: 1rem;
 }
 
 @layer base {
@@ -103,7 +215,7 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-size: 13px;
+    font-size: var(--ph-font-size-body);
     line-height: 1.45;
   }
   html, body, #root {
@@ -112,5 +224,41 @@
   body {
     margin: 0;
     overflow: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+@layer utilities {
+  .ph-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 32%, transparent) transparent;
+  }
+
+  .ph-scroll::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  .ph-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .ph-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--muted-foreground) 28%, transparent);
+  }
+
+  .ph-scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 44%, transparent);
+  }
+
+  .ph-focus-ring {
+    @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-ring/50;
   }
 }
