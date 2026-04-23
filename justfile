@@ -34,10 +34,9 @@ build:
     just frontend build
 
 # --- Local Stalwart dev server (end-to-end testing) ---
-# See dev/stalwart/ for config and seed script. Typical flow:
-#   terminal 1: just stalwart-up
-#   terminal 2: just stalwart-seed
-#   terminal 3: eval $(just stalwart-dev) && just backend run
+# See dev/stalwart/ for config and seed script.
+# Full-stack browser dev: just frontend dev
+# Full-stack desktop dev: just desktop dev
 
 # Admin password for Stalwart's fallback-admin + dev mailbox password.
 # Override with `just stalwart-up admin=... user=...` or set env vars directly.

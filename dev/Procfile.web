@@ -1,0 +1,4 @@
+stalwart: stalwart -c dev/stalwart/config.toml
+seed: bash dev/stalwart/seed.sh
+daemon: cargo run --bin posthaste-daemon
+vite: cd web && bun run dev

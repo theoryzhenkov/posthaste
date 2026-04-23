@@ -1,8 +1,8 @@
 # Frontend (React/Vite) recipes
 
-# Start the full dev stack (stalwart + daemon + vite) in a zellij session.
+# Start the full dev stack (stalwart + daemon + vite) with Overmind.
 dev:
-    bash ../dev/zellij/launch.sh web
+    bash ../dev/overmind/launch.sh web
 
 # Start the vite dev server alone. Assumes the backend is already running.
 dev-frontend:

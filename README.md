@@ -29,6 +29,18 @@ Two-phase setup. Requires `nix` and `direnv` installed.
 just setup       # phase 2: generates age key, initializes jj
 ```
 
+## Development
+
+The full local dev stacks run through Overmind in the Nix dev shell:
+
+```sh
+just frontend dev  # Stalwart + seed + posthaste-daemon + Vite
+just desktop dev   # Stalwart + seed + Tauri dev shell
+```
+
+The stacks use isolated config and state under `dev/posthaste/` and `dev/stalwart/`.
+After changing `flake.nix`, reload the dev shell with `direnv reload` or `nix develop`.
+
 ## Documentation
 
 MkDocs serves and builds the Markdown content in `docs/` with the Material theme.
