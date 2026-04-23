@@ -16,6 +16,7 @@ interface SortableColumnHeaderProps {
   sortDirection?: SortDirection;
   isSortable?: boolean;
   showResizeDivider?: boolean;
+  resizePlacement?: "between-columns" | "table-end";
   onSort: () => void;
   onResize?: (width: number) => void;
 }
@@ -30,6 +31,7 @@ export function SortableColumnHeader({
   sortDirection,
   isSortable = true,
   showResizeDivider = true,
+  resizePlacement = "between-columns",
   onSort,
   onResize,
 }: SortableColumnHeaderProps) {
@@ -91,6 +93,7 @@ export function SortableColumnHeader({
           basis={resizeBasis}
           minWidth={resizeMinWidth}
           showDivider={showResizeDivider}
+          placement={resizePlacement}
           onResize={onResize}
         />
       )}
