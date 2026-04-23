@@ -69,14 +69,15 @@ Mutations still use query invalidation for local actions, but the conversation l
 
 ## MessageList
 
-`MessageList` is conversation-first and currently does manual fixed-row virtualization rather than depending on a virtualization library.
+`MessageList` is conversation-first and uses TanStack Virtual for fixed-row virtualization.
 
 - Page size is `100`.
 - Row height follows the visual density contract: `24px` compact, `30px` standard, `48px` roomy.
 - Pagination is seek-based using an opaque cursor returned by the backend.
-- The visible slice is derived from `scrollTop`, `viewportHeight`, and overscan rows.
+- The visible slice comes from the virtualizer's scroll element, total count, row estimate, and overscan rows.
 - Scroll offset is preserved per selected mailbox or smart-mailbox key.
 - Near the bottom of the scroll container, the list fetches the next page.
+- Header and rows share one native scroll container for both axes; horizontal header/body sync is browser-owned.
 
 Each row represents a conversation summary, not an individual message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
 
@@ -86,7 +87,7 @@ Columns are reorderable (drag-and-drop via dnd-kit), sortable (click header), an
 
 `useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is forwarded to the backend via `sort` and `sortDir` query params -- the backend performs the sort, not the frontend. Available sort fields: `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment`; default is `date` DESC.
 
-Column widths are stored as pixel overrides (`ColumnWidths = Partial<Record<ColumnId, number>>`). Columns without an override use their default CSS grid width from the column definition's `gridWidth`. `buildGridTemplate` accepts optional width overrides and emits pixel values for overridden columns.
+Column widths are stored as pixel overrides (`ColumnWidths = Partial<Record<ColumnId, number>>`). Columns without an override use their default basis from the column definition. `buildGridTemplate` accepts optional width overrides and emits fixed pixel tracks or stretch `minmax(basis, grow)` tracks according to the column definition.
 
 All column config (visibility, order, sort, widths) is persisted to localStorage. Header and row cells must share the same effective column widths so resize lines remain visually aligned.
 

@@ -287,4 +287,20 @@
     @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-ring/50;
   }
 
+  .ph-thread-list-scroll {
+    container-type: inline-size;
+    overscroll-behavior: contain;
+  }
+
+  .ph-message-list-zebra-plane {
+    width: 100cqw;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--list-zebra) 0,
+      var(--list-zebra) var(--density-message-row-height),
+      var(--list-zebra-alt) var(--density-message-row-height),
+      var(--list-zebra-alt) calc(var(--density-message-row-height) * 2)
+    );
+  }
+
 }
