@@ -64,7 +64,7 @@ React Query manages server state, but different surfaces use different strategie
 - `queryKeys.accounts` loads configured account overviews.
 - `queryKeys.mailboxes(accountId)` loads synced mailboxes for account-level settings.
 - `queryKeys.sidebar` loads enabled sources plus smart mailbox summaries.
-- `queryKeys.messages(selectedView)` loads individual message summaries for the selected mailbox or smart mailbox.
+- `queryKeys.messages(selectedView, query, sort)` loads paginated individual message summaries for the selected mailbox or smart mailbox, with filtering and sorting executed by the backend.
 - `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
 - `mailKeys.message(sourceId, messageId)` loads full message detail, including lazily fetched body content when needed.
 
@@ -80,7 +80,7 @@ Domain events and mutation results update caches through the centralized domain 
 - Rows represent individual `MessageSummary` records, not grouped threads.
 - The visible slice is derived from `scrollTop`, `viewportHeight`, and overscan rows.
 - Scroll offset is preserved per selected mailbox or smart-mailbox key.
-- Sorting is applied over the currently loaded individual messages.
+- The active command/search filter, sort field, and sort direction are sent to the message endpoint and executed server-side. The frontend virtualizes loaded pages and fetches the next page near the viewport end.
 - Empty list space or `Escape` clears the selected message. When no message is selected, the detail pane is closed so the message list can use the available width.
 - The sidebar is resized in a separate shell panel group from the message list and detail pane, so selecting or deselecting a message does not change the left pane width.
 - Thread viewing is not the default list mode. When the user wants a thread, a command may apply a thread filter to the message list.
@@ -101,7 +101,7 @@ Account settings are edited in a sparse, section-first layout. Existing accounts
 
 Columns are reorderable (drag-and-drop via dnd-kit), sortable (click header), and resizable (drag right edge via `ColumnResizeHandle`).
 
-`useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is applied to the loaded message rows in the frontend. Available sort fields: `date`, `from`, `subject`, `source`, `flagged`, `attachment`; default is `date` DESC.
+`useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is sent to the backend message-page query so it applies to the full filtered result set, not only the loaded rows. Available sort fields: `date`, `from`, `subject`, `source`, `flagged`, `attachment`; default is `date` DESC.
 
 Column widths are stored as pixel overrides (`ColumnWidths = Partial<Record<ColumnId, number>>`). Columns without an override use their default CSS grid width from the column definition's `gridWidth`. `buildGridTemplate` accepts optional width overrides and emits pixel values for overridden columns.
 

@@ -13,12 +13,14 @@ use posthaste_domain::{
     AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
     CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
-    MailboxId, MailboxSummary, MessageAttachment, MessageDetail, MessageId, Recipient,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
-    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxRule, SmartMailboxSummary, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    MailboxId, MailboxSummary, MessageAttachment, MessageCursor, MessageDetail, MessageId,
+    MessagePage, MessageSortField, MessageSummary, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse,
+    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue, SortDirection,
+    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -38,8 +40,8 @@ use account_support::{
     validate_account_settings, validate_logo_image_id,
 };
 use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse, matches_event,
-    parse_conversation_cursor,
+    conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
+    message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
 
 /// Query parameters for conversation list endpoints.
@@ -64,6 +66,24 @@ pub struct ListConversationsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ListSourceMessagesQuery {
     pub mailbox_id: Option<String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+    pub sort: Option<MessageSortField>,
+    pub sort_dir: Option<SortDirection>,
+    pub q: Option<String>,
+}
+
+/// Query parameters for smart-mailbox message listing.
+///
+/// @spec docs/L1-api#smart-mailboxes
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSmartMailboxMessagesQuery {
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+    pub sort: Option<MessageSortField>,
+    pub sort_dir: Option<SortDirection>,
+    pub q: Option<String>,
 }
 
 /// Query parameters for the SSE event stream endpoint.
@@ -82,6 +102,58 @@ pub struct EventsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct GetAttachmentQuery {
     pub download: Option<bool>,
+}
+
+fn parse_optional_search_rule(query: Option<&str>) -> Result<Option<SmartMailboxRule>, ApiError> {
+    let Some(query) = query else {
+        return Ok(None);
+    };
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(None);
+    }
+    posthaste_domain::search::parse_query(query)
+        .map(Some)
+        .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))
+}
+
+fn rule_condition(field: SmartMailboxField, value: impl Into<String>) -> SmartMailboxRuleNode {
+    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+        field,
+        operator: SmartMailboxOperator::Equals,
+        negated: false,
+        value: SmartMailboxValue::String(value.into()),
+    })
+}
+
+fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
+    SmartMailboxRule {
+        root: SmartMailboxGroup {
+            operator: SmartMailboxGroupOperator::All,
+            negated: false,
+            nodes,
+        },
+    }
+}
+
+fn combine_rules(rules: Vec<SmartMailboxRule>) -> SmartMailboxRule {
+    all_rule(
+        rules
+            .into_iter()
+            .map(|rule| SmartMailboxRuleNode::Group(rule.root))
+            .collect(),
+    )
+}
+
+fn source_message_scope_rule(source_id: &str, mailbox_id: Option<&MailboxId>) -> SmartMailboxRule {
+    let mut nodes = vec![rule_condition(SmartMailboxField::SourceId, source_id)];
+    if let Some(mailbox_id) = mailbox_id {
+        nodes.push(rule_condition(
+            SmartMailboxField::MailboxId,
+            mailbox_id.as_str(),
+        ));
+    }
+    all_rule(nodes)
 }
 
 /// Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
@@ -244,6 +316,16 @@ pub struct VerificationResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ConversationPageResponse {
     pub items: Vec<ConversationSummary>,
+    pub next_cursor: Option<String>,
+}
+
+/// Paginated message list response with an opaque cursor for the next page.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePageResponse {
+    pub items: Vec<MessageSummary>,
     pub next_cursor: Option<String>,
 }
 
@@ -806,13 +888,38 @@ pub async fn list_source_messages(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
     Query(query): Query<ListSourceMessagesQuery>,
-) -> Result<Json<Vec<posthaste_domain::MessageSummary>>, ApiError> {
+) -> Result<Json<MessagePageResponse>, ApiError> {
     let mailbox_id = query.mailbox_id.map(MailboxId);
-    state
+    let limit = message_limit(query.limit)?;
+    let cursor = parse_message_cursor(query.cursor.as_deref())?;
+    let sort_field = query.sort.unwrap_or_default();
+    let sort_direction = query.sort_dir.unwrap_or_default();
+    if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
+        let scoped_rule = source_message_scope_rule(&source_id, mailbox_id.as_ref());
+        let page = state
+            .service
+            .query_message_page_by_rule(
+                &combine_rules(vec![scoped_rule, search_rule]),
+                limit,
+                cursor.as_ref(),
+                sort_field,
+                sort_direction,
+            )
+            .map_err(ApiError::from_service_error)?;
+        return Ok(Json(message_page_response(page)));
+    }
+    let page = state
         .service
-        .list_messages(&AccountId(source_id), mailbox_id.as_ref())
-        .map(Json)
-        .map_err(ApiError::from_service_error)
+        .list_message_page(
+            &AccountId(source_id),
+            mailbox_id.as_ref(),
+            limit,
+            cursor.as_ref(),
+            sort_field,
+            sort_direction,
+        )
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(message_page_response(page)))
 }
 
 /// GET /v1/sidebar
@@ -956,12 +1063,42 @@ pub async fn reset_default_smart_mailboxes(
 pub async fn list_smart_mailbox_messages(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
-) -> Result<Json<Vec<posthaste_domain::MessageSummary>>, ApiError> {
-    state
+    Query(query): Query<ListSmartMailboxMessagesQuery>,
+) -> Result<Json<MessagePageResponse>, ApiError> {
+    let limit = message_limit(query.limit)?;
+    let cursor = parse_message_cursor(query.cursor.as_deref())?;
+    let sort_field = query.sort.unwrap_or_default();
+    let sort_direction = query.sort_dir.unwrap_or_default();
+    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
+    if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
+        let mailbox = state
+            .service
+            .get_smart_mailbox(&smart_mailbox_id)
+            .map_err(ApiError::from_service_error)?;
+        let page = state
+            .service
+            .query_message_page_by_rule(
+                &combine_rules(vec![mailbox.rule, search_rule]),
+                limit,
+                cursor.as_ref(),
+                sort_field,
+                sort_direction,
+            )
+            .map_err(ApiError::from_service_error)?;
+        return Ok(Json(message_page_response(page)));
+    }
+
+    let page = state
         .service
-        .list_smart_mailbox_messages(&SmartMailboxId::from(smart_mailbox_id))
-        .map(Json)
-        .map_err(ApiError::from_service_error)
+        .list_smart_mailbox_message_page(
+            &smart_mailbox_id,
+            limit,
+            cursor.as_ref(),
+            sort_field,
+            sort_direction,
+        )
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(message_page_response(page)))
 }
 
 /// GET /v1/smart-mailboxes/{id}/conversations
@@ -981,22 +1118,12 @@ pub async fn list_smart_mailbox_conversations(
     // When a search query is provided, AND it with the smart mailbox rule.
     if let Some(q) = &query.q {
         if !q.trim().is_empty() {
-            let search_rule = posthaste_domain::search::parse_query(q)
-                .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))?;
+            let search_rule = parse_optional_search_rule(Some(q))?.expect("non-empty query");
             let mailbox = state
                 .service
                 .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
                 .map_err(ApiError::from_service_error)?;
-            let combined = SmartMailboxRule {
-                root: posthaste_domain::SmartMailboxGroup {
-                    operator: posthaste_domain::SmartMailboxGroupOperator::All,
-                    negated: false,
-                    nodes: vec![
-                        posthaste_domain::SmartMailboxRuleNode::Group(mailbox.rule.root),
-                        posthaste_domain::SmartMailboxRuleNode::Group(search_rule.root),
-                    ],
-                },
-            };
+            let combined = combine_rules(vec![mailbox.rule, search_rule]);
             return state
                 .service
                 .query_conversations_by_rule(
@@ -1042,8 +1169,7 @@ pub async fn list_conversations(
     // When a search query is provided, parse it into a rule and search globally.
     if let Some(q) = &query.q {
         if !q.trim().is_empty() {
-            let rule = posthaste_domain::search::parse_query(q)
-                .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))?;
+            let rule = parse_optional_search_rule(Some(q))?.expect("non-empty query");
             return state
                 .service
                 .query_conversations_by_rule(
@@ -1638,7 +1764,7 @@ async fn delete_account_logo_file(state: &AppState, image_id: &str) -> Result<()
 mod tests {
     use super::*;
     use account_support::{secret_status, validate_secret_request};
-    use cursor_support::encode_conversation_cursor;
+    use cursor_support::{encode_conversation_cursor, encode_message_cursor};
     use posthaste_domain::{GatewayError, EVENT_TOPIC_MESSAGE_ARRIVED};
 
     #[test]
@@ -1662,6 +1788,64 @@ mod tests {
         let error = parse_conversation_cursor(Some("broken-cursor")).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.body.code, "invalid_cursor");
+    }
+
+    #[test]
+    fn message_cursor_round_trips() {
+        let cursor = MessageCursor {
+            sort_value: "2026-04-01T10:11:12Z".to_string(),
+            source_id: AccountId::from("primary"),
+            message_id: MessageId::from("message-42"),
+        };
+
+        let encoded = encode_message_cursor(&cursor);
+        let decoded = parse_message_cursor(Some(&encoded))
+            .unwrap_or_else(|_| panic!("cursor should parse"))
+            .unwrap_or_else(|| panic!("cursor should be present"));
+
+        assert_eq!(decoded.sort_value, cursor.sort_value);
+        assert_eq!(decoded.source_id, cursor.source_id);
+        assert_eq!(decoded.message_id, cursor.message_id);
+    }
+
+    #[test]
+    fn message_cursor_allows_empty_sort_value() {
+        let cursor = MessageCursor {
+            sort_value: String::new(),
+            source_id: AccountId::from("primary"),
+            message_id: MessageId::from("message-42"),
+        };
+
+        let encoded = encode_message_cursor(&cursor);
+        let decoded = parse_message_cursor(Some(&encoded))
+            .unwrap_or_else(|_| panic!("cursor should parse"))
+            .unwrap_or_else(|| panic!("cursor should be present"));
+
+        assert_eq!(decoded.sort_value, cursor.sort_value);
+        assert_eq!(decoded.source_id, cursor.source_id);
+        assert_eq!(decoded.message_id, cursor.message_id);
+    }
+
+    #[test]
+    fn malformed_message_cursor_is_rejected() {
+        let error = parse_message_cursor(Some("broken-cursor")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_cursor");
+    }
+
+    #[test]
+    fn invalid_search_query_is_rejected() {
+        let error = parse_optional_search_rule(Some("wat:nope")).unwrap_err();
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_query");
+    }
+
+    #[test]
+    fn source_scope_rule_combines_source_and_mailbox() {
+        let rule = source_message_scope_rule("primary", Some(&MailboxId::from("inbox")));
+
+        assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+        assert_eq!(rule.root.nodes.len(), 2);
     }
 
     #[test]

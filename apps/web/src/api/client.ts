@@ -20,7 +20,8 @@ import type {
   MessageCommand,
   MessageCommandResult,
   MessageDetail,
-  MessageSummary,
+  MessagePage,
+  MessageSortField,
   OkResponse,
   PatchMailboxInput,
   ReplyContext,
@@ -32,6 +33,14 @@ import type {
   UpdateSmartMailboxInput,
   VerificationResponse,
 } from './types'
+
+interface MessagePageInput {
+  q?: string
+  limit?: number
+  cursor?: string | null
+  sort?: MessageSortField
+  sortDir?: string
+}
 
 function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
@@ -260,8 +269,28 @@ export async function resetDefaultSmartMailboxes(): Promise<
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchSmartMailboxMessages(
   id: string,
-): Promise<MessageSummary[]> {
-  return request<MessageSummary[]>(`/smart-mailboxes/${id}/messages`)
+  input?: MessagePageInput,
+): Promise<MessagePage> {
+  const params = new URLSearchParams()
+  if (input?.limit !== undefined) {
+    params.set('limit', String(input.limit))
+  }
+  if (input?.cursor) {
+    params.set('cursor', input.cursor)
+  }
+  if (input?.sort) {
+    params.set('sort', input.sort)
+  }
+  if (input?.sortDir) {
+    params.set('sortDir', input.sortDir)
+  }
+  if (input?.q) {
+    params.set('q', input.q)
+  }
+  const search = params.toString()
+  return request<MessagePage>(
+    `/smart-mailboxes/${id}/messages${search ? `?${search}` : ''}`,
+  )
 }
 
 /**
@@ -363,9 +392,31 @@ export async function fetchMessage(
 export async function fetchSourceMessages(
   sourceId: string,
   mailboxId: string | null,
-): Promise<MessageSummary[]> {
-  const search = mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ''
-  return request<MessageSummary[]>(`/sources/${sourceId}/messages${search}`)
+  input?: MessagePageInput,
+): Promise<MessagePage> {
+  const params = new URLSearchParams()
+  if (mailboxId) {
+    params.set('mailboxId', mailboxId)
+  }
+  if (input?.limit !== undefined) {
+    params.set('limit', String(input.limit))
+  }
+  if (input?.cursor) {
+    params.set('cursor', input.cursor)
+  }
+  if (input?.sort) {
+    params.set('sort', input.sort)
+  }
+  if (input?.sortDir) {
+    params.set('sortDir', input.sortDir)
+  }
+  if (input?.q) {
+    params.set('q', input.q)
+  }
+  const search = params.toString()
+  return request<MessagePage>(
+    `/sources/${sourceId}/messages${search ? `?${search}` : ''}`,
+  )
 }
 
 /** @spec docs/L1-api#compose */
