@@ -2,7 +2,7 @@
 .direnv/
 .venv/
 result
-site/
+/site/
 
 # jj
 .jj/
@@ -20,8 +20,12 @@ site/
 /apps/web/dist/
 /apps/web/.vite/
 /apps/web/node_modules/
+/apps/site/dist/
+/apps/site/.vite/
+/apps/site/node_modules/
 
 # local design handoff blobs
+/modal.png
 /.claude-design/Posthaste-handoff.zip
 /.claude-design/Posthaste.standalone.bundled.html
 /.claude-design/compare/

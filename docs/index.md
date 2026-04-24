@@ -16,7 +16,7 @@ A JMAP mail client that brings MailMate's power-user features to a modern web UI
 | Backend | Rust + Axum | Owns protocol, sync, storage, and API |
 | Storage | SQLite via rusqlite | Embedded, zero-config, portable |
 | Frontend | React + TypeScript | Component model, React Query caching, keyboard handling |
-| Build tool | Vite + npm scripts | Fast dev server and builds |
+| Build tool | Vite + Bun scripts | Fast dev server and builds |
 | HTML sanitization | ammonia (Rust) | Whitelist-based, built on html5ever |
 | Markdown | pulldown-cmark (Rust) | CommonMark + GFM extensions |
 
@@ -51,6 +51,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **[Search](L0-search.md)** -- Query language, smart mailboxes, search execution
 - **[Compose](L0-compose.md)** -- Markdown composition, MIME assembly, send/draft lifecycle
 - **[UI](L0-ui.md)** -- Web UI, React components, conversation list, HTML rendering, keyboard model
+- **[Website](L0-website.md)** -- Public product showcase site and static Docker deployment
 - **[Accounts](L0-accounts.md)** -- Multi-account scoping (deferred, L0-only)
 - **[API](L0-api.md)** -- REST API + SSE boundary, Axum handlers, pagination, error mapping
 

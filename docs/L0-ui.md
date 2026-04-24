@@ -9,6 +9,7 @@ depends:
   - path: docs/L0-branding
 dependents:
   - path: docs/L1-ui
+  - path: docs/L0-website
 ---
 
 # UI Domain -- L0

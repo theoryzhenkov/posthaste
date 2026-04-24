@@ -4,6 +4,7 @@ mod template
 mod mkdocs
 mod backend 'crates/justfile'
 mod frontend 'apps/web/justfile'
+mod site 'apps/site/justfile'
 mod desktop 'apps/desktop/justfile'
 mod docs 'docs/justfile'
 
@@ -18,11 +19,13 @@ setup:
 fmt:
     just backend fmt
     just frontend fmt
+    just site fmt
 
 # Check formatting without modifying files
 fmt-check:
     just backend fmt-check
     just frontend fmt-check
+    just site fmt-check
 
 # Smoke dev wiring, lint, typecheck, format-check, and docs build
 check:
@@ -30,6 +33,7 @@ check:
     just fmt-check
     just backend check
     just frontend check
+    just site check
     just docs build
 
 # Run all tests
@@ -42,6 +46,7 @@ build:
     just backend build
     just frontend build
     just desktop build
+    just site build
 
 # Build the browser-localhost distributable assets and server binary.
 build-serve:
