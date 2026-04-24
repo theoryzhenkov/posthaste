@@ -22,6 +22,7 @@ import type {
   SmartMailboxRule,
 } from '../../api/types'
 import { fetchMailboxes, patchSettings } from '../../api/client'
+import { cn } from '../../lib/utils'
 import { queryKeys } from '../../queryKeys'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
@@ -369,6 +370,53 @@ function actionListDescription(drafts: AutomationRuleDraft[]): string {
   }.`
 }
 
+function triggerLabel(trigger: AutomationTrigger): string {
+  return (
+    TRIGGER_OPTIONS.find((option) => option.value === trigger)?.label ?? trigger
+  )
+}
+
+function actionSummary(action: AutomationAction): string {
+  switch (action.kind) {
+    case 'applyTag':
+      return action.tag.trim() ? `Tag ${action.tag.trim()}` : 'Apply tag'
+    case 'removeTag':
+      return action.tag.trim() ? `Remove ${action.tag.trim()}` : 'Remove tag'
+    case 'markRead':
+      return 'Mark read'
+    case 'markUnread':
+      return 'Mark unread'
+    case 'flag':
+      return 'Flag'
+    case 'unflag':
+      return 'Unflag'
+    case 'moveToMailbox':
+      return action.mailboxId.trim()
+        ? `Move to ${action.mailboxId.trim()}`
+        : 'Move to mailbox'
+  }
+}
+
+function ruleActionSummary(draft: AutomationRuleDraft): string {
+  if (draft.actions.length === 0) {
+    return 'No actions'
+  }
+  const [firstAction] = draft.actions
+  const first = actionSummary(firstAction)
+  if (draft.actions.length === 1) {
+    return first
+  }
+  return `${first} +${draft.actions.length - 1}`
+}
+
+function accountName(accounts: AccountOverview[], accountId: string): string {
+  return (
+    accounts.find((account) => account.id === accountId)?.name ||
+    accountId.trim() ||
+    'Account'
+  )
+}
+
 export function AccountAutomationFields({
   account,
   settings,
@@ -597,6 +645,10 @@ function AutomationRuleList({
   onChange: (drafts: AutomationRuleDraft[]) => void
   onSave: () => void
 }) {
+  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(
+    () => drafts[0]?.id ?? null,
+  )
+
   function updateDraft(ruleId: string, patch: Partial<AutomationRuleDraft>) {
     onChange(
       drafts.map((draft) =>
@@ -609,6 +661,14 @@ function AutomationRuleList({
       ),
     )
   }
+
+  const effectiveSelectedRuleId = drafts.some(
+    (draft) => draft.id === selectedRuleId,
+  )
+    ? selectedRuleId
+    : (drafts[0]?.id ?? null)
+  const selectedDraft =
+    drafts.find((draft) => draft.id === effectiveSelectedRuleId) ?? null
 
   return (
     <div className="mt-8 space-y-4">
@@ -635,23 +695,35 @@ function AutomationRuleList({
       {drafts.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">{emptyText}</p>
       ) : (
-        <div className="space-y-6">
+        <div className="overflow-hidden rounded-lg border border-border-soft bg-bg-elev/35">
           {drafts.map((draft) => (
-            <AutomationRuleRow
+            <AutomationRuleListRow
               key={draft.id}
               draft={draft}
               accounts={accounts}
-              staticMailboxes={mailboxesByAccount[draft.accountId] ?? null}
-              canEditAccount={canEditAccount}
-              onChange={(patch) => updateDraft(draft.id, patch)}
-              onRemove={() =>
-                onChange(
-                  drafts.filter((candidate) => candidate.id !== draft.id),
-                )
-              }
+              isSelected={draft.id === effectiveSelectedRuleId}
+              isComplete={isDraftComplete(draft)}
+              onSelect={() => setSelectedRuleId(draft.id)}
             />
           ))}
         </div>
+      )}
+
+      {selectedDraft && (
+        <AutomationRuleEditor
+          draft={selectedDraft}
+          accounts={accounts}
+          staticMailboxes={mailboxesByAccount[selectedDraft.accountId] ?? null}
+          canEditAccount={canEditAccount}
+          onChange={(patch) => updateDraft(selectedDraft.id, patch)}
+          onRemove={() => {
+            const nextDrafts = drafts.filter(
+              (candidate) => candidate.id !== selectedDraft.id,
+            )
+            onChange(nextDrafts)
+            setSelectedRuleId(nextDrafts[0]?.id ?? null)
+          }}
+        />
       )}
 
       {errors.filter(Boolean).map((message) => (
@@ -676,7 +748,61 @@ function AutomationRuleList({
   )
 }
 
-function AutomationRuleRow({
+function AutomationRuleListRow({
+  draft,
+  accounts,
+  isSelected,
+  isComplete,
+  onSelect,
+}: {
+  draft: AutomationRuleDraft
+  accounts: AccountOverview[]
+  isSelected: boolean
+  isComplete: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        'group flex min-h-[58px] w-full items-center gap-3 border-b border-border-soft px-4 text-left transition-colors last:border-b-0 hover:bg-[var(--list-hover)]',
+        isSelected && 'bg-[var(--list-hover)]',
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'size-2 shrink-0 rounded-full',
+          draft.enabled ? 'bg-emerald-500' : 'bg-zinc-400',
+          !isComplete && 'bg-amber-500',
+        )}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[13px] font-medium text-foreground">
+            {draft.name.trim() || 'Untitled rule'}
+          </span>
+          {!isComplete && (
+            <span className="shrink-0 rounded-sm bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+              incomplete
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+          {accountName(accounts, draft.accountId)} ·{' '}
+          {triggerLabel(draft.triggers[0] ?? 'messageArrived')} ·{' '}
+          {ruleActionSummary(draft)}
+        </span>
+      </span>
+      <span className="shrink-0 text-[12px] text-muted-foreground/70">
+        {draft.backfill ? 'Backfill' : 'New mail'}
+      </span>
+    </button>
+  )
+}
+
+function AutomationRuleEditor({
   draft,
   accounts,
   staticMailboxes,
@@ -692,8 +818,28 @@ function AutomationRuleRow({
   onRemove: () => void
 }) {
   return (
-    <div className="space-y-4 border-t border-border-soft pt-4 first:border-t-0 first:pt-0">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+    <div className="space-y-5 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[12px] font-medium text-foreground">
+            Edit selected rule
+          </p>
+          <p className="text-[12px] text-muted-foreground">
+            Account and trigger decide when the conditions below are evaluated.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+        >
+          Remove
+        </Button>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] lg:items-end">
         <Field
           label="Rule name"
           value={draft.name}
@@ -732,16 +878,6 @@ function AutomationRuleRow({
             </SelectItem>
           ))}
         </LabeledSelect>
-
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 justify-self-start px-2 text-muted-foreground hover:text-destructive lg:justify-self-end"
-          onClick={onRemove}
-        >
-          Remove
-        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-4 text-[13px] text-muted-foreground">
