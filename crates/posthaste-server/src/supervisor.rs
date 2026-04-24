@@ -5,8 +5,8 @@ use std::time::Duration;
 use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus,
-    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
+    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus, PushStreamEvent,
+    ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
@@ -33,6 +33,7 @@ struct SupervisorShared {
     store: Arc<dyn MailStore>,
     secret_store: Arc<dyn SecretStore>,
     event_sender: broadcast::Sender<DomainEvent>,
+    gateways: RwLock<HashMap<String, SharedGateway>>,
     runtime_overviews: RwLock<HashMap<String, AccountRuntimeOverview>>,
     poll_interval: Duration,
 }
@@ -81,6 +82,7 @@ impl AccountSupervisor {
                 store,
                 secret_store,
                 event_sender,
+                gateways: RwLock::new(HashMap::new()),
                 runtime_overviews: RwLock::new(HashMap::new()),
                 poll_interval,
             }),
@@ -132,7 +134,7 @@ impl AccountSupervisor {
             info!(account_id = %account_id, "stopping account runtime");
             runtime.handle.abort();
         }
-        self.shared.service.remove_gateway(account_id);
+        self.shared.remove_gateway(account_id).await;
     }
 
     /// Stop the runtime and clear runtime overview state for a deleted account.
@@ -171,6 +173,11 @@ impl AccountSupervisor {
     /// Get the current runtime status snapshot for an account.
     pub async fn runtime_overview(&self, account_id: &AccountId) -> AccountRuntimeOverview {
         self.shared.runtime_overview(account_id).await
+    }
+
+    /// Return the live gateway for an account, if its runtime is connected.
+    pub async fn gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
+        self.shared.gateway(account_id).await
     }
 
     /// Attempt JMAP session discovery for an account without starting a
@@ -216,8 +223,14 @@ async fn run_account_runtime(
         .await;
 
     // Initial sync + gateway setup
-    let _ = process_sync_trigger(&shared, &account, SyncTrigger::Startup, &mut connection, None)
-        .await;
+    let _ = process_sync_trigger(
+        &shared,
+        &account,
+        SyncTrigger::Startup,
+        &mut connection,
+        None,
+    )
+    .await;
 
     loop {
         let next_push = async {
@@ -296,10 +309,14 @@ async fn process_sync_trigger(
 
     let result = match ensure_connection(shared, account, connection).await {
         Ok(()) => {
-            shared
-                .service
-                .sync_account(&account_id, trigger.clone())
-                .await
+            if let Some(connection) = connection.as_ref() {
+                shared
+                    .service
+                    .sync_account(&account_id, trigger.clone(), connection.gateway.as_ref())
+                    .await
+            } else {
+                Err(GatewayError::Unavailable(account_id.to_string()).into())
+            }
         }
         Err(error) => Err(error),
     };
@@ -315,7 +332,7 @@ async fn process_sync_trigger(
             }
         }
         Err(error) => {
-            shared.service.remove_gateway(&account_id);
+            shared.remove_gateway(&account_id).await;
             *connection = None; // tears down gateway + push stream together
             let stage = if matches!(
                 error,
@@ -359,7 +376,7 @@ async fn ensure_connection(
     }
     debug!(account_id = %account.id, "establishing connection");
     let conn = build_connection(account, shared.secret_store.as_ref()).await?;
-    shared.service.set_gateway(&account.id, conn.gateway.clone());
+    shared.set_gateway(&account.id, conn.gateway.clone()).await;
     *connection = Some(conn);
     info!(account_id = %account.id, "connection established");
     Ok(())
@@ -431,6 +448,26 @@ async fn build_connection(
 }
 
 impl SupervisorShared {
+    async fn gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
+        self.gateways
+            .read()
+            .await
+            .get(account_id.as_str())
+            .cloned()
+            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()).into())
+    }
+
+    async fn set_gateway(&self, account_id: &AccountId, gateway: SharedGateway) {
+        self.gateways
+            .write()
+            .await
+            .insert(account_id.to_string(), gateway);
+    }
+
+    async fn remove_gateway(&self, account_id: &AccountId) {
+        self.gateways.write().await.remove(account_id.as_str());
+    }
+
     /// Broadcast domain events to all SSE subscribers.
     fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {

@@ -12,10 +12,10 @@ use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
     AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, Identity, MailboxId, MailboxSummary, MessageAttachment,
+    DomainEvent, EventFilter, GatewayError, Identity, MailboxId, MailboxSummary, MessageAttachment,
     MessageDetail, MessageId, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SidebarResponse, SmartMailbox, SmartMailboxId,
+    ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxId,
     SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
     EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
@@ -894,9 +894,10 @@ pub async fn get_message(
 ) -> Result<Json<MessageDetail>, ApiError> {
     let account_id = AccountId(source_id.clone());
     let message_id_ref = MessageId(message_id.clone());
+    let gateway = optional_live_gateway(state.as_ref(), &account_id).await;
     let result = state
         .service
-        .get_message_detail(&account_id, &message_id_ref)
+        .get_message_detail(&account_id, &message_id_ref, gateway.as_deref())
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -925,9 +926,10 @@ pub async fn get_message_attachment(
 ) -> Result<Response, ApiError> {
     let account_id = AccountId(source_id);
     let message_id = MessageId(message_id);
+    let gateway = optional_live_gateway(state.as_ref(), &account_id).await;
     let result = state
         .service
-        .get_message_detail(&account_id, &message_id)
+        .get_message_detail(&account_id, &message_id, gateway.as_deref())
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -943,9 +945,10 @@ pub async fn get_message_attachment(
         .into_iter()
         .find(|attachment| attachment.id == attachment_id)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "attachment not found"))?;
+    let gateway = require_live_gateway(gateway, &account_id)?;
     let bytes = state
         .service
-        .download_blob(&account_id, &attachment.blob_id)
+        .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
         .await
         .map_err(ApiError::from_service_error)?;
 
@@ -985,9 +988,11 @@ pub async fn get_identity(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
 ) -> Result<Json<Identity>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
         .service
-        .fetch_identity(&AccountId(source_id))
+        .fetch_identity(&account_id, gateway.as_ref())
         .await
         .map(Json)
         .map_err(ApiError::from_service_error)
@@ -1001,9 +1006,11 @@ pub async fn get_reply_context(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<ReplyContext>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
         .service
-        .fetch_reply_context(&AccountId(source_id), &MessageId(message_id))
+        .fetch_reply_context(&account_id, &MessageId(message_id), gateway.as_ref())
         .await
         .map(Json)
         .map_err(ApiError::from_service_error)
@@ -1019,9 +1026,11 @@ pub async fn send_message(
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<OkResponse>, ApiError> {
     validate_send_message_request(&request)?;
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
         .service
-        .send_message(&AccountId(source_id), &request)
+        .send_message(&account_id, &request, gateway.as_ref())
         .await
         .map_err(ApiError::from_service_error)?;
     Ok(Json(OkResponse { ok: true }))
@@ -1098,6 +1107,29 @@ fn recipient_email_is_empty(recipient: &Recipient) -> bool {
     recipient.email.trim().is_empty()
 }
 
+async fn live_gateway(state: &AppState, account_id: &AccountId) -> Result<SharedGateway, ApiError> {
+    state
+        .supervisor
+        .gateway(account_id)
+        .await
+        .map_err(ApiError::from_service_error)
+}
+
+async fn optional_live_gateway(state: &AppState, account_id: &AccountId) -> Option<SharedGateway> {
+    state.supervisor.gateway(account_id).await.ok()
+}
+
+fn require_live_gateway(
+    gateway: Option<SharedGateway>,
+    account_id: &AccountId,
+) -> Result<SharedGateway, ApiError> {
+    gateway.ok_or_else(|| {
+        ApiError::from_service_error(ServiceError::from(GatewayError::Unavailable(
+            account_id.to_string(),
+        )))
+    })
+}
+
 /// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
 ///
 /// @spec docs/L1-api#message-commands
@@ -1106,9 +1138,16 @@ pub async fn set_keywords(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<SetKeywordsCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     let result = state
         .service
-        .set_keywords(&AccountId(source_id), &MessageId(message_id), &command)
+        .set_keywords(
+            &account_id,
+            &MessageId(message_id),
+            &command,
+            gateway.as_ref(),
+        )
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -1123,9 +1162,16 @@ pub async fn add_to_mailbox(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<AddToMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     let result = state
         .service
-        .add_to_mailbox(&AccountId(source_id), &MessageId(message_id), &command)
+        .add_to_mailbox(
+            &account_id,
+            &MessageId(message_id),
+            &command,
+            gateway.as_ref(),
+        )
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -1140,9 +1186,16 @@ pub async fn remove_from_mailbox(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<RemoveFromMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     let result = state
         .service
-        .remove_from_mailbox(&AccountId(source_id), &MessageId(message_id), &command)
+        .remove_from_mailbox(
+            &account_id,
+            &MessageId(message_id),
+            &command,
+            gateway.as_ref(),
+        )
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -1157,9 +1210,16 @@ pub async fn replace_mailboxes(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<ReplaceMailboxesCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     let result = state
         .service
-        .replace_mailboxes(&AccountId(source_id), &MessageId(message_id), &command)
+        .replace_mailboxes(
+            &account_id,
+            &MessageId(message_id),
+            &command,
+            gateway.as_ref(),
+        )
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
@@ -1173,9 +1233,11 @@ pub async fn destroy_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<CommandResult>, ApiError> {
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     let result = state
         .service
-        .destroy_message(&AccountId(source_id), &MessageId(message_id))
+        .destroy_message(&account_id, &MessageId(message_id), gateway.as_ref())
         .await
         .map_err(ApiError::from_service_error)?;
     state.publish_events(&result.events);
