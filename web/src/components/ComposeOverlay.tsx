@@ -189,12 +189,15 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
 
   const isPreparingReply = intent.kind === "reply" && replyContextQuery.isLoading;
   const fromLabel = useMemo(() => {
+    if (identityQuery.isError) {
+      return "Sender unavailable";
+    }
     const identity = identityQuery.data;
     if (!identity) {
       return "Loading sender...";
     }
     return identity.name ? `${identity.name} <${identity.email}>` : identity.email;
-  }, [identityQuery.data]);
+  }, [identityQuery.data, identityQuery.isError]);
 
   function setField<K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) {
     setForm((current) => ({ ...current, [field]: value }));
