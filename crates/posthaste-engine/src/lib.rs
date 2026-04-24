@@ -7,6 +7,11 @@
 mod compose;
 mod conversions;
 mod live;
+mod live_compose;
+mod live_message;
+mod live_mutation;
+mod live_push;
+mod live_sync;
 mod mock;
 mod push_sse;
 mod push_ws;
