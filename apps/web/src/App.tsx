@@ -8,13 +8,14 @@
 import {
   QueryClient,
   QueryClientProvider,
+  useMutation,
   useQuery,
 } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import { useDefaultLayout } from 'react-resizable-panels'
 import { toast, Toaster } from 'sonner'
-import { fetchAccounts, fetchMessage } from './api/client'
+import { fetchAccounts, fetchMessage, triggerSync } from './api/client'
 import type { ConversationSummary, MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { CommandPalette } from './components/CommandPalette'
@@ -52,6 +53,7 @@ const DEFAULT_VIEW: SidebarSelection = {
   id: 'default-inbox',
   name: 'Inbox',
 }
+const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
 
 /**
  * Main mail client shell: toolbar, three-column layout, settings overlay.
@@ -72,6 +74,12 @@ function MailClient() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsCategory, setSettingsCategory] = useState<
     'general' | 'appearance' | 'accounts' | 'mailboxes' | null
+  >(null)
+  const [settingsAccountId, setSettingsAccountId] = useState<string | null>(
+    null,
+  )
+  const [settingsSmartMailboxId, setSettingsSmartMailboxId] = useState<
+    string | null
   >(null)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
@@ -116,28 +124,61 @@ function MailClient() {
       fetchMessage(selectedMessage!.messageId, selectedMessage!.sourceId),
     enabled: selectedMessage !== null,
   })
+  const isMessageDetailOpen = selectedMessage !== null
+  const messagePanelIds = useMemo(
+    () =>
+      isMessageDetailOpen
+        ? ['message-list', 'message-detail']
+        : ['message-list'],
+    [isMessageDetailOpen],
+  )
 
   useDaemonEvents()
 
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: 'posthaste-panels',
+  const {
+    defaultLayout: shellDefaultLayout,
+    onLayoutChanged: onShellLayoutChanged,
+  } = useDefaultLayout({
+    id: 'posthaste-shell-panels',
+    panelIds: SHELL_PANEL_IDS,
+    storage: localStorage,
+  })
+  const {
+    defaultLayout: messageDefaultLayout,
+    onLayoutChanged: onMessageLayoutChanged,
+  } = useDefaultLayout({
+    id: 'posthaste-message-panels',
+    panelIds: messagePanelIds,
     storage: localStorage,
   })
   const actions = useEmailActions()
+  const syncSourceMutation = useMutation({
+    mutationFn: triggerSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+      ])
+      toast('Sync started')
+    },
+    onError: (error) => {
+      toast.error(error.message)
+    },
+  })
 
   useEffect(() => {
     if (!selectedMessage || !selectedMessageQuery.data) {
       return
     }
-    if (selectedMessageQuery.data.isRead) {
-      return
-    }
-
     const selectionKey = `${selectedMessage.sourceId}:${selectedMessage.messageId}`
     if (lastAutoSeenKeyRef.current === selectionKey) {
       return
     }
     lastAutoSeenKeyRef.current = selectionKey
+
+    if (selectedMessageQuery.data.isRead) {
+      return
+    }
 
     actions.markRead({
       conversationId: selectedMessage.conversationId,
@@ -198,6 +239,8 @@ function MailClient() {
     const sourceId = resolveComposeSourceId()
     if (!sourceId) {
       setSettingsCategory('accounts')
+      setSettingsAccountId(null)
+      setSettingsSmartMailboxId(null)
       setIsSettingsOpen(true)
       return
     }
@@ -214,6 +257,10 @@ function MailClient() {
       messageId: selectedMessage.messageId,
     })
   }, [selectedMessage])
+
+  const handleClearSelectedMessage = useCallback(() => {
+    setSelectedMessage(null)
+  }, [])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -234,6 +281,8 @@ function MailClient() {
       if ((event.metaKey || event.ctrlKey) && event.key === ',') {
         event.preventDefault()
         setSettingsCategory(null)
+        setSettingsAccountId(null)
+        setSettingsSmartMailboxId(null)
         setIsSettingsOpen(true)
         return
       }
@@ -265,6 +314,18 @@ function MailClient() {
         return
       }
       if (isTypingTarget) return
+      if (
+        event.key === 'Escape' &&
+        selectedMessage &&
+        !showSettings &&
+        !isCommandPaletteOpen &&
+        !showShortcuts &&
+        composeIntent === null
+      ) {
+        event.preventDefault()
+        handleClearSelectedMessage()
+        return
+      }
       if (event.key === '?') {
         event.preventDefault()
         setShowShortcuts((prev) => !prev)
@@ -279,7 +340,17 @@ function MailClient() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleCompose, handleReply, handleToggleFlag, selectedMessage])
+  }, [
+    composeIntent,
+    handleClearSelectedMessage,
+    handleCompose,
+    handleReply,
+    handleToggleFlag,
+    isCommandPaletteOpen,
+    selectedMessage,
+    showSettings,
+    showShortcuts,
+  ])
 
   const handleSearch = useCallback((query: string, append?: boolean) => {
     setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query))
@@ -287,8 +358,13 @@ function MailClient() {
   }, [])
 
   const handleOpenSettings = useCallback(
-    (category?: 'general' | 'accounts' | 'mailboxes') => {
+    (
+      category?: 'general' | 'appearance' | 'accounts' | 'mailboxes',
+      options?: { accountId?: string | null; smartMailboxId?: string | null },
+    ) => {
       setSettingsCategory(category ?? null)
+      setSettingsAccountId(options?.accountId ?? null)
+      setSettingsSmartMailboxId(options?.smartMailboxId ?? null)
       setIsSettingsOpen(true)
       setIsCommandPaletteOpen(false)
     },
@@ -377,22 +453,32 @@ function MailClient() {
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
           setSettingsCategory(null)
+          setSettingsAccountId(null)
+          setSettingsSmartMailboxId(null)
           setIsSettingsOpen((open) => !open)
         }}
         onToggleTheme={handleToggleTheme}
         onTrash={handleTrash}
       />
       {actions.errorMessage && (
-        <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {actions.errorMessage}
+        <div className="flex items-center gap-3 border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <span className="min-w-0 flex-1">{actions.errorMessage}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            className="ph-focus-ring flex size-6 shrink-0 items-center justify-center rounded-md text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+            onClick={actions.clearError}
+          >
+            <X size={14} strokeWidth={1.8} />
+          </button>
         </div>
       )}
 
       {/* Main content */}
       <ResizablePanelGroup
         orientation="horizontal"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
+        defaultLayout={shellDefaultLayout}
+        onLayoutChanged={onShellLayoutChanged}
         className="min-h-0 flex-1"
       >
         <ResizablePanel
@@ -400,35 +486,61 @@ function MailClient() {
           defaultSize="210px"
           minSize="190px"
           maxSize="420px"
+          groupResizeBehavior="preserve-pixel-size"
         >
           <Sidebar
             selectedView={effectiveView}
+            onOpenAccountSettings={(sourceId) =>
+              handleOpenSettings('accounts', { accountId: sourceId })
+            }
+            onOpenSmartMailboxSettings={(smartMailboxId) =>
+              handleOpenSettings('mailboxes', { smartMailboxId })
+            }
             onSelectSmartMailbox={handleSelectSmartMailbox}
             onSelectSourceMailbox={handleSelectSourceMailbox}
+            onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
           />
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel
-          id="message-list"
-          defaultSize="420px"
+          id="mail-content"
           minSize="360px"
-          maxSize="960px"
+          groupResizeBehavior="preserve-relative-size"
         >
-          <MessageList
-            selectedView={effectiveView}
-            selection={selectedMessage}
-            onSelectMessage={handleSelectMessageRef}
-            actions={actions}
-            searchQuery={debouncedQuery}
-          />
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel id="message-detail" minSize="300px">
-          <MessageDetail
-            selection={selectedMessage}
-            onSelectMessage={handleSelectMessage}
-            onSearch={handleSearch}
-          />
+          <ResizablePanelGroup
+            orientation="horizontal"
+            defaultLayout={messageDefaultLayout}
+            onLayoutChanged={onMessageLayoutChanged}
+            className="h-full min-h-0"
+          >
+            <ResizablePanel
+              id="message-list"
+              defaultSize="420px"
+              minSize="360px"
+              maxSize={isMessageDetailOpen ? '960px' : undefined}
+            >
+              <MessageList
+                selectedView={effectiveView}
+                selection={selectedMessage}
+                onSelectMessage={handleSelectMessageRef}
+                onClearSelection={handleClearSelectedMessage}
+                actions={actions}
+                searchQuery={debouncedQuery}
+              />
+            </ResizablePanel>
+            {isMessageDetailOpen && (
+              <>
+                <ResizableHandle />
+                <ResizablePanel id="message-detail" minSize="300px">
+                  <MessageDetail
+                    selection={selectedMessage}
+                    onSelectMessage={handleSelectMessage}
+                    onSearch={handleSearch}
+                  />
+                </ResizablePanel>
+              </>
+            )}
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
 
@@ -436,9 +548,11 @@ function MailClient() {
         <SettingsOverlay
           accounts={accounts}
           activeAccountId={focusedSourceId}
+          initialAccountId={settingsAccountId}
           initialCategory={
             shouldForceSettings ? 'accounts' : (settingsCategory ?? undefined)
           }
+          initialSmartMailboxId={settingsSmartMailboxId}
           onActiveAccountChange={() => {
             setSelectedView(DEFAULT_VIEW)
             setSelectedMessage(null)
