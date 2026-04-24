@@ -10,6 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent } from 'react'
 import {
   applyAccountNamesToMessages,
   useAccountDirectory,
@@ -36,6 +37,7 @@ interface MessageListProps {
   selectedView: SidebarSelection | null
   selection: MailSelection | null
   onSelectMessage: (message: MailSelection) => void
+  onClearSelection: () => void
   actions: EmailActions
   searchQuery?: string
 }
@@ -171,6 +173,7 @@ export function MessageList({
   selectedView,
   selection,
   onSelectMessage,
+  onClearSelection,
   actions,
   searchQuery,
 }: MessageListProps) {
@@ -358,22 +361,36 @@ export function MessageList({
     scrollOffsetByView.set(currentViewKey, node.scrollTop)
   }, [currentViewKey])
 
-  useEffect(() => {
-    if (!selectedView || selection || messages.length === 0) {
-      return
-    }
+  const handleBackgroundMouseDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return
+      }
 
-    const firstMessage = messages[0]
-    onSelectMessage({
-      conversationId: firstMessage.conversationId,
-      sourceId: firstMessage.sourceId,
-      messageId: firstMessage.id,
-    })
-  }, [messages, onSelectMessage, selectedView, selection])
+      if (event.target === event.currentTarget) {
+        onClearSelection()
+        return
+      }
+
+      const target = event.target
+      if (!(target instanceof HTMLElement)) {
+        return
+      }
+
+      if (target.closest('[data-message-list-empty="true"]')) {
+        onClearSelection()
+      }
+    },
+    [onClearSelection],
+  )
 
   if (!selectedView) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 bg-panel p-6"
+        data-message-list-empty="true"
+        onMouseDown={handleBackgroundMouseDown}
+      >
         <MousePointerClick
           size={40}
           strokeWidth={1.5}
@@ -436,10 +453,14 @@ export function MessageList({
           <div
             ref={scrollContainerRef}
             className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[var(--list-zebra)]"
+            onMouseDown={handleBackgroundMouseDown}
             onScroll={handleScroll}
           >
             {isLoading && (
-              <div className="space-y-0 bg-[var(--list-zebra)]">
+              <div
+                className="space-y-0 bg-[var(--list-zebra)]"
+                data-message-list-empty="true"
+              >
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
@@ -476,7 +497,10 @@ export function MessageList({
               </div>
             )}
             {!isLoading && !error && messages.length === 0 && (
-              <div className="flex flex-col items-center gap-3 px-3 py-12">
+              <div
+                className="flex flex-col items-center gap-3 px-3 py-12"
+                data-message-list-empty="true"
+              >
                 <Inbox
                   size={40}
                   strokeWidth={1.5}
@@ -494,7 +518,10 @@ export function MessageList({
             )}
             {messages.length > 0 && (
               <>
-                <div style={{ height: topSpacerHeight }} />
+                <div
+                  data-message-list-empty="true"
+                  style={{ height: topSpacerHeight }}
+                />
                 {visibleMessages.map((message, index) => (
                   <div key={messageKey(message)} style={{ height: ROW_HEIGHT }}>
                     <MessageRow
@@ -503,6 +530,7 @@ export function MessageList({
                       isStriped={(startIndex + index) % 2 === 1}
                       columns={columns}
                       layout={tableLayout}
+                      actions={actions}
                       onSelect={() =>
                         onSelectMessage({
                           conversationId: message.conversationId,
@@ -513,7 +541,10 @@ export function MessageList({
                     />
                   </div>
                 ))}
-                <div style={{ height: bottomSpacerHeight }} />
+                <div
+                  data-message-list-empty="true"
+                  style={{ height: bottomSpacerHeight }}
+                />
               </>
             )}
           </div>

@@ -31,22 +31,23 @@ App
     │   ├── Shortcut trigger
     │   ├── Settings trigger
     │   └── Theme trigger
-    ├── ResizablePanelGroup
+    ├── ResizablePanelGroup (shell)
         ├── Sidebar
         │   ├── Quick filters
         │   ├── Smart mailbox section
         │   ├── Tags section
         │   └── Account mailbox sections
-        ├── MessageList
-        │   ├── Column header bar (SortableColumnHeader + ColumnResizeHandle)
-        │   ├── Message query for the selected mailbox or smart mailbox
-        │   ├── Virtualized visible rows
-        │   └── Live refresh hook
-        └── MessageDetail
-            ├── Metadata header
-            ├── Tag strip
-            ├── Attachment strip
-            └── EmailFrame or text fallback
+        └── ResizablePanelGroup (mail content)
+            ├── MessageList
+            │   ├── Column header bar (SortableColumnHeader + ColumnResizeHandle)
+            │   ├── Message query for the selected mailbox or smart mailbox
+            │   ├── Virtualized visible rows
+            │   └── Live refresh hook
+            └── MessageDetail (mounted only while a message is selected)
+                ├── Metadata header
+                ├── Tag strip
+                ├── Attachment strip
+                └── EmailFrame or text fallback
     ├── CommandPalette
     ├── SettingsOverlay
     ├── ShortcutReference
@@ -78,9 +79,17 @@ Domain events and mutation results update caches through the centralized domain 
 - The visible slice is derived from `scrollTop`, `viewportHeight`, and overscan rows.
 - Scroll offset is preserved per selected mailbox or smart-mailbox key.
 - Sorting is applied over the currently loaded individual messages.
+- Empty list space or `Escape` clears the selected message. When no message is selected, the detail pane is closed so the message list can use the available width.
+- The sidebar is resized in a separate shell panel group from the message list and detail pane, so selecting or deselecting a message does not change the left pane width.
 - Thread viewing is not the default list mode. When the user wants a thread, a command may apply a thread filter to the message list.
 
 Each row represents one message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
+
+Message rows expose the same primary message actions through a right-click context menu: open, mark read/unread, flag/unflag, archive, and move to Trash. Opening the context menu selects the row first so command targets stay explicit.
+
+## Sidebar Context Menus
+
+Sidebar objects expose object-scoped right-click menus. Smart mailboxes can be opened or edited in settings. Source account headers can be synced or opened in account settings. Source mailboxes can be opened, can trigger a sync for their parent account, or can open account settings.
 
 ## Column configuration
 
@@ -130,6 +139,7 @@ Command palette, settings, mailbox editor, shortcuts, onboarding, and compose sh
 | `Cmd/Ctrl+,` | Open settings |
 | `Cmd/Ctrl+N` | Compose new message |
 | `?` | Open keyboard shortcuts |
+| `Esc` | Deselect the open message |
 | `j` / `k` or Down / Up | Next / previous conversation |
 | `e` or `y` | Archive |
 | `#` or `Backspace` | Delete (move to Trash) |

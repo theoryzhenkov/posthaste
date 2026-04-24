@@ -9,7 +9,15 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  Edit3,
+  MailOpen,
+  RefreshCw,
+  Settings,
+} from 'lucide-react'
 import { useAccountDirectory } from '../accountDirectory'
 import { fetchSidebar } from '../api/client'
 import type {
@@ -24,6 +32,13 @@ import {
   smartMailboxFallbackIcon,
 } from '../mailboxRoles'
 import { queryKeys } from '../queryKeys'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from './ui/context-menu'
 
 /**
  * Discriminated union representing the current sidebar selection.
@@ -41,12 +56,15 @@ export type SidebarSelection =
 /** @spec docs/L1-ui#component-hierarchy */
 interface SidebarProps {
   selectedView: SidebarSelection | null
+  onOpenAccountSettings: (sourceId: string) => void
+  onOpenSmartMailboxSettings: (smartMailboxId: string) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
     mailboxId: string,
     name: string,
   ) => void
+  onSyncSource: (sourceId: string) => void
 }
 
 function roleIcon(role: Mailbox['role'], size = 14): React.ReactNode {
@@ -209,22 +227,27 @@ function itemButtonClass(isSelected: boolean, depth = 0): string {
 
 /** Smart mailbox row with unread badge. */
 function ViewItem({
+  id,
   name,
   unreadMessages,
   accent,
   isSelected,
+  onOpenSettings,
   onSelect,
 }: {
+  id: string
   name: string
   unreadMessages?: number
   accent?: string
   isSelected: boolean
+  onOpenSettings: (smartMailboxId: string) => void
   onSelect: () => void
 }) {
-  return (
+  const button = (
     <button
       className={itemButtonClass(isSelected)}
       onClick={onSelect}
+      onContextMenu={onSelect}
       type="button"
     >
       <span
@@ -250,24 +273,50 @@ function ViewItem({
       )}
     </button>
   )
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-44">
+        <ContextMenuItem onSelect={onSelect}>
+          <MailOpen size={14} />
+          Open
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onOpenSettings(id)}>
+          <Edit3 size={14} />
+          Edit mailbox
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
 }
 
 /** Source mailbox row with role icon and unread badge. */
 function MailboxItem({
+  sourceId,
+  sourceName,
   mailbox,
   isSelected,
   depth = 0,
+  onOpenAccountSettings,
   onSelect,
+  onSyncSource,
 }: {
+  sourceId: string
+  sourceName: string
   mailbox: Mailbox
   isSelected: boolean
   depth?: number
+  onOpenAccountSettings: (sourceId: string) => void
   onSelect: () => void
+  onSyncSource: (sourceId: string) => void
 }) {
-  return (
+  const button = (
     <button
       className={itemButtonClass(isSelected, depth)}
       onClick={onSelect}
+      onContextMenu={onSelect}
       type="button"
     >
       <span
@@ -291,21 +340,46 @@ function MailboxItem({
       )}
     </button>
   )
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48">
+        <ContextMenuItem onSelect={onSelect}>
+          <MailOpen size={14} />
+          Open mailbox
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => onSyncSource(sourceId)}>
+          <RefreshCw size={14} />
+          Sync {sourceName}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onOpenAccountSettings(sourceId)}>
+          <Settings size={14} />
+          Account settings
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
 }
 
 /** Collapsible source section with its mailbox children. */
 function SourceSection({
   source,
   selectedView,
+  onOpenAccountSettings,
   onSelectSourceMailbox,
+  onSyncSource,
 }: {
   source: SidebarResponse['sources'][number]
   selectedView: SidebarSelection | null
+  onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
     mailboxId: string,
     name: string,
   ) => void
+  onSyncSource: (sourceId: string) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const accent = useMemo(
@@ -318,48 +392,72 @@ function SourceSection({
     [source.mailboxes],
   )
 
+  const headerButton = (
+    <button
+      type="button"
+      className="ph-focus-ring mx-1.5 mt-1 flex h-[30px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] px-2 text-left transition-colors hover:bg-[var(--sidebar-accent)]"
+      onClick={() => setCollapsed((prev) => !prev)}
+    >
+      {collapsed ? (
+        <ChevronRight
+          size={12}
+          strokeWidth={1.5}
+          className="text-muted-foreground"
+        />
+      ) : (
+        <ChevronDown
+          size={12}
+          strokeWidth={1.5}
+          className="text-muted-foreground"
+        />
+      )}
+      <span
+        className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] font-bold text-white"
+        style={{ backgroundColor: accent }}
+      >
+        {sourceStamp(source.name)}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
+        {source.name}
+      </span>
+      {unreadTotal > 0 && (
+        <span className="rounded-[4px] bg-signal-unread px-1.5 font-mono text-[11px] font-semibold tabular-nums text-white">
+          {unreadTotal}
+        </span>
+      )}
+    </button>
+  )
+
   return (
     <div>
-      <button
-        type="button"
-        className="ph-focus-ring mx-1.5 mt-1 flex h-[30px] w-[calc(100%-0.75rem)] items-center gap-2 rounded-[5px] px-2 text-left transition-colors hover:bg-[var(--sidebar-accent)]"
-        onClick={() => setCollapsed((prev) => !prev)}
-      >
-        {collapsed ? (
-          <ChevronRight
-            size={12}
-            strokeWidth={1.5}
-            className="text-muted-foreground"
-          />
-        ) : (
-          <ChevronDown
-            size={12}
-            strokeWidth={1.5}
-            className="text-muted-foreground"
-          />
-        )}
-        <span
-          className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] font-bold text-white"
-          style={{ backgroundColor: accent }}
-        >
-          {sourceStamp(source.name)}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
-          {source.name}
-        </span>
-        {unreadTotal > 0 && (
-          <span className="rounded-[4px] bg-signal-unread px-1.5 font-mono text-[11px] font-semibold tabular-nums text-white">
-            {unreadTotal}
-          </span>
-        )}
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{headerButton}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-48">
+          <ContextMenuItem onSelect={() => setCollapsed((prev) => !prev)}>
+            {collapsed ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {collapsed ? 'Expand' : 'Collapse'}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => onSyncSource(source.id)}>
+            <RefreshCw size={14} />
+            Sync account
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => onOpenAccountSettings(source.id)}>
+            <Settings size={14} />
+            Account settings
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {!collapsed && (
         <div className="space-y-0.5">
           {source.mailboxes.map((mailbox) => (
             <MailboxItem
               key={`${source.id}:${mailbox.id}`}
+              sourceId={source.id}
+              sourceName={source.name}
               mailbox={mailbox}
               depth={1}
+              onOpenAccountSettings={onOpenAccountSettings}
               isSelected={
                 selectedView?.kind === 'source-mailbox' &&
                 selectedView.sourceId === source.id &&
@@ -372,6 +470,7 @@ function SourceSection({
                   `${source.name} / ${mailbox.name}`,
                 )
               }
+              onSyncSource={onSyncSource}
             />
           ))}
         </div>
@@ -410,8 +509,11 @@ function SectionHeader({
  */
 export function Sidebar({
   selectedView,
+  onOpenAccountSettings,
+  onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
+  onSyncSource,
 }: SidebarProps) {
   const {
     data: sidebar,
@@ -477,6 +579,7 @@ export function Sidebar({
                 {groupedSmartMailboxes.quick.map((smartMailbox) => (
                   <ViewItem
                     key={smartMailbox.id}
+                    id={smartMailbox.id}
                     name={smartMailbox.name}
                     unreadMessages={smartMailbox.unreadMessages}
                     accent={smartMailboxAccent(smartMailbox.name)}
@@ -487,6 +590,7 @@ export function Sidebar({
                     onSelect={() =>
                       onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
                     }
+                    onOpenSettings={onOpenSmartMailboxSettings}
                   />
                 ))}
               </div>
@@ -501,6 +605,7 @@ export function Sidebar({
                 {groupedSmartMailboxes.smart.map((smartMailbox) => (
                   <ViewItem
                     key={smartMailbox.id}
+                    id={smartMailbox.id}
                     name={smartMailbox.name}
                     unreadMessages={smartMailbox.unreadMessages}
                     accent={smartMailboxAccent(smartMailbox.name)}
@@ -511,6 +616,7 @@ export function Sidebar({
                     onSelect={() =>
                       onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
                     }
+                    onOpenSettings={onOpenSmartMailboxSettings}
                   />
                 ))}
               </div>
@@ -527,6 +633,7 @@ export function Sidebar({
                   {groupedSmartMailboxes.tags.map((smartMailbox) => (
                     <ViewItem
                       key={smartMailbox.id}
+                      id={smartMailbox.id}
                       name={smartMailbox.name}
                       unreadMessages={smartMailbox.unreadMessages}
                       accent={smartMailboxAccent(smartMailbox.name)}
@@ -537,6 +644,7 @@ export function Sidebar({
                       onSelect={() =>
                         onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
                       }
+                      onOpenSettings={onOpenSmartMailboxSettings}
                     />
                   ))}
                 </div>
@@ -555,7 +663,9 @@ export function Sidebar({
                     key={source.id}
                     source={source}
                     selectedView={selectedView}
+                    onOpenAccountSettings={onOpenAccountSettings}
                     onSelectSourceMailbox={onSelectSourceMailbox}
+                    onSyncSource={onSyncSource}
                   />
                 ))}
               </div>

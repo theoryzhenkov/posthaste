@@ -6,8 +6,17 @@
  *
  * @spec docs/L1-ui#messagelist
  */
+import { Archive, Eye, EyeOff, MailOpen, Star, Trash2 } from 'lucide-react'
 import type { MessageSummary } from '../api/types'
+import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from './ui/context-menu'
 import {
   type ColumnId,
   type ThreadListLayout,
@@ -22,6 +31,7 @@ interface MessageRowProps {
   onSelect: () => void
   columns: ColumnId[]
   layout: ThreadListLayout
+  actions: EmailActions
 }
 
 /**
@@ -37,8 +47,10 @@ export function MessageRow({
   onSelect,
   columns,
   layout,
+  actions,
 }: MessageRowProps) {
-  return (
+  const messageRef = { messageId: message.id, sourceId: message.sourceId }
+  const row = (
     <button
       className={cn(
         'grid h-full w-full items-center gap-0',
@@ -53,6 +65,7 @@ export function MessageRow({
       )}
       style={layout.gridStyle}
       onClick={onSelect}
+      onContextMenu={onSelect}
       type="button"
     >
       {columns.map((columnId) => {
@@ -72,5 +85,37 @@ export function MessageRow({
         )
       })}
     </button>
+  )
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-44">
+        <ContextMenuItem onSelect={onSelect}>
+          <MailOpen size={14} />
+          Open
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.toggleRead(message)}>
+          {message.isRead ? <EyeOff size={14} /> : <Eye size={14} />}
+          {message.isRead ? 'Mark unread' : 'Mark read'}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.toggleFlag(message)}>
+          <Star size={14} />
+          {message.isFlagged ? 'Unflag' : 'Flag'}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => actions.archive(messageRef)}>
+          <Archive size={14} />
+          Archive
+        </ContextMenuItem>
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={() => actions.trash(messageRef)}
+        >
+          <Trash2 size={14} />
+          Move to Trash
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
