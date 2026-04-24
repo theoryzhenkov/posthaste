@@ -158,6 +158,23 @@ fn source_message_scope_rule(source_id: &str, mailbox_id: Option<&MailboxId>) ->
     all_rule(nodes)
 }
 
+const DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 5;
+const MAX_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 50;
+
+fn automation_rule_preview_limit(limit: Option<usize>) -> Result<usize, ApiError> {
+    let limit = limit.unwrap_or(DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT);
+    if limit == 0 || limit > MAX_AUTOMATION_RULE_PREVIEW_LIMIT {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_limit",
+            format!(
+                "limit must be between 1 and {MAX_AUTOMATION_RULE_PREVIEW_LIMIT} preview messages"
+            ),
+        ));
+    }
+    Ok(limit)
+}
+
 /// Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
 ///
 /// Outer `Option` distinguishes omitted `role` from an explicit JSON `null`.
@@ -180,6 +197,16 @@ pub struct PatchSettingsRequest {
     #[serde(default)]
     pub default_account_id: Option<Option<String>>,
     pub automation_rules: Option<Vec<AutomationRule>>,
+}
+
+/// Request body for `POST /v1/automation-rules:preview`.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAutomationRuleRequest {
+    pub condition: SmartMailboxRule,
+    pub limit: Option<usize>,
 }
 
 /// Transport fields for account create/patch requests.
@@ -333,6 +360,16 @@ pub struct MessagePageResponse {
     pub next_cursor: Option<String>,
 }
 
+/// Matching message preview for a draft automation rule condition.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRulePreviewResponse {
+    pub total: i64,
+    pub items: Vec<MessageSummary>,
+}
+
 impl ApiError {
     /// Map a domain `ServiceError` to an HTTP status code and JSON error body.
     ///
@@ -439,6 +476,37 @@ pub async fn patch_settings(
         .put_app_settings(&settings)
         .map_err(ApiError::from_service_error)?;
     Ok(Json(settings))
+}
+
+/// POST /v1/automation-rules:preview
+///
+/// Returns a small newest-first sample and total count for a draft rule
+/// condition using the same indexed rule query path as smart mailboxes.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn preview_automation_rule(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<PreviewAutomationRuleRequest>,
+) -> Result<Json<AutomationRulePreviewResponse>, ApiError> {
+    let limit = automation_rule_preview_limit(request.limit)?;
+    let (_, total) = state
+        .service
+        .count_messages_by_rule(&request.condition)
+        .map_err(ApiError::from_service_error)?;
+    let page = state
+        .service
+        .query_message_page_by_rule(
+            &request.condition,
+            limit,
+            None,
+            MessageSortField::Date,
+            SortDirection::Desc,
+        )
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(AutomationRulePreviewResponse {
+        total,
+        items: page.items,
+    }))
 }
 
 /// GET /v1/accounts

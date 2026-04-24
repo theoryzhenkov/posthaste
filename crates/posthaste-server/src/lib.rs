@@ -170,6 +170,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             get(api::get_settings).patch(api::patch_settings),
         )
         .route(
+            "/v1/automation-rules:preview",
+            post(api::preview_automation_rule),
+        )
+        .route(
             "/v1/accounts",
             get(api::list_accounts).post(api::create_account),
         )
