@@ -24,8 +24,9 @@ fmt-check:
     just backend fmt-check
     just frontend fmt-check
 
-# Lint, typecheck, format-check, and docs build
+# Smoke dev wiring, lint, typecheck, format-check, and docs build
 check:
+    just dev-smoke
     just fmt-check
     just backend check
     just frontend check
@@ -65,6 +66,10 @@ dev-desktop:
 # Start Stalwart + seed + daemon with Overmind.
 dev-services:
     bash tools/dev/overmind/launch.sh services
+
+# Validate dev stack paths and recipe wiring without starting services.
+dev-smoke:
+    bash tools/dev/smoke.sh
 
 # --- Local Stalwart dev server (end-to-end testing) ---
 # See tools/dev/stalwart/ for config and seed script.
