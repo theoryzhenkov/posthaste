@@ -259,9 +259,7 @@ fn date_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, St
         .format(&Rfc3339)
         .map_err(|e| format!("date format error: {e}"))?;
 
-    let next_day = date
-        .next_day()
-        .ok_or_else(|| "date overflow".to_string())?;
+    let next_day = date.next_day().ok_or_else(|| "date overflow".to_string())?;
     let end = next_day
         .midnight()
         .assume_utc()

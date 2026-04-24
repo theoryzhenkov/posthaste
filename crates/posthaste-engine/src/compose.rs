@@ -22,9 +22,7 @@ pub(crate) fn render_markdown(markdown: &str) -> String {
 }
 
 /// Convert a domain `Recipient` to a `jmap_client` email address for JMAP requests.
-pub(crate) fn recipient_to_address(
-    recipient: &Recipient,
-) -> jmap_client::email::EmailAddress {
+pub(crate) fn recipient_to_address(recipient: &Recipient) -> jmap_client::email::EmailAddress {
     match &recipient.name {
         Some(name) if !name.is_empty() => (name.as_str(), recipient.email.as_str()).into(),
         _ => recipient.email.as_str().into(),
