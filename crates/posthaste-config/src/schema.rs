@@ -1,9 +1,9 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppSettings, AutomationAction, AutomationRule, AutomationScope, AutomationTrigger, MailboxId,
-    SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, MailboxId, SecretKind,
+    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +17,8 @@ pub struct AppToml {
     #[serde(default)]
     pub schema_version: u32,
     pub default_source_id: Option<String>,
+    #[serde(default)]
+    pub automations: Vec<AutomationRuleToml>,
     #[serde(default)]
     pub daemon: DaemonToml,
     #[serde(default)]
@@ -43,10 +45,15 @@ impl AppToml {
     /// Converts this TOML struct to the domain `AppSettings`.
     ///
     /// @spec docs/L1-accounts#toml-schema
-    pub fn to_app_settings(&self) -> AppSettings {
-        AppSettings {
+    pub fn to_app_settings(&self) -> Result<AppSettings, String> {
+        Ok(AppSettings {
             default_account_id: self.default_source_id.as_deref().map(AccountId::from),
-        }
+            automation_rules: self
+                .automations
+                .iter()
+                .map(convert_automation_rule)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 
     /// Builds an `AppToml` from domain settings, preserving daemon config from
@@ -60,6 +67,11 @@ impl AppToml {
                 .default_account_id
                 .as_ref()
                 .map(|id| id.to_string()),
+            automations: settings
+                .automation_rules
+                .iter()
+                .map(convert_automation_rule_to_toml)
+                .collect(),
             daemon: existing.daemon.clone(),
             logging: existing.logging.clone(),
         }
@@ -82,8 +94,6 @@ pub struct SourceToml {
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub appearance: Option<AccountAppearanceToml>,
-    #[serde(default)]
-    pub automations: Vec<AutomationRuleToml>,
     #[serde(default)]
     pub transport: TransportToml,
     pub created_at: Option<String>,
@@ -126,7 +136,7 @@ pub enum AccountAppearanceToml {
     },
 }
 
-/// TOML `[[automations]]` item for account-scoped automation rules.
+/// TOML `[[automations]]` item for global automation rules.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AutomationRuleToml {
     pub id: String,
@@ -137,7 +147,6 @@ pub struct AutomationRuleToml {
     pub triggers: Vec<AutomationTriggerToml>,
     #[serde(default)]
     pub backfill: bool,
-    pub scope: AutomationScopeToml,
     pub condition: RuleGroupToml,
     #[serde(default)]
     pub actions: Vec<AutomationActionToml>,
@@ -150,14 +159,6 @@ pub enum AutomationTriggerToml {
     MessageArrived,
     MessageChanged,
     Manual,
-}
-
-/// TOML automation scope.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum AutomationScopeToml {
-    Account,
-    Mailbox { mailbox_id: String },
 }
 
 /// TOML automation action.
@@ -224,11 +225,6 @@ impl SourceToml {
                     color_hue: *color_hue,
                 },
             }),
-            automation_rules: self
-                .automations
-                .iter()
-                .map(convert_automation_rule)
-                .collect::<Result<Vec<_>, _>>()?,
             transport: AccountTransportSettings {
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
@@ -286,11 +282,6 @@ impl SourceToml {
                         color_hue: *color_hue,
                     },
                 }),
-            automations: settings
-                .automation_rules
-                .iter()
-                .map(convert_automation_rule_to_toml)
-                .collect(),
             transport: TransportToml {
                 base_url: settings.transport.base_url.clone(),
                 username: settings.transport.username.clone(),
@@ -322,12 +313,6 @@ fn convert_automation_rule(rule: &AutomationRuleToml) -> Result<AutomationRule, 
             .iter()
             .map(convert_automation_trigger)
             .collect(),
-        scope: match &rule.scope {
-            AutomationScopeToml::Account => AutomationScope::Account,
-            AutomationScopeToml::Mailbox { mailbox_id } => AutomationScope::Mailbox {
-                mailbox_id: MailboxId::from(mailbox_id.as_str()),
-            },
-        },
         condition: SmartMailboxRule {
             root: convert_rule_group(&rule.condition)?,
         },
@@ -369,12 +354,6 @@ fn convert_automation_rule_to_toml(rule: &AutomationRule) -> AutomationRuleToml 
             .map(convert_automation_trigger_to_toml)
             .collect(),
         backfill: rule.backfill,
-        scope: match &rule.scope {
-            AutomationScope::Account => AutomationScopeToml::Account,
-            AutomationScope::Mailbox { mailbox_id } => AutomationScopeToml::Mailbox {
-                mailbox_id: mailbox_id.to_string(),
-            },
-        },
         condition: convert_group_to_toml(&rule.condition.root),
         actions: rule
             .actions
@@ -766,39 +745,6 @@ mod tests {
                 initials: "MF".to_string(),
                 color_hue: 245,
             }),
-            automation_rules: vec![AutomationRule {
-                id: "rule-newsletters".to_string(),
-                name: "Newsletters".to_string(),
-                enabled: true,
-                triggers: vec![AutomationTrigger::MessageArrived],
-                scope: AutomationScope::Mailbox {
-                    mailbox_id: MailboxId::from("inbox"),
-                },
-                condition: SmartMailboxRule {
-                    root: SmartMailboxGroup {
-                        operator: SmartMailboxGroupOperator::Any,
-                        negated: false,
-                        nodes: vec![
-                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                                field: SmartMailboxField::FromName,
-                                operator: SmartMailboxOperator::Contains,
-                                negated: false,
-                                value: SmartMailboxValue::String("Posthaste".to_string()),
-                            }),
-                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                                field: SmartMailboxField::FromEmail,
-                                operator: SmartMailboxOperator::Contains,
-                                negated: false,
-                                value: SmartMailboxValue::String("Posthaste".to_string()),
-                            }),
-                        ],
-                    },
-                },
-                actions: vec![AutomationAction::ApplyTag {
-                    tag: "newsletter".to_string(),
-                }],
-                backfill: true,
-            }],
             transport: AccountTransportSettings {
                 base_url: Some("https://api.fastmail.com".to_string()),
                 username: Some("user@example.com".to_string()),
@@ -839,17 +785,48 @@ mod tests {
     fn app_toml_round_trips() {
         let settings = AppSettings {
             default_account_id: Some(AccountId::from("primary")),
+            automation_rules: vec![AutomationRule {
+                id: "rule-newsletters".to_string(),
+                name: "Newsletters".to_string(),
+                enabled: true,
+                triggers: vec![AutomationTrigger::MessageArrived],
+                condition: SmartMailboxRule {
+                    root: SmartMailboxGroup {
+                        operator: SmartMailboxGroupOperator::Any,
+                        negated: false,
+                        nodes: vec![
+                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                                field: SmartMailboxField::FromName,
+                                operator: SmartMailboxOperator::Contains,
+                                negated: false,
+                                value: SmartMailboxValue::String("Posthaste".to_string()),
+                            }),
+                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                                field: SmartMailboxField::FromEmail,
+                                operator: SmartMailboxOperator::Contains,
+                                negated: false,
+                                value: SmartMailboxValue::String("Posthaste".to_string()),
+                            }),
+                        ],
+                    },
+                },
+                actions: vec![AutomationAction::ApplyTag {
+                    tag: "newsletter".to_string(),
+                }],
+                backfill: true,
+            }],
         };
         let existing = AppToml {
             schema_version: 1,
             default_source_id: None,
+            automations: Vec::new(),
             daemon: DaemonToml::default(),
             logging: LoggingToml::default(),
         };
         let toml_struct = AppToml::from_app_settings(&settings, &existing);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
         let parsed: AppToml = toml::from_str(&toml_string).unwrap();
-        let round_tripped = parsed.to_app_settings();
+        let round_tripped = parsed.to_app_settings().unwrap();
 
         assert_eq!(round_tripped, settings);
     }

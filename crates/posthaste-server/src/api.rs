@@ -11,9 +11,9 @@ use axum::Json;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
     AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
-    AutomationAction, AutomationRule, AutomationScope, CommandResult, ConversationCursor,
-    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, GatewayError, Identity, MailboxId, MailboxSummary, MessageAttachment,
+    AutomationAction, AutomationRule, CommandResult, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSortField, ConversationSummary, ConversationView, DomainEvent,
+    EventFilter, GatewayError, Identity, MailboxId, MailboxSummary, MessageAttachment,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
     Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind,
     SecretRef, SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
@@ -38,7 +38,8 @@ use account_support::{
     apply_secret_instruction, default_account_appearance, delete_managed_secret,
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
     normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
-    normalize_optional, store_error_to_api, validate_account_settings, validate_logo_image_id,
+    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_rules,
+    validate_logo_image_id,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -176,7 +177,9 @@ const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSettingsRequest {
-    pub default_account_id: Option<String>,
+    #[serde(default)]
+    pub default_account_id: Option<Option<String>>,
+    pub automation_rules: Option<Vec<AutomationRule>>,
 }
 
 /// Transport fields for account create/patch requests.
@@ -227,8 +230,6 @@ pub struct CreateAccountRequest {
     pub enabled: Option<bool>,
     pub appearance: Option<AccountAppearance>,
     #[serde(default)]
-    pub automation_rules: Vec<AutomationRule>,
-    #[serde(default)]
     pub transport: AccountTransportRequest,
     #[serde(default)]
     pub secret: SecretWriteRequest,
@@ -246,7 +247,6 @@ pub struct PatchAccountRequest {
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
     pub appearance: Option<AccountAppearance>,
-    pub automation_rules: Option<Vec<AutomationRule>>,
     pub transport: Option<AccountTransportRequest>,
     pub secret: Option<SecretWriteRequest>,
 }
@@ -408,23 +408,32 @@ pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PatchSettingsRequest>,
 ) -> Result<Json<AppSettings>, ApiError> {
+    let mut settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
     if let Some(default_account_id) = &request.default_account_id {
-        let account = state
-            .service
-            .get_source(&AccountId::from(default_account_id.as_str()))
-            .map_err(ApiError::from_service_error)?;
-        if account.is_none() {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_account",
-                "default account must reference an existing account",
-            ));
+        if let Some(default_account_id) = default_account_id {
+            let account = state
+                .service
+                .get_source(&AccountId::from(default_account_id.as_str()))
+                .map_err(ApiError::from_service_error)?;
+            if account.is_none() {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_account",
+                    "default account must reference an existing account",
+                ));
+            }
+            settings.default_account_id = Some(AccountId::from(default_account_id.as_str()));
+        } else {
+            settings.default_account_id = None;
         }
     }
-
-    let settings = AppSettings {
-        default_account_id: request.default_account_id.map(AccountId),
-    };
+    if let Some(automation_rules) = &request.automation_rules {
+        settings.automation_rules = normalize_automation_rules(automation_rules);
+    }
+    validate_automation_rules(&settings.automation_rules)?;
     state
         .service
         .put_app_settings(&settings)
@@ -490,11 +499,9 @@ pub async fn create_account(
         driver,
         enabled,
         appearance,
-        automation_rules,
         transport,
         secret,
     } = request;
-    let automation_rules = normalize_automation_rules(&automation_rules);
     let email_patterns = normalize_email_patterns(&email_patterns);
     let account_id = match id {
         Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
@@ -536,7 +543,6 @@ pub async fn create_account(
         driver: driver.unwrap_or(AccountDriver::Jmap),
         enabled: enabled.unwrap_or(true),
         appearance: appearance.map(normalize_account_appearance),
-        automation_rules,
         transport: transport.into(),
         created_at: timestamp.clone(),
         updated_at: timestamp,
@@ -1946,7 +1952,6 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
-            automation_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -1972,7 +1977,6 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
-            automation_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: None,
@@ -2022,7 +2026,6 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
-            automation_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://before.example/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -2041,7 +2044,6 @@ mod tests {
                 driver: None,
                 enabled: None,
                 appearance: None,
-                automation_rules: None,
                 transport: Some(AccountTransportRequest {
                     base_url: Some("https://after.example/jmap".to_string()),
                     username: None,
