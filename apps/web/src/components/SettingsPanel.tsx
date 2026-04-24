@@ -369,6 +369,7 @@ export function SettingsPanel({
           {activeCategory === 'accounts' && (
             <AccountsPane
               accounts={accounts}
+              settings={settingsQuery.data ?? null}
               selectedAccountId={effectiveEditorTarget}
               editingAccount={editingAccount}
               editorKey={editorKey}
@@ -381,6 +382,10 @@ export function SettingsPanel({
               onSaved={async (account) => {
                 applyAccountMutationResult(queryClient, account)
                 setEditorTarget(account.id)
+              }}
+              onAutomationSettingsSaved={async (settings) => {
+                queryClient.setQueryData(queryKeys.settings, settings)
+                invalidateAccountReadModels(queryClient)
               }}
               onVerified={async () => {
                 invalidateAccountReadModels(
@@ -397,6 +402,7 @@ export function SettingsPanel({
             <SmartMailboxesPane
               smartMailboxes={smartMailboxSummaries}
               accounts={accounts}
+              settings={settingsQuery.data ?? null}
               selectedMailboxId={effectiveSmartMailboxTarget}
               editingSmartMailbox={editingSmartMailbox}
               editorKey={smartMailboxEditorKey}
@@ -413,10 +419,8 @@ export function SettingsPanel({
                 await invalidateSmartMailboxQueries(mailbox.id)
                 setSmartMailboxEditorTarget(mailbox.id)
               }}
-              onAutomationAccountsSaved={async (savedAccounts) => {
-                for (const account of savedAccounts) {
-                  applyAccountMutationResult(queryClient, account)
-                }
+              onAutomationSettingsSaved={async (settings) => {
+                queryClient.setQueryData(queryKeys.settings, settings)
                 invalidateAccountReadModels(queryClient)
               }}
               onDeleted={async (mailboxId) => {

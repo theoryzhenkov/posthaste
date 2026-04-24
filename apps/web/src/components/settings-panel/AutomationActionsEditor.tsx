@@ -1,9 +1,8 @@
 /**
  * Shared automation action editors for account and smart-mailbox settings.
  *
- * Account automations are persisted on accounts. Smart-mailbox actions are
- * projected into account automations whose condition is:
- * smart-mailbox rule AND per-action rule.
+ * Automation rules are persisted globally in app settings. Account and smart
+ * mailbox editors project their UI context into normal query conditions.
  *
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-search#smart-mailbox-data-model
@@ -13,16 +12,16 @@ import type React from 'react'
 import { useState } from 'react'
 import type {
   AccountOverview,
+  AppSettings,
   AutomationAction,
   AutomationRule,
-  AutomationScope,
   AutomationTrigger,
   Mailbox,
   SmartMailbox,
   SmartMailboxGroup,
   SmartMailboxRule,
 } from '../../api/types'
-import { fetchMailboxes, updateAccount } from '../../api/client'
+import { fetchMailboxes, patchSettings } from '../../api/client'
 import { queryKeys } from '../../queryKeys'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
@@ -68,7 +67,6 @@ interface AutomationRuleDraft {
   name: string
   enabled: boolean
   triggers: AutomationTrigger[]
-  scope: AutomationScope
   condition: SmartMailboxRule
   actions: AutomationAction[]
   backfill: boolean
@@ -92,6 +90,85 @@ function groupNode(group: SmartMailboxGroup) {
     negated: group.negated,
     nodes: group.nodes,
   }
+}
+
+function sourceConditionNode(accountId: string) {
+  return {
+    type: 'condition' as const,
+    field: 'sourceId' as const,
+    operator: 'equals' as const,
+    negated: false,
+    value: accountId,
+  }
+}
+
+function isSourceConditionForAccount(
+  node: SmartMailboxGroup['nodes'][number] | undefined,
+  accountId: string,
+): boolean {
+  return (
+    node?.type === 'condition' &&
+    node.field === 'sourceId' &&
+    node.operator === 'equals' &&
+    !node.negated &&
+    typeof node.value === 'string' &&
+    node.value === accountId
+  )
+}
+
+function extractAccountIdFromRule(
+  rule: AutomationRule,
+  fallbackAccountId: string,
+): string {
+  const sourceNode = rule.condition.root.nodes.find(
+    (node) =>
+      node.type === 'condition' &&
+      node.field === 'sourceId' &&
+      node.operator === 'equals' &&
+      !node.negated &&
+      typeof node.value === 'string' &&
+      node.value.trim().length > 0,
+  )
+  return sourceNode?.type === 'condition' &&
+    typeof sourceNode.value === 'string'
+    ? sourceNode.value
+    : fallbackAccountId
+}
+
+function accountScopedCondition(
+  rule: SmartMailboxRule,
+  accountId: string,
+): SmartMailboxRule {
+  return {
+    root: {
+      operator: 'all',
+      negated: false,
+      nodes: [sourceConditionNode(accountId), groupNode(cloneRule(rule).root)],
+    },
+  }
+}
+
+function actionConditionFromAccountRule(
+  rule: AutomationRule,
+  accountId: string,
+): SmartMailboxRule {
+  const nodes = rule.condition.root.nodes
+  const secondNode = nodes[1]
+  if (
+    rule.condition.root.operator === 'all' &&
+    !rule.condition.root.negated &&
+    isSourceConditionForAccount(nodes[0], accountId) &&
+    secondNode?.type === 'group'
+  ) {
+    return {
+      root: {
+        operator: secondNode.operator,
+        negated: secondNode.negated,
+        nodes: secondNode.nodes,
+      },
+    }
+  }
+  return cloneRule(rule.condition)
 }
 
 function automationRuleSignature(rules: AutomationRuleDraft[]): string {
@@ -155,8 +232,7 @@ function ruleToDraft(
     name: rule.name,
     enabled: rule.enabled,
     triggers: rule.triggers.length > 0 ? rule.triggers : ['messageArrived'],
-    scope: rule.scope,
-    condition: cloneRule(rule.condition),
+    condition: actionConditionFromAccountRule(rule, accountId),
     actions: rule.actions.map(normalizeAction),
     backfill: rule.backfill,
   }
@@ -168,11 +244,14 @@ function draftToRule(draft: AutomationRuleDraft): AutomationRule {
     name: draft.name.trim(),
     enabled: draft.enabled,
     triggers: draft.triggers.length > 0 ? draft.triggers : ['messageArrived'],
-    scope: draft.scope,
-    condition: cloneRule(draft.condition),
+    condition: accountScopedCondition(draft.condition, draft.accountId),
     actions: draft.actions.map(normalizeAction),
     backfill: draft.backfill,
   }
+}
+
+function accountRulePrefix(accountId: string): string {
+  return `account:${accountId}:`
 }
 
 function smartMailboxRulePrefix(smartMailboxId: string): string {
@@ -188,20 +267,22 @@ function isSmartMailboxLinkedRule(
 
 function actionConditionFromSmartMailboxRule(
   rule: AutomationRule,
+  accountId: string,
 ): SmartMailboxRule {
   const nodes = rule.condition.root.nodes
-  const secondNode = nodes[1]
+  const thirdNode = nodes[2]
   if (
     rule.condition.root.operator === 'all' &&
     !rule.condition.root.negated &&
-    nodes.length >= 2 &&
-    secondNode?.type === 'group'
+    isSourceConditionForAccount(nodes[0], accountId) &&
+    nodes[1]?.type === 'group' &&
+    thirdNode?.type === 'group'
   ) {
     return {
       root: {
-        operator: secondNode.operator,
-        negated: secondNode.negated,
-        nodes: secondNode.nodes,
+        operator: thirdNode.operator,
+        negated: thirdNode.negated,
+        nodes: thirdNode.nodes,
       },
     }
   }
@@ -214,17 +295,19 @@ function smartMailboxDraftToRule(
 ): AutomationRule {
   return {
     ...draftToRule(draft),
-    scope: { kind: 'account' },
-    condition: {
-      root: {
-        operator: 'all',
-        negated: false,
-        nodes: [
-          groupNode(cloneRule(smartMailbox.rule).root),
-          groupNode(cloneRule(draft.condition).root),
-        ],
+    condition: accountScopedCondition(
+      {
+        root: {
+          operator: 'all',
+          negated: false,
+          nodes: [
+            groupNode(cloneRule(smartMailbox.rule).root),
+            groupNode(cloneRule(draft.condition).root),
+          ],
+        },
       },
-    },
+      draft.accountId,
+    ),
   }
 }
 
@@ -247,8 +330,6 @@ function isDraftComplete(draft: AutomationRuleDraft): boolean {
   return (
     draft.accountId.trim().length > 0 &&
     draft.name.trim().length > 0 &&
-    (draft.scope.kind === 'account' ||
-      draft.scope.mailboxId.trim().length > 0) &&
     draft.actions.length > 0 &&
     draft.actions.every(isActionComplete)
   )
@@ -269,7 +350,6 @@ function defaultDraft({
     name,
     enabled: true,
     triggers: ['messageArrived'],
-    scope: { kind: 'account' },
     condition: defaultEmptyRule(),
     actions: [defaultAction()],
     backfill: true,
@@ -291,15 +371,18 @@ function actionListDescription(drafts: AutomationRuleDraft[]): string {
 
 export function AccountAutomationFields({
   account,
+  settings,
   onSaved,
 }: {
   account: AccountOverview
-  onSaved: (account: AccountOverview) => Promise<void>
+  settings: AppSettings
+  onSaved: (settings: AppSettings) => Promise<void>
 }) {
+  const rulePrefix = accountRulePrefix(account.id)
   const [drafts, setDrafts] = useState<AutomationRuleDraft[]>(() =>
-    (account.automationRules ?? []).map((rule) =>
-      ruleToDraft(account.id, rule),
-    ),
+    (settings.automationRules ?? [])
+      .filter((rule) => rule.id.startsWith(rulePrefix))
+      .map((rule) => ruleToDraft(account.id, rule)),
   )
   const [savedSignature, setSavedSignature] = useState(() =>
     automationRuleSignature(drafts),
@@ -309,17 +392,22 @@ export function AccountAutomationFields({
     queryFn: () => fetchMailboxes(account.id),
   })
   const saveMutation = useMutation({
-    mutationFn: () =>
-      updateAccount(account.id, {
-        automationRules: drafts.map(draftToRule),
-      }),
-    onSuccess: async (savedAccount) => {
-      const nextDrafts = (savedAccount.automationRules ?? []).map((rule) =>
-        ruleToDraft(savedAccount.id, rule),
-      )
+    mutationFn: () => {
+      const nextRules = [
+        ...(settings.automationRules ?? []).filter(
+          (rule) => !rule.id.startsWith(rulePrefix),
+        ),
+        ...drafts.map(draftToRule),
+      ]
+      return patchSettings({ automationRules: nextRules })
+    },
+    onSuccess: async (savedSettings) => {
+      const nextDrafts = (savedSettings.automationRules ?? [])
+        .filter((rule) => rule.id.startsWith(rulePrefix))
+        .map((rule) => ruleToDraft(account.id, rule))
       setDrafts(nextDrafts)
       setSavedSignature(automationRuleSignature(nextDrafts))
-      await onSaved(savedAccount)
+      await onSaved(savedSettings)
     },
   })
 
@@ -334,7 +422,6 @@ export function AccountAutomationFields({
       accounts={[account]}
       mailboxesByAccount={{ [account.id]: mailboxesQuery.data ?? [] }}
       canEditAccount={false}
-      canEditScope
       addLabel="Add action rule"
       emptyText="No account actions configured."
       saveLabel="Apply actions"
@@ -369,76 +456,56 @@ export function AccountAutomationFields({
 
 export function SmartMailboxAutomationFields({
   accounts,
+  settings,
   smartMailbox,
   disabledReason,
   onSaved,
 }: {
   accounts: AccountOverview[]
+  settings: AppSettings
   smartMailbox: SmartMailbox
   disabledReason?: string | null
-  onSaved: (accounts: AccountOverview[]) => Promise<void>
+  onSaved: (settings: AppSettings) => Promise<void>
 }) {
+  const fallbackAccountId = accounts[0]?.id ?? ''
   const linkedDrafts = () =>
-    accounts.flatMap((account) =>
-      (account.automationRules ?? [])
-        .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-        .map((rule) => ({
-          ...ruleToDraft(account.id, rule),
-          scope: { kind: 'account' as const },
-          condition: actionConditionFromSmartMailboxRule(rule),
-        })),
-    )
+    (settings.automationRules ?? [])
+      .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
+      .map((rule) => {
+        const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
+        return {
+          ...ruleToDraft(accountId, rule),
+          condition: actionConditionFromSmartMailboxRule(rule, accountId),
+        }
+      })
   const [drafts, setDrafts] = useState<AutomationRuleDraft[]>(linkedDrafts)
   const [savedSignature, setSavedSignature] = useState(() =>
     automationRuleSignature(drafts),
   )
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const linkedPrefix = smartMailboxRulePrefix(smartMailbox.id)
-      const draftsByAccount = new Map<string, AutomationRuleDraft[]>()
-      for (const draft of drafts) {
-        const list = draftsByAccount.get(draft.accountId) ?? []
-        list.push(draft)
-        draftsByAccount.set(draft.accountId, list)
-      }
-
-      const results: AccountOverview[] = []
-      for (const account of accounts) {
-        const nextRules = [
-          ...(account.automationRules ?? []).filter(
-            (rule) => !rule.id.startsWith(linkedPrefix),
-          ),
-          ...(draftsByAccount.get(account.id) ?? []).map((draft) =>
-            smartMailboxDraftToRule(draft, smartMailbox),
-          ),
-        ]
-        const currentSignature = JSON.stringify(account.automationRules ?? [])
-        const nextSignature = JSON.stringify(nextRules)
-        if (currentSignature !== nextSignature) {
-          results.push(
-            await updateAccount(account.id, { automationRules: nextRules }),
-          )
-        }
-      }
-      return results
+      const nextRules = [
+        ...(settings.automationRules ?? []).filter(
+          (rule) => !rule.id.startsWith(linkedPrefix),
+        ),
+        ...drafts.map((draft) => smartMailboxDraftToRule(draft, smartMailbox)),
+      ]
+      return patchSettings({ automationRules: nextRules })
     },
-    onSuccess: async (savedAccounts) => {
-      const nextAccounts = accounts.map(
-        (account) =>
-          savedAccounts.find((saved) => saved.id === account.id) ?? account,
-      )
-      const nextDrafts = nextAccounts.flatMap((account) =>
-        (account.automationRules ?? [])
-          .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-          .map((rule) => ({
-            ...ruleToDraft(account.id, rule),
-            scope: { kind: 'account' as const },
-            condition: actionConditionFromSmartMailboxRule(rule),
-          })),
-      )
+    onSuccess: async (savedSettings) => {
+      const nextDrafts = (savedSettings.automationRules ?? [])
+        .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
+        .map((rule) => {
+          const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
+          return {
+            ...ruleToDraft(accountId, rule),
+            condition: actionConditionFromSmartMailboxRule(rule, accountId),
+          }
+        })
       setDrafts(nextDrafts)
       setSavedSignature(automationRuleSignature(nextDrafts))
-      await onSaved(savedAccounts)
+      await onSaved(savedSettings)
     },
   })
 
@@ -452,7 +519,6 @@ export function SmartMailboxAutomationFields({
       drafts={drafts}
       accounts={accounts}
       canEditAccount
-      canEditScope={false}
       addLabel="Add action rule"
       emptyText="No smart mailbox actions configured."
       saveLabel="Apply actions"
@@ -501,7 +567,6 @@ function AutomationRuleList({
   accounts,
   mailboxesByAccount = {},
   canEditAccount,
-  canEditScope,
   addLabel,
   emptyText,
   saveLabel,
@@ -520,7 +585,6 @@ function AutomationRuleList({
   accounts: AccountOverview[]
   mailboxesByAccount?: Record<string, Mailbox[]>
   canEditAccount: boolean
-  canEditScope: boolean
   addLabel: string
   emptyText: string
   saveLabel: string
@@ -579,7 +643,6 @@ function AutomationRuleList({
               accounts={accounts}
               staticMailboxes={mailboxesByAccount[draft.accountId] ?? null}
               canEditAccount={canEditAccount}
-              canEditScope={canEditScope}
               onChange={(patch) => updateDraft(draft.id, patch)}
               onRemove={() =>
                 onChange(
@@ -618,7 +681,6 @@ function AutomationRuleRow({
   accounts,
   staticMailboxes,
   canEditAccount,
-  canEditScope,
   onChange,
   onRemove,
 }: {
@@ -626,7 +688,6 @@ function AutomationRuleRow({
   accounts: AccountOverview[]
   staticMailboxes: Mailbox[] | null
   canEditAccount: boolean
-  canEditScope: boolean
   onChange: (patch: Partial<AutomationRuleDraft>) => void
   onRemove: () => void
 }) {
@@ -640,16 +701,11 @@ function AutomationRuleRow({
           onChange={(name) => onChange({ name })}
         />
 
-        {canEditAccount ? (
+        {canEditAccount && (
           <LabeledSelect
             label="Account"
             value={draft.accountId}
-            onValueChange={(accountId) =>
-              onChange({
-                accountId,
-                scope: { kind: 'account' },
-              })
-            }
+            onValueChange={(accountId) => onChange({ accountId })}
           >
             {accounts.map((account) => (
               <SelectItem key={account.id} value={account.id}>
@@ -657,52 +713,25 @@ function AutomationRuleRow({
               </SelectItem>
             ))}
           </LabeledSelect>
-        ) : (
-          <LabeledSelect
-            label="Trigger"
-            value={draft.triggers[0] ?? 'messageArrived'}
-            onValueChange={(value) =>
-              onChange({
-                triggers: [
-                  parseTrigger(value, draft.triggers[0] ?? 'messageArrived'),
-                ],
-              })
-            }
-          >
-            {TRIGGER_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </LabeledSelect>
         )}
 
-        {canEditScope ? (
-          <ScopeEditor
-            accountId={draft.accountId}
-            scope={draft.scope}
-            staticMailboxes={staticMailboxes}
-            onChange={(scope) => onChange({ scope })}
-          />
-        ) : (
-          <LabeledSelect
-            label="Trigger"
-            value={draft.triggers[0] ?? 'messageArrived'}
-            onValueChange={(value) =>
-              onChange({
-                triggers: [
-                  parseTrigger(value, draft.triggers[0] ?? 'messageArrived'),
-                ],
-              })
-            }
-          >
-            {TRIGGER_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </LabeledSelect>
-        )}
+        <LabeledSelect
+          label="Trigger"
+          value={draft.triggers[0] ?? 'messageArrived'}
+          onValueChange={(value) =>
+            onChange({
+              triggers: [
+                parseTrigger(value, draft.triggers[0] ?? 'messageArrived'),
+              ],
+            })
+          }
+        >
+          {TRIGGER_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </LabeledSelect>
 
         <Button
           type="button"
@@ -779,56 +808,6 @@ function LabeledSelect({
         <SelectContent>{children}</SelectContent>
       </Select>
     </label>
-  )
-}
-
-function ScopeEditor({
-  accountId,
-  scope,
-  staticMailboxes,
-  onChange,
-}: {
-  accountId: string
-  scope: AutomationScope
-  staticMailboxes: Mailbox[] | null
-  onChange: (scope: AutomationScope) => void
-}) {
-  const scopeValue =
-    scope.kind === 'mailbox' ? `mailbox:${scope.mailboxId}` : 'account'
-  const mailboxes = staticMailboxes ?? []
-  return (
-    <LabeledSelect
-      label="Scope"
-      value={scopeValue}
-      onValueChange={(value) => {
-        if (value === 'account') {
-          onChange({ kind: 'account' })
-          return
-        }
-        onChange({
-          kind: 'mailbox',
-          mailboxId: value.replace(/^mailbox:/, ''),
-        })
-      }}
-    >
-      <SelectItem value="account">Account</SelectItem>
-      {mailboxes.map((mailbox) => (
-        <SelectItem key={mailbox.id} value={`mailbox:${mailbox.id}`}>
-          {mailbox.name}
-        </SelectItem>
-      ))}
-      {scope.kind === 'mailbox' &&
-        !mailboxes.some((mailbox) => mailbox.id === scope.mailboxId) && (
-          <SelectItem value={`mailbox:${scope.mailboxId}`}>
-            {scope.mailboxId}
-          </SelectItem>
-        )}
-      {mailboxes.length === 0 && (
-        <SelectItem value={`mailbox:${accountId}:none`} disabled>
-          No mailboxes
-        </SelectItem>
-      )}
-    </LabeledSelect>
   )
 }
 

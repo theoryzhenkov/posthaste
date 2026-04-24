@@ -219,11 +219,6 @@ async fn run_account_runtime(
         AUTOMATION_BACKFILL_INTERVAL,
     );
     backfill_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut backfill_remaining = account
-        .automation_rules
-        .iter()
-        .any(|rule| rule.enabled && rule.backfill);
-
     shared
         .set_runtime_overview(
             &account_id,
@@ -259,8 +254,8 @@ async fn run_account_runtime(
                     &shared, &account, SyncTrigger::Poll, &mut connection, None,
                 ).await;
             }
-            _ = backfill_interval.tick(), if backfill_remaining => {
-                backfill_remaining = process_automation_backfill_batch(
+            _ = backfill_interval.tick() => {
+                let _ = process_automation_backfill_batch(
                     &shared,
                     &account_id,
                     connection.as_ref().map(|connection| connection.gateway.clone()),

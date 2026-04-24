@@ -24,7 +24,6 @@ pub(super) async fn account_overview(
             .clone()
             .map(normalize_account_appearance)
             .unwrap_or_else(|| default_account_appearance(&account)),
-        automation_rules: account.automation_rules.clone(),
         transport: account_transport_overview(&account),
         created_at: account.created_at.clone(),
         updated_at: account.updated_at.clone(),
@@ -226,11 +225,10 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
     if let Some(appearance) = &account.appearance {
         validate_account_appearance(appearance)?;
     }
-    validate_automation_rules(&account.automation_rules)?;
     Ok(())
 }
 
-fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {
+pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {
     let mut ids = std::collections::BTreeSet::new();
     for rule in rules {
         if rule.id.trim().is_empty() {
@@ -267,15 +265,6 @@ fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {
                 "invalid_account",
                 "automation rule must include at least one action",
             ));
-        }
-        if let AutomationScope::Mailbox { mailbox_id } = &rule.scope {
-            if mailbox_id.as_str().trim().is_empty() {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_account",
-                    "automation mailbox scope id is required",
-                ));
-            }
         }
         for action in &rule.actions {
             match action {
@@ -486,9 +475,6 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
     if let Some(appearance) = &request.appearance {
         account.appearance = Some(normalize_account_appearance(appearance.clone()));
     }
-    if let Some(rules) = &request.automation_rules {
-        account.automation_rules = normalize_automation_rules(rules);
-    }
     if let Some(transport) = &request.transport {
         if transport.base_url.is_some() {
             account.transport.base_url = normalize_optional(transport.base_url.clone());
@@ -507,12 +493,6 @@ pub(super) fn normalize_automation_rules(rules: &[AutomationRule]) -> Vec<Automa
             name: rule.name.trim().to_string(),
             enabled: rule.enabled,
             triggers: rule.triggers.clone(),
-            scope: match &rule.scope {
-                AutomationScope::Account => AutomationScope::Account,
-                AutomationScope::Mailbox { mailbox_id } => AutomationScope::Mailbox {
-                    mailbox_id: MailboxId::from(mailbox_id.as_str().trim()),
-                },
-            },
             condition: rule.condition.clone(),
             actions: rule
                 .actions

@@ -60,6 +60,7 @@ impl TomlConfigRepository {
         let app = AppToml {
             schema_version: 1,
             default_source_id: None,
+            automations: Vec::new(),
             daemon: Default::default(),
             logging: Default::default(),
         };
@@ -310,7 +311,9 @@ impl ConfigRepository for TomlConfigRepository {
 ///
 /// @spec docs/L1-accounts#configsnapshot
 fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigError> {
-    let app_settings = read_app_toml(config_root)?.to_app_settings();
+    let app_settings = read_app_toml(config_root)?
+        .to_app_settings()
+        .map_err(|err| ConfigError::Parse(err))?;
 
     let sources = load_sources(config_root)?;
     let smart_mailboxes = load_smart_mailboxes(config_root)?;
@@ -513,7 +516,6 @@ mod tests {
             driver: posthaste_domain::AccountDriver::Mock,
             enabled: true,
             appearance: None,
-            automation_rules: Vec::new(),
             transport: Default::default(),
             created_at: "2026-03-31T00:00:00Z".to_string(),
             updated_at: "2026-03-31T00:00:00Z".to_string(),

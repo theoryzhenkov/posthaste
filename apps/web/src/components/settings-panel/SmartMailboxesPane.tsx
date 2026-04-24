@@ -6,6 +6,7 @@
 import { FolderSearch, Plus } from 'lucide-react'
 import type {
   AccountOverview,
+  AppSettings,
   SmartMailbox,
   SmartMailboxSummary,
 } from '../../api/types'
@@ -68,6 +69,7 @@ function smartMailboxAccent(name: string): string {
 export function SmartMailboxesPane({
   smartMailboxes,
   accounts,
+  settings,
   selectedMailboxId,
   editingSmartMailbox,
   editorKey,
@@ -79,11 +81,12 @@ export function SmartMailboxesPane({
   onResetDefaults,
   onReorderMailbox,
   onSaved,
-  onAutomationAccountsSaved,
+  onAutomationSettingsSaved,
   onDeleted,
 }: {
   smartMailboxes: SmartMailboxSummary[]
   accounts: AccountOverview[]
+  settings: AppSettings | null
   selectedMailboxId: SmartMailboxEditorTarget | null
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
   editorKey: string
@@ -95,7 +98,7 @@ export function SmartMailboxesPane({
   onResetDefaults: () => void
   onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void
   onSaved: (mailbox: SmartMailbox) => Promise<void>
-  onAutomationAccountsSaved: (accounts: AccountOverview[]) => Promise<void>
+  onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onDeleted: (mailboxId: string) => Promise<void>
 }) {
   const selectedMailbox =
@@ -128,8 +131,9 @@ export function SmartMailboxesPane({
               editingSmartMailbox={editingSmartMailbox}
               summary={selectedMailbox}
               accounts={accounts}
+              settings={settings}
               onSaved={onSaved}
-              onAutomationAccountsSaved={onAutomationAccountsSaved}
+              onAutomationSettingsSaved={onAutomationSettingsSaved}
               onDeleted={onDeleted}
               onReorder={onReorderMailbox}
               reorderPendingKey={actionPendingKey}
