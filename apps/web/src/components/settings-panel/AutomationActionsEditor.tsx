@@ -14,13 +14,22 @@ import type {
   AccountOverview,
   AppSettings,
   AutomationAction,
-  AutomationRule,
   AutomationTrigger,
   Mailbox,
   SmartMailbox,
-  SmartMailboxGroup,
-  SmartMailboxRule,
 } from '../../api/types'
+import type { AutomationRuleDraft } from '../../automationRules'
+import {
+  accountRulePrefix,
+  actionConditionFromSmartMailboxRule,
+  draftToRule,
+  extractAccountIdFromRule,
+  isSmartMailboxLinkedRule,
+  normalizeAction,
+  ruleToDraft,
+  smartMailboxDraftToRule,
+  smartMailboxRulePrefix,
+} from '../../automationRules'
 import { fetchMailboxes, patchSettings } from '../../api/client'
 import { cn } from '../../lib/utils'
 import { queryKeys } from '../../queryKeys'
@@ -37,8 +46,6 @@ import {
 import { RuleGroupEditor } from './RuleGroupEditor'
 import { defaultEmptyRule } from './helpers'
 import { FeedbackBanner, Field } from './shared'
-
-const SMART_MAILBOX_RULE_PREFIX = 'smart-mailbox'
 
 const TRIGGER_OPTIONS: Array<{
   value: AutomationTrigger
@@ -62,114 +69,11 @@ const ACTION_KIND_OPTIONS: Array<{
   { value: 'moveToMailbox', label: 'Move to mailbox' },
 ]
 
-interface AutomationRuleDraft {
-  id: string
-  accountId: string
-  name: string
-  enabled: boolean
-  triggers: AutomationTrigger[]
-  condition: SmartMailboxRule
-  actions: AutomationAction[]
-  backfill: boolean
-}
-
 function createRuleId(prefix = 'automation'): string {
   if (globalThis.crypto && 'randomUUID' in globalThis.crypto) {
     return `${prefix}:${globalThis.crypto.randomUUID()}`
   }
   return `${prefix}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-function cloneRule(rule: SmartMailboxRule): SmartMailboxRule {
-  return JSON.parse(JSON.stringify(rule)) as SmartMailboxRule
-}
-
-function groupNode(group: SmartMailboxGroup) {
-  return {
-    type: 'group' as const,
-    operator: group.operator,
-    negated: group.negated,
-    nodes: group.nodes,
-  }
-}
-
-function sourceConditionNode(accountId: string) {
-  return {
-    type: 'condition' as const,
-    field: 'sourceId' as const,
-    operator: 'equals' as const,
-    negated: false,
-    value: accountId,
-  }
-}
-
-function isSourceConditionForAccount(
-  node: SmartMailboxGroup['nodes'][number] | undefined,
-  accountId: string,
-): boolean {
-  return (
-    node?.type === 'condition' &&
-    node.field === 'sourceId' &&
-    node.operator === 'equals' &&
-    !node.negated &&
-    typeof node.value === 'string' &&
-    node.value === accountId
-  )
-}
-
-function extractAccountIdFromRule(
-  rule: AutomationRule,
-  fallbackAccountId: string,
-): string {
-  const sourceNode = rule.condition.root.nodes.find(
-    (node) =>
-      node.type === 'condition' &&
-      node.field === 'sourceId' &&
-      node.operator === 'equals' &&
-      !node.negated &&
-      typeof node.value === 'string' &&
-      node.value.trim().length > 0,
-  )
-  return sourceNode?.type === 'condition' &&
-    typeof sourceNode.value === 'string'
-    ? sourceNode.value
-    : fallbackAccountId
-}
-
-function accountScopedCondition(
-  rule: SmartMailboxRule,
-  accountId: string,
-): SmartMailboxRule {
-  return {
-    root: {
-      operator: 'all',
-      negated: false,
-      nodes: [sourceConditionNode(accountId), groupNode(cloneRule(rule).root)],
-    },
-  }
-}
-
-function actionConditionFromAccountRule(
-  rule: AutomationRule,
-  accountId: string,
-): SmartMailboxRule {
-  const nodes = rule.condition.root.nodes
-  const secondNode = nodes[1]
-  if (
-    rule.condition.root.operator === 'all' &&
-    !rule.condition.root.negated &&
-    isSourceConditionForAccount(nodes[0], accountId) &&
-    secondNode?.type === 'group'
-  ) {
-    return {
-      root: {
-        operator: secondNode.operator,
-        negated: secondNode.negated,
-        nodes: secondNode.nodes,
-      },
-    }
-  }
-  return cloneRule(rule.condition)
 }
 
 function automationRuleSignature(rules: AutomationRuleDraft[]): string {
@@ -182,22 +86,6 @@ function automationRuleSignature(rules: AutomationRuleDraft[]): string {
       actions: rule.actions.map(normalizeAction),
     })),
   )
-}
-
-function normalizeAction(action: AutomationAction): AutomationAction {
-  switch (action.kind) {
-    case 'applyTag':
-      return { kind: 'applyTag', tag: action.tag.trim() }
-    case 'removeTag':
-      return { kind: 'removeTag', tag: action.tag.trim() }
-    case 'moveToMailbox':
-      return { kind: 'moveToMailbox', mailboxId: action.mailboxId.trim() }
-    case 'markRead':
-    case 'markUnread':
-    case 'flag':
-    case 'unflag':
-      return action
-  }
 }
 
 function defaultAction(): AutomationAction {
@@ -220,95 +108,6 @@ function actionForKind(kind: AutomationAction['kind']): AutomationAction {
       return { kind: 'flag' }
     case 'unflag':
       return { kind: 'unflag' }
-  }
-}
-
-function ruleToDraft(
-  accountId: string,
-  rule: AutomationRule,
-): AutomationRuleDraft {
-  return {
-    id: rule.id,
-    accountId,
-    name: rule.name,
-    enabled: rule.enabled,
-    triggers: rule.triggers.length > 0 ? rule.triggers : ['messageArrived'],
-    condition: actionConditionFromAccountRule(rule, accountId),
-    actions: rule.actions.map(normalizeAction),
-    backfill: rule.backfill,
-  }
-}
-
-function draftToRule(draft: AutomationRuleDraft): AutomationRule {
-  return {
-    id: draft.id.trim(),
-    name: draft.name.trim(),
-    enabled: draft.enabled,
-    triggers: draft.triggers.length > 0 ? draft.triggers : ['messageArrived'],
-    condition: accountScopedCondition(draft.condition, draft.accountId),
-    actions: draft.actions.map(normalizeAction),
-    backfill: draft.backfill,
-  }
-}
-
-function accountRulePrefix(accountId: string): string {
-  return `account:${accountId}:`
-}
-
-function smartMailboxRulePrefix(smartMailboxId: string): string {
-  return `${SMART_MAILBOX_RULE_PREFIX}:${smartMailboxId}:`
-}
-
-function isSmartMailboxLinkedRule(
-  rule: AutomationRule,
-  smartMailboxId: string,
-): boolean {
-  return rule.id.startsWith(smartMailboxRulePrefix(smartMailboxId))
-}
-
-function actionConditionFromSmartMailboxRule(
-  rule: AutomationRule,
-  accountId: string,
-): SmartMailboxRule {
-  const nodes = rule.condition.root.nodes
-  const thirdNode = nodes[2]
-  if (
-    rule.condition.root.operator === 'all' &&
-    !rule.condition.root.negated &&
-    isSourceConditionForAccount(nodes[0], accountId) &&
-    nodes[1]?.type === 'group' &&
-    thirdNode?.type === 'group'
-  ) {
-    return {
-      root: {
-        operator: thirdNode.operator,
-        negated: thirdNode.negated,
-        nodes: thirdNode.nodes,
-      },
-    }
-  }
-  return cloneRule(rule.condition)
-}
-
-function smartMailboxDraftToRule(
-  draft: AutomationRuleDraft,
-  smartMailbox: SmartMailbox,
-): AutomationRule {
-  return {
-    ...draftToRule(draft),
-    condition: accountScopedCondition(
-      {
-        root: {
-          operator: 'all',
-          negated: false,
-          nodes: [
-            groupNode(cloneRule(smartMailbox.rule).root),
-            groupNode(cloneRule(draft.condition).root),
-          ],
-        },
-      },
-      draft.accountId,
-    ),
   }
 }
 
