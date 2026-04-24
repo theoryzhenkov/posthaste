@@ -37,6 +37,7 @@ The full local dev stacks run through Overmind in the Nix dev shell:
 just dev-web       # Stalwart + seed + posthaste-daemon + Vite
 just dev-desktop   # Stalwart + seed + Tauri dev shell
 just dev-services  # Stalwart + seed + posthaste-daemon
+just dev-smoke     # Validate dev-stack path wiring without starting services
 just frontend dev  # Vite only, assumes the backend is already running
 just desktop dev   # Tauri only, assumes Stalwart is already running if needed
 ```
