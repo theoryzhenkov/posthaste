@@ -238,6 +238,8 @@ pub struct AccountTransportSettings {
 pub struct AccountSettings {
     pub id: AccountId,
     pub name: String,
+    pub full_name: Option<String>,
+    pub email_patterns: Vec<String>,
     pub driver: AccountDriver,
     pub enabled: bool,
     pub transport: AccountTransportSettings,
@@ -315,6 +317,8 @@ impl Default for AccountRuntimeOverview {
 pub struct AccountOverview {
     pub id: AccountId,
     pub name: String,
+    pub full_name: Option<String>,
+    pub email_patterns: Vec<String>,
     pub driver: AccountDriver,
     pub enabled: bool,
     pub transport: AccountTransportOverview,

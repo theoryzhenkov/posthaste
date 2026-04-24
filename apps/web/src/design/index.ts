@@ -1,4 +1,10 @@
 export {
+  accentColor,
+  defaultAccentHue,
+  normalizeAccentHue,
+  parseAccentHue,
+} from './accent'
+export {
   designClassNames,
   designDataAttributes,
   designStorageKeys,
@@ -15,6 +21,23 @@ export {
   uiDensitySettings,
   type UiDensity,
 } from './density'
+export {
+  appendGlassBloom,
+  createGlassBloom,
+  defaultGlassThemeParameters,
+  glassBloomDisplayColor,
+  glassBloomColor,
+  glassMeshBackground,
+  maxGlassBloomCount,
+  minGlassBloomCount,
+  normalizeGlassThemeParameters,
+  removeGlassBloom,
+  updateGlassBloom,
+  type GlassBloom,
+  type GlassBloomId,
+  type GlassBloomPatch,
+  type GlassThemeParameters,
+} from './glassTheme'
 export {
   applyRootTheme,
   getSystemThemeMode,

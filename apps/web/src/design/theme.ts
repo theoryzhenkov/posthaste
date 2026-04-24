@@ -59,8 +59,8 @@ export const palettePresets = {
   },
   glass: {
     id: 'glass',
-    label: 'Glass',
-    description: 'Frosted panels over a soft gradient mesh',
+    label: 'Arc Glass',
+    description: 'Layered translucent panes over a vivid desktop wash',
     modes: ['dark', 'light'],
     style: 'glass',
   },

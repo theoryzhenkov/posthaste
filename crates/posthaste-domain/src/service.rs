@@ -1159,6 +1159,8 @@ mod tests {
         AccountSettings {
             id: AccountId::from("primary"),
             name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: Vec::new(),
             driver: crate::AccountDriver::Mock,
             enabled: true,
             transport: Default::default(),

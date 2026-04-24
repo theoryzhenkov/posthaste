@@ -2,6 +2,8 @@ export const designStorageKeys = {
   themeMode: 'posthaste.themeMode.v3',
   palettePreset: 'posthaste.palettePreset.v3',
   uiDensity: 'posthaste.uiDensity.v3',
+  accentHue: 'posthaste.accentHue.v1',
+  themeParameters: 'posthaste.themeParameters.v1',
 } as const
 
 export type DesignStorageKeyName = keyof typeof designStorageKeys

@@ -506,6 +506,8 @@ mod tests {
         let source = AccountSettings {
             id: AccountId::from("test"),
             name: "Test".to_string(),
+            full_name: None,
+            email_patterns: Vec::new(),
             driver: posthaste_domain::AccountDriver::Mock,
             enabled: true,
             transport: Default::default(),

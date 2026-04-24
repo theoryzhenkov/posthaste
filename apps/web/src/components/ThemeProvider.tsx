@@ -1,14 +1,24 @@
 import {
   applyRootTheme,
+  appendGlassBloom,
+  defaultAccentHue,
   defaultPalettePresetId,
   defaultThemeMode,
   defaultUiDensity,
   designStorageKeys,
   getSystemThemeMode,
+  normalizeGlassThemeParameters,
   isPalettePresetId,
   isThemeMode,
   isUiDensity,
+  normalizeAccentHue,
+  parseAccentHue,
+  removeGlassBloom as removeGlassBloomFromTheme,
+  updateGlassBloom,
   type AppliedRootTheme,
+  type GlassBloomId,
+  type GlassBloomPatch,
+  type GlassThemeParameters,
   type PalettePresetId,
   type ThemeMode,
   type UiDensity,
@@ -30,7 +40,9 @@ interface DesignThemeProviderProps {
 }
 
 interface DesignThemePreferences {
+  accentHue: number
   density: UiDensity
+  glassTheme: GlassThemeParameters
   mode: ThemeMode
   palettePreset: PalettePresetId
 }
@@ -50,9 +62,28 @@ function storedDensity(): UiDensity {
   return value && isUiDensity(value) ? value : defaultUiDensity
 }
 
+function storedAccentHue(): number {
+  return parseAccentHue(localStorage.getItem(designStorageKeys.accentHue))
+}
+
+function storedGlassTheme(): GlassThemeParameters {
+  const value = localStorage.getItem(designStorageKeys.themeParameters)
+  if (!value) {
+    return normalizeGlassThemeParameters(null)
+  }
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return normalizeGlassThemeParameters(parsed.glass)
+  } catch {
+    return normalizeGlassThemeParameters(null)
+  }
+}
+
 function readInitialThemeState(): DesignThemePreferences {
   if (typeof window === 'undefined') {
     return {
+      accentHue: defaultAccentHue,
+      glassTheme: normalizeGlassThemeParameters(null),
       mode: defaultThemeMode,
       palettePreset: defaultPalettePresetId,
       density: defaultUiDensity,
@@ -60,6 +91,8 @@ function readInitialThemeState(): DesignThemePreferences {
   }
 
   return {
+    accentHue: storedAccentHue(),
+    glassTheme: storedGlassTheme(),
     mode: storedThemeMode(),
     palettePreset: storedPalettePreset(),
     density: storedDensity(),
@@ -68,8 +101,10 @@ function readInitialThemeState(): DesignThemePreferences {
 
 export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
   const [preferences, setPreferences] = useState(readInitialThemeState)
-  const { density, mode, palettePreset } = preferences
+  const { accentHue, density, glassTheme, mode, palettePreset } = preferences
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
+    accentHue,
+    glassTheme,
     mode,
     resolvedMode: mode === 'dark' ? 'dark' : 'light',
     palettePreset,
@@ -79,7 +114,15 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
   useEffect(() => {
     const root = window.document.documentElement
     const apply = () =>
-      setApplied(applyRootTheme(root, { mode, palettePreset, density }))
+      setApplied(
+        applyRootTheme(root, {
+          mode,
+          palettePreset,
+          density,
+          accentHue,
+          glassTheme,
+        }),
+      )
 
     apply()
 
@@ -92,14 +135,81 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
       setApplied(
         applyRootTheme(
           root,
-          { mode, palettePreset, density },
+          { mode, palettePreset, density, accentHue, glassTheme },
           getSystemThemeMode(),
         ),
       )
 
     query.addEventListener('change', handleSystemChange)
     return () => query.removeEventListener('change', handleSystemChange)
-  }, [density, mode, palettePreset])
+  }, [accentHue, density, glassTheme, mode, palettePreset])
+
+  const persistGlassTheme = useCallback(
+    (nextGlassTheme: GlassThemeParameters) => {
+      let currentParameters: Record<string, unknown> = {}
+      const stored = localStorage.getItem(designStorageKeys.themeParameters)
+      if (stored) {
+        try {
+          currentParameters = JSON.parse(stored) as Record<string, unknown>
+        } catch {
+          currentParameters = {}
+        }
+      }
+      localStorage.setItem(
+        designStorageKeys.themeParameters,
+        JSON.stringify({ ...currentParameters, glass: nextGlassTheme }),
+      )
+    },
+    [],
+  )
+
+  const setAccentHue = useCallback((nextHue: number) => {
+    const hue = normalizeAccentHue(nextHue)
+    localStorage.setItem(designStorageKeys.accentHue, String(hue))
+    setPreferences((current) => ({ ...current, accentHue: hue }))
+  }, [])
+
+  const addGlassBloom = useCallback(
+    (patch?: GlassBloomPatch) => {
+      const result = appendGlassBloom(glassTheme, patch)
+      persistGlassTheme(result.parameters)
+      setPreferences((current) => ({
+        ...current,
+        glassTheme: result.parameters,
+      }))
+      return result.bloom.id
+    },
+    [glassTheme, persistGlassTheme],
+  )
+
+  const removeGlassBloom = useCallback(
+    (bloomId: GlassBloomId) => {
+      setPreferences((current) => {
+        const nextGlassTheme = removeGlassBloomFromTheme(
+          current.glassTheme,
+          bloomId,
+        )
+        persistGlassTheme(nextGlassTheme)
+        return { ...current, glassTheme: nextGlassTheme }
+      })
+    },
+    [persistGlassTheme],
+  )
+
+  const setGlassBloom = useCallback(
+    (bloomId: GlassBloomId, patch: GlassBloomPatch) => {
+      setPreferences((current) => {
+        const nextGlassTheme = updateGlassBloom(
+          current.glassTheme,
+          bloomId,
+          patch,
+        )
+        persistGlassTheme(nextGlassTheme)
+        return { ...current, glassTheme: nextGlassTheme }
+      })
+    },
+    [persistGlassTheme],
+  )
 
   const setMode = useCallback((nextMode: ThemeMode) => {
     localStorage.setItem(designStorageKeys.themeMode, nextMode)
@@ -119,11 +229,24 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
   const value = useMemo<DesignThemeContextValue>(
     () => ({
       ...applied,
+      addGlassBloom,
+      removeGlassBloom,
+      setAccentHue,
+      setGlassBloom,
       setDensity,
       setMode,
       setPalettePreset,
     }),
-    [applied, setDensity, setMode, setPalettePreset],
+    [
+      applied,
+      addGlassBloom,
+      removeGlassBloom,
+      setAccentHue,
+      setGlassBloom,
+      setDensity,
+      setMode,
+      setPalettePreset,
+    ],
   )
 
   return (

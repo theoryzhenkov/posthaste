@@ -32,6 +32,8 @@ export type KnownMailboxRole =
 export interface AccountOverview {
   id: string
   name: string
+  fullName: string | null
+  emailPatterns: string[]
   driver: AccountDriver
   enabled: boolean
   transport: {
@@ -72,10 +74,12 @@ export interface SecretInstructionInput {
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface CreateAccountInput {
-  id: string
+  id?: string
   name: string
-  driver: AccountDriver
-  enabled: boolean
+  fullName?: string | null
+  emailPatterns: string[]
+  driver?: AccountDriver
+  enabled?: boolean
   transport: AccountTransportInput
   secret: SecretInstructionInput
 }
@@ -86,6 +90,8 @@ export interface CreateAccountInput {
  */
 export interface UpdateAccountInput {
   name?: string
+  fullName?: string | null
+  emailPatterns?: string[]
   driver?: AccountDriver
   enabled?: boolean
   transport?: Partial<AccountTransportInput>

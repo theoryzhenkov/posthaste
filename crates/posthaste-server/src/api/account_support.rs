@@ -15,6 +15,8 @@ pub(super) async fn account_overview(
     AccountOverview {
         id: account.id.clone(),
         name: account.name.clone(),
+        full_name: account.full_name.clone(),
+        email_patterns: account.email_patterns.clone(),
         driver: account.driver.clone(),
         enabled: account.enabled,
         transport: account_transport_overview(&account),
@@ -181,6 +183,17 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
             "account name is required",
         ));
     }
+    if account
+        .email_patterns
+        .iter()
+        .any(|pattern| pattern.trim().is_empty())
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            "email patterns must not be blank",
+        ));
+    }
     if matches!(account.driver, AccountDriver::Jmap) {
         if account
             .transport
@@ -235,7 +248,7 @@ pub(super) fn delete_managed_secret(
 }
 
 /// Trim whitespace from an optional string, converting empty/blank to `None`.
-fn normalize_optional(value: Option<String>) -> Option<String> {
+pub(super) fn normalize_optional(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -252,7 +265,13 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
 /// @spec docs/L1-api#account-crud-lifecycle
 pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountRequest) {
     if let Some(name) = &request.name {
-        account.name = name.clone();
+        account.name = name.trim().to_string();
+    }
+    if let Some(full_name) = &request.full_name {
+        account.full_name = normalize_optional(Some(full_name.clone()));
+    }
+    if let Some(email_patterns) = &request.email_patterns {
+        account.email_patterns = normalize_email_patterns(email_patterns);
     }
     if let Some(driver) = &request.driver {
         account.driver = driver.clone();
@@ -268,6 +287,22 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
             account.transport.username = normalize_optional(transport.username.clone());
         }
     }
+}
+
+/// Normalize user-owned email addresses/patterns by trimming whitespace and
+/// dropping empty entries. Patterns such as `*@example.com` are preserved.
+pub(super) fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            let trimmed = pattern.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
 }
 
 /// Append an account lifecycle event to the event log and broadcast it.
@@ -326,4 +361,34 @@ pub(super) fn generate_smart_mailbox_id(name: &str) -> String {
         },
         Uuid::new_v4()
     )
+}
+
+/// Generate an internal account ID from identity fields. The ID is deliberately
+/// hidden from the UI; it only needs to be stable after account creation.
+pub(super) fn generate_account_id_seed(name: &str, email_patterns: &[String]) -> String {
+    let seed = email_patterns
+        .iter()
+        .map(|pattern| pattern.trim())
+        .find(|pattern| !pattern.is_empty())
+        .unwrap_or_else(|| name.trim());
+    let slug = seed
+        .trim_start_matches("*@")
+        .trim_start_matches('@')
+        .to_lowercase()
+        .chars()
+        .map(|char| {
+            if char.is_ascii_alphanumeric() {
+                char
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        "account".to_string()
+    } else {
+        slug
+    }
 }

@@ -1,4 +1,4 @@
-use keyring::Entry;
+use keyring::{Entry, Error as KeyringError};
 use posthaste_domain::{SecretKind, SecretRef, SecretStore, SecretStoreError};
 
 /// Keyring service name used for all OS-managed secrets.
@@ -52,9 +52,10 @@ impl SecretStore for SystemSecretStore {
                 "delete via {:?}:{}",
                 secret_ref.kind, secret_ref.key
             ))),
-            SecretKind::Os => Self::entry(secret_ref)?
-                .delete_credential()
-                .map_err(|err| SecretStoreError::Unavailable(err.to_string())),
+            SecretKind::Os => match Self::entry(secret_ref)?.delete_credential() {
+                Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+                Err(err) => Err(SecretStoreError::Unavailable(err.to_string())),
+            },
         }
     }
 }
