@@ -32,9 +32,7 @@ pub enum PushStreamEvent {
     /// A JMAP state-change notification.
     Notification(PushNotification),
     /// Transport connected successfully.
-    Connected {
-        transport: &'static str,
-    },
+    Connected { transport: &'static str },
     /// Transport disconnected or errored.
     Disconnected {
         transport: &'static str,

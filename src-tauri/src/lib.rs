@@ -1,7 +1,7 @@
+use posthaste_server::ServerConfig;
 use tauri::webview::WebviewWindowBuilder;
 use tauri::Manager;
 use tauri_utils::config::WebviewUrl;
-use posthaste_server::ServerConfig;
 
 /// Receive a log entry from the frontend and emit it through the backend's
 /// tracing subscriber so it lands in the same log files with rotation.

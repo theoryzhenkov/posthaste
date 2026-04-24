@@ -106,9 +106,9 @@ fn cursor_sort_sql_value(
     raw: &str,
 ) -> Result<SqlValue, StoreError> {
     if is_numeric_sort(sort_field) {
-        let n = raw.parse::<i64>().map_err(|_| {
-            StoreError::Failure(format!("invalid numeric cursor value: {raw}"))
-        })?;
+        let n = raw
+            .parse::<i64>()
+            .map_err(|_| StoreError::Failure(format!("invalid numeric cursor value: {raw}")))?;
         Ok(SqlValue::Integer(n))
     } else {
         Ok(SqlValue::Text(raw.to_string()))

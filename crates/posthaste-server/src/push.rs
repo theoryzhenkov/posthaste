@@ -208,7 +208,12 @@ mod tests {
             resilient_push_stream(AccountId::from("test"), primary, None, immediate_config());
 
         let event = stream.next().await.unwrap();
-        assert!(matches!(event, PushStreamEvent::Connected { transport: "primary" }));
+        assert!(matches!(
+            event,
+            PushStreamEvent::Connected {
+                transport: "primary"
+            }
+        ));
 
         let event = stream.next().await.unwrap();
         assert!(matches!(event, PushStreamEvent::Notification(_)));
@@ -250,8 +255,12 @@ mod tests {
         let mut events = Vec::new();
         for _ in 0..10 {
             let event = stream.next().await.unwrap();
-            let is_fallback_connected =
-                matches!(&event, PushStreamEvent::Connected { transport: "fallback" });
+            let is_fallback_connected = matches!(
+                &event,
+                PushStreamEvent::Connected {
+                    transport: "fallback"
+                }
+            );
             events.push(event);
             if is_fallback_connected {
                 break;
@@ -259,9 +268,13 @@ mod tests {
         }
 
         // Should have seen: 2 disconnects from primary, 1 fallback event, 1 connected
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, PushStreamEvent::Fallback { from: "primary", to: "fallback" })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PushStreamEvent::Fallback {
+                from: "primary",
+                to: "fallback"
+            }
+        )));
         assert_eq!(primary_calls.load(Ordering::SeqCst), 2);
     }
 

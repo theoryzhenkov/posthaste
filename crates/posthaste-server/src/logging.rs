@@ -19,8 +19,8 @@ pub fn init(state_root: &Path, config_level: &str) -> WorkerGuard {
     let log_dir = state_root.join("logs");
 
     // EnvFilter is not Clone, so we construct it separately for each layer.
-    let stderr_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(config_level));
+    let stderr_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(config_level));
 
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
@@ -28,8 +28,8 @@ pub fn init(state_root: &Path, config_level: &str) -> WorkerGuard {
 
     let file_appender = rolling::daily(&log_dir, "posthaste");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-    let file_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(config_level));
+    let file_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(config_level));
     let json_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_target(true)

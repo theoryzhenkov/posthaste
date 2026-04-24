@@ -83,9 +83,7 @@ impl PushTransport for SsePushTransport {
             async move {
                 match event {
                     Ok(jmap_client::event_source::PushNotification::StateChange(changes)) => {
-                        let Some(entries) = changes.changes(server_account_id.as_str()) else {
-                            return None;
-                        };
+                        let entries = changes.changes(server_account_id.as_str())?;
                         let changed = entries
                             .map(|(data_type, _)| data_type.to_string())
                             .collect::<Vec<_>>();
