@@ -61,6 +61,7 @@ The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L
 React Query manages server state, but different surfaces use different strategies:
 
 - `queryKeys.accounts` loads configured account overviews.
+- `queryKeys.mailboxes(accountId)` loads synced mailboxes for account-level settings.
 - `queryKeys.sidebar` loads enabled sources plus smart mailbox summaries.
 - `queryKeys.messages(selectedView)` loads individual message summaries for the selected mailbox or smart mailbox.
 - `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
@@ -90,6 +91,10 @@ Message rows expose the same primary message actions through a right-click conte
 ## Sidebar Context Menus
 
 Sidebar objects expose object-scoped right-click menus. Smart mailboxes can be opened or edited in settings. Source account headers can be synced or opened in account settings. Source mailboxes can be opened, can trigger a sync for their parent account, or can open account settings.
+
+## Account Settings
+
+Account settings are edited in a sparse, section-first layout. Existing accounts expose a mailbox metadata section that lists synced server mailboxes and lets the user assign or clear known JMAP roles. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper.
 
 ## Column configuration
 

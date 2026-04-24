@@ -65,6 +65,7 @@ All endpoints are prefixed with `/v1`.
 | GET | `/views/conversations` | `list_conversations` | `ListConversationsQuery` | `ConversationPageResponse` |
 | GET | `/views/conversations/{id}` | `get_conversation` | -- | `ConversationView` |
 | GET | `/sources/{source_id}/mailboxes` | `list_mailboxes` | -- | `MailboxSummary[]` |
+| PATCH | `/sources/{source_id}/mailboxes/{mailbox_id}` | `patch_mailbox` | `PatchMailboxRequest` | `MailboxSummary[]` |
 | GET | `/sources/{source_id}/messages` | `list_source_messages` | `ListSourceMessagesQuery` | `MessageSummary[]` |
 | GET | `/sources/{source_id}/messages/{id}` | `get_message` | -- | `MessageDetail` |
 
@@ -116,7 +117,11 @@ All error responses are JSON objects with three fields:
 | `config_io` | 500 |
 | (other) | 500 |
 
-Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_compose`.
+Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_compose`, `invalid_mailbox`.
+
+## Mailbox metadata
+
+`PATCH /sources/{source_id}/mailboxes/{mailbox_id}` updates server-side mailbox metadata through JMAP `Mailbox/set`. The initial supported request field is `role`; valid values are `inbox`, `archive`, `drafts`, `sent`, `junk`, `trash`, or `null` to clear the role. When assigning a role that another mailbox currently owns, the server first clears the old owner, then assigns the new owner using the returned mailbox state. After the mutation succeeds, the server refreshes the account's mailbox projection and returns the current `MailboxSummary[]`.
 
 ## Cursor pagination
 

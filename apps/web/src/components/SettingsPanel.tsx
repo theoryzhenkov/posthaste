@@ -323,7 +323,7 @@ export function SettingsPanel({
       ? 'mailbox:none'
       : effectiveSmartMailboxTarget === 'new'
         ? 'mailbox:new'
-        : `mailbox:${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? 'pending'}`
+        : `mailbox:${effectiveSmartMailboxTarget}:${'rule' in (editingSmartMailbox ?? {}) ? 'full' : 'summary'}:${editingSmartMailbox?.updatedAt ?? 'pending'}`
   function handleSelectCategory(category: SettingsCategory) {
     setActiveCategory(category)
     setEditorTarget(null)

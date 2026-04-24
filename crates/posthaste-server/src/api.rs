@@ -84,6 +84,17 @@ pub struct GetAttachmentQuery {
     pub download: Option<bool>,
 }
 
+/// Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
+///
+/// Outer `Option` distinguishes omitted `role` from an explicit JSON `null`.
+///
+/// @spec docs/L1-api#conversations-and-messages
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchMailboxRequest {
+    pub role: Option<Option<String>>,
+}
+
 const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
 
 /// Request body for `PATCH /v1/settings`.
@@ -758,6 +769,36 @@ pub async fn list_mailboxes(
         .map_err(ApiError::from_service_error)
 }
 
+/// PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}
+///
+/// @spec docs/L1-api#conversations-and-messages
+/// @spec docs/L1-jmap#methods-used
+pub async fn patch_mailbox(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, mailbox_id)): Path<(String, String)>,
+    Json(request): Json<PatchMailboxRequest>,
+) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    let role = validate_patch_mailbox_role(request.role)?;
+    let account_id = AccountId(source_id);
+    let gateway = live_gateway(state.as_ref(), &account_id).await?;
+    let events = state
+        .service
+        .set_mailbox_role(
+            &account_id,
+            &MailboxId(mailbox_id),
+            role.as_deref(),
+            gateway.as_ref(),
+        )
+        .await
+        .map_err(ApiError::from_service_error)?;
+    state.publish_events(&events);
+    state
+        .service
+        .list_mailboxes(&account_id)
+        .map(Json)
+        .map_err(ApiError::from_service_error)
+}
+
 /// GET /v1/sources/{source_id}/messages
 ///
 /// @spec docs/L1-api#conversations-and-messages
@@ -1231,6 +1272,25 @@ fn rewrite_inline_attachment_urls(
 
 fn escape_content_disposition_filename(filename: &str) -> String {
     filename.replace('\\', "_").replace('"', "'")
+}
+
+fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<String>, ApiError> {
+    let Some(role) = role else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_mailbox",
+            "role is required",
+        ));
+    };
+    match role.as_deref() {
+        None | Some("archive") | Some("drafts") | Some("inbox") | Some("junk") | Some("sent")
+        | Some("trash") => Ok(role),
+        Some(_) => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_mailbox",
+            "unsupported mailbox role",
+        )),
+    }
 }
 
 fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), ApiError> {

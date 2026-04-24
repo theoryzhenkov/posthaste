@@ -132,9 +132,6 @@ function SearchField({
           className="text-muted-foreground/70"
         />
         <span className="flex-1">Search mail</span>
-        <span className="rounded-[4px] border border-border/80 bg-background/85 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
-          ⌘K
-        </span>
       </button>
     )
   }
@@ -201,9 +198,7 @@ export function ActionBar({
       <div className="w-4" />
 
       <ToolbarChip
-        hint="⌘N"
         icon={<PenSquare size={14} strokeWidth={1.6} />}
-        label="Compose"
         onClick={onCompose}
         title="Compose"
       />
