@@ -1,0 +1,29 @@
+# Public website recipes
+
+dev:
+    bun run dev
+
+build:
+    bun run build
+
+check:
+    bun run check
+
+typecheck:
+    bun run typecheck
+
+fmt:
+    bun run format
+
+fmt-check:
+    bun run format:check
+
+lint-fix:
+    bun run lint --fix
+    bun run format
+
+preview:
+    bun run preview
+
+install:
+    bun install
