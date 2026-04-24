@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-state_root="${POSTHASTE_STATE_ROOT:-$root/dev/posthaste/state}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+state_root="${POSTHASTE_STATE_ROOT:-$root/var/dev/posthaste/state}"
 seed_ready_marker="$state_root/.stalwart-seed-ready"
 
 for _ in $(seq 1 120); do

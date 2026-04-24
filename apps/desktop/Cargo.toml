@@ -14,5 +14,5 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-utils = "2"
 tauri-plugin-shell = "2"
-posthaste-server = { path = "../crates/posthaste-server" }
+posthaste-server = { path = "../../crates/posthaste-server" }
 tracing = { workspace = true }

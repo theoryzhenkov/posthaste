@@ -1,0 +1,3 @@
+stalwart: stalwart -c tools/dev/stalwart/config.toml
+seed: bash tools/dev/stalwart/seed.sh
+tauri: cd apps/desktop && cargo tauri dev

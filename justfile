@@ -3,8 +3,8 @@
 mod template
 mod mkdocs
 mod backend 'crates/justfile'
-mod frontend 'web/justfile'
-mod desktop 'src-tauri/justfile'
+mod frontend 'apps/web/justfile'
+mod desktop 'apps/desktop/justfile'
 mod docs 'docs/justfile'
 
 default:
@@ -56,18 +56,18 @@ browser-screenshot url file *args:
 
 # Start Stalwart + seed + daemon + Vite with Overmind.
 dev-web:
-    bash dev/overmind/launch.sh web
+    bash tools/dev/overmind/launch.sh web
 
 # Start Stalwart + seed + Tauri with Overmind.
 dev-desktop:
-    bash dev/overmind/launch.sh desktop
+    bash tools/dev/overmind/launch.sh desktop
 
 # Start Stalwart + seed + daemon with Overmind.
 dev-services:
-    bash dev/overmind/launch.sh services
+    bash tools/dev/overmind/launch.sh services
 
 # --- Local Stalwart dev server (end-to-end testing) ---
-# See dev/stalwart/ for config and seed script.
+# See tools/dev/stalwart/ for config and seed script.
 # Full-stack browser dev: just dev-web
 # Full-stack desktop dev: just dev-desktop
 # Services only: just dev-services
@@ -78,22 +78,22 @@ dev-services:
 # Override with `just stalwart-up admin=... user=...` or set env vars directly.
 STALWART_ADMIN_PASSWORD := env_var_or_default("POSTHASTE_STALWART_ADMIN_PASSWORD", "devadmin")
 STALWART_USER_PASSWORD := env_var_or_default("POSTHASTE_STALWART_USER_PASSWORD", "devpass")
-STALWART_DATA := justfile_directory() / "dev/stalwart/data"
-STALWART_LOGS := justfile_directory() / "dev/stalwart/logs"
-DAEMON_LOG_PATH_SCRIPT := justfile_directory() / "dev/overmind/daemon-log-path.sh"
+STALWART_DATA := justfile_directory() / "var/dev/stalwart/data"
+STALWART_LOGS := justfile_directory() / "var/dev/stalwart/logs"
+DAEMON_LOG_PATH_SCRIPT := justfile_directory() / "tools/dev/overmind/daemon-log-path.sh"
 
 # Start Stalwart in the foreground. Ctrl-C to stop.
 stalwart-up:
     POSTHASTE_STALWART_DATA={{ STALWART_DATA }} \
-    POSTHASTE_STALWART_LOGS={{ STALWART_LOGS }} \
-    POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
-        stalwart -c dev/stalwart/config.toml
+        POSTHASTE_STALWART_LOGS={{ STALWART_LOGS }} \
+        POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
+        stalwart -c tools/dev/stalwart/config.toml
 
 # Provision the dev domain + mailbox user. Idempotent.
 stalwart-seed:
     POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
     POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }} \
-        bash dev/stalwart/seed.sh
+        bash tools/dev/stalwart/seed.sh
 
 # Wipe Stalwart data + logs for a clean slate.
 stalwart-reset:
@@ -102,7 +102,7 @@ stalwart-reset:
 # Print export lines that point posthaste-daemon at the local Stalwart.
 # Usage: eval $(just stalwart-dev)
 stalwart-dev:
-    @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/dev/bootstrap.stalwart.toml'
+    @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/tools/dev/bootstrap.stalwart.toml'
     @echo 'export POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }}'
 
 # Print the current or expected persisted daemon log path for dev.

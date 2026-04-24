@@ -5,10 +5,10 @@ React 19 + Vite frontend for the local mail daemon. The app talks only to the Ru
 ## Commands
 
 ```bash
-npm install
-npm run dev
-npm run build
-npm run lint
+bun install
+bun run dev
+bun run build
+bun run check
 ```
 
 ## Architecture
