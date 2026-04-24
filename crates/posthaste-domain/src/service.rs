@@ -12,8 +12,8 @@ use crate::{
     SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse,
     SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxRule,
     SmartMailboxStore, SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore,
-    SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, ThreadId, ThreadView,
-    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary, ThreadId,
+    ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -36,6 +36,7 @@ pub struct MailService {
     config: SharedConfigRepository,
     mailbox_reader: Arc<dyn MailboxReadStore>,
     message_lister: Arc<dyn MessageListStore>,
+    tag_reader: Arc<dyn TagReadStore>,
     conversation_reader: Arc<dyn ConversationReadStore>,
     message_detail_reader: Arc<dyn MessageDetailStore>,
     smart_mailboxes: Arc<dyn SmartMailboxStore>,
@@ -58,6 +59,7 @@ impl MailService {
             config,
             mailbox_reader: store.clone(),
             message_lister: store.clone(),
+            tag_reader: store.clone(),
             conversation_reader: store.clone(),
             message_detail_reader: store.clone(),
             smart_mailboxes: store.clone(),
@@ -352,9 +354,26 @@ impl MailService {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let mut tag_totals = std::collections::BTreeMap::<String, (i64, i64)>::new();
+        for source in &sidebar_sources {
+            for tag in self.tag_reader.list_tags(&source.id)? {
+                let entry = tag_totals.entry(tag.name).or_insert((0, 0));
+                entry.0 += tag.unread_messages;
+                entry.1 += tag.total_messages;
+            }
+        }
+        let tags = tag_totals
+            .into_iter()
+            .map(|(name, (unread_messages, total_messages))| TagSummary {
+                name,
+                unread_messages,
+                total_messages,
+            })
+            .collect();
 
         Ok(SidebarResponse {
             smart_mailboxes: sidebar_smart_mailboxes,
+            tags,
             sources: sidebar_sources,
         })
     }
@@ -1010,6 +1029,12 @@ mod tests {
                 items: Vec::new(),
                 next_cursor: None,
             })
+        }
+    }
+
+    impl TagReadStore for TestStore {
+        fn list_tags(&self, _account_id: &AccountId) -> Result<Vec<TagSummary>, StoreError> {
+            Ok(Vec::new())
         }
     }
 

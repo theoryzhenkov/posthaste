@@ -30,6 +30,7 @@ interface ActionBarProps {
   onPlaceholderAction: (label: string) => void
   onReply: () => void
   onShowShortcuts: () => void
+  onTag: () => void
   onToggleFlag: () => void
   onToggleSettings: () => void
   onToggleTheme: () => void
@@ -39,6 +40,7 @@ interface ActionBarProps {
 interface ToolbarChipProps {
   active?: boolean
   disabled?: boolean
+  tagEditorTrigger?: boolean
   hint?: string
   icon: React.ReactNode
   label?: string
@@ -63,6 +65,7 @@ function Divider() {
 function ToolbarChip({
   active,
   disabled,
+  tagEditorTrigger,
   hint,
   icon,
   label,
@@ -72,6 +75,7 @@ function ToolbarChip({
   return (
     <button
       type="button"
+      data-tag-editor-trigger={tagEditorTrigger ? 'true' : undefined}
       title={title}
       disabled={disabled}
       onClick={onClick}
@@ -148,6 +152,7 @@ export function ActionBar({
   onPlaceholderAction,
   onReply,
   onShowShortcuts,
+  onTag,
   onToggleFlag,
   onToggleSettings,
   onToggleTheme,
@@ -215,8 +220,10 @@ export function ActionBar({
       />
       <ToolbarChip
         hint="L"
+        disabled={!isMessageSelected}
+        tagEditorTrigger
         icon={<Tag size={14} strokeWidth={1.6} />}
-        onClick={() => onPlaceholderAction('Tag')}
+        onClick={onTag}
         title="Tag"
       />
 
