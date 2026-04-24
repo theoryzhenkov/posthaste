@@ -89,7 +89,10 @@ export const FIELD_OPTIONS: Array<{ value: SmartMailboxField; label: string }> =
   [
     { value: 'sourceId', label: 'Source ID' },
     { value: 'sourceName', label: 'Source Name' },
+    { value: 'messageId', label: 'Message ID' },
+    { value: 'threadId', label: 'Thread ID' },
     { value: 'mailboxId', label: 'Mailbox ID' },
+    { value: 'mailboxName', label: 'Mailbox Name' },
     { value: 'mailboxRole', label: 'Mailbox Role' },
     { value: 'isRead', label: 'Read state' },
     { value: 'isFlagged', label: 'Flagged' },
@@ -153,11 +156,15 @@ export function operatorOptionsForField(
 ): SmartMailboxOperator[] {
   switch (field) {
     case 'sourceId':
-    case 'sourceName':
+    case 'messageId':
+    case 'threadId':
     case 'mailboxId':
     case 'mailboxRole':
     case 'keyword':
       return ['equals', 'in']
+    case 'sourceName':
+    case 'mailboxName':
+      return ['equals', 'contains', 'in']
     case 'isRead':
     case 'isFlagged':
     case 'hasAttachment':

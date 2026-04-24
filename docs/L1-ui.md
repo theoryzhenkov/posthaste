@@ -132,6 +132,11 @@ unified command/search palette. The action bar does not contain an editable
 search field. When a query is applied, the current filter is rendered as a
 compact chip next to the command-search icon with a clear button.
 
+The palette shows query completions before message and command results when the
+current text has a valid completion point. Completion rows update the query text
+without closing the panel. Query language help is rendered in the same panel and
+uses the same floating-panel behavior as commands and keyboard shortcuts.
+
 Search syntax and backend execution are defined by [L1-search](L1-search.md). The visual treatment is defined by L2.
 
 ## Settings And Overlays
