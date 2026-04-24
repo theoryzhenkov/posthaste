@@ -1,26 +1,28 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::header;
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, AccountDriver, AccountId, AccountOverview, AccountSettings,
-    AccountTransportOverview, AddToMailboxCommand, AppSettings, CommandResult, ConversationCursor,
-    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, GatewayError, Identity, MailboxId, MailboxSummary, MessageAttachment,
-    MessageDetail, MessageId, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxId,
-    SmartMailboxKind, SmartMailboxRule, SmartMailboxSummary, SortDirection,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
+    AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
+    CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
+    MailboxId, MailboxSummary, MessageAttachment, MessageDetail, MessageId, Recipient,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
+    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxId, SmartMailboxKind,
+    SmartMailboxRule, SmartMailboxSummary, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use crate::{sanitize, AppState};
@@ -30,9 +32,10 @@ mod cursor_support;
 
 use account_support::{
     account_overview, append_and_publish_account_event, apply_account_patch,
-    apply_secret_instruction, delete_managed_secret, generate_account_id_seed,
-    generate_smart_mailbox_id, internal_error, normalize_email_patterns, normalize_optional,
-    store_error_to_api, validate_account_settings,
+    apply_secret_instruction, default_account_appearance, delete_managed_secret,
+    generate_account_id_seed, generate_smart_mailbox_id, internal_error,
+    normalize_account_appearance, normalize_email_patterns, normalize_optional, store_error_to_api,
+    validate_account_settings, validate_logo_image_id,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event,
@@ -80,6 +83,8 @@ pub struct EventsQuery {
 pub struct GetAttachmentQuery {
     pub download: Option<bool>,
 }
+
+const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
 
 /// Request body for `PATCH /v1/settings`.
 ///
@@ -136,6 +141,7 @@ pub struct CreateAccountRequest {
     pub email_patterns: Vec<String>,
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
+    pub appearance: Option<AccountAppearance>,
     #[serde(default)]
     pub transport: AccountTransportRequest,
     #[serde(default)]
@@ -153,6 +159,7 @@ pub struct PatchAccountRequest {
     pub email_patterns: Option<Vec<String>>,
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
+    pub appearance: Option<AccountAppearance>,
     pub transport: Option<AccountTransportRequest>,
     pub secret: Option<SecretWriteRequest>,
 }
@@ -385,6 +392,7 @@ pub async fn create_account(
         email_patterns,
         driver,
         enabled,
+        appearance,
         transport,
         secret,
     } = request;
@@ -428,6 +436,7 @@ pub async fn create_account(
         email_patterns,
         driver: driver.unwrap_or(AccountDriver::Jmap),
         enabled: enabled.unwrap_or(true),
+        appearance: appearance.map(normalize_account_appearance),
         transport: transport.into(),
         created_at: timestamp.clone(),
         updated_at: timestamp,
@@ -466,6 +475,7 @@ pub async fn patch_account(
         .get_source(&account_id)
         .map_err(ApiError::from_service_error)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let previous_image_id = account_appearance_image_id(&account);
     apply_account_patch(&mut account, &request);
     account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     let existing_secret_ref = account.transport.secret_ref.clone();
@@ -485,6 +495,12 @@ pub async fn patch_account(
     state.supervisor.start_account(&account).await;
     append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
         .map_err(store_error_to_api)?;
+    let next_image_id = account_appearance_image_id(&account);
+    if previous_image_id != next_image_id {
+        if let Some(previous_image_id) = previous_image_id {
+            let _ = delete_account_logo_file(state.as_ref(), &previous_image_id).await;
+        }
+    }
 
     let settings = state
         .service
@@ -539,6 +555,123 @@ pub async fn disable_account(
     set_account_enabled(state, account_id, false).await
 }
 
+/// POST /v1/accounts/{account_id}/logo
+///
+/// Stores a user-uploaded account logo under the config root and updates the
+/// account appearance to reference it.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn upload_account_logo(
+    State(state): State<Arc<AppState>>,
+    Path(account_id): Path<String>,
+    headers: HeaderMap,
+    bytes: Bytes,
+) -> Result<Json<AccountOverview>, ApiError> {
+    let account_id = AccountId::from(account_id.as_str());
+    let mut account = state
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+
+    if bytes.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account_logo",
+            "account logo file is empty",
+        ));
+    }
+    if bytes.len() > MAX_ACCOUNT_LOGO_BYTES {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account_logo",
+            "account logo file is too large",
+        ));
+    }
+
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .unwrap_or("");
+    let extension = account_logo_extension(content_type)?;
+    fs::create_dir_all(&state.account_logo_root)
+        .await
+        .map_err(|err| internal_error(format!("failed to create account logo directory: {err}")))?;
+    let image_id = uuid::Uuid::new_v4().simple().to_string();
+    let path = state
+        .account_logo_root
+        .join(format!("{image_id}.{extension}"));
+    fs::write(&path, &bytes)
+        .await
+        .map_err(|err| internal_error(format!("failed to write account logo: {err}")))?;
+
+    let previous_image_id = match &account.appearance {
+        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
+        _ => None,
+    };
+    let (initials, color_hue) = account_appearance_fallback_parts(&account);
+    account.appearance = Some(AccountAppearance::Image {
+        image_id: image_id.clone(),
+        initials,
+        color_hue,
+    });
+    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
+    validate_account_settings(&account)?;
+    if let Err(error) = state.service.save_source(&account) {
+        let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
+        return Err(ApiError::from_service_error(error));
+    }
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+        .map_err(store_error_to_api)?;
+    if let Some(previous_image_id) = previous_image_id {
+        if previous_image_id != image_id {
+            let _ = delete_account_logo_file(state.as_ref(), &previous_image_id).await;
+        }
+    }
+
+    let settings = state
+        .service
+        .get_app_settings()
+        .map_err(ApiError::from_service_error)?;
+    Ok(Json(account_overview(&state, &settings, account).await))
+}
+
+/// GET /v1/account-assets/logos/{image_id}
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn get_account_logo(
+    State(state): State<Arc<AppState>>,
+    Path(image_id): Path<String>,
+) -> Result<Response, ApiError> {
+    validate_logo_image_id(&image_id)?;
+    for (extension, content_type) in ACCOUNT_LOGO_MIME_TYPES {
+        let path = state
+            .account_logo_root
+            .join(format!("{image_id}.{extension}"));
+        if path.exists() {
+            let bytes = fs::read(path)
+                .await
+                .map_err(|err| internal_error(format!("failed to read account logo: {err}")))?;
+            let mut response = Response::new(Body::from(bytes));
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("private, max-age=86400"),
+            );
+            return Ok(response);
+        }
+    }
+    Err(ApiError::new(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "account logo not found",
+    ))
+}
+
 /// DELETE /v1/accounts/{account_id}
 ///
 /// Removes the managed OS keyring secret, stops the supervisor runtime,
@@ -561,6 +694,10 @@ pub async fn delete_account(
             "account not found",
         ));
     };
+    let logo_image_id = match &account.appearance {
+        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
+        _ => None,
+    };
     delete_managed_secret(state.as_ref(), account.transport.secret_ref.as_ref())?;
     state.supervisor.remove_account(&account_id).await;
     state
@@ -569,6 +706,9 @@ pub async fn delete_account(
         .map_err(ApiError::from_service_error)?;
     append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_DELETED)
         .map_err(store_error_to_api)?;
+    if let Some(image_id) = logo_image_id {
+        let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
+    }
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -1369,6 +1509,71 @@ async fn set_account_enabled(
     Ok(Json(OkResponse { ok: true }))
 }
 
+const ACCOUNT_LOGO_MIME_TYPES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("webp", "image/webp"),
+    ("gif", "image/gif"),
+];
+
+fn account_logo_extension(content_type: &str) -> Result<&'static str, ApiError> {
+    match content_type {
+        "image/png" => Ok("png"),
+        "image/jpeg" => Ok("jpg"),
+        "image/webp" => Ok("webp"),
+        "image/gif" => Ok("gif"),
+        _ => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account_logo",
+            "account logo must be a PNG, JPEG, WebP, or GIF image",
+        )),
+    }
+}
+
+fn account_appearance_fallback_parts(account: &AccountSettings) -> (String, u16) {
+    let appearance = account
+        .appearance
+        .clone()
+        .unwrap_or_else(|| default_account_appearance(account));
+    match normalize_account_appearance(appearance) {
+        AccountAppearance::Initials {
+            initials,
+            color_hue,
+        } => (initials, color_hue),
+        AccountAppearance::Image {
+            initials,
+            color_hue,
+            ..
+        } => (initials, color_hue),
+    }
+}
+
+fn account_appearance_image_id(account: &AccountSettings) -> Option<String> {
+    match &account.appearance {
+        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
+        _ => None,
+    }
+}
+
+async fn delete_account_logo_file(state: &AppState, image_id: &str) -> Result<(), ApiError> {
+    validate_logo_image_id(image_id)?;
+    for (extension, _) in ACCOUNT_LOGO_MIME_TYPES {
+        let path = state
+            .account_logo_root
+            .join(format!("{image_id}.{extension}"));
+        match fs::remove_file(path).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(internal_error(format!(
+                    "failed to delete previous account logo: {error}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1489,6 +1694,7 @@ mod tests {
             email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
+            appearance: None,
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -1513,6 +1719,7 @@ mod tests {
             email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
+            appearance: None,
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: None,
@@ -1561,6 +1768,7 @@ mod tests {
             email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
+            appearance: None,
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://before.example/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -1578,6 +1786,7 @@ mod tests {
                 email_patterns: None,
                 driver: None,
                 enabled: None,
+                appearance: None,
                 transport: Some(AccountTransportRequest {
                     base_url: Some("https://after.example/jmap".to_string()),
                     username: None,
@@ -1593,6 +1802,21 @@ mod tests {
         assert_eq!(
             account.transport.username.as_deref(),
             Some("alice@example.com")
+        );
+    }
+
+    #[test]
+    fn account_appearance_accepts_camel_case_json() {
+        let payload = r#"{"kind":"initials","initials":"P","colorHue":245}"#;
+        let appearance: AccountAppearance =
+            serde_json::from_str(payload).expect("camelCase appearance should deserialize");
+
+        assert_eq!(
+            appearance,
+            AccountAppearance::Initials {
+                initials: "P".to_string(),
+                color_hue: 245,
+            }
         );
     }
 }

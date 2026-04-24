@@ -510,6 +510,7 @@ mod tests {
             email_patterns: Vec::new(),
             driver: posthaste_domain::AccountDriver::Mock,
             enabled: true,
+            appearance: None,
             transport: Default::default(),
             created_at: "2026-03-31T00:00:00Z".to_string(),
             updated_at: "2026-03-31T00:00:00Z".to_string(),

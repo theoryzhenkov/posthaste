@@ -129,6 +129,10 @@ Search syntax and backend execution are defined by [L1-search](L1-search.md). Th
 
 Settings opens as a centered sheet over the live mail shell. The main shell remains visible under a dark blur/saturation scrim. Settings must not replace the whole app view.
 
+The connected accounts list and main sidebar account headers use the account's configured mark as the leading visual identity. Account health is shown separately as a small status dot next to the account name, not as the row's primary icon.
+
+Account editing uses a single stripped-down property page with plain section labels and whitespace instead of nested cards, divider lines, or tabbed subviews. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
+
 Command palette, settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity.
 
 ## Keyboard shortcuts

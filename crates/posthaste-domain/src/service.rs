@@ -1163,6 +1163,7 @@ mod tests {
             email_patterns: Vec::new(),
             driver: crate::AccountDriver::Mock,
             enabled: true,
+            appearance: None,
             transport: Default::default(),
             created_at: crate::RFC3339_EPOCH.to_string(),
             updated_at: crate::RFC3339_EPOCH.to_string(),

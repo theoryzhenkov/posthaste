@@ -7,6 +7,7 @@ pub mod secret;
 pub mod supervisor;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,6 +38,7 @@ pub struct AppState {
     pub secret_store: Arc<dyn SecretStore>,
     pub supervisor: Arc<AccountSupervisor>,
     pub event_sender: broadcast::Sender<DomainEvent>,
+    pub account_logo_root: PathBuf,
 }
 
 impl AppState {
@@ -139,6 +141,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         secret_store,
         supervisor,
         event_sender,
+        account_logo_root: roots.config_root.join("account-assets").join("logos"),
     });
 
     // Build CORS layer: always include the configured origin, plus any extras.
@@ -187,6 +190,14 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .route(
             "/v1/accounts/{account_id}/disable",
             post(api::disable_account),
+        )
+        .route(
+            "/v1/accounts/{account_id}/logo",
+            post(api::upload_account_logo),
+        )
+        .route(
+            "/v1/account-assets/logos/{image_id}",
+            get(api::get_account_logo),
         )
         .route("/v1/sidebar", get(api::get_sidebar))
         .route(

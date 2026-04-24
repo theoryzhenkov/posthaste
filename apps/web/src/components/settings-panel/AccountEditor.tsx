@@ -5,7 +5,7 @@
  * @spec docs/L1-api#secret-management
  */
 import { useMutation } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,26 +17,53 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '../ui/alert-dialog'
-import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { createAccount, updateAccount, verifyAccount } from '../../api/client'
 import type { AccountOverview, VerificationResponse } from '../../api/types'
-import { formatRelativeTime } from '../../utils/relativeTime'
+import { AccountMark } from '../AccountMark'
 import {
   buildCreateAccountPayload,
+  buildAccountAppearanceInput,
   buildUpdateAccountPayload,
-  EMPTY_FORM,
+  emptyAccountForm,
   formFromAccount,
+  normalizeAccountInitials,
 } from './helpers'
-import {
-  FeedbackBanner,
-  Field,
-  SectionCard,
-  SectionHeader,
-  StatusDot,
-} from './shared'
+import { FeedbackBanner, Field, StatusDot } from './shared'
 import type { EditorTarget } from './types'
+import type { AccountFormState } from './types'
+
+const accountHueGradient =
+  'linear-gradient(90deg, oklch(0.68 0.17 0), oklch(0.68 0.17 45), oklch(0.68 0.17 90), oklch(0.68 0.17 145), oklch(0.68 0.17 205), oklch(0.68 0.17 260), oklch(0.68 0.17 315), oklch(0.68 0.17 360))'
+
+function accountAppearanceSignature(
+  appearance: AccountOverview['appearance'],
+): string {
+  const imagePart = appearance.kind === 'image' ? appearance.imageId : ''
+  return `${appearance.kind}:${appearance.initials}:${appearance.colorHue}:${imagePart}`
+}
+
+function appearanceFromForm(
+  form: AccountFormState,
+): AccountOverview['appearance'] {
+  return {
+    kind: 'initials',
+    initials: normalizeAccountInitials(form.appearanceInitials || form.name),
+    colorHue: Math.min(360, Math.max(0, Math.round(form.appearanceColorHue))),
+  }
+}
+
+function accountFieldsSignature(form: AccountFormState): string {
+  return JSON.stringify({
+    name: form.name.trim(),
+    fullName: form.fullName.trim(),
+    emailPatternsText: form.emailPatternsText.trim(),
+    baseUrl: form.baseUrl.trim(),
+    username: form.username.trim(),
+    passwordChanged: form.password.trim().length > 0,
+  })
+}
 
 /**
  * Account editor form: create new or edit existing accounts.
@@ -68,27 +95,30 @@ export function AccountEditor({
   commandError: string | null
 }) {
   const [form, setForm] = useState(() =>
-    editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
+    editingAccount ? formFromAccount(editingAccount) : emptyAccountForm(),
   )
-  const [feedback, setFeedback] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [verification, setVerification] = useState<VerificationResponse | null>(
     null,
   )
+  const [savedAccountFieldsSignature, setSavedAccountFieldsSignature] =
+    useState(() => accountFieldsSignature(form))
 
   const saveMutation = useMutation({
-    mutationFn: (currentForm: typeof form) =>
-      editorTarget === 'new'
+    mutationFn: async (currentForm: typeof form) => {
+      return editorTarget === 'new'
         ? createAccount(buildCreateAccountPayload(currentForm))
-        : updateAccount(editorTarget, buildUpdateAccountPayload(currentForm)),
+        : updateAccount(editorTarget, buildUpdateAccountPayload(currentForm))
+    },
     onSuccess: async (account) => {
-      setFeedback(`Saved ${account.name}.`)
       setErrorMessage(null)
       setVerification(null)
+      const savedForm = formFromAccount(account)
+      setSavedAccountFieldsSignature(accountFieldsSignature(savedForm))
+      setForm(savedForm)
       await onSaved(account)
     },
     onError: (error: Error) => {
-      setFeedback(null)
       setErrorMessage(error.message)
     },
   })
@@ -97,59 +127,70 @@ export function AccountEditor({
     mutationFn: (accountId: string) => verifyAccount(accountId),
     onSuccess: async (result) => {
       setVerification(result)
-      setFeedback(
-        result.identityEmail
-          ? `Verified ${result.identityEmail}.`
-          : 'Account verified.',
-      )
       setErrorMessage(null)
       await onVerified()
     },
     onError: (error: Error) => {
       setVerification(null)
-      setFeedback(null)
       setErrorMessage(error.message)
     },
   })
 
   const isEditing = editorTarget !== 'new' && editingAccount !== null
+  const formAppearance = appearanceFromForm(form)
+  const hasUnsavedAccountChanges =
+    accountFieldsSignature(form) !== savedAccountFieldsSignature
 
   return (
-    <div>
-      <SectionCard>
-        <SectionHeader
-          eyebrow="Account editor"
-          title={
-            editorTarget === 'new'
-              ? 'New account'
-              : (editingAccount?.name ?? 'Account')
-          }
-          description={
-            editorTarget === 'new'
-              ? 'Configure transport details, then save and verify the connection.'
-              : 'Update credentials, review sync status, or run account-level actions.'
-          }
-          actions={
-            isEditing && editingAccount ? (
-              <AccountActions
-                account={editingAccount}
-                onCommand={onCommand}
-                onVerify={() => verifyMutation.mutate(editingAccount.id)}
-                isVerifying={verifyMutation.isPending}
-                isCommandPending={isCommandPending}
-              />
-            ) : null
-          }
-        />
+    <div className="pb-8">
+      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <AccountMark
+            appearance={formAppearance}
+            className="size-10 rounded-md text-[14px]"
+          />
+          <div className="min-w-0">
+            <h1 className="truncate text-[20px] font-semibold leading-tight text-foreground">
+              {editorTarget === 'new'
+                ? 'New account'
+                : (editingAccount?.name ?? 'Account')}
+            </h1>
+            <p className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+              {isEditing && editingAccount ? (
+                <>
+                  <StatusDot
+                    status={editingAccount.status}
+                    className="size-1.5"
+                  />
+                  <span className="font-mono uppercase tracking-[0.12em]">
+                    {editingAccount.status}
+                  </span>
+                </>
+              ) : (
+                'Configure the account, then apply it.'
+              )}
+            </p>
+          </div>
+        </div>
 
-        {isEditing && editingAccount && (
-          <AccountStatusStrip account={editingAccount} />
-        )}
-      </SectionCard>
+        {isEditing && editingAccount ? (
+          <AccountActions
+            account={editingAccount}
+            onCommand={onCommand}
+            isCommandPending={isCommandPending}
+          />
+        ) : null}
+      </header>
 
-      <SectionCard>
-        <SectionHeader eyebrow="Identity" title="Mailbox source" />
+      {editingAccount?.lastSyncError && (
+        <div className="mt-4">
+          <FeedbackBanner tone="error">
+            {editingAccount.lastSyncError}
+          </FeedbackBanner>
+        </div>
+      )}
 
+      <AccountEditorGroup title="Identity">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Account name"
@@ -184,11 +225,18 @@ export function AccountEditor({
             }
           />
         </label>
-      </SectionCard>
+      </AccountEditorGroup>
 
-      <SectionCard>
-        <SectionHeader eyebrow="Connection" title="Server details" />
+      <AccountEditorGroup title="Appearance">
+        <AccountAppearanceFields
+          accountId={isEditing ? editingAccount.id : null}
+          form={form}
+          onChange={setForm}
+          onSaved={onSaved}
+        />
+      </AccountEditorGroup>
 
+      <AccountEditorGroup title="Server">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Base URL"
@@ -207,23 +255,14 @@ export function AccountEditor({
             }
           />
         </div>
-      </SectionCard>
+      </AccountEditorGroup>
 
-      <SectionCard>
-        <SectionHeader
-          eyebrow="Credentials"
-          title="Password"
-          actions={
-            editingAccount?.transport.secret.configured ? (
-              <Badge
-                variant="outline"
-                className="h-6 border-emerald-500/30 bg-emerald-500/10 font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-700"
-              >
-                configured
-              </Badge>
-            ) : null
-          }
-        />
+      <AccountEditorGroup title="Password">
+        {editingAccount?.transport.secret.configured && (
+          <p className="-mt-1 text-[12px] text-muted-foreground">
+            A password is configured. Enter a new one to replace it.
+          </p>
+        )}
 
         <Input
           id="account-password"
@@ -242,12 +281,9 @@ export function AccountEditor({
             }))
           }
         />
-      </SectionCard>
+      </AccountEditorGroup>
 
-      <SectionCard>
-        <SectionHeader eyebrow="Changes" title="Apply updates" />
-
-        {feedback && <FeedbackBanner tone="success">{feedback}</FeedbackBanner>}
+      <FormFooter>
         {verification?.identityEmail && (
           <FeedbackBanner tone="success">
             Verified identity: {verification.identityEmail}
@@ -260,17 +296,162 @@ export function AccountEditor({
           <FeedbackBanner tone="error">{commandError}</FeedbackBanner>
         )}
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             onClick={() => saveMutation.mutate(form)}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || !hasUnsavedAccountChanges}
             className="bg-brand-coral text-white hover:bg-brand-coral/90"
           >
             Apply
           </Button>
+          {isEditing && editingAccount && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => verifyMutation.mutate(editingAccount.id)}
+              disabled={
+                verifyMutation.isPending ||
+                saveMutation.isPending ||
+                hasUnsavedAccountChanges
+              }
+              className="rounded-md border-border bg-background"
+            >
+              Verify connection
+            </Button>
+          )}
+          <span className="text-[12px] text-muted-foreground">
+            {hasUnsavedAccountChanges ? 'Unsaved changes' : 'Saved'}
+          </span>
         </div>
-      </SectionCard>
+      </FormFooter>
+
+      {isEditing && editingAccount && (
+        <DangerSection
+          account={editingAccount}
+          onCommand={onCommand}
+          isCommandPending={isCommandPending}
+        />
+      )}
+    </div>
+  )
+}
+
+function FormFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid gap-3 pt-2 md:grid-cols-[140px_1fr]">
+      <div aria-hidden />
+      <div className="min-w-0 space-y-3">{children}</div>
+    </div>
+  )
+}
+
+function AccountEditorGroup({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="grid gap-3 py-5 md:grid-cols-[140px_1fr]">
+      <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h2>
+      <div className="min-w-0 space-y-3">{children}</div>
+    </section>
+  )
+}
+
+function AccountAppearanceFields({
+  accountId,
+  form,
+  onChange,
+  onSaved,
+}: {
+  accountId: string | null
+  form: AccountFormState
+  onChange: React.Dispatch<React.SetStateAction<AccountFormState>>
+  onSaved: (account: AccountOverview) => Promise<void>
+}) {
+  const previewAppearance = useMemo(() => appearanceFromForm(form), [form])
+  const appearanceKey = accountAppearanceSignature(previewAppearance)
+  const savedAppearanceKeyRef = useRef<string | null>(
+    accountId ? appearanceKey : null,
+  )
+  const saveAppearanceMutation = useMutation({
+    mutationFn: () =>
+      updateAccount(accountId!, {
+        appearance: buildAccountAppearanceInput(form),
+      }),
+    onSuccess: async (account) => {
+      savedAppearanceKeyRef.current = accountAppearanceSignature(
+        account.appearance,
+      )
+      await onSaved(account)
+    },
+  })
+  const { error: saveAppearanceError, mutate: saveAppearance } =
+    saveAppearanceMutation
+
+  useEffect(() => {
+    if (!accountId || appearanceKey === savedAppearanceKeyRef.current) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      saveAppearance()
+    }, 350)
+    return () => window.clearTimeout(timeout)
+  }, [accountId, appearanceKey, saveAppearance])
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
+      <AccountMark
+        appearance={previewAppearance}
+        className="size-12 rounded-md text-[15px]"
+      />
+
+      <div className="min-w-0 space-y-3">
+        <div className="grid gap-3 sm:grid-cols-[96px_1fr]">
+          <Field
+            label="Letter"
+            value={form.appearanceInitials}
+            onChange={(value) =>
+              onChange((current) => ({
+                ...current,
+                appearanceInitials: value.toUpperCase().slice(0, 1),
+              }))
+            }
+          />
+          <label className="grid gap-1.5 text-[13px]">
+            <span className="flex items-center justify-between text-[12px] font-medium text-muted-foreground">
+              <span>Color</span>
+              <span className="font-mono">{form.appearanceColorHue}°</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={360}
+              step={1}
+              value={form.appearanceColorHue}
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  appearanceColorHue: Number(event.target.value),
+                }))
+              }
+              className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
+              style={{ background: accountHueGradient }}
+            />
+          </label>
+        </div>
+        {saveAppearanceError && (
+          <FeedbackBanner tone="error">
+            {saveAppearanceError.message}
+          </FeedbackBanner>
+        )}
+      </div>
     </div>
   )
 }
@@ -278,8 +459,6 @@ export function AccountEditor({
 function AccountActions({
   account,
   onCommand,
-  onVerify,
-  isVerifying,
   isCommandPending,
 }: {
   account: AccountOverview
@@ -287,24 +466,13 @@ function AccountActions({
     action: 'enable' | 'disable' | 'delete' | 'sync',
     account: AccountOverview,
   ) => void
-  onVerify: () => void
-  isVerifying: boolean
   isCommandPending: boolean
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1">
       <Button
         size="sm"
-        variant="outline"
-        type="button"
-        onClick={onVerify}
-        disabled={isVerifying}
-      >
-        Verify
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
+        variant="ghost"
         type="button"
         onClick={() => onCommand('sync', account)}
         disabled={isCommandPending}
@@ -313,7 +481,7 @@ function AccountActions({
       </Button>
       <Button
         size="sm"
-        variant="outline"
+        variant="ghost"
         type="button"
         onClick={() =>
           onCommand(account.enabled ? 'disable' : 'enable', account)
@@ -322,58 +490,62 @@ function AccountActions({
       >
         {account.enabled ? 'Disable' : 'Enable'}
       </Button>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button size="sm" variant="destructive" type="button">
-            Delete
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete account?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove &ldquo;{account.name}&rdquo; and all
-              synced data. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => onCommand('delete', account)}
-            >
-              Delete account
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
 
-function AccountStatusStrip({ account }: { account: AccountOverview }) {
+function DangerSection({
+  account,
+  onCommand,
+  isCommandPending,
+}: {
+  account: AccountOverview
+  onCommand: (
+    action: 'enable' | 'disable' | 'delete' | 'sync',
+    account: AccountOverview,
+  ) => void
+  isCommandPending: boolean
+}) {
   return (
-    <>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border-soft bg-bg-elev px-3 py-2 text-[12px] text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <StatusDot status={account.status} />
-          <span className="font-mono uppercase tracking-wider">
-            {account.status}
-          </span>
-        </span>
-        <span>
-          Last sync:{' '}
-          {account.lastSyncAt
-            ? formatRelativeTime(account.lastSyncAt)
-            : 'never'}
-        </span>
-        <span>Real-time: {account.push}</span>
-      </div>
-      {account.lastSyncError && (
-        <p className="mt-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
-          {account.lastSyncError}
+    <section className="grid gap-3 pt-16 md:grid-cols-[140px_1fr]">
+      <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-destructive">
+        Danger
+      </h2>
+      <div>
+        <p className="mb-3 text-[12px] text-muted-foreground">
+          Remove this account and its synced local data.
         </p>
-      )}
-    </>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="destructive"
+              type="button"
+              disabled={isCommandPending}
+            >
+              Delete
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete account?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove &ldquo;{account.name}&rdquo; and
+                all synced data. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => onCommand('delete', account)}
+              >
+                Delete account
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </section>
   )
 }
