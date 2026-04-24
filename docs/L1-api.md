@@ -152,11 +152,11 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 ## Account CRUD lifecycle
 
-**Create**: `POST /accounts` validates the ID is unique, applies secret instruction, validates required fields (for JMAP: base URL and configured secret; username is optional for bearer-token auth), persists to config, starts the supervisor runtime, and emits an `account.created` event.
+**Create**: `POST /accounts` accepts account name, optional full name, email address/pattern ownership, JMAP transport details, and a secret instruction. If `id` is omitted, the backend derives an internal unique ID from the first email pattern or account name. UI-created accounts always use JMAP. The endpoint applies the secret instruction, validates required fields (for JMAP: base URL and configured secret; username is optional for bearer-token auth), persists to config, starts the supervisor runtime, and emits an `account.created` event.
 
-**Patch**: `PATCH /accounts/{id}` merges provided fields into the existing account. Omitted fields in the transport sub-object preserve their current values (sparse merge). Secret handling uses the `SecretWriteMode` tri-state: `keep` (preserve existing), `replace` (store new secret in keyring), `clear` (delete managed secret).
+**Patch**: `PATCH /accounts/{id}` merges provided fields into the existing account. Omitted fields in the transport sub-object preserve their current values (sparse merge). Secret handling uses the backend `SecretWriteMode` tri-state: `keep` (preserve existing), `replace` (store new secret in keyring), `clear` (delete managed secret). The settings UI exposes this as an empty password field to keep the configured secret or a filled password field to replace it.
 
-**Delete**: `DELETE /accounts/{id}` removes the managed OS keyring secret (if any), stops the supervisor runtime, deletes the config file, and emits an `account.deleted` event.
+**Delete**: `DELETE /accounts/{id}` removes the managed OS keyring secret (if any), treating an already-missing keyring entry as deleted, stops the supervisor runtime, deletes the config file, and emits an `account.deleted` event.
 
 **Verify**: `POST /accounts/{id}/verify` attempts a JMAP session discovery and returns whether the connection succeeded, the primary identity email, and whether push is supported.
 

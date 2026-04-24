@@ -26,6 +26,7 @@ import {
 } from '../api/client'
 import type {
   MessageAttachment,
+  MessageDetail as MessageDetailRecord,
   MessageSummary,
   SourceMessageRef,
 } from '../api/types'
@@ -78,6 +79,12 @@ function canPreviewAttachment(attachment: MessageAttachment): boolean {
     attachment.mimeType === 'application/pdf' ||
     attachment.mimeType.startsWith('text/')
   )
+}
+
+function isMessageDetailPayload(
+  message: MessageDetailRecord | MessageSummary | undefined,
+): message is MessageDetailRecord {
+  return Array.isArray((message as Partial<MessageDetailRecord>)?.attachments)
 }
 
 function formatAttachmentSize(size: number): string {
@@ -161,7 +168,13 @@ export function MessageDetail({
     enabled: selection !== null,
   })
 
-  const messageQuery = useQuery({
+  const {
+    data: messageData,
+    error: messageError,
+    isFetching: isMessageFetching,
+    isLoading: isMessageLoading,
+    refetch: refetchMessage,
+  } = useQuery({
     queryKey: ['message', selection?.sourceId, selection?.messageId],
     queryFn: () => fetchMessage(selection!.messageId, selection!.sourceId),
     enabled: selection !== null,
@@ -173,6 +186,17 @@ export function MessageDetail({
     }
     mergeConversationView(queryClient, conversationQuery.data)
   }, [conversationQuery.data, queryClient])
+
+  const conversation = conversationQuery.data
+  const hasMessageDetailPayload = isMessageDetailPayload(messageData)
+  const message = hasMessageDetailPayload ? messageData : null
+
+  useEffect(() => {
+    if (!messageData || hasMessageDetailPayload || isMessageFetching) {
+      return
+    }
+    void refetchMessage()
+  }, [hasMessageDetailPayload, isMessageFetching, messageData, refetchMessage])
 
   if (!selection) {
     return (
@@ -196,7 +220,11 @@ export function MessageDetail({
     )
   }
 
-  if (conversationQuery.isLoading || messageQuery.isLoading) {
+  if (
+    conversationQuery.isLoading ||
+    isMessageLoading ||
+    (messageData && !hasMessageDetailPayload)
+  ) {
     return (
       <div className="flex h-full flex-col bg-panel">
         <div className="shrink-0 space-y-3 border-b border-border px-5 py-4">
@@ -216,15 +244,7 @@ export function MessageDetail({
     )
   }
 
-  const conversation = conversationQuery.data
-  const message = messageQuery.data
-
-  if (
-    conversationQuery.error ||
-    messageQuery.error ||
-    !conversation ||
-    !message
-  ) {
+  if (conversationQuery.error || messageError || !conversation || !message) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel">
         <AlertCircle
@@ -238,7 +258,7 @@ export function MessageDetail({
           className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onClick={() => {
             void conversationQuery.refetch()
-            void messageQuery.refetch()
+            void refetchMessage()
           }}
         >
           Try again

@@ -21,7 +21,7 @@ Multi-account UI is out of scope for MVP. The implementation targets a single Fa
 
 All SQLite tables use `(account_id, ...)` composite primary keys. All Rust-side state (sync state strings, session objects) is keyed by account ID. All API endpoints that return account-scoped data filter by account ID internally. The UI may hardcode a single account ID for v1, but no code path assumes there is only one account.
 
-The local account ID is a PostHaste identifier. The JMAP server account ID comes from the Session object's `accounts` and `primaryAccounts` fields. These IDs are mapped explicitly and are not interchangeable.
+The local account ID is a hidden PostHaste identifier used for storage, routes, and secret references. User-facing account identity is the account name, full name, and owned email address/pattern list. The JMAP server account ID comes from the Session object's `accounts` and `primaryAccounts` fields. These IDs are mapped explicitly and are not interchangeable.
 
 ## Credential storage
 
@@ -33,4 +33,4 @@ Account setup starts from a configured Session URL or provider origin. Generic J
 
 ## What "deferred" means concretely
 
-No account picker UI, no add/remove account flow, no per-account settings screen, no universal mailbox aggregating mail across accounts. This L0 exists so that other domain specs reference the account-scoping invariant and do not accidentally introduce single-account assumptions into data models, interfaces, or queries.
+The account settings UI can add, edit, verify, enable/disable, and delete configured accounts, but the primary mail shell still treats the configured sources as one workspace rather than a full account-picker product. This L0 exists so that other domain specs reference the account-scoping invariant and do not accidentally introduce single-account assumptions into data models, interfaces, or queries.

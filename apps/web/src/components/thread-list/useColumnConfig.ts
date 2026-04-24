@@ -11,7 +11,7 @@ import {
   getColumnDef,
 } from './columns'
 
-const STORAGE_KEY = 'posthaste-thread-columns-v6'
+const STORAGE_KEY = 'posthaste-message-columns-v7'
 
 interface StoredConfig {
   columns: ColumnId[]

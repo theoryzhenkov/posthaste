@@ -35,6 +35,7 @@ import { useDebouncedValue } from './hooks/useDebouncedValue'
 import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
 import { mailKeys, type MailSelection } from './mailState'
+import { queryKeys } from './queryKeys'
 
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
@@ -70,7 +71,7 @@ function MailClient() {
   )
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsCategory, setSettingsCategory] = useState<
-    'general' | 'accounts' | 'mailboxes' | null
+    'general' | 'appearance' | 'accounts' | 'mailboxes' | null
   >(null)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
@@ -78,6 +79,7 @@ function MailClient() {
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedQuery = useDebouncedValue(searchQuery, 300)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const theme = useDesignTheme()
 
@@ -90,7 +92,7 @@ function MailClient() {
   }, [theme])
 
   const { data: accounts = [], isLoading } = useQuery({
-    queryKey: ['accounts'],
+    queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
   })
 
@@ -122,6 +124,30 @@ function MailClient() {
     storage: localStorage,
   })
   const actions = useEmailActions()
+
+  useEffect(() => {
+    if (!selectedMessage || !selectedMessageQuery.data) {
+      return
+    }
+    if (selectedMessageQuery.data.isRead) {
+      return
+    }
+
+    const selectionKey = `${selectedMessage.sourceId}:${selectedMessage.messageId}`
+    if (lastAutoSeenKeyRef.current === selectionKey) {
+      return
+    }
+    lastAutoSeenKeyRef.current = selectionKey
+
+    actions.markRead({
+      conversationId: selectedMessage.conversationId,
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+      isFlagged: selectedMessageQuery.data.isFlagged,
+      isRead: selectedMessageQuery.data.isRead,
+      keywords: selectedMessageQuery.data.keywords,
+    })
+  }, [actions, selectedMessage, selectedMessageQuery.data])
 
   const handleToggleFlag = useCallback(() => {
     if (!selectedMessage) {

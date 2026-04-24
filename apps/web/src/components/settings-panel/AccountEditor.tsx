@@ -19,15 +19,7 @@ import {
 } from '../ui/alert-dialog'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { Checkbox } from '../ui/checkbox'
 import { Input } from '../ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../ui/select'
 import { createAccount, updateAccount, verifyAccount } from '../../api/client'
 import type { AccountOverview, VerificationResponse } from '../../api/types'
 import { formatRelativeTime } from '../../utils/relativeTime'
@@ -36,7 +28,6 @@ import {
   buildUpdateAccountPayload,
   EMPTY_FORM,
   formFromAccount,
-  parseAccountDriver,
 } from './helpers'
 import {
   FeedbackBanner,
@@ -50,8 +41,8 @@ import type { EditorTarget } from './types'
 /**
  * Account editor form: create new or edit existing accounts.
  *
- * Supports the tri-state secret write mode (keep/replace/clear), post-save
- * JMAP session verification, and account-level actions (sync, enable/disable, delete).
+ * Hides backend-only account IDs and secret write modes from users while
+ * preserving post-save JMAP verification and account-level actions.
  *
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#secret-management
@@ -63,6 +54,7 @@ export function AccountEditor({
   onVerified,
   onCommand,
   isCommandPending,
+  commandError,
 }: {
   editorTarget: EditorTarget
   editingAccount: AccountOverview | null
@@ -73,6 +65,7 @@ export function AccountEditor({
     account: AccountOverview,
   ) => void
   isCommandPending: boolean
+  commandError: string | null
 }) {
   const [form, setForm] = useState(() =>
     editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
@@ -157,55 +150,39 @@ export function AccountEditor({
       <SectionCard>
         <SectionHeader eyebrow="Identity" title="Mailbox source" />
 
-        <Field
-          label="Account name"
-          value={form.name}
-          onChange={(value) =>
-            setForm((current) => ({ ...current, name: value }))
-          }
-        />
-
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_10rem]">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field
-            label="Account ID"
-            value={form.id}
-            disabled={editorTarget !== 'new'}
+            label="Account name"
+            value={form.name}
             onChange={(value) =>
-              setForm((current) => ({ ...current, id: value }))
+              setForm((current) => ({ ...current, name: value }))
             }
           />
-          <label className="grid gap-1.5 text-[13px]">
-            <span className="text-[12px] font-medium text-muted-foreground">
-              Driver
-            </span>
-            <Select
-              value={form.driver}
-              onValueChange={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  driver: parseAccountDriver(value, current.driver),
-                }))
-              }
-            >
-              <SelectTrigger className="h-8 w-full rounded-md border-border bg-background text-[13px] shadow-none">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="jmap">JMAP</SelectItem>
-                <SelectItem value="mock">Mock</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
+          <Field
+            label="Full name"
+            value={form.fullName}
+            placeholder="Ada Lovelace"
+            onChange={(value) =>
+              setForm((current) => ({ ...current, fullName: value }))
+            }
+          />
         </div>
 
-        <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-          <Checkbox
-            checked={form.enabled}
-            onCheckedChange={(checked) =>
-              setForm((current) => ({ ...current, enabled: checked === true }))
+        <label className="grid gap-1.5 text-[13px]">
+          <span className="text-[12px] font-medium text-muted-foreground">
+            Email addresses
+          </span>
+          <textarea
+            className="min-h-[72px] w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 text-[13px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            value={form.emailPatternsText}
+            placeholder={'you@example.com\n*@example.com'}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                emailPatternsText: event.target.value,
+              }))
             }
           />
-          Account enabled
         </label>
       </SectionCard>
 
@@ -248,53 +225,15 @@ export function AccountEditor({
           }
         />
 
-        <div className="flex flex-wrap gap-1.5">
-          {(['keep', 'replace', 'clear'] as const).map((mode) => {
-            const showKeep =
-              mode !== 'keep' ||
-              Boolean(editingAccount?.transport.secret.configured)
-            if (!showKeep) {
-              return null
-            }
-            return (
-              <Button
-                key={mode}
-                size="sm"
-                type="button"
-                variant={form.secretMode === mode ? 'default' : 'outline'}
-                onClick={() => {
-                  if (
-                    mode === 'clear' &&
-                    editingAccount?.transport.secret.configured &&
-                    !window.confirm(
-                      'Are you sure? The stored password will be permanently removed.',
-                    )
-                  ) {
-                    return
-                  }
-                  setForm((current) => ({
-                    ...current,
-                    secretMode: mode,
-                    password: mode === 'replace' ? current.password : '',
-                  }))
-                }}
-              >
-                {mode}
-              </Button>
-            )
-          })}
-        </div>
-
         <Input
           id="account-password"
           type="password"
           className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
           value={form.password}
-          disabled={form.secretMode !== 'replace'}
           placeholder={
-            form.secretMode === 'replace'
-              ? 'Enter a new password'
-              : 'Password hidden'
+            editingAccount?.transport.secret.configured
+              ? '********'
+              : 'Password'
           }
           onChange={(event) =>
             setForm((current) => ({
@@ -317,6 +256,9 @@ export function AccountEditor({
         {errorMessage && (
           <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>
         )}
+        {commandError && (
+          <FeedbackBanner tone="error">{commandError}</FeedbackBanner>
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           <Button
@@ -325,18 +267,7 @@ export function AccountEditor({
             disabled={saveMutation.isPending}
             className="bg-brand-coral text-white hover:bg-brand-coral/90"
           >
-            {editorTarget === 'new' ? 'Create account' : 'Save changes'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              setForm(
-                editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
-              )
-            }
-          >
-            Reset form
+            Apply
           </Button>
         </div>
       </SectionCard>
@@ -437,7 +368,6 @@ function AccountStatusStrip({ account }: { account: AccountOverview }) {
             : 'never'}
         </span>
         <span>Real-time: {account.push}</span>
-        <span>{account.driver.toUpperCase()}</span>
       </div>
       {account.lastSyncError && (
         <p className="mt-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">

@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   FolderSearch,
   Mailbox,
+  Palette,
   Settings as SettingsIcon,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -30,17 +31,24 @@ import {
 } from '../api/client'
 import type { AccountOverview, SmartMailboxSummary } from '../api/types'
 import { AccountsPane } from './settings-panel/AccountsPane'
+import { AppearancePane } from './settings-panel/AppearancePane'
 import { GeneralPane } from './settings-panel/GeneralPane'
 import { SmartMailboxesPane } from './settings-panel/SmartMailboxesPane'
 import { brandAccents } from '../design/tokens'
+import {
+  applyAccountMutationResult,
+  invalidateAccountReadModels,
+  removeAccountOverview,
+} from '../domainCache'
 import { cn } from '../lib/utils'
+import { queryKeys } from '../queryKeys'
 import { Button } from './ui/button'
 import type {
   EditorTarget,
   SmartMailboxEditorTarget,
 } from './settings-panel/types'
 
-type SettingsCategory = 'general' | 'accounts' | 'mailboxes'
+type SettingsCategory = 'general' | 'appearance' | 'accounts' | 'mailboxes'
 
 const SETTINGS_CATEGORIES = [
   {
@@ -49,6 +57,13 @@ const SETTINGS_CATEGORIES = [
     description: 'Default account and workspace-wide preferences.',
     icon: SettingsIcon,
     accent: brandAccents.blue,
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    description: 'Built-in themes, color mode, and density.',
+    icon: Palette,
+    accent: brandAccents.sage,
   },
   {
     id: 'accounts',
@@ -103,6 +118,9 @@ export function SettingsPanel({
   const [smartMailboxActionError, setSmartMailboxActionError] = useState<
     string | null
   >(null)
+  const [accountCommandError, setAccountCommandError] = useState<string | null>(
+    null,
+  )
 
   useEffect(() => {
     if (initialCategory !== undefined) {
@@ -111,11 +129,11 @@ export function SettingsPanel({
   }, [initialCategory])
 
   const settingsQuery = useQuery({
-    queryKey: ['settings'],
+    queryKey: queryKeys.settings,
     queryFn: fetchSettings,
   })
   const smartMailboxListQuery = useQuery({
-    queryKey: ['smart-mailboxes'],
+    queryKey: queryKeys.smartMailboxes,
     queryFn: fetchSmartMailboxes,
   })
 
@@ -130,7 +148,7 @@ export function SettingsPanel({
       ? null
       : effectiveEditorTarget
   const accountQuery = useQuery({
-    queryKey: ['account', editorAccountId],
+    queryKey: queryKeys.account(editorAccountId),
     queryFn: () => fetchAccount(editorAccountId!),
     enabled: editorAccountId !== null,
   })
@@ -154,7 +172,7 @@ export function SettingsPanel({
       ? null
       : effectiveSmartMailboxTarget
   const smartMailboxQuery = useQuery({
-    queryKey: ['smart-mailbox', editingSmartMailboxId],
+    queryKey: queryKeys.smartMailbox(editingSmartMailboxId),
     queryFn: () => fetchSmartMailbox(editingSmartMailboxId!),
     enabled: editingSmartMailboxId !== null,
   })
@@ -165,24 +183,14 @@ export function SettingsPanel({
     ) ??
     null
 
-  const invalidateAccountQueries = async (accountId?: string) => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['settings'] }),
-      queryClient.invalidateQueries({ queryKey: ['accounts'] }),
-      accountId
-        ? queryClient.invalidateQueries({ queryKey: ['account', accountId] })
-        : Promise.resolve(),
-    ])
-  }
-
   const invalidateSmartMailboxQueries = async (smartMailboxId?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['sidebar'] }),
-      queryClient.invalidateQueries({ queryKey: ['messages'] }),
-      queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
       smartMailboxId
         ? queryClient.invalidateQueries({
-            queryKey: ['smart-mailbox', smartMailboxId],
+            queryKey: queryKeys.smartMailbox(smartMailboxId),
           })
         : Promise.resolve(),
     ])
@@ -230,7 +238,7 @@ export function SettingsPanel({
     mutationFn: (accountId: string | null) =>
       patchSettings({ defaultAccountId: accountId }),
     onSuccess: async () => {
-      await invalidateAccountQueries()
+      invalidateAccountReadModels(queryClient)
     },
   })
 
@@ -253,8 +261,16 @@ export function SettingsPanel({
           return triggerSync(account.id)
       }
     },
+    onMutate: () => {
+      setAccountCommandError(null)
+    },
     onSuccess: async (_result, variables) => {
-      await invalidateAccountQueries(variables.account.id)
+      if (variables.action === 'delete') {
+        removeAccountOverview(queryClient, variables.account.id)
+        invalidateAccountReadModels(queryClient)
+      } else {
+        invalidateAccountReadModels(queryClient, variables.account.id)
+      }
       if (variables.action === 'delete') {
         const fallbackAccountId =
           accounts.find(
@@ -274,6 +290,9 @@ export function SettingsPanel({
           setEditorTarget(null)
         }
       }
+    },
+    onError: (error: Error) => {
+      setAccountCommandError(error.message)
     },
   })
 
@@ -325,6 +344,12 @@ export function SettingsPanel({
             </div>
           )}
 
+          {activeCategory === 'appearance' && (
+            <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+              <AppearancePane />
+            </div>
+          )}
+
           {activeCategory === 'accounts' && (
             <AccountsPane
               accounts={accounts}
@@ -338,13 +363,17 @@ export function SettingsPanel({
                 commandMutation.mutate({ action, account })
               }
               onSaved={async (account) => {
-                await invalidateAccountQueries(account.id)
+                applyAccountMutationResult(queryClient, account)
                 setEditorTarget(account.id)
               }}
-              onVerified={() =>
-                invalidateAccountQueries(editorAccountId ?? undefined)
-              }
+              onVerified={async () => {
+                invalidateAccountReadModels(
+                  queryClient,
+                  editorAccountId ?? undefined,
+                )
+              }}
               commandMutation={commandMutation}
+              commandError={accountCommandError}
             />
           )}
 

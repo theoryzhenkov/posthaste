@@ -8,7 +8,6 @@
  * @spec docs/L1-search#smart-mailbox-data-model
  */
 import type {
-  AccountDriver,
   AccountOverview,
   CreateAccountInput,
   SmartMailbox,
@@ -22,19 +21,14 @@ import type {
 } from '../../api/types'
 import type { AccountFormState, SmartMailboxFormState } from './types'
 
-/** @spec docs/L1-api#account-crud-lifecycle */
-export const ACCOUNT_DRIVER_VALUES = ['jmap', 'mock'] as const
-
 /** Default empty form state for creating a new account. */
 export const EMPTY_FORM: AccountFormState = {
-  id: '',
   name: '',
-  driver: 'jmap',
-  enabled: true,
+  fullName: '',
+  emailPatternsText: '',
   baseUrl: '',
   username: '',
   password: '',
-  secretMode: 'replace',
 }
 
 /** Default empty form state for creating a new smart mailbox. */
@@ -53,14 +47,12 @@ export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
 /** Convert an existing account overview into editable form state. */
 export function formFromAccount(account: AccountOverview): AccountFormState {
   return {
-    id: account.id,
     name: account.name,
-    driver: account.driver,
-    enabled: account.enabled,
+    fullName: account.fullName ?? '',
+    emailPatternsText: account.emailPatterns?.join('\n') ?? '',
     baseUrl: account.transport.baseUrl ?? '',
     username: account.transport.username ?? '',
     password: '',
-    secretMode: account.transport.secret.configured ? 'keep' : 'replace',
   }
 }
 
@@ -107,16 +99,6 @@ export const GROUP_OPERATOR_OPTIONS: Array<{
   { value: 'all', label: 'All' },
   { value: 'any', label: 'Any' },
 ]
-
-/** Parse a string into a valid account driver, returning the fallback on mismatch. */
-export function parseAccountDriver(
-  value: string,
-  fallback: AccountDriver,
-): AccountDriver {
-  return (
-    ACCOUNT_DRIVER_VALUES.find((candidate) => candidate === value) ?? fallback
-  )
-}
 
 /** Parse a string into a valid group operator, returning the fallback on mismatch. */
 export function parseGroupOperator(
@@ -210,10 +192,18 @@ export function defaultGroup(): SmartMailboxRuleNode {
  * @spec docs/L1-api#secret-management
  */
 export function buildSecretInput(form: AccountFormState) {
-  if (form.secretMode === 'replace') {
+  if (form.password.trim() !== '') {
     return { mode: 'replace' as const, password: form.password }
   }
-  return { mode: form.secretMode as 'keep' | 'clear' }
+  return { mode: 'keep' as const }
+}
+
+/** Parse newline/comma-separated addresses and catch-all patterns. */
+export function parseEmailPatterns(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0)
 }
 
 /** Build a create-account API payload from form state. */
@@ -221,10 +211,11 @@ export function buildCreateAccountPayload(
   form: AccountFormState,
 ): CreateAccountInput {
   return {
-    id: form.id.trim(),
     name: form.name.trim(),
-    driver: form.driver,
-    enabled: form.enabled,
+    fullName: form.fullName.trim() || null,
+    emailPatterns: parseEmailPatterns(form.emailPatternsText),
+    driver: 'jmap',
+    enabled: true,
     transport: {
       baseUrl: form.baseUrl,
       username: form.username,
@@ -242,8 +233,8 @@ export function buildUpdateAccountPayload(
 ): UpdateAccountInput {
   return {
     name: form.name.trim(),
-    driver: form.driver,
-    enabled: form.enabled,
+    fullName: form.fullName.trim() || null,
+    emailPatterns: parseEmailPatterns(form.emailPatternsText),
     transport: {
       baseUrl: form.baseUrl,
       username: form.username,

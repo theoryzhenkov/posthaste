@@ -41,6 +41,7 @@ export function AccountsPane({
   onSaved,
   onVerified,
   commandMutation,
+  commandError,
 }: {
   accounts: AccountOverview[]
   selectedAccountId: EditorTarget | null
@@ -64,6 +65,7 @@ export function AccountsPane({
     },
     unknown
   >
+  commandError: string | null
 }) {
   if (selectedAccountId !== null) {
     return (
@@ -90,6 +92,7 @@ export function AccountsPane({
               onVerified={onVerified}
               onCommand={onCommand}
               isCommandPending={commandMutation.isPending}
+              commandError={commandError}
             />
           ) : (
             <AccountsEmptyState onCreateAccount={onCreateAccount} />
@@ -140,7 +143,10 @@ export function AccountsPane({
                 accent={accountAccent(account)}
                 label={account.name}
                 sublabel={
-                  account.transport.username ?? account.driver.toUpperCase()
+                  account.emailPatterns?.[0] ??
+                  account.transport.username ??
+                  account.fullName ??
+                  undefined
                 }
                 isDefault={account.isDefault}
                 leading={<StatusDot status={account.status} />}

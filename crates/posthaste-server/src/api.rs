@@ -30,7 +30,8 @@ mod cursor_support;
 
 use account_support::{
     account_overview, append_and_publish_account_event, apply_account_patch,
-    apply_secret_instruction, delete_managed_secret, generate_smart_mailbox_id, internal_error,
+    apply_secret_instruction, delete_managed_secret, generate_account_id_seed,
+    generate_smart_mailbox_id, internal_error, normalize_email_patterns, normalize_optional,
     store_error_to_api, validate_account_settings,
 };
 use cursor_support::{
@@ -128,9 +129,12 @@ pub struct SecretWriteRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountRequest {
-    pub id: String,
+    pub id: Option<String>,
     pub name: String,
-    pub driver: AccountDriver,
+    pub full_name: Option<String>,
+    #[serde(default)]
+    pub email_patterns: Vec<String>,
+    pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
     #[serde(default)]
     pub transport: AccountTransportRequest,
@@ -145,6 +149,8 @@ pub struct CreateAccountRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PatchAccountRequest {
     pub name: Option<String>,
+    pub full_name: Option<String>,
+    pub email_patterns: Option<Vec<String>>,
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
     pub transport: Option<AccountTransportRequest>,
@@ -375,12 +381,32 @@ pub async fn create_account(
     let CreateAccountRequest {
         id,
         name,
+        full_name,
+        email_patterns,
         driver,
         enabled,
         transport,
         secret,
     } = request;
-    let account_id = AccountId::from(id.as_str());
+    let email_patterns = normalize_email_patterns(&email_patterns);
+    let account_id = match id {
+        Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
+        _ => {
+            let seed = generate_account_id_seed(&name, &email_patterns);
+            let mut candidate = AccountId::from(seed.as_str());
+            let mut suffix = 2;
+            while state
+                .service
+                .get_source(&candidate)
+                .map_err(ApiError::from_service_error)?
+                .is_some()
+            {
+                candidate = AccountId::from(format!("{seed}-{suffix}"));
+                suffix += 1;
+            }
+            candidate
+        }
+    };
     if state
         .service
         .get_source(&account_id)
@@ -397,8 +423,10 @@ pub async fn create_account(
     let timestamp = domain_now_iso8601().map_err(internal_error)?;
     let mut account = AccountSettings {
         id: account_id.clone(),
-        name,
-        driver,
+        name: name.trim().to_string(),
+        full_name: normalize_optional(full_name),
+        email_patterns,
+        driver: driver.unwrap_or(AccountDriver::Jmap),
         enabled: enabled.unwrap_or(true),
         transport: transport.into(),
         created_at: timestamp.clone(),
@@ -1457,6 +1485,8 @@ mod tests {
         let account = AccountSettings {
             id: AccountId::from("primary"),
             name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
             transport: posthaste_domain::AccountTransportSettings {
@@ -1479,6 +1509,8 @@ mod tests {
         let account = AccountSettings {
             id: AccountId::from("primary"),
             name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
             transport: posthaste_domain::AccountTransportSettings {
@@ -1525,6 +1557,8 @@ mod tests {
         let mut account = AccountSettings {
             id: AccountId::from("primary"),
             name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: Vec::new(),
             driver: AccountDriver::Jmap,
             enabled: true,
             transport: posthaste_domain::AccountTransportSettings {
@@ -1540,6 +1574,8 @@ mod tests {
             &mut account,
             &PatchAccountRequest {
                 name: None,
+                full_name: None,
+                email_patterns: None,
                 driver: None,
                 enabled: None,
                 transport: Some(AccountTransportRequest {

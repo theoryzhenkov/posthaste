@@ -1,12 +1,12 @@
 /**
- * Single conversation row in the message list.
+ * Single message row in the message list.
  *
  * Renders sender, subject, preview, relative timestamp, unread dot,
- * flag star, message count badge, and source tag.
+ * flag star, attachment state, and source tag.
  *
  * @spec docs/L1-ui#messagelist
  */
-import type { ConversationSummary } from '../api/types'
+import type { MessageSummary } from '../api/types'
 import { cn } from '../lib/utils'
 import {
   type ColumnId,
@@ -16,7 +16,7 @@ import {
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageRowProps {
-  message: ConversationSummary
+  message: MessageSummary
   isSelected: boolean
   isStriped: boolean
   onSelect: () => void
@@ -25,8 +25,8 @@ interface MessageRowProps {
 }
 
 /**
- * Fixed-height conversation row displaying sender, subject,
- * preview, date, unread state, flag, and thread count.
+ * Fixed-height message row displaying sender, subject,
+ * preview, date, unread state, flag, and source.
  *
  * @spec docs/L1-ui#messagelist
  */

@@ -74,6 +74,9 @@ impl AppToml {
 pub struct SourceToml {
     pub id: String,
     pub name: String,
+    pub full_name: Option<String>,
+    #[serde(default)]
+    pub email_patterns: Vec<String>,
     pub driver: DriverToml,
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -126,6 +129,8 @@ impl SourceToml {
         AccountSettings {
             id: AccountId::from(self.id.as_str()),
             name: self.name.clone(),
+            full_name: self.full_name.clone(),
+            email_patterns: self.email_patterns.clone(),
             driver: match self.driver {
                 DriverToml::Jmap => AccountDriver::Jmap,
                 DriverToml::Mock => AccountDriver::Mock,
@@ -160,6 +165,8 @@ impl SourceToml {
         Self {
             id: settings.id.to_string(),
             name: settings.name.clone(),
+            full_name: settings.full_name.clone(),
+            email_patterns: settings.email_patterns.clone(),
             driver: match settings.driver {
                 AccountDriver::Jmap => DriverToml::Jmap,
                 AccountDriver::Mock => DriverToml::Mock,
@@ -529,6 +536,8 @@ mod tests {
         let settings = AccountSettings {
             id: AccountId::from("primary"),
             name: "My Fastmail".to_string(),
+            full_name: Some("Example User".to_string()),
+            email_patterns: vec!["user@example.com".to_string(), "*@example.net".to_string()],
             driver: AccountDriver::Jmap,
             enabled: true,
             transport: AccountTransportSettings {

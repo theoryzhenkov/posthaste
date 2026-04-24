@@ -138,6 +138,8 @@ pub fn import_bootstrap(
         let source = AccountSettings {
             id: account.id.clone().into(),
             name: account.name.clone(),
+            full_name: account.full_name.clone(),
+            email_patterns: account.email_patterns.clone(),
             driver: account.driver.clone(),
             enabled: account.enabled.unwrap_or(true),
             transport: AccountTransportSettings {
@@ -188,6 +190,9 @@ struct BootstrapAppSettings {
 struct BootstrapAccountConfig {
     id: String,
     name: String,
+    full_name: Option<String>,
+    #[serde(default)]
+    email_patterns: Vec<String>,
     driver: AccountDriver,
     enabled: Option<bool>,
     #[serde(default)]
