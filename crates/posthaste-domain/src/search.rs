@@ -105,7 +105,8 @@ fn scan_prefixed_value(chars: &[char], pos: &mut usize, prefix: &str) -> String 
         *pos += 1;
     }
 
-    if !prefix_accepts_spaced_value(prefix) {
+    let prefix = prefix.to_ascii_lowercase();
+    if !prefix_accepts_spaced_value(&prefix) {
         return scan_value(chars, pos);
     }
 
@@ -144,7 +145,10 @@ fn starts_next_prefix(chars: &[char], pos: usize) -> bool {
     let start = i;
     while i < chars.len() && !chars[i].is_whitespace() {
         if chars[i] == ':' {
-            let prefix: String = chars[start..i].iter().collect();
+            let prefix: String = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .to_ascii_lowercase();
             return is_known_prefix(&prefix);
         }
         i += 1;
@@ -243,57 +247,70 @@ fn parse_prefixed(
     if value.is_empty() {
         return Err(format!("empty value for {prefix}:"));
     }
+    let normalized_prefix = prefix.to_ascii_lowercase();
     match prefix {
-        "f" | "from" | "sender" => Ok(vec![from_node(value, negated)]),
-        "subject" | "s" => Ok(vec![condition_node(
+        _ if matches!(normalized_prefix.as_str(), "f" | "from" | "sender") => {
+            Ok(vec![from_node(value, negated)])
+        }
+        _ if matches!(normalized_prefix.as_str(), "subject" | "s") => Ok(vec![condition_node(
             SmartMailboxField::Subject,
             SmartMailboxOperator::Contains,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "body" | "preview" => Ok(vec![condition_node(
+        _ if matches!(normalized_prefix.as_str(), "body" | "preview") => Ok(vec![condition_node(
             SmartMailboxField::Preview,
             SmartMailboxOperator::Contains,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "is" => is_node(value, negated),
-        "has" => has_node(value, negated),
-        "tag" | "keyword" => Ok(vec![condition_node(
+        _ if normalized_prefix == "is" => is_node(value, negated),
+        _ if normalized_prefix == "has" => has_node(value, negated),
+        _ if matches!(normalized_prefix.as_str(), "tag" | "keyword") => Ok(vec![condition_node(
             SmartMailboxField::Keyword,
             SmartMailboxOperator::Equals,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "in" | "mailbox" => Ok(vec![mailbox_node(value, negated)]),
-        "source" | "account" => Ok(vec![source_node(value, negated)]),
-        "id" => Ok(vec![condition_node(
+        _ if matches!(normalized_prefix.as_str(), "in" | "mailbox") => {
+            Ok(vec![mailbox_node(value, negated)])
+        }
+        _ if matches!(normalized_prefix.as_str(), "source" | "account") => {
+            Ok(vec![source_node(value, negated)])
+        }
+        _ if normalized_prefix == "id" => Ok(vec![condition_node(
             SmartMailboxField::MessageId,
             SmartMailboxOperator::Equals,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "thread" | "threadid" => Ok(vec![condition_node(
-            SmartMailboxField::ThreadId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(value.to_string()),
-            negated,
-        )]),
-        "before" => Ok(vec![condition_node(
+        _ if matches!(normalized_prefix.as_str(), "thread" | "threadid") => {
+            Ok(vec![condition_node(
+                SmartMailboxField::ThreadId,
+                SmartMailboxOperator::Equals,
+                SmartMailboxValue::String(value.to_string()),
+                negated,
+            )])
+        }
+        _ if normalized_prefix == "before" => Ok(vec![condition_node(
             SmartMailboxField::ReceivedAt,
             SmartMailboxOperator::Before,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "after" => Ok(vec![condition_node(
+        _ if normalized_prefix == "after" => Ok(vec![condition_node(
             SmartMailboxField::ReceivedAt,
             SmartMailboxOperator::After,
             SmartMailboxValue::String(value.to_string()),
             negated,
         )]),
-        "date" => date_node(value, negated),
-        "newer" => relative_date_node(value, SmartMailboxOperator::After, negated),
-        "older" => relative_date_node(value, SmartMailboxOperator::Before, negated),
+        _ if normalized_prefix == "date" => date_node(value, negated),
+        _ if normalized_prefix == "newer" => {
+            relative_date_node(value, SmartMailboxOperator::After, negated)
+        }
+        _ if normalized_prefix == "older" => {
+            relative_date_node(value, SmartMailboxOperator::Before, negated)
+        }
         _ => Err(format!("unknown search prefix: {prefix}")),
     }
 }
@@ -388,7 +405,8 @@ fn source_node(value: &str, negated: bool) -> SmartMailboxRuleNode {
 
 /// `is:unread` / `is:flagged`
 fn is_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, String> {
-    match value {
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
         "unread" => Ok(vec![condition_node(
             SmartMailboxField::IsRead,
             SmartMailboxOperator::Equals,
@@ -425,7 +443,8 @@ fn is_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, Stri
 
 /// `has:attachment`
 fn has_node(value: &str, negated: bool) -> Result<Vec<SmartMailboxRuleNode>, String> {
-    match value {
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
         "attachment" | "attachments" => Ok(vec![condition_node(
             SmartMailboxField::HasAttachment,
             SmartMailboxOperator::Equals,
@@ -655,6 +674,34 @@ mod tests {
         } else {
             panic!("expected Condition node for is:read");
         }
+    }
+
+    #[test]
+    fn test_parse_all_static_state_queries() {
+        for query in [
+            "is:unread",
+            "is:read",
+            "is:seen",
+            "is:flagged",
+            "is:unflagged",
+            "is:attachment",
+            "is:attachments",
+            "has:attachment",
+            "has:attachments",
+        ] {
+            parse_query(query).unwrap_or_else(|error| panic!("{query} failed: {error}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_prefix_and_state_values_case_insensitively() {
+        let rule = parse_query("IS:Read FROM: Posthaste").unwrap();
+        assert_eq!(rule.root.nodes.len(), 2);
+        let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+            panic!("expected IsRead condition");
+        };
+        assert_eq!(condition.field, SmartMailboxField::IsRead);
+        assert_eq!(condition.value, SmartMailboxValue::Bool(true));
     }
 
     #[test]
