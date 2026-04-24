@@ -10,6 +10,7 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { createSmartMailbox, updateSmartMailbox } from '../../api/client'
 import type {
   AccountOverview,
+  AppSettings,
   CreateSmartMailboxInput,
   SmartMailbox,
   SmartMailboxSummary,
@@ -53,8 +54,9 @@ export function SmartMailboxEditor({
   editingSmartMailbox,
   summary,
   accounts,
+  settings,
   onSaved,
-  onAutomationAccountsSaved,
+  onAutomationSettingsSaved,
   onDeleted,
   onReorder,
   reorderPendingKey,
@@ -63,8 +65,9 @@ export function SmartMailboxEditor({
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
   summary: SmartMailboxSummary | null
   accounts: AccountOverview[]
+  settings: AppSettings | null
   onSaved: (smartMailbox: SmartMailbox) => Promise<void>
-  onAutomationAccountsSaved: (accounts: AccountOverview[]) => Promise<void>
+  onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onDeleted: (smartMailboxId: string) => Promise<void>
   onReorder: (mailbox: SmartMailboxSummary, position: number) => void
   reorderPendingKey: string | null
@@ -198,17 +201,19 @@ export function SmartMailboxEditor({
 
       {editorTarget !== 'new' &&
         editingSmartMailbox &&
-        'rule' in editingSmartMailbox && (
+        'rule' in editingSmartMailbox &&
+        settings && (
           <SettingsSection title="Actions">
             <SmartMailboxAutomationFields
               accounts={accounts}
+              settings={settings}
               smartMailbox={editingSmartMailbox}
               disabledReason={
                 hasUnsavedChanges
                   ? 'Save mailbox definition before applying actions'
                   : null
               }
-              onSaved={onAutomationAccountsSaved}
+              onSaved={onAutomationSettingsSaved}
             />
           </SettingsSection>
         )}

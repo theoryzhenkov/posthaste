@@ -126,6 +126,7 @@ pub fn import_bootstrap(
     if let Some(app_seed) = &bootstrap.seed.app {
         let settings = AppSettings {
             default_account_id: app_seed.default_account_id.as_deref().map(Into::into),
+            automation_rules: Vec::new(),
         };
         config_repo
             .put_app_settings(&settings)
@@ -143,7 +144,6 @@ pub fn import_bootstrap(
             driver: account.driver.clone(),
             enabled: account.enabled.unwrap_or(true),
             appearance: None,
-            automation_rules: Vec::new(),
             transport: AccountTransportSettings {
                 base_url: account.transport.base_url.clone(),
                 username: account.transport.username.clone(),

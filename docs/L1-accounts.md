@@ -67,13 +67,42 @@ A `ConfigSnapshot` holds the full in-memory state: `app_settings`, `sources`, an
 schema_version = 1
 default_source_id = "primary"   # optional
 
+[[automations]]
+id = "rule-newsletters"
+name = "Posthaste newsletters"
+enabled = true
+triggers = ["message_arrived"]
+backfill = true
+
+[automations.condition]
+operator = "all"
+negated = false
+
+[[automations.condition.nodes]]
+type = "condition"
+field = "source_id"
+operator = "equals"
+negated = false
+value = "primary"
+
+[[automations.condition.nodes]]
+type = "condition"
+field = "from_name"
+operator = "contains"
+negated = false
+value = "Posthaste"
+
+[[automations.actions]]
+kind = "apply_tag"
+tag = "newsletter"
+
 [daemon]
 bind = "127.0.0.1:2525"         # optional, daemon bind address
 cors_origin = "http://localhost:5173"  # optional, CORS origin
 poll_interval_seconds = 300     # optional, sync poll interval
 ```
 
-`AppToml` converts bidirectionally to `AppSettings`. The `daemon` section is only read at startup and not exposed through the API.
+`AppToml` converts bidirectionally to `AppSettings`. `automations` are global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `daemon` section is only read at startup and not exposed through the API.
 
 ### sources/{id}.toml
 
@@ -91,39 +120,6 @@ initials = "MF"
 color_hue = 245                 # 0-360 hue used for the account mark
 # image_id = "..."              # present for image-backed marks
 
-[[automations]]
-id = "rule-newsletters"
-name = "Posthaste newsletters"
-enabled = true
-triggers = ["message_arrived"]
-backfill = true
-
-[automations.scope]
-kind = "mailbox"
-mailbox_id = "inbox"
-
-[automations.condition]
-operator = "any"
-negated = false
-
-[[automations.condition.nodes]]
-type = "condition"
-field = "from_name"
-operator = "contains"
-negated = false
-value = "Posthaste"
-
-[[automations.condition.nodes]]
-type = "condition"
-field = "from_email"
-operator = "contains"
-negated = false
-value = "Posthaste"
-
-[[automations.actions]]
-kind = "apply_tag"
-tag = "newsletter"
-
 [transport]
 base_url = "https://api.fastmail.com/jmap/session"
 username = "user@example.com"  # optional; omit for bearer-token auth
@@ -138,8 +134,6 @@ key = "account:primary"
 `full_name` identifies the person behind the account. `email_patterns` lists owned sender addresses and may include catch-all patterns such as `*@example.net`.
 
 `appearance` is optional account UI metadata. When absent, the API derives a stable initials mark from account name/full name and source ID. Image-backed marks keep the image bytes outside TOML under `account-assets/logos/`, with `image_id` pointing at the stored asset.
-
-`automations` are account-scoped backend rules with explicit triggers, scope, condition, actions, and backfill behavior. Conditions use the same recursive rule tree as smart mailboxes. Actions mutate JMAP state through the backend command path, so the server remains authoritative. Settings edits these rules through a shared action editor used from account mailboxes and smart mailbox definitions. Smart-mailbox actions are projected into account automations whose condition is the smart-mailbox rule combined with the action rule's own condition.
 
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 

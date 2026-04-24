@@ -28,6 +28,7 @@ import {
 } from '../../api/client'
 import type {
   AccountOverview,
+  AppSettings,
   KnownMailboxRole,
   Mailbox,
   VerificationResponse,
@@ -113,7 +114,9 @@ function accountFieldsSignature(form: AccountFormState): string {
 export function AccountEditor({
   editorTarget,
   editingAccount,
+  settings,
   onSaved,
+  onAutomationSettingsSaved,
   onVerified,
   onCommand,
   isCommandPending,
@@ -121,7 +124,9 @@ export function AccountEditor({
 }: {
   editorTarget: EditorTarget
   editingAccount: AccountOverview | null
+  settings: AppSettings | null
   onSaved: (account: AccountOverview) => Promise<void>
+  onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onVerified: () => Promise<void>
   onCommand: (
     action: 'enable' | 'disable' | 'delete' | 'sync',
@@ -276,11 +281,14 @@ export function AccountEditor({
       {isEditing && editingAccount && (
         <SettingsSection title="Mailboxes">
           <MailboxRoleFields accountId={editingAccount.id} />
-          <AccountAutomationFields
-            key={`${editingAccount.id}:${automationRulesSignature(editingAccount.automationRules ?? [])}`}
-            account={editingAccount}
-            onSaved={onSaved}
-          />
+          {settings && (
+            <AccountAutomationFields
+              key={`${editingAccount.id}:${automationRulesSignature(settings.automationRules)}`}
+              account={editingAccount}
+              settings={settings}
+              onSaved={onAutomationSettingsSaved}
+            />
+          )}
         </SettingsSection>
       )}
 
@@ -479,7 +487,7 @@ function AccountAppearanceFields({
 }
 
 function automationRulesSignature(
-  rules: AccountOverview['automationRules'],
+  rules: AppSettings['automationRules'],
 ): string {
   return JSON.stringify(rules)
 }

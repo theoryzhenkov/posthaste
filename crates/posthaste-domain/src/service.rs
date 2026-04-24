@@ -4,19 +4,19 @@ use serde_json::json;
 
 use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, AutomationAction, AutomationRule,
-    AutomationScope, AutomationTrigger, CommandResult, ConfigDiff, ConfigRepository,
-    ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
-    ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
-    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
-    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
-    MessageRecord, MessageSortField, MessageSummary, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection, SourceDataStore,
-    SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore,
-    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    AutomationTrigger, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
+    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
+    ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
+    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
+    MessageListStore, MessageMailboxStore, MessagePage, MessageRecord, MessageSortField,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse, SidebarSmartMailbox,
+    SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection,
+    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
+    EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -68,14 +68,6 @@ fn automation_query_rule(
         ),
         SmartMailboxRuleNode::Group(rule.condition.root.clone()),
     ];
-
-    if let AutomationScope::Mailbox { mailbox_id } = &rule.scope {
-        nodes.push(condition_node(
-            SmartMailboxField::MailboxId,
-            SmartMailboxOperator::Equals,
-            SmartMailboxValue::String(mailbox_id.to_string()),
-        ));
-    }
 
     if !message_ids.is_empty() {
         nodes.push(condition_node(
@@ -708,10 +700,11 @@ impl MailService {
         messages: &[MessageRecord],
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let Some(account) = self.config.get_source(account_id)? else {
+        if self.config.get_source(account_id)?.is_none() {
             return Ok(Vec::new());
-        };
-        if account.automation_rules.is_empty() || messages.is_empty() {
+        }
+        let settings = self.config.get_app_settings()?;
+        if settings.automation_rules.is_empty() || messages.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -720,7 +713,7 @@ impl MailService {
             .iter()
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
-        for rule in account.automation_rules.iter().filter(|rule| {
+        for rule in settings.automation_rules.iter().filter(|rule| {
             rule.enabled
                 && rule
                     .triggers
@@ -888,7 +881,7 @@ impl MailService {
         }
     }
 
-    /// Apply one bounded batch of account automation rules to existing local mail.
+    /// Apply one bounded batch of global automation rules to existing local mail.
     ///
     /// This is intended for low-priority background backfill. It queries the
     /// local projection first, then applies actions through JMAP so the server
@@ -901,10 +894,11 @@ impl MailService {
         gateway: &dyn MailGateway,
         batch_size: usize,
     ) -> Result<(Vec<DomainEvent>, bool), ServiceError> {
-        let Some(account) = self.config.get_source(account_id)? else {
+        if self.config.get_source(account_id)?.is_none() {
             return Ok((Vec::new(), false));
-        };
-        if account.automation_rules.is_empty() || batch_size == 0 {
+        }
+        let settings = self.config.get_app_settings()?;
+        if settings.automation_rules.is_empty() || batch_size == 0 {
             return Ok((Vec::new(), false));
         }
 
@@ -912,7 +906,7 @@ impl MailService {
         let mut has_more = false;
         let mut remaining = batch_size;
 
-        for rule in account
+        for rule in settings
             .automation_rules
             .iter()
             .filter(|rule| rule.enabled && rule.backfill)
@@ -1725,7 +1719,6 @@ mod tests {
             driver: crate::AccountDriver::Mock,
             enabled: true,
             appearance: None,
-            automation_rules: Vec::new(),
             transport: Default::default(),
             created_at: crate::RFC3339_EPOCH.to_string(),
             updated_at: crate::RFC3339_EPOCH.to_string(),
@@ -1758,9 +1751,6 @@ mod tests {
             name: "Posthaste".to_string(),
             enabled: true,
             triggers: vec![AutomationTrigger::MessageArrived],
-            scope: AutomationScope::Mailbox {
-                mailbox_id: MailboxId::from("inbox"),
-            },
             condition: SmartMailboxRule {
                 root: SmartMailboxGroup {
                     operator: SmartMailboxGroupOperator::Any,
@@ -2014,13 +2004,16 @@ mod tests {
     #[tokio::test]
     async fn sync_applies_matching_automation_tag() {
         let account_id = AccountId::from("primary");
-        let mut account = sample_source();
-        account.automation_rules = vec![sample_automation_rule()];
+        let account = sample_source();
         let store = Arc::new(TestStore::default());
         *store.rule_page.lock().expect("rule page lock poisoned") =
             vec![sample_message_summary("message-1", Vec::new())];
         let config = Arc::new(TestConfig {
             sources: vec![account],
+            app_settings: Mutex::new(AppSettings {
+                default_account_id: None,
+                automation_rules: vec![sample_automation_rule()],
+            }),
             ..Default::default()
         });
         let service = MailService::new(store.clone(), config);
@@ -2073,8 +2066,7 @@ mod tests {
     #[tokio::test]
     async fn automation_backfill_processes_one_bounded_batch() {
         let account_id = AccountId::from("primary");
-        let mut account = sample_source();
-        account.automation_rules = vec![sample_automation_rule()];
+        let account = sample_source();
         let store = Arc::new(TestStore::default());
         *store.rule_page.lock().expect("rule page lock poisoned") = vec![
             sample_message_summary("message-1", Vec::new()),
@@ -2082,6 +2074,10 @@ mod tests {
         ];
         let config = Arc::new(TestConfig {
             sources: vec![account],
+            app_settings: Mutex::new(AppSettings {
+                default_account_id: None,
+                automation_rules: vec![sample_automation_rule()],
+            }),
             ..Default::default()
         });
         let service = MailService::new(store.clone(), config);
@@ -2189,6 +2185,7 @@ mod tests {
             sources: vec![account.clone()],
             app_settings: Mutex::new(AppSettings {
                 default_account_id: Some(account.id.clone()),
+                automation_rules: Vec::new(),
             }),
             ..Default::default()
         });

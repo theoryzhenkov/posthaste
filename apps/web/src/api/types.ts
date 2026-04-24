@@ -4,6 +4,7 @@ export type AccountDriver = 'jmap' | 'mock'
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
   defaultAccountId: string | null
+  automationRules: AutomationRule[]
 }
 
 /**
@@ -29,11 +30,6 @@ export type KnownMailboxRole =
 export type AutomationTrigger = 'messageArrived' | 'messageChanged' | 'manual'
 
 /** @spec docs/L1-api#account-crud-lifecycle */
-export type AutomationScope =
-  | { kind: 'account' }
-  | { kind: 'mailbox'; mailboxId: string }
-
-/** @spec docs/L1-api#account-crud-lifecycle */
 export type AutomationAction =
   | { kind: 'applyTag'; tag: string }
   | { kind: 'removeTag'; tag: string }
@@ -49,7 +45,6 @@ export interface AutomationRule {
   name: string
   enabled: boolean
   triggers: AutomationTrigger[]
-  scope: AutomationScope
   condition: SmartMailboxRule
   actions: AutomationAction[]
   backfill: boolean
@@ -67,7 +62,6 @@ export interface AccountOverview {
   driver: AccountDriver
   enabled: boolean
   appearance: AccountAppearance
-  automationRules: AutomationRule[]
   transport: {
     baseUrl: string | null
     username: string | null
@@ -127,7 +121,6 @@ export interface CreateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
-  automationRules?: AutomationRule[]
   transport: AccountTransportInput
   secret: SecretInstructionInput
 }
@@ -143,7 +136,6 @@ export interface UpdateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
-  automationRules?: AutomationRule[]
   transport?: Partial<AccountTransportInput>
   secret?: SecretInstructionInput
 }

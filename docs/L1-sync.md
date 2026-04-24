@@ -113,9 +113,9 @@ These events are inserted into `event_log` and also published over the local bro
 
 ## Automation actions
 
-After a sync batch is written, account automation rules evaluate matching synced message records from that batch. Rules have explicit triggers, scope, smart-mailbox-style conditions, and typed actions. The initial settings UI creates a mailbox-scoped rule equivalent to:
+After a sync batch is written, global automation rules evaluate matching synced message records from that batch. Rules have explicit triggers, smart-mailbox-style conditions, and typed actions. Account and mailbox targeting is expressed as ordinary conditions. The backend still evaluates each rule inside the current account runtime and adds the current `source_id` plus the synced message IDs to the internal query before applying actions through that account's gateway. The initial settings UI creates an account-conditioned rule equivalent to:
 
-- if a message appears in mailbox `M` and its sender display name or email contains text `X`, apply user tag `Y`
+- if a message belongs to account `A` and its sender display name or email contains text `X`, apply user tag `Y`
 
 Actions mutate the remote server through the same JMAP command paths as manual message actions, then persist the returned mutation locally. Supported action variants include applying/removing user tags, read/unread, flag/unflag, and moving a message to a target mailbox. Action execution is idempotent: if the target state is already true, the action is skipped. Action mutations happen after `apply_sync_batch`, so they do not weaken the atomicity of the incoming metadata write.
 

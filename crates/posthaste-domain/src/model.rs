@@ -160,6 +160,7 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
+    pub automation_rules: Vec<AutomationRule>,
 }
 
 /// Backend driver type for an account.
@@ -263,7 +264,6 @@ pub struct AutomationRule {
     pub name: String,
     pub enabled: bool,
     pub triggers: Vec<AutomationTrigger>,
-    pub scope: AutomationScope,
     pub condition: SmartMailboxRule,
     pub actions: Vec<AutomationAction>,
     pub backfill: bool,
@@ -282,20 +282,6 @@ pub enum AutomationTrigger {
     MessageArrived,
     MessageChanged,
     Manual,
-}
-
-/// Data boundary inside an account where a rule is allowed to run.
-///
-/// @spec docs/L1-sync#automation-actions
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind"
-)]
-pub enum AutomationScope {
-    Account,
-    Mailbox { mailbox_id: MailboxId },
 }
 
 /// Supported effects for automation rules.
@@ -330,7 +316,6 @@ pub struct AccountSettings {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: Option<AccountAppearance>,
-    pub automation_rules: Vec<AutomationRule>,
     pub transport: AccountTransportSettings,
     pub created_at: String,
     pub updated_at: String,
@@ -411,7 +396,6 @@ pub struct AccountOverview {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: AccountAppearance,
-    pub automation_rules: Vec<AutomationRule>,
     pub transport: AccountTransportOverview,
     pub created_at: String,
     pub updated_at: String,
