@@ -16,7 +16,7 @@ import { Loader2, X } from 'lucide-react'
 import { useDefaultLayout } from 'react-resizable-panels'
 import { toast, Toaster } from 'sonner'
 import { fetchAccounts, fetchMessage, triggerSync } from './api/client'
-import type { ConversationSummary, MessageSummary } from './api/types'
+import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { CommandPalette } from './components/CommandPalette'
 import { ComposeOverlay, type ComposeIntent } from './components/ComposeOverlay'
@@ -83,10 +83,8 @@ function MailClient() {
   >(null)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
-  const [isSearchActive, setIsSearchActive] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedQuery = useDebouncedValue(searchQuery, 300)
-  const searchInputRef = useRef<HTMLInputElement>(null)
   const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const theme = useDesignTheme()
@@ -316,15 +314,21 @@ function MailClient() {
       if (isTypingTarget) return
       if (
         event.key === 'Escape' &&
-        selectedMessage &&
         !showSettings &&
         !isCommandPaletteOpen &&
         !showShortcuts &&
         composeIntent === null
       ) {
-        event.preventDefault()
-        handleClearSelectedMessage()
-        return
+        if (selectedMessage) {
+          event.preventDefault()
+          handleClearSelectedMessage()
+          return
+        }
+        if (searchQuery.trim()) {
+          event.preventDefault()
+          setSearchQuery('')
+          return
+        }
       }
       if (event.key === '?') {
         event.preventDefault()
@@ -333,8 +337,7 @@ function MailClient() {
       }
       if (event.key === '/') {
         event.preventDefault()
-        setIsSearchActive(true)
-        requestAnimationFrame(() => searchInputRef.current?.focus())
+        setIsCommandPaletteOpen(true)
       }
     }
 
@@ -347,6 +350,7 @@ function MailClient() {
     handleReply,
     handleToggleFlag,
     isCommandPaletteOpen,
+    searchQuery,
     selectedMessage,
     showSettings,
     showShortcuts,
@@ -354,7 +358,6 @@ function MailClient() {
 
   const handleSearch = useCallback((query: string, append?: boolean) => {
     setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query))
-    setIsSearchActive(true)
   }, [])
 
   const handleOpenSettings = useCallback(
@@ -373,20 +376,7 @@ function MailClient() {
 
   const handleApplySearch = useCallback((query: string) => {
     setSearchQuery(query)
-    setIsSearchActive(true)
-    requestAnimationFrame(() => searchInputRef.current?.focus())
   }, [])
-
-  const handleSelectConversation = useCallback(
-    (conversation: ConversationSummary) => {
-      setSelectedMessage({
-        conversationId: conversation.id,
-        sourceId: conversation.latestMessage.sourceId,
-        messageId: conversation.latestMessage.messageId,
-      })
-    },
-    [],
-  )
 
   function handleSelectMessage(message: MessageSummary) {
     setSelectedMessage({
@@ -403,8 +393,6 @@ function MailClient() {
   function handleSelectSmartMailbox(smartMailboxId: string, name: string) {
     setSelectedView({ kind: 'smart-mailbox', id: smartMailboxId, name })
     setSelectedMessage(null)
-    setSearchQuery('')
-    setIsSearchActive(false)
   }
 
   function handleSelectSourceMailbox(
@@ -414,8 +402,6 @@ function MailClient() {
   ) {
     setSelectedView({ kind: 'source-mailbox', sourceId, mailboxId, name })
     setSelectedMessage(null)
-    setSearchQuery('')
-    setIsSearchActive(false)
   }
 
   if (isLoading) {
@@ -433,22 +419,16 @@ function MailClient() {
         isDarkMode={theme.resolvedMode === 'dark'}
         isFlagged={selectedMessageQuery.data?.isFlagged ?? false}
         isMessageSelected={selectedMessage !== null}
-        isSearchActive={isSearchActive}
         isSettingsOpen={showSettings}
-        searchInputRef={searchInputRef}
         searchQuery={searchQuery}
         onArchive={handleArchive}
         onClearSearch={() => {
           setSearchQuery('')
-          setIsSearchActive(false)
         }}
         onCompose={handleCompose}
-        onFocusSearch={() => setIsSearchActive(true)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onPlaceholderAction={handlePlaceholderAction}
         onReply={handleReply}
-        onSearchBlur={() => setIsSearchActive(false)}
-        onSearchQueryChange={setSearchQuery}
         onShowShortcuts={() => setShowShortcuts(true)}
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
@@ -576,7 +556,7 @@ function MailClient() {
           onOpenShortcuts={() => setShowShortcuts(true)}
           onPlaceholderAction={handlePlaceholderAction}
           onReply={handleReply}
-          onSelectConversation={handleSelectConversation}
+          onSelectMessage={handleSelectMessage}
           onSelectSmartMailbox={handleSelectSmartMailbox}
           onSelectSourceMailbox={handleSelectSourceMailbox}
           onToggleFlag={handleToggleFlag}

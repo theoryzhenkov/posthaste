@@ -24,7 +24,7 @@ NotExpr     <- '-' Atom / 'NOT' Atom / Atom
 Atom        <- '(' OrExpr ')' / Prefix / FreeText
 
 Prefix      <- PrefixName ':' Value
-PrefixName  <- 'from' / 'to' / 'cc' / 'bcc' / 'subject' / 'body'
+PrefixName  <- 'f' / 'from' / 'to' / 'cc' / 'bcc' / 'subject' / 'body'
              / 'participant'               # desugars to OR(from, to, cc)
              / 'is' / 'has' / 'in' / 'tag'
              / 'before' / 'after' / 'date' / 'during'
@@ -50,38 +50,44 @@ FreeText    <- QuotedString / Word         # searches subject + body + from
 
 A query like `from:alice subject:"weekly report" newer:2w` parses into three AND-ed atoms: a from prefix, a quoted subject prefix, and a relative date prefix.
 
+The short `f:` alias is equivalent to `from:`. The client accepts optional
+whitespace after `f:`/`from:` and trims the field value, so `f: Posthaste` and
+`f: Posthaste Author` are valid. A `f:`/`from:` value extends until the next
+recognized prefix, allowing chained queries such as
+`Account Creation f: Posthaste`.
+
 ## Prefix-to-JMAP mapping
 
 Each prefix compiles to a specific JMAP FilterCondition property. The mapping is fixed at compile time except for `in:`, which requires resolving mailbox names to IDs against the local cache.
 
-| Prefix | JMAP FilterCondition property | Notes |
-|--------|-------------------------------|-------|
-| `from:` | `from` | Matches address or display name |
-| `to:` | `to` | |
-| `cc:` | `cc` | |
-| `bcc:` | `bcc` | |
-| `subject:` | `subject` | |
-| `body:` | `body` | Full-text body search |
-| `participant:` | OR(from, to, cc) | Desugars at compilation |
-| `is:unread` | `notKeyword: "$seen"` | Inverted: unread = absence of `$seen` |
-| `is:flagged` | `hasKeyword: { "$flagged": true }` | |
-| `is:draft` | `hasKeyword: { "$draft": true }` | |
-| `is:answered` | `hasKeyword: { "$answered": true }` | |
-| `has:attachment` | `hasAttachment: true` | |
-| `in:` | `inMailbox` | Matches mailbox name or role (inbox, drafts, sent, trash, archive) |
-| `-in:` | `inMailboxOtherThan` | Negated mailbox membership |
-| `tag:` | `hasKeyword` | Custom JMAP keywords (Fastmail labels) |
-| `before:` | `before` | Exclusive upper bound |
-| `after:` | `after` | Inclusive lower bound |
-| `date:` | `after` + `before` | Single date = that day (after 00:00, before 23:59:59) |
-| `during:` | `after` + `before` | Date range: `during:3m..1m` |
-| `newer:` | `after` | Relative: `newer:2w` = after (now - 2 weeks) |
-| `older:` | `before` | Relative: `older:1y` = before (now - 1 year) |
-| `size:` | `size` | `size:>1M`, `size:<100k` with comparison operators |
-| `header:` | N/A (client-only, v2) | Arbitrary header match, requires local index |
-| `id:` | `Email/get` by ID | Direct lookup, not a query |
-| `threadid:` | `threadId` filter | All emails in a thread |
-| Free text | `text` (JMAP's combined field) | Searches from + to + subject + body |
+| Prefix           | JMAP FilterCondition property       | Notes                                                              |
+| ---------------- | ----------------------------------- | ------------------------------------------------------------------ |
+| `f:` / `from:`   | `from`                              | Matches address or display name                                    |
+| `to:`            | `to`                                |                                                                    |
+| `cc:`            | `cc`                                |                                                                    |
+| `bcc:`           | `bcc`                               |                                                                    |
+| `subject:`       | `subject`                           |                                                                    |
+| `body:`          | `body`                              | Full-text body search                                              |
+| `participant:`   | OR(from, to, cc)                    | Desugars at compilation                                            |
+| `is:unread`      | `notKeyword: "$seen"`               | Inverted: unread = absence of `$seen`                              |
+| `is:flagged`     | `hasKeyword: { "$flagged": true }`  |                                                                    |
+| `is:draft`       | `hasKeyword: { "$draft": true }`    |                                                                    |
+| `is:answered`    | `hasKeyword: { "$answered": true }` |                                                                    |
+| `has:attachment` | `hasAttachment: true`               |                                                                    |
+| `in:`            | `inMailbox`                         | Matches mailbox name or role (inbox, drafts, sent, trash, archive) |
+| `-in:`           | `inMailboxOtherThan`                | Negated mailbox membership                                         |
+| `tag:`           | `hasKeyword`                        | Custom JMAP keywords (Fastmail labels)                             |
+| `before:`        | `before`                            | Exclusive upper bound                                              |
+| `after:`         | `after`                             | Inclusive lower bound                                              |
+| `date:`          | `after` + `before`                  | Single date = that day (after 00:00, before 23:59:59)              |
+| `during:`        | `after` + `before`                  | Date range: `during:3m..1m`                                        |
+| `newer:`         | `after`                             | Relative: `newer:2w` = after (now - 2 weeks)                       |
+| `older:`         | `before`                            | Relative: `older:1y` = before (now - 1 year)                       |
+| `size:`          | `size`                              | `size:>1M`, `size:<100k` with comparison operators                 |
+| `header:`        | N/A (client-only, v2)               | Arbitrary header match, requires local index                       |
+| `id:`            | `Email/get` by ID                   | Direct lookup, not a query                                         |
+| `threadid:`      | `threadId` filter                   | All emails in a thread                                             |
+| Free text        | `text` (JMAP's combined field)      | Searches from + to + subject + body                                |
 
 ## Filter compilation
 
@@ -194,6 +200,29 @@ Completion is local-only, drawing from the SQLite cache. No network requests dur
 
 Search results and mailbox views default to flat mode: individual messages, not collapsed by thread. A thread command may add a `threadId` filter when the user wants to inspect one thread.
 
+### Command palette filtering
+
+`Cmd/Ctrl+K` opens the unified command palette/search panel. The panel floats
+above the app without a blocking backdrop and can be moved or pinned, so the
+user can keep viewing and interacting with mail underneath it. By default,
+clicking outside the panel closes it; pinning keeps it open across outside
+interaction. Dragged panel position is persisted locally and restored the next
+time the panel opens. While dragging, faint modal-width guide rails appear for
+left/center/right and top/bottom placement. When the panel reaches a rail, it
+resists movement for a short 12px breakout distance so the user can drag along
+the rail; the active rail is highlighted while resisting. As the user types, matching individual messages are shown before
+commands. No row is selected by default after opening or editing the query. Down
+selects the first result, Up from the first result clears selection, Enter opens
+the selected result, and Enter with no selected result applies the current query
+as a persistent message list filter. Shift+Enter and Option/Alt+Enter always
+apply the current query as a filter.
+
+When a message result is selected, the client switches to one of that message's
+source mailboxes when the mailbox is known, then opens the message. Applied
+filters persist while navigating mailboxes until explicitly cleared. Pressing
+Esc with no open message clears the active filter; pressing Esc while the
+palette is open only closes the palette.
+
 ### Clickable drill-down
 
 Clicking a structured field in the message detail view populates the search bar with the corresponding query. Clicking "alice@example.com" in the From header produces `from:alice@example.com`. Clicking a date produces `date:2026-03-29`. Clicking an attachment icon produces `has:attachment`. Clicking a tag badge produces `tag:tagname`.
@@ -263,21 +292,21 @@ Rendered as an SVG element (or HTML Canvas) at the top of the thread detail pane
 
 ## Assertions
 
-| ID | Sev. | Assertion |
-|----|------|-----------|
-| grammar-parse | MUST | Every query that conforms to the PEG grammar parses without error |
-| grammar-roundtrip | SHOULD | Parsing then serializing a query produces an equivalent (not necessarily identical) string |
-| compile-jmap | MUST | Queries using only standard prefixes compile to valid JMAP FilterCondition |
-| compile-participant | MUST | `participant:X` compiles to `OR(from:X, to:X, cc:X)` |
-| compile-unread | MUST | `is:unread` compiles to `NOT hasKeyword("$seen")` |
-| compile-mailbox | MUST | `in:inbox` resolves to the Inbox mailbox ID before compilation |
-| compile-date | MUST | Relative dates resolve to absolute timestamps at compilation time |
-| smartmailbox-persist | MUST | Smart mailbox query_text is persisted and parseable across grammar versions |
-| smartmailbox-refresh | SHOULD | Smart mailbox results refresh on each sync cycle |
-| search-snippet | SHOULD | Search results include highlighted snippets from SearchSnippet/get |
-| drilldown-click | MUST | Clicking a header field populates the search bar with the corresponding prefix query |
-| drilldown-shift | MUST | Shift+clicking a header field appends to the current query with AND |
-| thread-order | MUST | Thread conversation view orders messages by receivedAt |
-| thread-crossmailbox | MUST | Thread view shows all messages in a thread regardless of mailbox |
-| threadarc-render | SHOULD | Thread arcs render at 60fps for threads up to 500 messages |
-| threadarc-color | MUST | Thread arc node colors are consistent per sender within a thread |
+| ID                   | Sev.   | Assertion                                                                                  |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------ |
+| grammar-parse        | MUST   | Every query that conforms to the PEG grammar parses without error                          |
+| grammar-roundtrip    | SHOULD | Parsing then serializing a query produces an equivalent (not necessarily identical) string |
+| compile-jmap         | MUST   | Queries using only standard prefixes compile to valid JMAP FilterCondition                 |
+| compile-participant  | MUST   | `participant:X` compiles to `OR(from:X, to:X, cc:X)`                                       |
+| compile-unread       | MUST   | `is:unread` compiles to `NOT hasKeyword("$seen")`                                          |
+| compile-mailbox      | MUST   | `in:inbox` resolves to the Inbox mailbox ID before compilation                             |
+| compile-date         | MUST   | Relative dates resolve to absolute timestamps at compilation time                          |
+| smartmailbox-persist | MUST   | Smart mailbox query_text is persisted and parseable across grammar versions                |
+| smartmailbox-refresh | SHOULD | Smart mailbox results refresh on each sync cycle                                           |
+| search-snippet       | SHOULD | Search results include highlighted snippets from SearchSnippet/get                         |
+| drilldown-click      | MUST   | Clicking a header field populates the search bar with the corresponding prefix query       |
+| drilldown-shift      | MUST   | Shift+clicking a header field appends to the current query with AND                        |
+| thread-order         | MUST   | Thread conversation view orders messages by receivedAt                                     |
+| thread-crossmailbox  | MUST   | Thread view shows all messages in a thread regardless of mailbox                           |
+| threadarc-render     | SHOULD | Thread arcs render at 60fps for threads up to 500 messages                                 |
+| threadarc-color      | MUST   | Thread arc node colors are consistent per sender within a thread                           |

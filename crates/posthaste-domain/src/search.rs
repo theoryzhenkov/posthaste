@@ -2,7 +2,8 @@
 //! [`SmartMailboxRule`] trees.
 //!
 //! Syntax: `prefix:value` tokens separated by whitespace. Quoted values
-//! (`"hello world"`) and negation (`-prefix:value`) are supported.
+//! (`"hello world"`), negation (`-prefix:value`), and the `f:` alias for
+//! `from:` are supported.
 
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
@@ -78,7 +79,7 @@ fn tokenize(input: &str) -> Vec<Token> {
             let prefix: String = chars[start..cp].iter().collect();
             i = cp + 1; // skip ':'
 
-            let value = scan_value(&chars, &mut i);
+            let value = scan_prefixed_value(&chars, &mut i, &prefix);
             tokens.push(Token {
                 negated,
                 prefix: Some(prefix),
@@ -97,6 +98,75 @@ fn tokenize(input: &str) -> Vec<Token> {
     }
 
     tokens
+}
+
+fn scan_prefixed_value(chars: &[char], pos: &mut usize, prefix: &str) -> String {
+    while *pos < chars.len() && chars[*pos].is_whitespace() {
+        *pos += 1;
+    }
+
+    if !matches!(prefix, "f" | "from") {
+        return scan_value(chars, pos);
+    }
+
+    if *pos < chars.len() && chars[*pos] == '"' {
+        return scan_value(chars, pos);
+    }
+
+    let start = *pos;
+    while *pos < chars.len() {
+        if starts_next_prefix(chars, *pos) {
+            break;
+        }
+        *pos += 1;
+    }
+
+    chars[start..*pos]
+        .iter()
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn starts_next_prefix(chars: &[char], pos: usize) -> bool {
+    if pos >= chars.len() || !chars[pos].is_whitespace() {
+        return false;
+    }
+
+    let mut i = pos;
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() && chars[i] == '-' {
+        i += 1;
+    }
+
+    let start = i;
+    while i < chars.len() && !chars[i].is_whitespace() {
+        if chars[i] == ':' {
+            let prefix: String = chars[start..i].iter().collect();
+            return is_known_prefix(&prefix);
+        }
+        i += 1;
+    }
+
+    false
+}
+
+fn is_known_prefix(prefix: &str) -> bool {
+    matches!(
+        prefix,
+        "f" | "from"
+            | "subject"
+            | "is"
+            | "has"
+            | "tag"
+            | "before"
+            | "after"
+            | "date"
+            | "newer"
+            | "older"
+    )
 }
 
 /// Reads a value starting at `chars[*pos]`. Handles quoted strings.
@@ -140,7 +210,7 @@ fn parse_prefixed(
     negated: bool,
 ) -> Result<Vec<SmartMailboxRuleNode>, String> {
     match prefix {
-        "from" => Ok(vec![from_node(value, negated)]),
+        "f" | "from" => Ok(vec![from_node(value, negated)]),
         "subject" => Ok(vec![condition_node(
             SmartMailboxField::Subject,
             SmartMailboxOperator::Contains,
@@ -377,6 +447,37 @@ mod tests {
         } else {
             panic!("expected Group node for from: prefix");
         }
+    }
+
+    #[test]
+    fn test_parse_from_alias() {
+        let rule = parse_query("f:alice").unwrap();
+        assert_eq!(rule.root.operator, SmartMailboxGroupOperator::All);
+        assert_eq!(rule.root.nodes.len(), 1);
+
+        assert!(matches!(
+            &rule.root.nodes[0],
+            SmartMailboxRuleNode::Group(group)
+                if group.operator == SmartMailboxGroupOperator::Any && group.nodes.len() == 2
+        ));
+    }
+
+    #[test]
+    fn test_parse_spaced_from_alias_value() {
+        let rule = parse_query("Account Creation f: Posthaste Author subject:welcome").unwrap();
+        assert_eq!(rule.root.nodes.len(), 4);
+
+        let SmartMailboxRuleNode::Group(group) = &rule.root.nodes[2] else {
+            panic!("expected Group node for f: prefix");
+        };
+        let SmartMailboxRuleNode::Condition(condition) = &group.nodes[0] else {
+            panic!("expected FromEmail condition for f: prefix");
+        };
+
+        assert_eq!(
+            condition.value,
+            SmartMailboxValue::String("Posthaste Author".to_string())
+        );
     }
 
     #[test]

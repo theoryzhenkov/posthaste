@@ -1,19 +1,19 @@
 import {
   Archive,
   Clock3,
+  Command,
   Flag,
   Forward,
   Moon,
   PenSquare,
   Reply,
   ReplyAll,
-  Search,
   Settings,
   SunMedium,
   Tag,
   Trash2,
+  X,
 } from 'lucide-react'
-import type { RefObject } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -21,19 +21,14 @@ interface ActionBarProps {
   isDarkMode: boolean
   isFlagged: boolean
   isMessageSelected: boolean
-  isSearchActive: boolean
   isSettingsOpen: boolean
-  searchInputRef: RefObject<HTMLInputElement | null>
   searchQuery: string
   onArchive: () => void
   onClearSearch: () => void
   onCompose: () => void
-  onFocusSearch: () => void
   onOpenCommandPalette: () => void
   onPlaceholderAction: (label: string) => void
   onReply: () => void
-  onSearchBlur: () => void
-  onSearchQueryChange: (query: string) => void
   onShowShortcuts: () => void
   onToggleFlag: () => void
   onToggleSettings: () => void
@@ -98,73 +93,44 @@ function ToolbarChip({
   )
 }
 
-function SearchField({
-  isActive,
-  searchInputRef,
+function CommandSearchControl({
   searchQuery,
   onClearSearch,
-  onFocus,
-  onBlur,
   onOpenCommandPalette,
-  onSearchQueryChange,
 }: {
-  isActive: boolean
-  searchInputRef: RefObject<HTMLInputElement | null>
   searchQuery: string
   onClearSearch: () => void
-  onFocus: () => void
-  onBlur: () => void
   onOpenCommandPalette: () => void
-  onSearchQueryChange: (query: string) => void
 }) {
-  const expanded = isActive || searchQuery.length > 0
-
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={onOpenCommandPalette}
-        className="ph-focus-ring flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border border-border-soft bg-[var(--bg-elev)] px-2 text-left text-[12px] text-muted-foreground transition-[width,box-shadow,border-color] hover:border-border"
-      >
-        <Search
-          size={13}
-          strokeWidth={1.75}
-          className="text-muted-foreground/70"
-        />
-        <span className="flex-1">Search mail</span>
-      </button>
-    )
-  }
+  const hasFilter = searchQuery.trim().length > 0
 
   return (
-    <div className="flex h-[26px] w-[340px] items-center gap-2 rounded-[6px] border border-ring bg-panel px-2 shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_30%,transparent)] transition-[width,box-shadow,border-color]">
-      <Search
-        size={13}
-        strokeWidth={1.75}
-        className="text-muted-foreground/70"
-      />
-      <input
-        ref={searchInputRef}
-        autoFocus
-        type="text"
-        value={searchQuery}
-        onFocus={onFocus}
-        onBlur={() => {
-          if (!searchQuery) {
-            onBlur()
-          }
-        }}
-        onChange={(event) => onSearchQueryChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            onClearSearch()
-            onBlur()
-            searchInputRef.current?.blur()
-          }
-        }}
-        placeholder="from:maya tag:work date:>2026-04-01"
-        className="h-full flex-1 border-0 bg-transparent font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70"
-      />
+    <div className="flex min-w-0 items-center gap-2">
+      <button
+        type="button"
+        data-command-search-trigger="true"
+        onClick={onOpenCommandPalette}
+        title="Command search"
+        className={cn(
+          'ph-focus-ring flex size-7 shrink-0 items-center justify-center rounded-[6px] border border-border-soft bg-[var(--bg-elev)] text-chrome-foreground/62 transition-colors hover:border-border hover:bg-[var(--hover-bg)] hover:text-chrome-foreground',
+          hasFilter && 'border-ring text-chrome-foreground',
+        )}
+      >
+        <Command size={14} strokeWidth={1.7} />
+      </button>
+      {hasFilter && (
+        <span className="flex h-7 min-w-0 max-w-[24rem] items-center gap-1.5 rounded-[6px] border border-ring/45 bg-panel px-2 font-mono text-[11px] text-foreground shadow-[0_0_0_2px_color-mix(in_oklab,var(--ring)_18%,transparent)]">
+          <span className="min-w-0 truncate">{searchQuery}</span>
+          <button
+            type="button"
+            aria-label="Clear active filter"
+            onClick={onClearSearch}
+            className="ph-focus-ring -mr-1 flex size-5 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground transition-colors hover:bg-[var(--hover-bg)] hover:text-foreground"
+          >
+            <X size={12} strokeWidth={1.8} />
+          </button>
+        </span>
+      )}
     </div>
   )
 }
@@ -173,19 +139,14 @@ export function ActionBar({
   isDarkMode,
   isFlagged,
   isMessageSelected,
-  isSearchActive,
   isSettingsOpen,
-  searchInputRef,
   searchQuery,
   onArchive,
   onClearSearch,
   onCompose,
-  onFocusSearch,
   onOpenCommandPalette,
   onPlaceholderAction,
   onReply,
-  onSearchBlur,
-  onSearchQueryChange,
   onShowShortcuts,
   onToggleFlag,
   onToggleSettings,
@@ -261,19 +222,15 @@ export function ActionBar({
 
       <div className="flex-1" />
 
-      <SearchField
-        isActive={isSearchActive}
-        searchInputRef={searchInputRef}
+      <CommandSearchControl
         searchQuery={searchQuery}
         onClearSearch={onClearSearch}
-        onFocus={onFocusSearch}
-        onBlur={onSearchBlur}
         onOpenCommandPalette={onOpenCommandPalette}
-        onSearchQueryChange={onSearchQueryChange}
       />
 
       <button
         type="button"
+        data-shortcut-reference-trigger="true"
         className="ph-focus-ring ml-1 flex size-7 items-center justify-center rounded-[6px] text-[13px] font-bold text-chrome-foreground/60 transition-colors hover:bg-[var(--hover-bg)] hover:text-chrome-foreground"
         onClick={onShowShortcuts}
         title="Keyboard shortcuts (?)"
