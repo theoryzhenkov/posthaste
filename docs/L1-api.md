@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-04-03
-reviewed: 2026-04-03
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-api
   - path: docs/L1-sync
@@ -164,13 +164,15 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 ## Secret management
 
+Account secrets are opaque authentication material. For JMAP accounts this may be an OAuth token set, a provider API token, or a development credential accepted by the provider. The API must not assume that the value is a Fastmail app-specific password.
+
 Secrets use a tri-state write mode:
 
 | Mode | Behavior |
 |------|----------|
-| `keep` | Preserve existing `secret_ref`; no `password` allowed |
-| `replace` | Store `password` in OS keyring under `account:{id}` key; `password` required |
-| `clear` | Delete managed OS secret; no `password` allowed |
+| `keep` | Preserve existing `secret_ref`; no secret value allowed |
+| `replace` | Store the submitted secret value in OS keyring under `account:{id}` key; secret value required |
+| `clear` | Delete managed OS secret; no secret value allowed |
 
 The API never returns secret values. Responses include `SecretStatus` with `storage` (os/env), `configured` (bool), and `label` (env var name for env-type, redacted for os-type).
 

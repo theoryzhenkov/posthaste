@@ -2,7 +2,7 @@
 scope: L0
 summary: "Production-grade structured logging and tracing across Rust backend and React frontend"
 modified: 2026-04-04
-reviewed: 2026-04-04
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-api
   - path: docs/L0-sync

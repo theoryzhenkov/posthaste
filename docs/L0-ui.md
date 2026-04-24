@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why the frontend owns interaction, the handoff-led UI direction, and shell model"
 modified: 2026-04-23
-reviewed: 2026-04-23
+reviewed: 2026-04-24
 depends:
   - path: README
   - path: docs/L0-api
