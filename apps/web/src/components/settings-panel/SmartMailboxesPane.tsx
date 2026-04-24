@@ -4,7 +4,11 @@
  * @spec docs/L1-api#smart-mailbox-crud
  */
 import { FolderSearch, Plus } from 'lucide-react'
-import type { SmartMailbox, SmartMailboxSummary } from '../../api/types'
+import type {
+  AccountOverview,
+  SmartMailbox,
+  SmartMailboxSummary,
+} from '../../api/types'
 import { brandAccents } from '../../design/tokens'
 import { Button } from '../ui/button'
 import { SmartMailboxEditor } from './SmartMailboxEditor'
@@ -63,6 +67,7 @@ function smartMailboxAccent(name: string): string {
 
 export function SmartMailboxesPane({
   smartMailboxes,
+  accounts,
   selectedMailboxId,
   editingSmartMailbox,
   editorKey,
@@ -74,9 +79,11 @@ export function SmartMailboxesPane({
   onResetDefaults,
   onReorderMailbox,
   onSaved,
+  onAutomationAccountsSaved,
   onDeleted,
 }: {
   smartMailboxes: SmartMailboxSummary[]
+  accounts: AccountOverview[]
   selectedMailboxId: SmartMailboxEditorTarget | null
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
   editorKey: string
@@ -88,6 +95,7 @@ export function SmartMailboxesPane({
   onResetDefaults: () => void
   onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void
   onSaved: (mailbox: SmartMailbox) => Promise<void>
+  onAutomationAccountsSaved: (accounts: AccountOverview[]) => Promise<void>
   onDeleted: (mailboxId: string) => Promise<void>
 }) {
   const selectedMailbox =
@@ -119,7 +127,9 @@ export function SmartMailboxesPane({
               editorTarget={selectedMailboxId}
               editingSmartMailbox={editingSmartMailbox}
               summary={selectedMailbox}
+              accounts={accounts}
               onSaved={onSaved}
+              onAutomationAccountsSaved={onAutomationAccountsSaved}
               onDeleted={onDeleted}
               onReorder={onReorderMailbox}
               reorderPendingKey={actionPendingKey}

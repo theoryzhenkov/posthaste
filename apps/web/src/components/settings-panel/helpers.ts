@@ -15,6 +15,7 @@ import type {
   SmartMailboxField,
   SmartMailboxGroupOperator,
   SmartMailboxOperator,
+  SmartMailboxRule,
   SmartMailboxRuleNode,
   SmartMailboxSummary,
   UpdateAccountInput,
@@ -44,13 +45,17 @@ export function emptyAccountForm(): AccountFormState {
 export const EMPTY_SMART_MAILBOX_FORM: SmartMailboxFormState = {
   name: '',
   position: 0,
-  rule: {
+  rule: defaultEmptyRule(),
+}
+
+export function defaultEmptyRule(): SmartMailboxRule {
+  return {
     root: {
       operator: 'all',
       negated: false,
       nodes: [],
     },
-  },
+  }
 }
 
 /** Convert an existing account overview into editable form state. */

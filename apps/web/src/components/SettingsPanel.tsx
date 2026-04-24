@@ -396,6 +396,7 @@ export function SettingsPanel({
           {activeCategory === 'mailboxes' && (
             <SmartMailboxesPane
               smartMailboxes={smartMailboxSummaries}
+              accounts={accounts}
               selectedMailboxId={effectiveSmartMailboxTarget}
               editingSmartMailbox={editingSmartMailbox}
               editorKey={smartMailboxEditorKey}
@@ -411,6 +412,12 @@ export function SettingsPanel({
               onSaved={async (mailbox) => {
                 await invalidateSmartMailboxQueries(mailbox.id)
                 setSmartMailboxEditorTarget(mailbox.id)
+              }}
+              onAutomationAccountsSaved={async (savedAccounts) => {
+                for (const account of savedAccounts) {
+                  applyAccountMutationResult(queryClient, account)
+                }
+                invalidateAccountReadModels(queryClient)
               }}
               onDeleted={async (mailboxId) => {
                 await deleteSmartMailbox(mailboxId)

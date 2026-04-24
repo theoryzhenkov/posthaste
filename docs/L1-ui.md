@@ -104,7 +104,9 @@ Sidebar objects expose object-scoped right-click menus. Smart mailboxes can be o
 
 ## Account Settings
 
-Account settings are edited in a sparse, section-first layout. Existing accounts expose a mailbox metadata section that lists synced server mailboxes and lets the user assign or clear known JMAP roles. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper. The same section can edit mailbox-scoped automation rules such as "from includes X, apply tag Y"; automation rules are saved as account configuration and executed by the sync layer.
+Account settings are edited in a sparse, section-first layout. Existing accounts expose a mailbox metadata section that lists synced server mailboxes and lets the user assign or clear known JMAP roles. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper. The same section uses the shared automation action editor to edit account or mailbox-scoped backend automations. Action conditions use the same recursive rule builder as smart mailbox rules.
+
+Smart mailbox settings use the same rule builder for the mailbox definition and the same automation action editor for backend actions. Smart-mailbox actions are saved as account automations: the smart mailbox rule is the fixed base filter, and each action rule adds its own condition before executing its selected actions.
 
 ## Column configuration
 
