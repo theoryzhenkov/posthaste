@@ -356,6 +356,8 @@ function parseQueryTokens(input: string):
         const scanned = scanTokenValue(chars, index)
         value = scanned.value
         index = scanned.end
+      } else if (startsKnownPrefixTokenAt(chars, index)) {
+        value = ''
       } else {
         const valueStart = index
         while (index < chars.length) {
@@ -396,6 +398,26 @@ function scanTokenValue(
     end += 1
   }
   return { value: chars.slice(start, end).join(''), end }
+}
+
+function startsKnownPrefixTokenAt(chars: string[], position: number): boolean {
+  if (position >= chars.length) {
+    return false
+  }
+
+  let index = position
+  if (chars[index] === '-') {
+    index += 1
+  }
+
+  const start = index
+  while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+    if (chars[index] === ':') {
+      return prefixDefinition(chars.slice(start, index).join('')) !== undefined
+    }
+    index += 1
+  }
+  return false
 }
 
 function startsKnownPrefixAt(chars: string[], position: number): boolean {
