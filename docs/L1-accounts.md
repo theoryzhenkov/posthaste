@@ -85,7 +85,7 @@ enabled = true                  # default: true
 
 [transport]
 base_url = "https://api.fastmail.com/jmap/session"
-username = "user@example.com"
+username = "user@example.com"  # optional; omit for bearer-token auth
 
 [transport.secret_ref]
 kind = "os"                     # "os" (keyring) or "env" (environment variable)
@@ -95,6 +95,8 @@ key = "account:primary"
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 
 The referenced secret is an opaque JMAP auth secret. For Fastmail this is an OAuth token set for distributed clients or an API token for personal/testing use, not a Fastmail app-specific password.
+
+When `username` is absent or blank, the runtime sends the secret as a bearer token. When `username` is present, the runtime uses the provider's basic-auth path with the secret as the password/token component.
 
 `SourceToml` converts bidirectionally to `AccountSettings`. Missing `created_at`/`updated_at` default to `RFC3339_EPOCH`.
 

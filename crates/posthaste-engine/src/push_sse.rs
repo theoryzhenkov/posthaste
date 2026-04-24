@@ -21,12 +21,16 @@ use crate::live::map_gateway_error;
 /// @spec docs/L1-jmap#push
 pub struct SsePushTransport {
     client: Arc<Client>,
+    server_account_id: String,
 }
 
 impl SsePushTransport {
     /// Create an SSE push transport wrapping an authenticated JMAP client.
-    pub fn new(client: Arc<Client>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<Client>, server_account_id: String) -> Self {
+        Self {
+            client,
+            server_account_id,
+        }
     }
 }
 
@@ -49,7 +53,13 @@ impl PushTransport for SsePushTransport {
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
         let target_url = self.client.session().event_source_url().to_string();
-        debug!(account_id = %account_id, target_url = %target_url, checkpoint, "opening SSE push stream");
+        debug!(
+            account_id = %account_id,
+            server_account_id = %self.server_account_id,
+            target_url = %target_url,
+            checkpoint,
+            "opening SSE push stream"
+        );
         let stream = self
             .client
             .event_source(
@@ -66,19 +76,19 @@ impl PushTransport for SsePushTransport {
             })?;
 
         let account_id = account_id.clone();
+        let server_account_id = self.server_account_id.clone();
         Ok(Some(Box::pin(stream.filter_map(move |event| {
             let account_id = account_id.clone();
+            let server_account_id = server_account_id.clone();
             async move {
                 match event {
                     Ok(jmap_client::event_source::PushNotification::StateChange(changes)) => {
-                        let changed = changes
-                            .changes(account_id.as_str())
-                            .map(|entries| {
-                                entries
-                                    .map(|(data_type, _)| data_type.to_string())
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
+                        let Some(entries) = changes.changes(server_account_id.as_str()) else {
+                            return None;
+                        };
+                        let changed = entries
+                            .map(|(data_type, _)| data_type.to_string())
+                            .collect::<Vec<_>>();
                         let received_at = match domain_now_iso8601() {
                             Ok(value) => value,
                             Err(error) => return Some(Err(GatewayError::Rejected(error))),

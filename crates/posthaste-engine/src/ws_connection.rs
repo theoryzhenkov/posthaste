@@ -14,7 +14,7 @@ use posthaste_domain::GatewayError;
 
 /// A shared WebSocket connection that supports both API calls and push.
 ///
-/// Created once per account when the server advertises WebSocket capability.
+/// Created once per account when the server advertises WebSocket push support.
 /// Dropped when the account connection tears down. The same connection
 /// carries interleaved API responses and push notifications, demultiplexed
 /// by the `CorrelatedWs` layer in `jmap-client`.
@@ -61,7 +61,10 @@ impl SharedWsConnection {
             return Ok(());
         }
         let target_url = self.ws_url();
-        debug!(target_url = target_url.as_deref(), "opening WebSocket connection");
+        debug!(
+            target_url = target_url.as_deref(),
+            "opening WebSocket connection"
+        );
         let ws = self
             .client
             .connect_ws_correlated()
@@ -72,7 +75,10 @@ impl SharedWsConnection {
                 mapped
             })?;
         *guard = Some(ws);
-        info!(target_url = target_url.as_deref(), "WebSocket connection established");
+        info!(
+            target_url = target_url.as_deref(),
+            "WebSocket connection established"
+        );
         Ok(())
     }
 

@@ -26,6 +26,9 @@ pub(crate) struct MailboxSync {
 pub(crate) struct MessageSync {
     pub messages: Vec<MessageRecord>,
     pub deleted_message_ids: Vec<MessageId>,
+    /// When `true`, the store treats this as an authoritative snapshot and
+    /// prunes any local messages missing from the result.
+    pub replace_all_messages: bool,
     pub cursor: SyncCursor,
 }
 
@@ -158,19 +161,7 @@ async fn fetch_email_delta(
             request
                 .get_email()
                 .ids(chunk.iter().map(String::as_str))
-                .properties([
-                    email::Property::Id,
-                    email::Property::ThreadId,
-                    email::Property::BlobId,
-                    email::Property::MailboxIds,
-                    email::Property::Keywords,
-                    email::Property::Subject,
-                    email::Property::From,
-                    email::Property::Preview,
-                    email::Property::ReceivedAt,
-                    email::Property::HasAttachment,
-                    email::Property::Size,
-                ]);
+                .properties(email_metadata_properties());
             for email in request
                 .send_get_email()
                 .await
@@ -188,6 +179,7 @@ async fn fetch_email_delta(
     Ok(MessageSync {
         messages: upsert,
         deleted_message_ids: deleted,
+        replace_all_messages: false,
         cursor: SyncCursor {
             object_type: SyncObject::Message,
             state: current_state,
@@ -271,22 +263,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
             request
                 .get_email()
                 .ids(chunk.iter().map(String::as_str))
-                .properties([
-                    email::Property::Id,
-                    email::Property::ThreadId,
-                    email::Property::BlobId,
-                    email::Property::MailboxIds,
-                    email::Property::Keywords,
-                    email::Property::Subject,
-                    email::Property::From,
-                    email::Property::Preview,
-                    email::Property::ReceivedAt,
-                    email::Property::HasAttachment,
-                    email::Property::Size,
-                    email::Property::MessageId,
-                    email::Property::References,
-                    email::Property::InReplyTo,
-                ]);
+                .properties(email_metadata_properties());
             let mut response = request.send_get_email().await.map_err(map_gateway_error)?;
             if state.is_none() {
                 state = Some(response.take_state());
@@ -297,6 +274,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
     Ok(MessageSync {
         messages,
         deleted_message_ids: Vec::new(),
+        replace_all_messages: true,
         cursor: SyncCursor {
             object_type: SyncObject::Message,
             state: state.unwrap_or_default(),
@@ -307,6 +285,25 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
 
 fn non_empty_state(state: &str) -> Option<&str> {
     (!state.is_empty()).then_some(state)
+}
+
+fn email_metadata_properties() -> [email::Property; 14] {
+    [
+        email::Property::Id,
+        email::Property::ThreadId,
+        email::Property::BlobId,
+        email::Property::MailboxIds,
+        email::Property::Keywords,
+        email::Property::Subject,
+        email::Property::From,
+        email::Property::Preview,
+        email::Property::ReceivedAt,
+        email::Property::HasAttachment,
+        email::Property::Size,
+        email::Property::MessageId,
+        email::Property::References,
+        email::Property::InReplyTo,
+    ]
 }
 
 #[cfg(test)]
@@ -329,6 +326,15 @@ mod tests {
         assert_eq!(super::non_empty_state(""), None);
     }
 
+    #[test]
+    fn email_metadata_sync_requests_threading_headers() {
+        let properties = super::email_metadata_properties();
+
+        assert!(properties.contains(&email::Property::MessageId));
+        assert!(properties.contains(&email::Property::References));
+        assert!(properties.contains(&email::Property::InReplyTo));
+    }
+
     #[tokio::test]
     async fn empty_email_cursor_recovers_via_full_sync_and_persists_real_state() {
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -347,7 +353,7 @@ mod tests {
             axum::serve(listener, app).await.expect("serve mock JMAP");
         });
 
-        let client = connect_jmap_client(&format!("http://{addr}"), "dev", "devpass")
+        let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
             .await
             .expect("connect mock client");
 

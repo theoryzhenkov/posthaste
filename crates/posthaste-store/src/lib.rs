@@ -859,6 +859,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![message_cursor(cursor_state, "2026-03-31T10:00:00Z")],
             },
         )?;
@@ -888,6 +889,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "a".to_string(),
@@ -909,6 +911,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "b".to_string(),
@@ -953,6 +956,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state".to_string(),
@@ -1063,6 +1067,7 @@ mod tests {
                     deleted_mailbox_ids: Vec::new(),
                     deleted_message_ids: Vec::new(),
                     replace_all_mailboxes: false,
+                    replace_all_messages: false,
                     cursors: vec![SyncCursor {
                         object_type: SyncObject::Message,
                         state: "state".to_string(),
@@ -1143,6 +1148,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state-a".to_string(),
@@ -1169,6 +1175,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state-b".to_string(),
@@ -1239,6 +1246,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state".to_string(),
@@ -1262,6 +1270,52 @@ mod tests {
             vec!["Primary, Inc.".to_string()]
         );
         assert_eq!(page.items[0].latest_source_name, "Primary, Inc.");
+        Ok(())
+    }
+
+    #[test]
+    fn conversations_follow_jmap_thread_id_not_headers_or_subject() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+
+        let first = sample_message("message-1", "inbox", Some("mime-1"));
+        let mut second = sample_message("message-2", "inbox", Some("mime-2"));
+        second.source_thread_id = ThreadId::from("thread-2");
+        second.subject = first.subject.clone();
+        second.in_reply_to = first.rfc_message_id.clone();
+        second.references = first.rfc_message_id.iter().cloned().collect();
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![posthaste_domain::MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: vec![first, second],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: true,
+                replace_all_messages: true,
+                cursors: vec![message_cursor("message-1", "2026-03-31T10:00:00Z")],
+            },
+        )?;
+
+        let page = store.list_conversations(
+            Some(&account),
+            None,
+            10,
+            None,
+            ConversationSortField::default(),
+            SortDirection::default(),
+        )?;
+
+        assert_eq!(page.items.len(), 2);
         Ok(())
     }
 
@@ -1292,6 +1346,7 @@ mod tests {
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
+            replace_all_messages: false,
             cursors: vec![SyncCursor {
                 object_type: SyncObject::Message,
                 state: "state-1".to_string(),
@@ -1307,6 +1362,7 @@ mod tests {
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
+            replace_all_messages: false,
             cursors: vec![SyncCursor {
                 object_type: SyncObject::Message,
                 state: "state-2".to_string(),
@@ -1521,6 +1577,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Mailbox,
                     state: "mailbox-1".to_string(),
@@ -1543,6 +1600,7 @@ mod tests {
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
+                replace_all_messages: false,
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Mailbox,
                     state: "mailbox-2".to_string(),
@@ -1554,6 +1612,58 @@ mod tests {
         let mailboxes = store.list_mailboxes(&account)?;
         assert_eq!(mailboxes.len(), 1);
         assert_eq!(mailboxes[0].id, MailboxId::from("inbox"));
+        Ok(())
+    }
+
+    #[test]
+    fn full_message_snapshot_removes_stale_local_messages() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+
+        let mailbox = posthaste_domain::MailboxRecord {
+            id: MailboxId::from("inbox"),
+            name: "Inbox".to_string(),
+            role: Some("inbox".to_string()),
+            unread_emails: 0,
+            total_emails: 0,
+        };
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![mailbox.clone()],
+                messages: vec![
+                    sample_message("message-1", "inbox", Some("mime-1")),
+                    sample_message("message-2", "inbox", Some("mime-2")),
+                ],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: true,
+                replace_all_messages: true,
+                cursors: vec![message_cursor("message-1", "2026-03-31T10:00:00Z")],
+            },
+        )?;
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![mailbox],
+                messages: vec![sample_message("message-2", "inbox", Some("mime-2"))],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: true,
+                cursors: vec![message_cursor("message-2", "2026-03-31T10:05:00Z")],
+            },
+        )?;
+
+        let messages = store.list_messages(&account, None)?;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, MessageId::from("message-2"));
+        assert!(store
+            .get_message_detail(&account, &MessageId::from("message-1"))?
+            .is_none());
         Ok(())
     }
 }

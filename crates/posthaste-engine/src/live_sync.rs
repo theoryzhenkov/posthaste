@@ -47,6 +47,7 @@ pub(crate) async fn sync_account(
         deleted_mailbox_ids: mailbox_sync.deleted_mailbox_ids,
         deleted_message_ids: email_sync.deleted_message_ids,
         replace_all_mailboxes: mailbox_sync.replace_all_mailboxes,
+        replace_all_messages: email_sync.replace_all_messages,
         cursors: vec![mailbox_sync.cursor, email_sync.cursor],
     })
 }

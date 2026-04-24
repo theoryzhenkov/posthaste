@@ -85,6 +85,44 @@ pub(crate) fn apply_sync_batch_tx(
         }
     }
 
+    if batch.replace_all_messages {
+        let remote_message_ids: BTreeSet<_> = batch
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect();
+        let mut statement = tx
+            .prepare("SELECT id FROM message WHERE account_id = ?1")
+            .map_err(sql_to_store_error)?;
+        let local_message_ids = statement
+            .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(sql_to_store_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)?
+            .into_iter()
+            .map(MessageId)
+            .collect::<BTreeSet<_>>();
+
+        for message_id in local_message_ids.difference(&remote_message_ids) {
+            delete_message_and_track_projection_inputs(
+                tx,
+                account_id,
+                message_id,
+                &mut affected_mailboxes,
+                &mut affected_threads,
+                &mut affected_conversations,
+            )?;
+            events.push(insert_event_tx(
+                tx,
+                account_id,
+                EVENT_TOPIC_MESSAGE_UPDATED,
+                None,
+                Some(message_id),
+                json!({ "messageId": message_id.as_str(), "deleted": true }),
+            )?);
+        }
+    }
+
     for mailbox_id in &batch.deleted_mailbox_ids {
         tx.execute(
             "DELETE FROM mailbox WHERE account_id = ?1 AND id = ?2",
@@ -103,36 +141,14 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     for message_id in &batch.deleted_message_ids {
-        let prior_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
-        let thread_id = tx
-            .query_row(
-                "SELECT thread_id FROM message WHERE account_id = ?1 AND id = ?2",
-                params![account_id.as_str(), message_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?
-            .map(ThreadId);
-        let conversation_id = tx
-            .query_row(
-                "SELECT conversation_id FROM message WHERE account_id = ?1 AND id = ?2",
-                params![account_id.as_str(), message_id.as_str()],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?
-            .flatten()
-            .map(ConversationId);
-        delete_message_tx(tx, account_id, message_id)?;
-        for mailbox_id in prior_mailboxes {
-            affected_mailboxes.insert(mailbox_id);
-        }
-        if let Some(thread_id) = thread_id {
-            affected_threads.insert(thread_id);
-        }
-        if let Some(conversation_id) = conversation_id {
-            affected_conversations.insert(conversation_id);
-        }
+        delete_message_and_track_projection_inputs(
+            tx,
+            account_id,
+            message_id,
+            &mut affected_mailboxes,
+            &mut affected_threads,
+            &mut affected_conversations,
+        )?;
     }
 
     for mailbox in &batch.mailboxes {
@@ -376,6 +392,47 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     Ok(events)
+}
+
+fn delete_message_and_track_projection_inputs(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+    affected_mailboxes: &mut BTreeSet<MailboxId>,
+    affected_threads: &mut BTreeSet<ThreadId>,
+    affected_conversations: &mut BTreeSet<ConversationId>,
+) -> Result<(), StoreError> {
+    let prior_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
+    let thread_id = tx
+        .query_row(
+            "SELECT thread_id FROM message WHERE account_id = ?1 AND id = ?2",
+            params![account_id.as_str(), message_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?
+        .map(ThreadId);
+    let conversation_id = tx
+        .query_row(
+            "SELECT conversation_id FROM message WHERE account_id = ?1 AND id = ?2",
+            params![account_id.as_str(), message_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?
+        .flatten()
+        .map(ConversationId);
+    delete_message_tx(tx, account_id, message_id)?;
+    for mailbox_id in prior_mailboxes {
+        affected_mailboxes.insert(mailbox_id);
+    }
+    if let Some(thread_id) = thread_id {
+        affected_threads.insert(thread_id);
+    }
+    if let Some(conversation_id) = conversation_id {
+        affected_conversations.insert(conversation_id);
+    }
+    Ok(())
 }
 
 /// Stores a lazily fetched body (HTML, text, raw ref) and emits a

@@ -152,9 +152,9 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 ## Account CRUD lifecycle
 
-**Create**: `POST /accounts` validates the ID is unique, applies secret instruction, validates required fields (for JMAP: base URL, username, configured secret), persists to config, starts the supervisor runtime, and emits an `account.created` event.
+**Create**: `POST /accounts` validates the ID is unique, applies secret instruction, validates required fields (for JMAP: base URL and configured secret; username is optional for bearer-token auth), persists to config, starts the supervisor runtime, and emits an `account.created` event.
 
-**Patch**: `PATCH /accounts/{id}` merges provided fields into the existing account. Omitted fields in the transport sub-object preserve their current values (sparse merge). Secret handling uses the `SecretWriteMode` tri-state: `keep` (preserve existing), `replace` (store new password in keyring), `clear` (delete managed secret).
+**Patch**: `PATCH /accounts/{id}` merges provided fields into the existing account. Omitted fields in the transport sub-object preserve their current values (sparse merge). Secret handling uses the `SecretWriteMode` tri-state: `keep` (preserve existing), `replace` (store new secret in keyring), `clear` (delete managed secret).
 
 **Delete**: `DELETE /accounts/{id}` removes the managed OS keyring secret (if any), stops the supervisor runtime, deletes the config file, and emits an `account.deleted` event.
 

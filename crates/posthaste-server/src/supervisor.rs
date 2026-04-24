@@ -405,12 +405,13 @@ async fn build_connection(
                 .transport
                 .username
                 .as_deref()
-                .ok_or_else(|| GatewayError::Rejected("missing JMAP username".to_string()))?;
+                .map(str::trim)
+                .filter(|username| !username.is_empty());
             let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
                 GatewayError::Rejected("missing JMAP secret reference".to_string())
             })?;
-            let password = secret_store.resolve(secret_ref)?;
-            let client = connect_jmap_client(url, username, &password).await?;
+            let secret = secret_store.resolve(secret_ref)?;
+            let client = connect_jmap_client(url, username, &secret).await?;
             let gateway: SharedGateway = Arc::new(LiveJmapGateway::from_client(client));
 
             let transports = gateway.push_transports();
@@ -423,7 +424,7 @@ async fn build_connection(
                 primary = primary.as_ref().map(|t| t.name()),
                 fallback = fallback.as_ref().map(|t| t.name()),
                 reason = if primary.as_ref().map(|t| t.name()) == Some("ws") {
-                    "server advertises WebSocket capability"
+                    "server advertises WebSocket push support"
                 } else {
                     "WebSocket not available, SSE only"
                 },

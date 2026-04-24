@@ -20,12 +20,16 @@ use crate::ws_connection::SharedWsConnection;
 /// @spec docs/L2-transport#websocket-connection-lifecycle
 pub struct WsPushTransport {
     ws: Arc<SharedWsConnection>,
+    server_account_id: String,
 }
 
 impl WsPushTransport {
     /// Create a WebSocket push transport wrapping an existing shared connection.
-    pub fn new(ws: Arc<SharedWsConnection>) -> Self {
-        Self { ws }
+    pub fn new(ws: Arc<SharedWsConnection>, server_account_id: String) -> Self {
+        Self {
+            ws,
+            server_account_id,
+        }
     }
 }
 
@@ -47,18 +51,25 @@ impl PushTransport for WsPushTransport {
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
         let target_url = self.ws.ws_url();
-        debug!(account_id = %account_id, target_url = target_url.as_deref(), checkpoint, "opening WS push stream");
+        debug!(
+            account_id = %account_id,
+            server_account_id = %self.server_account_id,
+            target_url = target_url.as_deref(),
+            checkpoint,
+            "opening WS push stream"
+        );
         self.ws.ensure_connected().await?;
         self.ws.enable_push(checkpoint).await?;
 
         let ws = self.ws.clone();
         let account_id = account_id.clone();
+        let server_account_id = self.server_account_id.clone();
 
         Ok(Some(Box::pin(async_stream::stream! {
             loop {
                 match ws.next_push().await {
                     Some(Ok(push)) => {
-                        match convert_push_object(&account_id, push) {
+                        match convert_push_object(&account_id, &server_account_id, push) {
                             Ok(Some(notification)) => yield Ok(notification),
                             Ok(None) => continue,
                             Err(error) => yield Err(error),
@@ -89,14 +100,15 @@ impl PushTransport for WsPushTransport {
 /// @spec docs/L1-jmap#push
 fn convert_push_object(
     account_id: &AccountId,
+    server_account_id: &str,
     push: jmap_client::PushObject,
 ) -> Result<Option<PushNotification>, GatewayError> {
     match push {
         jmap_client::PushObject::StateChange { mut changed } => {
-            let changed_types = changed
-                .remove(account_id.as_str())
-                .map(|entries| entries.into_keys().map(|dt| dt.to_string()).collect())
-                .unwrap_or_default();
+            let Some(entries) = changed.remove(server_account_id) else {
+                return Ok(None);
+            };
+            let changed_types = entries.into_keys().map(|dt| dt.to_string()).collect();
             let received_at = domain_now_iso8601().map_err(GatewayError::Rejected)?;
             Ok(Some(PushNotification {
                 account_id: account_id.clone(),
@@ -111,5 +123,56 @@ fn convert_push_object(
             }))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use posthaste_domain::AccountId;
+    use serde_json::json;
+
+    use super::convert_push_object;
+
+    #[test]
+    fn ws_push_filters_by_server_account_and_emits_local_account() {
+        let push = serde_json::from_value(json!({
+            "@type": "StateChange",
+            "changed": {
+                "server-account": {
+                    "Email": "state-1",
+                    "Mailbox": "state-2"
+                }
+            }
+        }))
+        .expect("push object");
+
+        let notification =
+            convert_push_object(&AccountId::from("local-account"), "server-account", push)
+                .expect("conversion")
+                .expect("notification");
+
+        assert_eq!(notification.account_id, AccountId::from("local-account"));
+        assert_eq!(notification.changed.len(), 2);
+        assert!(notification.changed.contains(&"Email".to_string()));
+        assert!(notification.changed.contains(&"Mailbox".to_string()));
+    }
+
+    #[test]
+    fn ws_push_ignores_other_server_accounts() {
+        let push = serde_json::from_value(json!({
+            "@type": "StateChange",
+            "changed": {
+                "other-server-account": {
+                    "Email": "state-1"
+                }
+            }
+        }))
+        .expect("push object");
+
+        let notification =
+            convert_push_object(&AccountId::from("local-account"), "server-account", push)
+                .expect("conversion");
+
+        assert!(notification.is_none());
     }
 }

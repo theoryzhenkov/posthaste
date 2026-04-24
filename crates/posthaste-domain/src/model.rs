@@ -779,8 +779,8 @@ pub fn now_iso8601() -> Result<String, String> {
 
 /// Atomic unit of sync data applied within a single SQLite transaction.
 ///
-/// When `replace_all_mailboxes` is true, the store treats the mailbox list as a
-/// full snapshot and prunes any local mailboxes not present in the batch.
+/// When a `replace_all_*` flag is true, the store treats that object list as a
+/// full snapshot and prunes any local objects not present in the batch.
 ///
 /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -792,6 +792,8 @@ pub struct SyncBatch {
     pub deleted_message_ids: Vec<MessageId>,
     /// When true, mailboxes are a full snapshot (from full resync fallback).
     pub replace_all_mailboxes: bool,
+    /// When true, messages are a full snapshot (from full resync fallback).
+    pub replace_all_messages: bool,
     pub cursors: Vec<SyncCursor>,
 }
 
