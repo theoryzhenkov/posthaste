@@ -121,6 +121,7 @@ async function fetchMessagesForView(
   searchQuery: string | undefined,
   sort: SortConfig,
   cursor: string | null,
+  signal: AbortSignal,
 ): Promise<MessagePage> {
   const q = normalizedServerQuery(searchQuery)
   const input = {
@@ -129,6 +130,7 @@ async function fetchMessagesForView(
     limit: MESSAGE_PAGE_SIZE,
     sort: serverSortField(sort),
     sortDir: sort.direction,
+    signal,
   }
   if (selectedView.kind === 'smart-mailbox') {
     return fetchSmartMailboxMessages(selectedView.id, input)
@@ -189,11 +191,13 @@ export function MessageList({
     error,
     fetchNextPage,
     hasNextPage,
+    isFetching,
     isFetchingNextPage,
+    isPlaceholderData,
   } = useInfiniteQuery({
     queryKey: queryKeys.messages(selectedView, searchQuery, sort),
-    queryFn: ({ pageParam }) =>
-      fetchMessagesForView(selectedView!, searchQuery, sort, pageParam),
+    queryFn: ({ pageParam, signal }) =>
+      fetchMessagesForView(selectedView!, searchQuery, sort, pageParam, signal),
     enabled: selectedView !== null,
     initialPageParam: null as string | null,
     placeholderData: (previousData) => previousData,
@@ -218,6 +222,8 @@ export function MessageList({
     error instanceof ApiError && error.code === 'invalid_query'
       ? `Search query is not valid: ${error.message}`
       : 'Failed to load messages'
+  const isRefreshingMessages =
+    !isLoading && !isFetchingNextPage && (isFetching || isPlaceholderData)
 
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
@@ -454,6 +460,11 @@ export function MessageList({
               onToggleSort={toggleSort}
             />
           </div>
+          {isRefreshingMessages && (
+            <div className="h-px overflow-hidden bg-border/40">
+              <div className="h-full w-full animate-pulse bg-foreground/30" />
+            </div>
+          )}
 
           <div
             ref={scrollContainerRef}
