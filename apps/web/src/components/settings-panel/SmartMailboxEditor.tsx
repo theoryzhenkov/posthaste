@@ -17,8 +17,26 @@ import type {
 import { Button } from '../ui/button'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
 import { RuleGroupEditor } from './RuleGroupEditor'
-import { FeedbackBanner, Field, SectionCard, SectionHeader } from './shared'
+import {
+  FeedbackBanner,
+  Field,
+  SettingsFooter,
+  SettingsPageHeader,
+  SettingsSection,
+} from './shared'
 import type { SmartMailboxEditorTarget } from './types'
+
+function smartMailboxFieldsSignature(form: {
+  name: string
+  position: number
+  rule: unknown
+}): string {
+  return JSON.stringify({
+    name: form.name.trim(),
+    position: form.position,
+    rule: form.rule,
+  })
+}
 
 /**
  * Smart mailbox editor form: create new or edit existing smart mailboxes.
@@ -50,8 +68,11 @@ export function SmartMailboxEditor({
       ? formFromSmartMailbox(editingSmartMailbox)
       : EMPTY_SMART_MAILBOX_FORM,
   )
-  const [feedback, setFeedback] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [
+    savedSmartMailboxFieldsSignature,
+    setSavedSmartMailboxFieldsSignature,
+  ] = useState(() => smartMailboxFieldsSignature(form))
 
   const saveMutation = useMutation({
     mutationFn: async (currentForm: typeof form) => {
@@ -72,158 +93,138 @@ export function SmartMailboxEditor({
       return updateSmartMailbox(editorTarget, payload)
     },
     onSuccess: async (smartMailbox) => {
-      setFeedback(`Saved ${smartMailbox.name}.`)
       setErrorMessage(null)
+      const savedForm = formFromSmartMailbox(smartMailbox)
+      setSavedSmartMailboxFieldsSignature(
+        smartMailboxFieldsSignature(savedForm),
+      )
+      setForm(savedForm)
       await onSaved(smartMailbox)
     },
     onError: (error: Error) => {
-      setFeedback(null)
       setErrorMessage(error.message)
     },
   })
 
   const isEditing = editorTarget !== 'new'
+  const hasUnsavedChanges =
+    smartMailboxFieldsSignature(form) !== savedSmartMailboxFieldsSignature
 
   return (
-    <div>
-      <SectionCard>
-        <SectionHeader
-          eyebrow="Mailbox editor"
-          title={
-            editorTarget === 'new'
-              ? 'New smart mailbox'
-              : (editingSmartMailbox?.name ?? 'Smart mailbox')
-          }
-          description={
-            editorTarget === 'new'
-              ? 'A saved message query that powers a virtual mailbox.'
-              : 'Saved queries power unified mailboxes and custom filtered views.'
-          }
-          actions={
-            isEditing ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {summary && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      type="button"
-                      onClick={() =>
-                        onReorder(summary, Math.max(0, summary.position - 1))
-                      }
-                      disabled={reorderPendingKey !== null}
-                      aria-label="Move up"
-                    >
-                      <ArrowUp size={14} strokeWidth={1.75} />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      type="button"
-                      onClick={() => onReorder(summary, summary.position + 1)}
-                      disabled={reorderPendingKey !== null}
-                      aria-label="Move down"
-                    >
-                      <ArrowDown size={14} strokeWidth={1.75} />
-                    </Button>
-                  </>
-                )}
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  type="button"
-                  onClick={() => onDeleted(editorTarget)}
-                >
-                  Delete
-                </Button>
-              </div>
-            ) : null
+    <div className="pb-8">
+      <SettingsPageHeader
+        title={
+          editorTarget === 'new'
+            ? 'New smart mailbox'
+            : (editingSmartMailbox?.name ?? 'Smart mailbox')
+        }
+        description={
+          editorTarget === 'new'
+            ? 'A saved message query that powers a virtual mailbox.'
+            : 'Saved queries power unified mailboxes and custom filtered views.'
+        }
+        actions={
+          isEditing && summary ? (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={() =>
+                  onReorder(summary, Math.max(0, summary.position - 1))
+                }
+                disabled={reorderPendingKey !== null}
+                aria-label="Move up"
+              >
+                <ArrowUp size={14} strokeWidth={1.75} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={() => onReorder(summary, summary.position + 1)}
+                disabled={reorderPendingKey !== null}
+                aria-label="Move down"
+              >
+                <ArrowDown size={14} strokeWidth={1.75} />
+              </Button>
+            </>
+          ) : null
+        }
+      />
+
+      <SettingsSection title="Definition">
+        <Field
+          label="Name"
+          value={form.name}
+          placeholder="Important"
+          onChange={(value) =>
+            setForm((current) => ({ ...current, name: value }))
           }
         />
-      </SectionCard>
+      </SettingsSection>
 
-      <div>
-        <div>
-          <SectionCard>
-            <SectionHeader eyebrow="Definition" title="Mailbox name" />
+      <SettingsSection
+        title="Rules"
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={() =>
+              setForm((current) => ({
+                ...current,
+                rule: EMPTY_SMART_MAILBOX_FORM.rule,
+              }))
+            }
+          >
+            Reset rule
+          </Button>
+        }
+      >
+        <RuleGroupEditor
+          group={form.rule.root}
+          onChange={(root) =>
+            setForm((current) => ({ ...current, rule: { root } }))
+          }
+        />
+      </SettingsSection>
 
-            <Field
-              label="Name"
-              value={form.name}
-              placeholder="Important"
-              onChange={(value) =>
-                setForm((current) => ({ ...current, name: value }))
-              }
-            />
-          </SectionCard>
+      <SettingsFooter>
+        {errorMessage && (
+          <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>
+        )}
 
-          <SectionCard>
-            <SectionHeader
-              eyebrow="Rules"
-              title="Rule builder"
-              description="Smart mailboxes match individual messages, not whole threads."
-              actions={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  type="button"
-                  onClick={() => setForm(EMPTY_SMART_MAILBOX_FORM)}
-                >
-                  Reset rule
-                </Button>
-              }
-            />
-
-            <RuleGroupEditor
-              group={form.rule.root}
-              onChange={(root) =>
-                setForm((current) => ({ ...current, rule: { root } }))
-              }
-            />
-          </SectionCard>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            onClick={() => saveMutation.mutate(form)}
+            disabled={saveMutation.isPending || !hasUnsavedChanges}
+            className="bg-brand-coral text-white hover:bg-brand-coral/90"
+          >
+            {editorTarget === 'new' ? 'Create mailbox' : 'Save mailbox'}
+          </Button>
+          <span className="text-[12px] text-muted-foreground">
+            {hasUnsavedChanges ? 'Unsaved changes' : 'Saved'}
+          </span>
         </div>
+      </SettingsFooter>
 
-        <div>
-          <SectionCard>
-            <SectionHeader
-              eyebrow="Changes"
-              title="Apply updates"
-              description="Save the current smart mailbox or reset the form back to its loaded state."
-            />
-
-            {feedback && (
-              <FeedbackBanner tone="success">{feedback}</FeedbackBanner>
-            )}
-            {errorMessage && (
-              <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>
-            )}
-
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                type="button"
-                onClick={() => saveMutation.mutate(form)}
-                disabled={saveMutation.isPending}
-                className="bg-brand-coral text-white hover:bg-brand-coral/90"
-              >
-                {editorTarget === 'new' ? 'Create mailbox' : 'Save mailbox'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  setForm(
-                    editingSmartMailbox
-                      ? formFromSmartMailbox(editingSmartMailbox)
-                      : EMPTY_SMART_MAILBOX_FORM,
-                  )
-                }
-              >
-                Reset form
-              </Button>
-            </div>
-          </SectionCard>
-        </div>
-      </div>
+      {isEditing && (
+        <SettingsSection title="Danger" tone="danger" className="pt-16">
+          <p className="mb-3 text-[12px] text-muted-foreground">
+            Delete this smart mailbox. Messages remain in their source accounts.
+          </p>
+          <Button
+            size="sm"
+            variant="destructive"
+            type="button"
+            onClick={() => onDeleted(editorTarget)}
+          >
+            Delete
+          </Button>
+        </SettingsSection>
+      )}
     </div>
   )
 }
