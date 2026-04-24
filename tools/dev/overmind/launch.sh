@@ -142,6 +142,27 @@ log_path="$("$root/tools/dev/overmind/daemon-log-path.sh")"
 echo "Persisted daemon log: $log_path (tail with 'just daemon-log-tail')"
 echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, API http://127.0.0.1:$POSTHASTE_DAEMON_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
 
+if [[ "${POSTHASTE_DEV_STACK_SMOKE:-}" == "1" ]]; then
+  require_var_dev_path() {
+    local label="${1:?label required}"
+    local path="${2:?path required}"
+    case "$path" in
+      "$root"/var/dev/*) ;;
+      *) echo "$label must stay under var/dev: $path" >&2; exit 1 ;;
+    esac
+  }
+
+  require_var_dev_path "Stalwart data" "$POSTHASTE_STALWART_DATA"
+  require_var_dev_path "Stalwart logs" "$POSTHASTE_STALWART_LOGS"
+  require_var_dev_path "PostHaste config" "$POSTHASTE_CONFIG_ROOT"
+  require_var_dev_path "PostHaste state" "$POSTHASTE_STATE_ROOT"
+  require_var_dev_path "Generated bootstrap" "$POSTHASTE_BOOTSTRAP_PATH"
+  [[ -f "tools/dev/Procfile.$layout" ]] || { echo "missing Procfile for $layout" >&2; exit 1; }
+  [[ -f "$POSTHASTE_BOOTSTRAP_PATH" ]] || { echo "missing generated bootstrap: $POSTHASTE_BOOTSTRAP_PATH" >&2; exit 1; }
+  echo "Dev stack smoke passed for $layout."
+  exit 0
+fi
+
 if ! command -v overmind >/dev/null 2>&1; then
   echo "overmind is not on PATH; reload the Nix dev shell with 'direnv reload' or 'nix develop'." >&2
   exit 127
