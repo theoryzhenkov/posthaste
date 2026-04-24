@@ -21,7 +21,11 @@ import type { MessageSummary } from '@/api/types'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
 import { queryKeys } from '@/queryKeys'
-import { getQueryCompletions, getQueryHelpEntries } from '@/queryLanguage'
+import {
+  getQueryCompletions,
+  getQueryHelpEntries,
+  validateSearchQuery,
+} from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
 
 import { FloatingPanel } from './FloatingPanel'
@@ -216,7 +220,9 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const serverQuery = normalizeAppliedSearchQuery(query)
+  const queryValidation = useMemo(() => validateSearchQuery(query), [query])
+  const serverQuery =
+    queryValidation.state === 'valid' ? normalizeAppliedSearchQuery(query) : ''
   const debouncedServerQuery = useDebouncedValue(serverQuery, 180)
   const { data: sidebar } = useQuery({
     queryKey: ['sidebar'],
@@ -552,7 +558,7 @@ export function CommandPalette({
 
   function applyCurrentQuery() {
     const normalized = normalizeAppliedSearchQuery(query)
-    if (!normalized) {
+    if (!normalized || queryValidation.state !== 'valid') {
       return
     }
     onApplySearch(normalized)

@@ -24,6 +24,11 @@ export interface QueryHelpEntry {
   keywords: string
 }
 
+export type QueryValidation =
+  | { state: 'valid' }
+  | { state: 'incomplete'; message: string }
+  | { state: 'invalid'; message: string }
+
 interface QueryCompletionContext {
   sidebar: SidebarResponse | undefined
   messages: MessageSummary[]
@@ -221,6 +226,10 @@ function normalize(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function prefixDefinition(prefix: string): QueryPrefixDefinition | undefined {
+  return PREFIX_BY_NAME.get(prefix.toLowerCase())
+}
+
 function todayIsoDate(now: Date): string {
   return now.toISOString().slice(0, 10)
 }
@@ -276,6 +285,206 @@ function activeBareToken(input: string): { start: number; value: string } {
     start -= 1
   }
   return { start, value: input.slice(start) }
+}
+
+function parseQueryTokens(input: string):
+  | {
+      ok: true
+      tokens: Array<{ prefix: string | null; value: string }>
+    }
+  | {
+      ok: false
+      validation: QueryValidation
+    } {
+  const tokens: Array<{ prefix: string | null; value: string }> = []
+  const chars = [...input]
+  let index = 0
+
+  while (index < chars.length) {
+    while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+      index += 1
+    }
+    if (index >= chars.length) {
+      break
+    }
+
+    if (
+      chars[index] === '-' &&
+      index + 1 < chars.length &&
+      !isWhitespace(chars[index + 1] ?? '')
+    ) {
+      index += 1
+    }
+
+    const start = index
+    let colonIndex: number | null = null
+    while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+      if (chars[index] === ':') {
+        colonIndex = index
+        break
+      }
+      index += 1
+    }
+
+    if (colonIndex === null) {
+      index = start
+      tokens.push({ prefix: null, value: scanTokenValue(chars, index).value })
+      index = scanTokenValue(chars, index).end
+      continue
+    }
+
+    const prefix = input.slice(start, colonIndex).toLowerCase()
+    const definition = prefixDefinition(prefix)
+    if (!definition) {
+      return {
+        ok: false,
+        validation: {
+          state: 'invalid',
+          message: `unknown search prefix: ${prefix}`,
+        },
+      }
+    }
+
+    index = colonIndex + 1
+    while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+      index += 1
+    }
+
+    let value: string
+    if (SPACED_VALUE_PREFIXES.has(prefix)) {
+      if (chars[index] === '"') {
+        const scanned = scanTokenValue(chars, index)
+        value = scanned.value
+        index = scanned.end
+      } else {
+        const valueStart = index
+        while (index < chars.length) {
+          if (startsKnownPrefixAt(chars, index)) {
+            break
+          }
+          index += 1
+        }
+        value = input.slice(valueStart, index).trim()
+      }
+    } else {
+      const scanned = scanTokenValue(chars, index)
+      value = scanned.value
+      index = scanned.end
+    }
+
+    tokens.push({ prefix, value })
+  }
+
+  return { ok: true, tokens }
+}
+
+function scanTokenValue(
+  chars: string[],
+  start: number,
+): { value: string; end: number } {
+  if (chars[start] === '"') {
+    let end = start + 1
+    while (end < chars.length && chars[end] !== '"') {
+      end += 1
+    }
+    const value = chars.slice(start + 1, end).join('')
+    return { value, end: end < chars.length ? end + 1 : end }
+  }
+
+  let end = start
+  while (end < chars.length && !isWhitespace(chars[end] ?? '')) {
+    end += 1
+  }
+  return { value: chars.slice(start, end).join(''), end }
+}
+
+function startsKnownPrefixAt(chars: string[], position: number): boolean {
+  if (position >= chars.length || !isWhitespace(chars[position] ?? '')) {
+    return false
+  }
+
+  let index = position
+  while (index < chars.length && isWhitespace(chars[index] ?? '')) {
+    index += 1
+  }
+  if (chars[index] === '-') {
+    index += 1
+  }
+
+  const start = index
+  while (index < chars.length && !isWhitespace(chars[index] ?? '')) {
+    if (chars[index] === ':') {
+      return prefixDefinition(chars.slice(start, index).join('')) !== undefined
+    }
+    index += 1
+  }
+  return false
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false
+  }
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
+}
+
+function validatePrefixedValue(prefix: string, value: string): QueryValidation {
+  if (!value.trim()) {
+    return { state: 'incomplete', message: `empty value for ${prefix}:` }
+  }
+
+  const normalizedPrefix = prefixDefinition(prefix)?.primary
+  const normalizedValue = normalize(value)
+  switch (normalizedPrefix) {
+    case 'is':
+      return IS_VALUES.includes(normalizedValue)
+        ? { state: 'valid' }
+        : { state: 'invalid', message: `unknown is: value: ${value}` }
+    case 'has':
+      return normalizedValue === 'attachment' ||
+        normalizedValue === 'attachments'
+        ? { state: 'valid' }
+        : { state: 'invalid', message: `unknown has: value: ${value}` }
+    case 'date':
+      return isValidIsoDate(normalizedValue)
+        ? { state: 'valid' }
+        : { state: 'invalid', message: `invalid date '${value}'` }
+    case 'newer':
+    case 'older':
+      return /^\d+[dwmy]$/.test(normalizedValue)
+        ? { state: 'valid' }
+        : {
+            state: 'invalid',
+            message: `invalid relative date '${value}', expected e.g. 2w`,
+          }
+    default:
+      return { state: 'valid' }
+  }
+}
+
+export function validateSearchQuery(input: string): QueryValidation {
+  const query = input.trim()
+  if (!query) {
+    return { state: 'incomplete', message: 'empty query' }
+  }
+
+  const parsed = parseQueryTokens(query)
+  if (!parsed.ok) {
+    return parsed.validation
+  }
+
+  for (const token of parsed.tokens) {
+    if (!token.prefix) {
+      continue
+    }
+    const validation = validatePrefixedValue(token.prefix, token.value)
+    if (validation.state !== 'valid') {
+      return validation
+    }
+  }
+
+  return { state: 'valid' }
 }
 
 function findActivePrefix(input: string): {
