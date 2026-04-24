@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "JMAP transport abstraction: WS preferred with SSE fallback, JmapTransport for API routing, resilient push streams"
-modified: 2026-04-02
-reviewed: 2026-04-02
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L1-jmap
   - path: docs/L1-sync
@@ -16,11 +16,11 @@ dependents: []
 
 The client currently hardcodes SSE (EventSource) for push notifications and HTTP POST for every JMAP API call. JMAP also defines a WebSocket transport (RFC 8887) that carries both push notifications and request/response pairs on a single persistent connection. WebSocket reduces connection overhead and latency, particularly for mutation-heavy workflows where each flag toggle or move currently opens a new HTTP request.
 
-The client should prefer WebSocket when the server supports it, fall back to SSE for push when it doesn't, and always have HTTP as a last resort for API calls.
+The client should prefer WebSocket when the server supports it, fall back to SSE for push when WebSocket push is unavailable, and always have HTTP as a last resort for API calls.
 
 ## Transport negotiation
 
-On connection, the gateway reads the JMAP Session object. If the session advertises `urn:ietf:params:jmap:websocket` in its capabilities map, the gateway opens a WebSocket connection and routes both API calls and push notifications through it. If the capability is absent, the gateway falls back to SSE for push and HTTP for API calls. This is automatic and silent -- no user-facing configuration. All accounts use the same strategy: prefer WS, fall back to SSE.
+On connection, the gateway reads the JMAP Session object. If the session advertises `urn:ietf:params:jmap:websocket`, the gateway may open a WebSocket connection for request/response traffic. Push notifications use WebSocket only when that capability has `supportsPush: true`. If WebSocket is absent or does not support push, the gateway falls back to SSE for push and HTTP for API calls. This is automatic and silent -- no user-facing configuration.
 
 ## New abstractions
 
@@ -61,7 +61,7 @@ One WebSocket connection per account. The connection is opened during the first 
 - Responses are routed to the caller that sent the corresponding request (matched by `requestId`).
 - Push notifications are forwarded to the `PushStream`.
 
-Push is enabled on the WS connection immediately after open via `WebSocketPushEnable` with the relevant data types.
+Push is enabled on the WS connection immediately after open via `WebSocketPushEnable` with the relevant data types, but only when the Session advertises WebSocket `supportsPush: true`.
 
 ## Request/response correlation
 
@@ -101,7 +101,7 @@ This is a two-phase implementation:
 
 | ID | Sev. | Assertion |
 |----|------|-----------|
-| ws-preferred | MUST | WebSocket is attempted before SSE when the server advertises the capability |
+| ws-preferred | MUST | WebSocket is attempted before SSE for push only when the server advertises WebSocket `supportsPush` |
 | sse-fallback | MUST | If WebSocket is unavailable or fails, push falls back to SSE without user intervention |
 | http-fallback | MUST | If the WebSocket connection drops, API calls transparently fall back to HTTP |
 | gateway-unchanged | MUST | MailGateway trait methods do not change; transport is an internal concern of the gateway |

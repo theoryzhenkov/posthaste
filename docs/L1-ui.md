@@ -2,7 +2,7 @@
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
 modified: 2026-04-23
-reviewed: 2026-04-23
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-ui
   - path: docs/L0-branding

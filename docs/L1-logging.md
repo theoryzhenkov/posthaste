@@ -2,7 +2,7 @@
 scope: L1
 summary: "Logging contracts: crate layout, span conventions, config schema, event content rules, frontend logger interface"
 modified: 2026-04-04
-reviewed: 2026-04-04
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-logging
   - path: docs/L1-accounts

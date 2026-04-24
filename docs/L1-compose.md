@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-03-31
-reviewed: 2026-03-31
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-compose
   - path: docs/L1-jmap
@@ -124,7 +124,7 @@ The user configures a signature per Identity, stored locally. The signature is a
 
 ## Attachment handling
 
-Files are uploaded to JMAP via `Blob/upload` before the email is assembled. Each uploaded blob gets a `blobId` referenced in the MIME structure. The compose session tracks pending uploads and blocks `send()` until all uploads complete. Maximum attachment size is determined by the server's `maxSizeUpload` capability, which the client reads from the JMAP Session object.
+Files are uploaded through the JMAP Session `uploadUrl` endpoint before the email is assembled. Each uploaded blob gets a `blobId` referenced in the MIME structure. RFC 9404 `Blob/upload` may be used only when the server advertises the blob-management capability; it is not the baseline RFC 8620 upload path. The compose session tracks pending uploads and blocks `send()` until all uploads complete. Maximum attachment size is determined by the server's `maxSizeUpload` capability, which the client reads from the JMAP Session object.
 
 ## Error model
 
@@ -132,7 +132,7 @@ Files are uploaded to JMAP via `Blob/upload` before the email is assembled. Each
 ComposeError
   ├── DraftSaveError(JmapError)     -- Email/set failed
   ├── SendError(JmapError)          -- EmailSubmission/set failed
-  ├── AttachmentUploadError(cause)  -- Blob/upload failed
+  ├── AttachmentUploadError(cause)  -- JMAP upload endpoint failed
   ├── AttachmentTooLarge(maxBytes)  -- exceeds server limit
   ├── NoRecipients                  -- tried to send with empty To
   └── IdentityNotFound              -- invalid identity ID
@@ -143,7 +143,7 @@ ComposeError
 - Markdown source is always preserved as the text/plain part
 - HTML output contains no external resource references
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
-- Send uses EmailSubmission/set, which handles server-side Sent folder placement
+- Send uses EmailSubmission/set. Server-side draft cleanup or Sent placement is requested through `onSuccessUpdateEmail` and the implicit Email/set response is handled as part of the same JMAP operation.
 - The compose session is a Rust object; the frontend interacts via REST API
 - `render_preview()` is called on text change (debounced) and returns HTML for WKWebView
 - Attachments are uploaded before send, not inline with the email body
@@ -160,5 +160,5 @@ ComposeError
 | reply-quote | MUST | Reply body includes attribution line and > prefixed original text |
 | forward-attachments | SHOULD | Forward re-attaches original message attachments |
 | sig-delimiter | MUST | Signature is preceded by standard `-- ` delimiter line |
-| upload-before-send | MUST | All attachments are uploaded via Blob/upload before EmailSubmission |
+| upload-before-send | MUST | All attachments are uploaded through the JMAP upload endpoint before EmailSubmission |
 | no-send-empty-to | MUST | send() returns NoRecipients error if To is empty |

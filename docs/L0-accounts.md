@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Multi-account scoping invariant and deferral rationale"
-modified: 2026-03-31
-reviewed: 2026-04-23
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -21,13 +21,15 @@ Multi-account UI is out of scope for MVP. The implementation targets a single Fa
 
 All SQLite tables use `(account_id, ...)` composite primary keys. All Rust-side state (sync state strings, session objects) is keyed by account ID. All API endpoints that return account-scoped data filter by account ID internally. The UI may hardcode a single account ID for v1, but no code path assumes there is only one account.
 
+The local account ID is a PostHaste identifier. The JMAP server account ID comes from the Session object's `accounts` and `primaryAccounts` fields. These IDs are mapped explicitly and are not interchangeable.
+
 ## Credential storage
 
-Auth tokens (Fastmail app-specific passwords) are stored in macOS Keychain as generic passwords, keyed by account ID. Tokens are read from Keychain at session creation and not held in memory beyond the active session. On authentication failure (HTTP 401), the UI presents a re-authentication flow.
+JMAP auth secrets are stored in the OS keyring as generic secrets, keyed by local account ID. For Fastmail, distributed clients use OAuth access/refresh tokens and personal/testing clients use JMAP API tokens. App-specific passwords are for non-JMAP protocols and are not the normal JMAP credential. Secrets are read at session creation and not written to TOML config. On authentication failure (HTTP 401), the UI refreshes OAuth credentials when possible or presents a re-authentication flow.
 
 ## JMAP discovery
 
-Account setup uses `GET /.well-known/jmap` on the provider's domain. The Session response reveals the JMAP API URL, capabilities, and account IDs. For Fastmail, the domain is `fastmail.com`. For future providers, the user enters their email domain and discovery is attempted automatically. If discovery fails, the user can manually provide the JMAP endpoint URL.
+Account setup starts from a configured Session URL or provider origin. Generic JMAP providers may support `GET /.well-known/jmap` on their domain. Fastmail documents `https://api.fastmail.com/jmap/session` as the Session resource. The Session response reveals the JMAP API URL, upload/download URLs, capabilities, and server account IDs. If discovery fails, the user can manually provide the Session URL.
 
 ## What "deferred" means concretely
 

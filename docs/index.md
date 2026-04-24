@@ -56,8 +56,8 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 
 ## MVP acceptance criteria
 
-1. Connect to Fastmail via JMAP, authenticate with app-specific password
-2. Sync all mailboxes and email metadata, lazy-fetch bodies on demand, and prune stale local mailboxes on authoritative full resyncs
+1. Connect to Fastmail via JMAP, authenticate with an OAuth bearer token or JMAP API token
+2. Sync all mailboxes and email metadata, lazy-fetch bodies on demand, and prune stale local mailboxes and messages on authoritative full resyncs
 3. Search with boolean queries (AND/OR/NOT, field prefixes, date ranges)
 4. Create and use smart mailboxes (saved queries with auto-grouping)
 5. Read email in a conversation-first view with paginated conversation list, anchored live updates, and on-demand message body fetch

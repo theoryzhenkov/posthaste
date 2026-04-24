@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-03
-reviewed: 2026-04-03
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-search
@@ -84,13 +84,17 @@ driver = "jmap"                 # "jmap" or "mock"
 enabled = true                  # default: true
 
 [transport]
-base_url = "https://api.fastmail.com"
+base_url = "https://api.fastmail.com/jmap/session"
 username = "user@example.com"
 
 [transport.secret_ref]
 kind = "os"                     # "os" (keyring) or "env" (environment variable)
 key = "account:primary"
 ```
+
+`base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
+
+The referenced secret is an opaque JMAP auth secret. For Fastmail this is an OAuth token set for distributed clients or an API token for personal/testing use, not a Fastmail app-specific password.
 
 `SourceToml` converts bidirectionally to `AccountSettings`. Missing `created_at`/`updated_at` default to `RFC3339_EPOCH`.
 

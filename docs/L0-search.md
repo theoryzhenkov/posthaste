@@ -2,7 +2,7 @@
 scope: L0
 summary: "Why custom query language, search execution strategy, smart mailbox rationale"
 modified: 2026-03-31
-reviewed: 2026-04-23
+reviewed: 2026-04-24
 depends:
   - path: README
   - path: docs/L0-sync
