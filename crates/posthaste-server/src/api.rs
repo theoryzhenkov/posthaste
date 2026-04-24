@@ -1475,6 +1475,28 @@ mod tests {
     }
 
     #[test]
+    fn jmap_account_allows_bearer_secret_without_username() {
+        let account = AccountSettings {
+            id: AccountId::from("primary"),
+            name: "Primary".to_string(),
+            driver: AccountDriver::Jmap,
+            enabled: true,
+            transport: posthaste_domain::AccountTransportSettings {
+                base_url: Some("https://example.com/jmap".to_string()),
+                username: None,
+                secret_ref: Some(SecretRef {
+                    kind: SecretKind::Env,
+                    key: "POSTHASTE_JMAP_TOKEN".to_string(),
+                }),
+            },
+            created_at: "2026-03-31T10:00:00Z".to_string(),
+            updated_at: "2026-03-31T10:00:00Z".to_string(),
+        };
+
+        assert!(validate_account_settings(&account).is_ok());
+    }
+
+    #[test]
     fn secret_replace_requires_password() {
         let error = validate_secret_request(&SecretWriteRequest {
             mode: SecretWriteMode::Replace,

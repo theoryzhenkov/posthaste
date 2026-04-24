@@ -1,13 +1,11 @@
 use super::*;
 use posthaste_domain::MessageAttachment;
 
-/// Determines the conversation ID for a message using a three-tier lookup:
-/// 1. Match by RFC `Message-ID`, `In-Reply-To`, or `References` headers
-/// 2. Match by server-assigned `thread_id`
-/// 3. Match by normalized subject
+/// Determines the conversation ID for a message from JMAP `threadId`.
 ///
-/// If multiple conversations match, they are merged into the lowest-sorted ID.
-/// If none match, a new deterministic ID is generated.
+/// JMAP owns thread membership. RFC headers and subject normalization are
+/// retained as display/search metadata, but they do not define conversation
+/// membership.
 ///
 /// @spec docs/L1-sync#sqlite-schema
 pub(crate) fn assign_conversation_id_tx(
@@ -15,85 +13,23 @@ pub(crate) fn assign_conversation_id_tx(
     account_id: &AccountId,
     message: &posthaste_domain::MessageRecord,
 ) -> Result<ConversationId, StoreError> {
-    let mut matches = HashSet::new();
-    let mut header_ids = Vec::new();
-    if let Some(message_id) = normalize_header_token(message.rfc_message_id.as_deref()) {
-        header_ids.push(message_id);
-    }
-    if let Some(in_reply_to) = normalize_header_token(message.in_reply_to.as_deref()) {
-        header_ids.push(in_reply_to);
-    }
-    for reference in &message.references {
-        if let Some(reference) = normalize_header_token(Some(reference.as_str())) {
-            header_ids.push(reference);
-        }
-    }
-    for header_id in header_ids {
-        let mut statement = tx
-            .prepare(
-                "SELECT DISTINCT conversation_id
-                 FROM message
-                 WHERE rfc_message_id = ?1 AND conversation_id IS NOT NULL",
-            )
-            .map_err(sql_to_store_error)?;
-        let rows = statement
-            .query_map(params![header_id], |row| row.get::<_, String>(0))
-            .map_err(sql_to_store_error)?;
-        for conversation_id in rows {
-            matches.insert(conversation_id.map_err(sql_to_store_error)?);
-        }
+    if let Some(conversation_id) = tx
+        .query_row(
+            "SELECT conversation_id
+             FROM message
+             WHERE account_id = ?1 AND thread_id = ?2 AND conversation_id IS NOT NULL
+             ORDER BY received_at DESC
+             LIMIT 1",
+            params![account_id.as_str(), message.source_thread_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?
+    {
+        return Ok(ConversationId::from(conversation_id.as_str()));
     }
 
-    if matches.is_empty() {
-        let by_thread = tx
-            .query_row(
-                "SELECT conversation_id
-                 FROM message
-                 WHERE account_id = ?1 AND thread_id = ?2 AND conversation_id IS NOT NULL
-                 ORDER BY received_at DESC
-                 LIMIT 1",
-                params![account_id.as_str(), message.source_thread_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(sql_to_store_error)?;
-        if let Some(conversation_id) = by_thread {
-            matches.insert(conversation_id);
-        }
-    }
-
-    if matches.is_empty() {
-        if let Some(normalized_subject_value) = normalized_subject(message.subject.as_deref()) {
-            let by_subject = tx
-                .query_row(
-                    "SELECT conversation_id
-                     FROM message
-                     WHERE account_id = ?1
-                       AND normalized_subject = ?2
-                       AND conversation_id IS NOT NULL
-                     ORDER BY received_at DESC
-                     LIMIT 1",
-                    params![account_id.as_str(), normalized_subject_value],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(sql_to_store_error)?;
-            if let Some(conversation_id) = by_subject {
-                matches.insert(conversation_id);
-            }
-        }
-    }
-
-    let mut matches = matches.into_iter().collect::<Vec<_>>();
-    matches.sort();
-    let target = matches
-        .first()
-        .map(|conversation_id| ConversationId::from(conversation_id.as_str()))
-        .unwrap_or_else(|| generate_conversation_id(account_id, message));
-    if matches.len() > 1 {
-        merge_conversations_tx(tx, &target, &matches[1..])?;
-    }
-    Ok(target)
+    Ok(generate_conversation_id(account_id, message))
 }
 
 /// Recomputes the `conversation` projection row (subject, latest message,
@@ -422,47 +358,6 @@ pub(crate) fn insert_event_tx(
     })
 }
 
-/// Merges multiple conversations into a single target by reassigning all
-/// messages and cleaning up old conversation rows.
-fn merge_conversations_tx(
-    tx: &Transaction<'_>,
-    target: &ConversationId,
-    other_ids: &[String],
-) -> Result<(), StoreError> {
-    for other_id in other_ids {
-        tx.execute(
-            "UPDATE message
-             SET conversation_id = ?1
-             WHERE conversation_id = ?2",
-            params![target.as_str(), other_id],
-        )
-        .map_err(sql_to_store_error)?;
-        tx.execute(
-            "UPDATE OR REPLACE conversation_message
-             SET conversation_id = ?1
-             WHERE conversation_id = ?2",
-            params![target.as_str(), other_id],
-        )
-        .map_err(sql_to_store_error)?;
-        tx.execute("DELETE FROM conversation WHERE id = ?1", params![other_id])
-            .map_err(sql_to_store_error)?;
-    }
-    Ok(())
-}
-
-/// Trims whitespace from header tokens, returning `None` for empty/absent
-/// values.
-fn normalize_header_token(value: Option<&str>) -> Option<String> {
-    value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
-}
-
 /// Strips `Re:`/`Fwd:` prefixes and lowercases the subject for conversation
 /// grouping.
 pub(crate) fn normalized_subject(value: Option<&str>) -> Option<String> {
@@ -488,21 +383,15 @@ pub(crate) fn normalized_subject(value: Option<&str>) -> Option<String> {
     })
 }
 
-/// Generates a deterministic conversation ID from account ID, message ID,
-/// RFC `Message-ID`, and subject via SHA-256.
+/// Generates a deterministic conversation ID from account ID and JMAP
+/// `threadId` via SHA-256.
 fn generate_conversation_id(
     account_id: &AccountId,
     message: &posthaste_domain::MessageRecord,
 ) -> ConversationId {
     let mut hasher = Sha256::new();
     hasher.update(account_id.as_str().as_bytes());
-    hasher.update(message.id.as_str().as_bytes());
-    if let Some(rfc_message_id) = &message.rfc_message_id {
-        hasher.update(rfc_message_id.as_bytes());
-    }
-    if let Some(subject) = &message.subject {
-        hasher.update(subject.as_bytes());
-    }
+    hasher.update(message.source_thread_id.as_str().as_bytes());
     ConversationId(format!("conv-{}", hex_encode(hasher.finalize())))
 }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use jmap_client::client::Client;
+use jmap_client::client::{Client, Credentials};
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::mailbox;
 use posthaste_domain::{
@@ -15,15 +15,16 @@ use tracing::{debug, info, instrument};
 /// Discover and connect to a JMAP server, returning a configured client.
 ///
 /// Performs session discovery via `.well-known/jmap`, authenticates with
-/// basic credentials, and follows redirects scoped to the server's host.
+/// the configured account secret, and follows redirects scoped to the
+/// server's host.
 ///
 /// @spec docs/L1-jmap#session
 /// @spec docs/L1-jmap#authentication
-#[instrument(skip(password))]
+#[instrument(skip(secret))]
 pub async fn connect_jmap_client(
     url: &str,
-    username: &str,
-    password: &str,
+    username: Option<&str>,
+    secret: &str,
 ) -> Result<Arc<Client>, GatewayError> {
     debug!("connecting to JMAP server");
     let host = url::Url::parse(url)
@@ -31,7 +32,7 @@ pub async fn connect_jmap_client(
         .and_then(|parsed| parsed.host_str().map(String::from))
         .unwrap_or_default();
     let client = Client::new()
-        .credentials((username, password))
+        .credentials(jmap_credentials(username, secret))
         .follow_redirects([host])
         .connect(url)
         .await
@@ -57,7 +58,7 @@ pub async fn connect_jmap_client(
 /// Production `MailGateway` backed by a live JMAP server connection.
 ///
 /// Holds an authenticated `jmap_client::Client` and, when the server
-/// advertises WebSocket capability, a `SharedWsConnection` used for
+/// advertises WebSocket push support, a `SharedWsConnection` used for
 /// interactive API calls and push notifications.
 ///
 /// @spec docs/L1-jmap#session
@@ -68,17 +69,22 @@ pub struct LiveJmapGateway {
 }
 
 impl LiveJmapGateway {
-    /// Wrap an already-connected client, opening a WebSocket if the server supports it.
+    /// Wrap an already-connected client, opening a WebSocket if the server supports push.
     ///
     /// @spec docs/L2-transport#transport-negotiation
     pub fn from_client(client: Arc<Client>) -> Self {
-        let ws = if client.session().websocket_capabilities().is_some() {
-            debug!("WebSocket capability available, creating shared connection");
+        let ws = if client
+            .session()
+            .websocket_capabilities()
+            .map(|capabilities| capabilities.supports_push())
+            .unwrap_or(false)
+        {
+            debug!("WebSocket push capability available, creating shared connection");
             Some(Arc::new(crate::ws_connection::SharedWsConnection::new(
                 client.clone(),
             )))
         } else {
-            debug!("WebSocket capability not advertised, WS transport disabled");
+            debug!("WebSocket push capability not advertised, WS transport disabled");
             None
         };
         Self { client, ws }
@@ -87,14 +93,23 @@ impl LiveJmapGateway {
     /// Discover, authenticate, and construct a gateway in one step.
     ///
     /// @spec docs/L1-jmap#session
-    pub async fn connect(url: &str, username: &str, password: &str) -> Result<Self, GatewayError> {
-        let client = connect_jmap_client(url, username, password).await?;
+    pub async fn connect(
+        url: &str,
+        username: Option<&str>,
+        secret: &str,
+    ) -> Result<Self, GatewayError> {
+        let client = connect_jmap_client(url, username, secret).await?;
         Ok(Self::from_client(client))
     }
 
     /// Borrow the underlying JMAP client for direct access.
     pub fn client(&self) -> &Arc<Client> {
         &self.client
+    }
+
+    /// JMAP account id selected from the server session.
+    pub(crate) fn server_account_id(&self) -> &str {
+        self.client.default_account_id()
     }
 
     /// Route a JMAP request through WebSocket if connected, HTTP otherwise.
@@ -317,9 +332,37 @@ pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
     }
 }
 
+fn jmap_credentials(username: Option<&str>, secret: &str) -> Credentials {
+    username
+        .map(str::trim)
+        .filter(|username| !username.is_empty())
+        .map(|username| Credentials::basic(username, secret))
+        .unwrap_or_else(|| Credentials::bearer(secret))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jmap_credentials_use_bearer_without_username() {
+        assert_eq!(
+            jmap_credentials(None, "token"),
+            Credentials::bearer("token")
+        );
+        assert_eq!(
+            jmap_credentials(Some("  "), "token"),
+            Credentials::bearer("token")
+        );
+    }
+
+    #[test]
+    fn jmap_credentials_use_basic_with_username() {
+        assert_eq!(
+            jmap_credentials(Some("alice@example.com"), "secret"),
+            Credentials::basic("alice@example.com", "secret")
+        );
+    }
 
     #[test]
     fn missing_method_response_becomes_gateway_rejected_error() {
