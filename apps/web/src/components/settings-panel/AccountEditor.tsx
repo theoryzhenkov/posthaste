@@ -30,6 +30,7 @@ import type {
   AccountOverview,
   KnownMailboxRole,
   Mailbox,
+  MailboxActionRule,
   VerificationResponse,
 } from '../../api/types'
 import { invalidateAccountReadModels } from '../../domainCache'
@@ -275,6 +276,11 @@ export function AccountEditor({
       {isEditing && editingAccount && (
         <SettingsSection title="Mailboxes">
           <MailboxRoleFields accountId={editingAccount.id} />
+          <MailboxActionFields
+            key={`${editingAccount.id}:${mailboxActionSignature(editingAccount.mailboxActionRules ?? [])}`}
+            account={editingAccount}
+            onSaved={onSaved}
+          />
         </SettingsSection>
       )}
 
@@ -468,6 +474,251 @@ function AccountAppearanceFields({
           </FeedbackBanner>
         )}
       </div>
+    </div>
+  )
+}
+
+function mailboxActionSignature(rules: MailboxActionRule[]): string {
+  return JSON.stringify(normalizeMailboxActionRules(rules))
+}
+
+function createRuleId(): string {
+  if (globalThis.crypto && 'randomUUID' in globalThis.crypto) {
+    return globalThis.crypto.randomUUID()
+  }
+  return `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function normalizeMailboxActionRules(
+  rules: MailboxActionRule[],
+): MailboxActionRule[] {
+  return rules.map((rule) => ({
+    id: rule.id.trim(),
+    mailboxId: rule.mailboxId.trim(),
+    condition: {
+      kind: 'fromContains',
+      value: rule.condition.value.trim(),
+    },
+    action: {
+      kind: 'applyTag',
+      tag: rule.action.tag.trim(),
+    },
+  }))
+}
+
+function isMailboxActionRuleComplete(rule: MailboxActionRule): boolean {
+  return (
+    rule.mailboxId.trim().length > 0 &&
+    rule.condition.value.trim().length > 0 &&
+    rule.action.tag.trim().length > 0 &&
+    !rule.action.tag.trim().startsWith('$')
+  )
+}
+
+function MailboxActionFields({
+  account,
+  onSaved,
+}: {
+  account: AccountOverview
+  onSaved: (account: AccountOverview) => Promise<void>
+}) {
+  const [rules, setRules] = useState<MailboxActionRule[]>(
+    () => account.mailboxActionRules ?? [],
+  )
+  const [savedSignature, setSavedSignature] = useState(() =>
+    mailboxActionSignature(account.mailboxActionRules ?? []),
+  )
+  const mailboxesQuery = useQuery({
+    queryKey: queryKeys.mailboxes(account.id),
+    queryFn: () => fetchMailboxes(account.id),
+  })
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateAccount(account.id, {
+        mailboxActionRules: normalizeMailboxActionRules(rules),
+      }),
+    onSuccess: async (savedAccount) => {
+      const nextRules = savedAccount.mailboxActionRules ?? []
+      setRules(nextRules)
+      setSavedSignature(mailboxActionSignature(nextRules))
+      await onSaved(savedAccount)
+    },
+  })
+
+  const mailboxes = mailboxesQuery.data ?? []
+  const hasInvalidRule = rules.some(
+    (rule) => !isMailboxActionRuleComplete(rule),
+  )
+  const hasUnsavedChanges = mailboxActionSignature(rules) !== savedSignature
+
+  function updateRule(ruleId: string, patch: Partial<MailboxActionRule>) {
+    setRules((current) =>
+      current.map((rule) =>
+        rule.id === ruleId
+          ? {
+              ...rule,
+              ...patch,
+              condition: patch.condition ?? rule.condition,
+              action: patch.action ?? rule.action,
+            }
+          : rule,
+      ),
+    )
+  }
+
+  function addRule() {
+    setRules((current) => [
+      ...current,
+      {
+        id: createRuleId(),
+        mailboxId: mailboxes[0]?.id ?? '',
+        condition: { kind: 'fromContains', value: '' },
+        action: { kind: 'applyTag', tag: '' },
+      },
+    ])
+  }
+
+  return (
+    <div className="mt-8 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[13px] font-medium text-foreground">Actions</p>
+          <p className="text-[12px] text-muted-foreground">
+            Apply tags when matching mail arrives in a mailbox.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-md border-border bg-background"
+          disabled={mailboxes.length === 0}
+          onClick={addRule}
+        >
+          Add action
+        </Button>
+      </div>
+
+      {rules.length > 0 && (
+        <div className="space-y-2">
+          {rules.map((rule) => (
+            <MailboxActionRow
+              key={rule.id}
+              rule={rule}
+              mailboxes={mailboxes}
+              onChange={(patch) => updateRule(rule.id, patch)}
+              onRemove={() =>
+                setRules((current) =>
+                  current.filter((candidate) => candidate.id !== rule.id),
+                )
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {rules.length === 0 && (
+        <p className="text-[12px] text-muted-foreground">
+          No mailbox actions configured.
+        </p>
+      )}
+
+      {mailboxesQuery.error && (
+        <FeedbackBanner tone="error">
+          {mailboxesQuery.error.message}
+        </FeedbackBanner>
+      )}
+      {saveMutation.error && (
+        <FeedbackBanner tone="error">
+          {saveMutation.error.message}
+        </FeedbackBanner>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => saveMutation.mutate()}
+          disabled={
+            saveMutation.isPending || !hasUnsavedChanges || hasInvalidRule
+          }
+          className="bg-brand-coral text-white hover:bg-brand-coral/90"
+        >
+          Apply actions
+        </Button>
+        <span className="text-[12px] text-muted-foreground">
+          {hasInvalidRule
+            ? 'Complete all actions before applying'
+            : hasUnsavedChanges
+              ? 'Unsaved action changes'
+              : 'Actions saved'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function MailboxActionRow({
+  rule,
+  mailboxes,
+  onChange,
+  onRemove,
+}: {
+  rule: MailboxActionRule
+  mailboxes: Mailbox[]
+  onChange: (patch: Partial<MailboxActionRule>) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(140px,1fr)_minmax(140px,1fr)_minmax(120px,1fr)_auto] sm:items-end">
+      <label className="grid gap-1.5 text-[13px]">
+        <span className="text-[12px] font-medium text-muted-foreground">
+          Mailbox
+        </span>
+        <Select
+          value={rule.mailboxId || '__none__'}
+          onValueChange={(value) =>
+            onChange({ mailboxId: value === '__none__' ? '' : value })
+          }
+        >
+          <SelectTrigger className="h-8 w-full rounded-md border-border bg-background text-[13px] shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {mailboxes.length === 0 && (
+              <SelectItem value="__none__">No mailboxes</SelectItem>
+            )}
+            {mailboxes.map((mailbox) => (
+              <SelectItem key={mailbox.id} value={mailbox.id}>
+                {mailbox.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+      <Field
+        label="From includes"
+        value={rule.condition.value}
+        placeholder="Posthaste"
+        onChange={(value) =>
+          onChange({ condition: { kind: 'fromContains', value } })
+        }
+      />
+      <Field
+        label="Apply tag"
+        value={rule.action.tag}
+        placeholder="newsletter"
+        onChange={(tag) => onChange({ action: { kind: 'applyTag', tag } })}
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 justify-self-start px-2 text-muted-foreground hover:text-destructive sm:justify-self-end"
+        onClick={onRemove}
+      >
+        Remove
+      </Button>
     </div>
   )
 }

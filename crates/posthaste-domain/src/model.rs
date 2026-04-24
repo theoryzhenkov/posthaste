@@ -252,6 +252,45 @@ pub enum AccountAppearance {
     },
 }
 
+/// Account-level action rule that runs when synced messages appear in a mailbox.
+///
+/// @spec docs/L1-accounts#toml-schema
+/// @spec docs/L1-sync#mailbox-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxActionRule {
+    pub id: String,
+    pub mailbox_id: MailboxId,
+    pub condition: MailboxActionCondition,
+    pub action: MailboxAction,
+}
+
+/// Supported condition for mailbox action rules.
+///
+/// @spec docs/L1-sync#mailbox-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum MailboxActionCondition {
+    FromContains { value: String },
+}
+
+/// Supported effect for mailbox action rules.
+///
+/// @spec docs/L1-sync#mailbox-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum MailboxAction {
+    ApplyTag { tag: String },
+}
+
 /// Full persisted configuration for a mail account.
 ///
 /// @spec docs/L1-accounts#toml-schema
@@ -265,6 +304,7 @@ pub struct AccountSettings {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: Option<AccountAppearance>,
+    pub mailbox_action_rules: Vec<MailboxActionRule>,
     pub transport: AccountTransportSettings,
     pub created_at: String,
     pub updated_at: String,
@@ -345,6 +385,7 @@ pub struct AccountOverview {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: AccountAppearance,
+    pub mailbox_action_rules: Vec<MailboxActionRule>,
     pub transport: AccountTransportOverview,
     pub created_at: String,
     pub updated_at: String,
