@@ -91,15 +91,36 @@ initials = "MF"
 color_hue = 245                 # 0-360 hue used for the account mark
 # image_id = "..."              # present for image-backed marks
 
-[[mailbox_actions]]
+[[automations]]
 id = "rule-newsletters"
+name = "Posthaste newsletters"
+enabled = true
+triggers = ["message_arrived"]
+backfill = true
+
+[automations.scope]
+kind = "mailbox"
 mailbox_id = "inbox"
 
-[mailbox_actions.condition]
-kind = "from_contains"
+[automations.condition]
+operator = "any"
+negated = false
+
+[[automations.condition.nodes]]
+type = "condition"
+field = "from_name"
+operator = "contains"
+negated = false
 value = "Posthaste"
 
-[mailbox_actions.action]
+[[automations.condition.nodes]]
+type = "condition"
+field = "from_email"
+operator = "contains"
+negated = false
+value = "Posthaste"
+
+[[automations.actions]]
 kind = "apply_tag"
 tag = "newsletter"
 
@@ -118,7 +139,7 @@ key = "account:primary"
 
 `appearance` is optional account UI metadata. When absent, the API derives a stable initials mark from account name/full name and source ID. Image-backed marks keep the image bytes outside TOML under `account-assets/logos/`, with `image_id` pointing at the stored asset.
 
-`mailbox_actions` are account-scoped action rules. The initial rule shape matches synced mail that appears in a configured source mailbox by sender display name or email substring, then applies a non-system JMAP keyword as a user-facing tag. Action rules run from the sync layer after incoming message metadata is stored.
+`automations` are account-scoped backend rules with explicit triggers, scope, condition, actions, and backfill behavior. Conditions use the same recursive rule tree as smart mailboxes. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The first settings UI edits a mailbox-scoped automation equivalent to "from includes X, apply tag Y".
 
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 

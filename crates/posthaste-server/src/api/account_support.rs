@@ -24,7 +24,7 @@ pub(super) async fn account_overview(
             .clone()
             .map(normalize_account_appearance)
             .unwrap_or_else(|| default_account_appearance(&account)),
-        mailbox_action_rules: account.mailbox_action_rules.clone(),
+        automation_rules: account.automation_rules.clone(),
         transport: account_transport_overview(&account),
         created_at: account.created_at.clone(),
         updated_at: account.updated_at.clone(),
@@ -226,53 +226,79 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
     if let Some(appearance) = &account.appearance {
         validate_account_appearance(appearance)?;
     }
-    validate_mailbox_action_rules(&account.mailbox_action_rules)?;
+    validate_automation_rules(&account.automation_rules)?;
     Ok(())
 }
 
-fn validate_mailbox_action_rules(rules: &[MailboxActionRule]) -> Result<(), ApiError> {
+fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {
     let mut ids = std::collections::BTreeSet::new();
     for rule in rules {
         if rule.id.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_account",
-                "mailbox action rule id is required",
+                "automation rule id is required",
             ));
         }
         if !ids.insert(rule.id.trim().to_string()) {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_account",
-                "mailbox action rule ids must be unique",
+                "automation rule ids must be unique",
             ));
         }
-        if rule.mailbox_id.as_str().trim().is_empty() {
+        if rule.name.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_account",
-                "mailbox action mailbox id is required",
+                "automation rule name is required",
             ));
         }
-        match &rule.condition {
-            MailboxActionCondition::FromContains { value } if value.trim().is_empty() => {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_account",
-                    "mailbox action sender match must not be blank",
-                ));
-            }
-            MailboxActionCondition::FromContains { .. } => {}
+        if rule.triggers.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "automation rule must include at least one trigger",
+            ));
         }
-        match &rule.action {
-            MailboxAction::ApplyTag { tag } if tag.trim().is_empty() || tag.starts_with('$') => {
+        if rule.actions.is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "automation rule must include at least one action",
+            ));
+        }
+        if let AutomationScope::Mailbox { mailbox_id } = &rule.scope {
+            if mailbox_id.as_str().trim().is_empty() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_account",
-                    "mailbox action tag must be a non-system keyword",
+                    "automation mailbox scope id is required",
                 ));
             }
-            MailboxAction::ApplyTag { .. } => {}
+        }
+        for action in &rule.actions {
+            match action {
+                AutomationAction::ApplyTag { tag } | AutomationAction::RemoveTag { tag }
+                    if tag.trim().is_empty() || tag.starts_with('$') =>
+                {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_account",
+                        "automation tag must be a non-system keyword",
+                    ));
+                }
+                AutomationAction::MoveToMailbox { mailbox_id }
+                    if mailbox_id.as_str().trim().is_empty() =>
+                {
+                    return Err(ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_account",
+                        "automation target mailbox id is required",
+                    ));
+                }
+                _ => {}
+            }
         }
     }
     Ok(())
@@ -460,8 +486,8 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
     if let Some(appearance) = &request.appearance {
         account.appearance = Some(normalize_account_appearance(appearance.clone()));
     }
-    if let Some(rules) = &request.mailbox_action_rules {
-        account.mailbox_action_rules = normalize_mailbox_action_rules(rules);
+    if let Some(rules) = &request.automation_rules {
+        account.automation_rules = normalize_automation_rules(rules);
     }
     if let Some(transport) = &request.transport {
         if transport.base_url.is_some() {
@@ -473,28 +499,47 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
     }
 }
 
-pub(super) fn normalize_mailbox_action_rules(
-    rules: &[MailboxActionRule],
-) -> Vec<MailboxActionRule> {
+pub(super) fn normalize_automation_rules(rules: &[AutomationRule]) -> Vec<AutomationRule> {
     rules
         .iter()
-        .map(|rule| MailboxActionRule {
+        .map(|rule| AutomationRule {
             id: rule.id.trim().to_string(),
-            mailbox_id: MailboxId::from(rule.mailbox_id.as_str().trim()),
-            condition: match &rule.condition {
-                MailboxActionCondition::FromContains { value } => {
-                    MailboxActionCondition::FromContains {
-                        value: value.trim().to_string(),
-                    }
-                }
-            },
-            action: match &rule.action {
-                MailboxAction::ApplyTag { tag } => MailboxAction::ApplyTag {
-                    tag: tag.trim().to_string(),
+            name: rule.name.trim().to_string(),
+            enabled: rule.enabled,
+            triggers: rule.triggers.clone(),
+            scope: match &rule.scope {
+                AutomationScope::Account => AutomationScope::Account,
+                AutomationScope::Mailbox { mailbox_id } => AutomationScope::Mailbox {
+                    mailbox_id: MailboxId::from(mailbox_id.as_str().trim()),
                 },
             },
+            condition: rule.condition.clone(),
+            actions: rule
+                .actions
+                .iter()
+                .map(normalize_automation_action)
+                .collect(),
+            backfill: rule.backfill,
         })
         .collect()
+}
+
+fn normalize_automation_action(action: &AutomationAction) -> AutomationAction {
+    match action {
+        AutomationAction::ApplyTag { tag } => AutomationAction::ApplyTag {
+            tag: tag.trim().to_string(),
+        },
+        AutomationAction::RemoveTag { tag } => AutomationAction::RemoveTag {
+            tag: tag.trim().to_string(),
+        },
+        AutomationAction::MarkRead => AutomationAction::MarkRead,
+        AutomationAction::MarkUnread => AutomationAction::MarkUnread,
+        AutomationAction::Flag => AutomationAction::Flag,
+        AutomationAction::Unflag => AutomationAction::Unflag,
+        AutomationAction::MoveToMailbox { mailbox_id } => AutomationAction::MoveToMailbox {
+            mailbox_id: MailboxId::from(mailbox_id.as_str().trim()),
+        },
+    }
 }
 
 /// Normalize user-owned email addresses/patterns by trimming whitespace and

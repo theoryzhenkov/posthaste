@@ -179,7 +179,7 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 
-**Mailbox actions**: `AccountOverview`, `CreateAccountRequest`, and `PatchAccountRequest` include `mailboxActionRules`. The initial rule form is `{ mailboxId, condition: { kind: "fromContains", value }, action: { kind: "applyTag", tag } }`. PATCH replaces the full rule list when `mailboxActionRules` is present and preserves it when omitted. Rule IDs must be unique, sender text and mailbox IDs must be non-empty, and `applyTag` must target a non-system keyword.
+**Automation rules**: `AccountOverview`, `CreateAccountRequest`, and `PatchAccountRequest` include `automationRules`. Each rule has `id`, `name`, `enabled`, `triggers`, `scope`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. PATCH replaces the full rule list when `automationRules` is present and preserves it when omitted. Rule IDs must be unique, enabled rules need at least one trigger and one action, tag actions must target non-system keywords, and mailbox IDs must be non-empty where used.
 
 ## Secret management
 

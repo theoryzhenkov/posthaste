@@ -111,15 +111,15 @@ This matters because the frontend keeps many pages cached while live updates kee
 
 These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. The frontend consumes that ordered stream and decides whether to invalidate or merge.
 
-## Mailbox actions
+## Automation actions
 
-After a sync batch is written, account mailbox action rules evaluate the synced message records from that batch. The initial supported action is:
+After a sync batch is written, account automation rules evaluate matching synced message records from that batch. Rules have explicit triggers, scope, smart-mailbox-style conditions, and typed actions. The initial settings UI creates a mailbox-scoped rule equivalent to:
 
 - if a message appears in mailbox `M` and its sender display name or email contains text `X`, apply user tag `Y`
 
-Actions mutate the remote server through the same JMAP `Email/set` keyword command path as manual tag edits, then persist the returned keyword mutation locally. Rules are idempotent: if the message already has the target keyword, the action is skipped. Action mutations happen after `apply_sync_batch`, so they do not weaken the atomicity of the incoming metadata write.
+Actions mutate the remote server through the same JMAP command paths as manual message actions, then persist the returned mutation locally. Supported action variants include applying/removing user tags, read/unread, flag/unflag, and moving a message to a target mailbox. Action execution is idempotent: if the target state is already true, the action is skipped. Action mutations happen after `apply_sync_batch`, so they do not weaken the atomicity of the incoming metadata write.
 
-The account runtime also performs automatic backfill for existing local messages. Backfill is intentionally low priority: it runs only while the account runtime has a live gateway, starts after a delay, processes a small bounded batch, publishes resulting keyword events, then waits before the next batch. Foreground sync, push handling, and manual commands remain the primary work of the runtime.
+The account runtime also performs automatic backfill for existing local messages. Backfill is intentionally low priority: it runs only while the account runtime has a live gateway, starts after a delay, processes a small bounded batch, publishes resulting mutation events, then waits before the next batch. Foreground sync, push handling, and manual commands remain the primary work of the runtime.
 
 ## Conflict model
 

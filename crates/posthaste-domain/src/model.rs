@@ -252,43 +252,69 @@ pub enum AccountAppearance {
     },
 }
 
-/// Account-level action rule that runs when synced messages appear in a mailbox.
+/// Account-level automation rule evaluated by backend triggers.
 ///
 /// @spec docs/L1-accounts#toml-schema
-/// @spec docs/L1-sync#mailbox-actions
+/// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MailboxActionRule {
+pub struct AutomationRule {
     pub id: String,
-    pub mailbox_id: MailboxId,
-    pub condition: MailboxActionCondition,
-    pub action: MailboxAction,
+    pub name: String,
+    pub enabled: bool,
+    pub triggers: Vec<AutomationTrigger>,
+    pub scope: AutomationScope,
+    pub condition: SmartMailboxRule,
+    pub actions: Vec<AutomationAction>,
+    pub backfill: bool,
 }
 
-/// Supported condition for mailbox action rules.
+/// Event types that can cause an automation rule to run.
 ///
-/// @spec docs/L1-sync#mailbox-actions
+/// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
-pub enum MailboxActionCondition {
-    FromContains { value: String },
+pub enum AutomationTrigger {
+    MessageArrived,
+    MessageChanged,
+    Manual,
 }
 
-/// Supported effect for mailbox action rules.
+/// Data boundary inside an account where a rule is allowed to run.
 ///
-/// @spec docs/L1-sync#mailbox-actions
+/// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
-pub enum MailboxAction {
+pub enum AutomationScope {
+    Account,
+    Mailbox { mailbox_id: MailboxId },
+}
+
+/// Supported effects for automation rules.
+///
+/// @spec docs/L1-sync#automation-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum AutomationAction {
     ApplyTag { tag: String },
+    RemoveTag { tag: String },
+    MarkRead,
+    MarkUnread,
+    Flag,
+    Unflag,
+    MoveToMailbox { mailbox_id: MailboxId },
 }
 
 /// Full persisted configuration for a mail account.
@@ -304,7 +330,7 @@ pub struct AccountSettings {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: Option<AccountAppearance>,
-    pub mailbox_action_rules: Vec<MailboxActionRule>,
+    pub automation_rules: Vec<AutomationRule>,
     pub transport: AccountTransportSettings,
     pub created_at: String,
     pub updated_at: String,
@@ -385,7 +411,7 @@ pub struct AccountOverview {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: AccountAppearance,
-    pub mailbox_action_rules: Vec<MailboxActionRule>,
+    pub automation_rules: Vec<AutomationRule>,
     pub transport: AccountTransportOverview,
     pub created_at: String,
     pub updated_at: String,
