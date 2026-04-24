@@ -15,9 +15,10 @@ site/
 # build output
 /target/
 /crates/target/
-/src-tauri/target/
-/web/dist/
-/web/node_modules/
+/apps/desktop/target/
+/apps/web/dist/
+/apps/web/.vite/
+/apps/web/node_modules/
 
 # local design handoff blobs
 /.claude-design/Posthaste-handoff.zip
@@ -26,13 +27,9 @@ site/
 /.claude-design/handoff/posthaste/project/uploads/
 
 # local app/dev data
-/crates/data/
-/dev/stalwart/data/
-/dev/stalwart/logs/
-/dev/posthaste/
-/dev/instances/
+/var/dev/
 /.overmind.*.sock
-src-tauri/gen/schemas/
+apps/desktop/gen/schemas/
 
 # editor
 .idea/
@@ -44,6 +41,3 @@ src-tauri/gen/schemas/
 # OS
 .DS_Store
 Thumbs.db
-
-# legacy
-/swift/MailClient/.build

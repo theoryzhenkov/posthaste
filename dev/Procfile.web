@@ -1,4 +1,0 @@
-stalwart: stalwart -c dev/stalwart/config.toml
-seed: bash dev/stalwart/seed.sh
-daemon: bash dev/overmind/run-daemon.sh
-vite: cd web && bun run dev -- --host "$POSTHASTE_VITE_HOST" --port "$POSTHASTE_VITE_PORT" --strictPort

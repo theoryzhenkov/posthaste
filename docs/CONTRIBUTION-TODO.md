@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Junior developer onboarding tasks — frontend, backend, and project infrastructure"
-modified: 2026-04-02
-reviewed: 2026-04-23
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: README
   - path: docs/L0-ui
@@ -25,7 +25,7 @@ Two junior developers are joining. They have **no Rust experience** and **some f
 
 `MessageDetail.tsx` shows plain "Loading..." text while fetching. Replace with skeleton loaders using Tailwind `animate-pulse` that match the layout structure (subject, from/date, tags, body frame).
 
-**Files**: `web/src/components/MessageDetail.tsx`
+**Files**: `apps/web/src/components/MessageDetail.tsx`
 **Depends on**: nothing
 **Skills learned**: React Query loading states, Tailwind animations, component composition
 
@@ -37,7 +37,7 @@ Two junior developers are joining. They have **no Rust experience** and **some f
 
 Toolbar buttons (Archive, Trash, Flag) in `App.tsx` have `title` attributes but lack `aria-label` for screen readers. Update titles to show keyboard shortcuts (e.g. "Archive (e)", "Trash (#)").
 
-**Files**: `web/src/App.tsx`
+**Files**: `apps/web/src/App.tsx`
 **Depends on**: nothing
 **Skills learned**: Web accessibility (ARIA), semantic HTML
 
@@ -49,7 +49,7 @@ Toolbar buttons (Archive, Trash, Flag) in `App.tsx` have `title` attributes but 
 
 No top-level error boundary exists. Create `ErrorBoundary.tsx` that catches React rendering errors, shows a user-friendly UI with error details in dev mode only, and provides a "Reload" button.
 
-**Files**: new `web/src/components/ErrorBoundary.tsx`, `web/src/App.tsx`
+**Files**: new `apps/web/src/components/ErrorBoundary.tsx`, `apps/web/src/App.tsx`
 **Depends on**: nothing
 **Skills learned**: React error boundaries, error recovery UX
 
@@ -61,7 +61,7 @@ No top-level error boundary exists. Create `ErrorBoundary.tsx` that catches Reac
 
 Several components show plain text for empty states ("No threads in this view", "Select a message"). Replace with lucide-react icons + descriptive message + next-step hints.
 
-**Files**: `web/src/components/MessageList.tsx`, `web/src/components/MessageDetail.tsx`, `web/src/components/Sidebar.tsx`
+**Files**: `apps/web/src/components/MessageList.tsx`, `apps/web/src/components/MessageDetail.tsx`, `apps/web/src/components/Sidebar.tsx`
 **Depends on**: nothing
 **Skills learned**: UI/UX polish, icon usage
 
@@ -73,7 +73,7 @@ Several components show plain text for empty states ("No threads in this view", 
 
 In MessageDetail, the sender email is displayed but not copyable. Add a small copy icon button with tooltip and brief "Copied!" feedback using `navigator.clipboard.writeText()`.
 
-**Files**: `web/src/components/MessageDetail.tsx`
+**Files**: `apps/web/src/components/MessageDetail.tsx`
 **Depends on**: nothing
 **Skills learned**: Clipboard API, micro-interactions
 
@@ -85,7 +85,7 @@ In MessageDetail, the sender email is displayed but not copyable. Add a small co
 
 Browser tab just says "PostHaste". Create a `useDocumentTitle()` hook that computes total unread from sidebar data and updates `document.title` (e.g. "PostHaste (3)").
 
-**Files**: new `web/src/hooks/useDocumentTitle.ts`, `web/src/App.tsx`
+**Files**: new `apps/web/src/hooks/useDocumentTitle.ts`, `apps/web/src/App.tsx`
 **Depends on**: nothing
 **Skills learned**: Document API, custom hooks, side effects
 
@@ -97,7 +97,7 @@ Browser tab just says "PostHaste". Create a `useDocumentTitle()` hook that compu
 
 `MessageRow` uses `font-semibold` for unread but overall hierarchy (sender, subject, preview) could be sharper. Review font weights, padding, and gap for better readability.
 
-**Files**: `web/src/components/MessageRow.tsx`
+**Files**: `apps/web/src/components/MessageRow.tsx`
 **Depends on**: nothing
 **Skills learned**: Typography, Tailwind, visual hierarchy
 
@@ -109,7 +109,7 @@ Browser tab just says "PostHaste". Create a `useDocumentTitle()` hook that compu
 
 Trashing messages via keyboard shortcut (#) has no confirmation. Create a reusable `ConfirmDialog.tsx` with Escape-to-cancel and message preview.
 
-**Files**: new `web/src/components/ConfirmDialog.tsx`, `web/src/hooks/useEmailActions.ts`, `web/src/components/MessageList.tsx`
+**Files**: new `apps/web/src/components/ConfirmDialog.tsx`, `apps/web/src/hooks/useEmailActions.ts`, `apps/web/src/components/MessageList.tsx`
 **Depends on**: nothing
 **Skills learned**: Dialog patterns, keyboard handling, state management
 
@@ -121,7 +121,7 @@ Trashing messages via keyboard shortcut (#) has no confirmation. Create a reusab
 
 Search bar in `App.tsx` expands on focus but the clear button is subtle. Improve hover state, add "Escape to clear" hint, and consider input debounce.
 
-**Files**: `web/src/App.tsx`
+**Files**: `apps/web/src/App.tsx`
 **Depends on**: nothing
 **Skills learned**: UX polish, keyboard shortcuts, input handling
 
@@ -131,9 +131,9 @@ Search bar in `App.tsx` expands on focus but the clear button is subtle. Improve
 
 **Difficulty**: Easy
 
-Messages have size info but it is never displayed. Create `web/src/utils/formatBytes.ts` with proper unit formatting (B, KB, MB, GB) and write Vitest tests for it.
+Messages have size info but it is never displayed. Create `apps/web/src/utils/formatBytes.ts` with proper unit formatting (B, KB, MB, GB) and write Vitest tests for it.
 
-**Files**: new `web/src/utils/formatBytes.ts`, new `web/src/utils/__tests__/formatBytes.test.ts`
+**Files**: new `apps/web/src/utils/formatBytes.ts`, new `apps/web/src/utils/__tests__/formatBytes.test.ts`
 **Depends on**: Task 25 (testing framework)
 **Skills learned**: Utility functions, testing patterns
 
@@ -145,7 +145,7 @@ Messages have size info but it is never displayed. Create `web/src/utils/formatB
 
 Keyboard navigation needs visible focus indicators. Add `focus-visible:ring-1 focus-visible:ring-ring` to all buttons and clickable elements. Test tab order (sidebar -> list -> detail).
 
-**Files**: `web/src/App.tsx`, `web/src/components/Sidebar.tsx`, `web/src/components/MessageList.tsx`, others
+**Files**: `apps/web/src/App.tsx`, `apps/web/src/components/Sidebar.tsx`, `apps/web/src/components/MessageList.tsx`, others
 **Depends on**: nothing
 **Skills learned**: Accessibility, Tailwind focus states, keyboard navigation
 
@@ -157,7 +157,7 @@ Keyboard navigation needs visible focus indicators. Add `focus-visible:ring-1 fo
 
 `SettingsPanel` loads settings and smart mailboxes but has no skeleton. Add progressive loading UI to avoid flash of empty state.
 
-**Files**: `web/src/components/SettingsPanel.tsx`
+**Files**: `apps/web/src/components/SettingsPanel.tsx`
 **Depends on**: Task 1 (pattern established)
 **Skills learned**: React Query states, progressive loading
 
@@ -169,7 +169,7 @@ Keyboard navigation needs visible focus indicators. Add `focus-visible:ring-1 fo
 
 The small blue dot in `MessageRow` for unread status is not immediately obvious. Add a hover tooltip "Unread message".
 
-**Files**: `web/src/components/MessageRow.tsx`
+**Files**: `apps/web/src/components/MessageRow.tsx`
 **Depends on**: nothing
 **Skills learned**: Tooltips, hover states
 
@@ -179,9 +179,9 @@ The small blue dot in `MessageRow` for unread status is not immediately obvious.
 
 **Difficulty**: Easy
 
-`MessageList.tsx` has magic numbers (PAGE_SIZE, ROW_HEIGHT, OVERSCAN_ROWS). Extract to `web/src/config/messageListConfig.ts` with comments explaining each.
+`MessageList.tsx` has magic numbers (PAGE_SIZE, ROW_HEIGHT, OVERSCAN_ROWS). Extract to `apps/web/src/config/messageListConfig.ts` with comments explaining each.
 
-**Files**: new `web/src/config/messageListConfig.ts`, `web/src/components/MessageList.tsx`
+**Files**: new `apps/web/src/config/messageListConfig.ts`, `apps/web/src/components/MessageList.tsx`
 **Depends on**: nothing
 **Skills learned**: Code organization, configuration management
 
@@ -317,9 +317,9 @@ Public functions in posthaste-server and posthaste-store lack `///` doc comments
 
 Zero frontend tests exist. Add `vitest`, `@testing-library/react`, and `@testing-library/user-event`. Create `vitest.config.ts`, a test script, and one example test for `formatRelativeTime`.
 
-**Files**: `web/package.json`, new `web/vitest.config.ts`, new `web/src/utils/formatRelativeTime.test.ts`
+**Files**: `apps/web/package.json`, new `apps/web/vitest.config.ts`, new `apps/web/src/utils/formatRelativeTime.test.ts`
 **Depends on**: nothing
-**Skills learned**: Test framework setup, npm tooling
+**Skills learned**: Test framework setup, Bun tooling
 
 ---
 
@@ -327,7 +327,7 @@ Zero frontend tests exist. Add `vitest`, `@testing-library/react`, and `@testing
 
 **Difficulty**: Medium
 
-Add a hook that runs `npm run lint` in web/ and `cargo clippy` in crates/ before each commit.
+Add a hook that runs `bun run lint` in `apps/web/` and `cargo clippy --workspace` from the repository root before each commit.
 
 **Files**: hook script, `README.md` update
 **Depends on**: nothing

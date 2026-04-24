@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-state_root="${POSTHASTE_STATE_ROOT:-$root/dev/posthaste/state}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+state_root="${POSTHASTE_STATE_ROOT:-$root/var/dev/posthaste/state}"
 log_dir="$state_root/logs"
 today_log="$log_dir/posthaste.$(date +%F)"
 
