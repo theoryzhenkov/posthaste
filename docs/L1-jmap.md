@@ -49,6 +49,8 @@ These come from `jmap-client` and are not reimplemented:
 - Session `uploadUrl` and `downloadUrl` HTTP endpoints for attachments and raw blobs
 - Optional RFC 9404 blob-management methods only when the server advertises `urn:ietf:params:jmap:blob`
 
+`Mailbox/set` is used for user-controlled mailbox metadata, starting with role assignment. Role changes use the mailbox sync state as `ifInState`, and clearing a role sends an explicit JSON `null` patch. Because JMAP servers reject duplicate system roles, role reassignment clears the previous role owner before assigning the new owner with the returned mailbox state.
+
 ## Push
 
 Push notifications arrive over either WebSocket or EventSource (SSE), depending on server capabilities. The client prefers WebSocket only when the server advertises `urn:ietf:params:jmap:websocket` with `supportsPush: true`; otherwise it falls back to SSE. Both transports deliver `StateChange` events containing updated state strings per object type, keyed by server account ID. On receiving a state change for the mapped server account, the sync engine triggers a delta sync for the affected type.

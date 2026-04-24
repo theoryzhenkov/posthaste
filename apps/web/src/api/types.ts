@@ -166,9 +166,14 @@ export interface OkResponse {
 export interface Mailbox {
   id: string
   name: string
-  role: KnownMailboxRole | null
+  role: string | null
   unreadEmails: number
   totalEmails: number
+}
+
+/** @spec docs/L1-api#endpoint-table */
+export interface PatchMailboxInput {
+  role: KnownMailboxRole | null
 }
 
 /**
