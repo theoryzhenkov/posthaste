@@ -8,12 +8,12 @@
  * @spec docs/L1-ui#messagedetail-and-emailframe
  * @spec docs/L0-ui#html-email-rendering
  */
-import { cn } from "../lib/utils";
+import { cn } from '../lib/utils'
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface EmailFrameProps {
-  html: string;
-  className?: string;
+  html: string
+  className?: string
 }
 
 /**
@@ -65,14 +65,14 @@ export function EmailFrame({ html, className }: EmailFrameProps) {
     </style>
 </head>
 <body>${html}</body>
-</html>`;
+</html>`
 
   return (
     <iframe
-      className={cn("block h-full w-full border-0 bg-card", className)}
+      className={cn('block h-full w-full border-0 bg-card', className)}
       sandbox="allow-same-origin"
       srcDoc={wrappedHtml}
       title="Email content"
     />
-  );
+  )
 }

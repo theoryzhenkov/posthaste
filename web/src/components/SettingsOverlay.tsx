@@ -1,13 +1,13 @@
-import { useEffect } from "react";
-import type { AccountOverview } from "../api/types";
-import { SettingsPanel } from "./SettingsPanel";
+import { useEffect } from 'react'
+import type { AccountOverview } from '../api/types'
+import { SettingsPanel } from './SettingsPanel'
 
 interface SettingsOverlayProps {
-  accounts: AccountOverview[];
-  activeAccountId: string | null;
-  initialCategory?: "general" | "accounts" | "mailboxes";
-  onActiveAccountChange: (accountId: string | null) => void;
-  onClose: () => void;
+  accounts: AccountOverview[]
+  activeAccountId: string | null
+  initialCategory?: 'general' | 'accounts' | 'mailboxes'
+  onActiveAccountChange: (accountId: string | null) => void
+  onClose: () => void
 }
 
 export function SettingsOverlay({
@@ -19,14 +19,14 @@ export function SettingsOverlay({
 }: SettingsOverlayProps) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
+      if (event.key === 'Escape') {
+        onClose()
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   return (
     <div className="fixed inset-0 z-[2100] bg-background text-foreground">
@@ -39,5 +39,5 @@ export function SettingsOverlay({
         shell="overlay"
       />
     </div>
-  );
+  )
 }

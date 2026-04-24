@@ -8,13 +8,26 @@ dev:
 build:
     bun run build
 
-# Lint
+# Lint, typecheck, and verify formatting
 check:
-    bun run lint
+    bun run check
 
-# Lint with auto-fix
+# Typecheck
+typecheck:
+    bun run typecheck
+
+# Format frontend sources
+fmt:
+    bun run format
+
+# Check frontend formatting
+fmt-check:
+    bun run format:check
+
+# Lint with auto-fix, then format
 lint-fix:
     bun run lint --fix
+    bun run format
 
 # Preview production build
 preview:

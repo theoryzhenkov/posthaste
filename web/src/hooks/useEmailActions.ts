@@ -6,10 +6,10 @@
  *
  * @spec docs/L1-ui#data-fetching
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
-import { fetchSidebar, performMessageCommand } from "../api/client";
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { toast } from 'sonner'
+import { fetchSidebar, performMessageCommand } from '../api/client'
 import type {
   KnownMailboxRole,
   MessageCommand,
@@ -17,7 +17,7 @@ import type {
   MessageSummary,
   SidebarResponse,
   SourceMessageRef,
-} from "../api/types";
+} from '../api/types'
 import {
   applyKeywordPatch,
   deriveKeywordState,
@@ -29,133 +29,133 @@ import {
   type KeywordPatch,
   type MailSelection,
   type QuerySnapshot,
-} from "../mailState";
+} from '../mailState'
 
 /** Message reference augmented with optional keyword fields for optimistic patching. */
 type ReadToggleTarget = MailSelection &
-  Partial<Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">>;
+  Partial<Pick<MessageSummary, 'isFlagged' | 'isRead' | 'keywords'>>
 /** Message reference augmented with optional keyword fields for optimistic patching. */
 type FlagToggleTarget = MailSelection &
-  Partial<Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">>;
+  Partial<Pick<MessageSummary, 'isFlagged' | 'isRead' | 'keywords'>>
 
 type MutationInput =
   | {
-      command: MessageCommand;
-      conversationId?: string;
-      optimisticKeywordPatch?: KeywordPatch;
-      target: SourceMessageRef;
+      command: MessageCommand
+      conversationId?: string
+      optimisticKeywordPatch?: KeywordPatch
+      target: SourceMessageRef
     }
   | {
-      conversationId?: string;
-      mailboxRole: KnownMailboxRole;
-      target: SourceMessageRef;
-    };
+      conversationId?: string
+      mailboxRole: KnownMailboxRole
+      target: SourceMessageRef
+    }
 
 type MutationContext = {
-  conversationId: string | null;
-  incomplete: boolean;
-  isKeywordMutation: boolean;
-  snapshots: QuerySnapshot[];
-  target: SourceMessageRef;
-};
+  conversationId: string | null
+  incomplete: boolean
+  isKeywordMutation: boolean
+  snapshots: QuerySnapshot[]
+  target: SourceMessageRef
+}
 
 /** Return type of {@link useEmailActions}. */
-export type EmailActions = ReturnType<typeof useEmailActions>;
+export type EmailActions = ReturnType<typeof useEmailActions>
 
 function requiredMailboxByRole(
   sidebar: SidebarResponse | undefined,
   sourceId: string,
   role: KnownMailboxRole,
 ) {
-  const source = sidebar?.sources.find((candidate) => candidate.id === sourceId);
-  const mailbox = source?.mailboxes.find((candidate) => candidate.role === role);
+  const source = sidebar?.sources.find((candidate) => candidate.id === sourceId)
+  const mailbox = source?.mailboxes.find((candidate) => candidate.role === role)
   if (!mailbox) {
-    throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`);
+    throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`)
   }
-  return mailbox;
+  return mailbox
 }
 
 function toSourceMessageRef(
   message: SourceMessageRef | MessageSummary | MailSelection,
 ): SourceMessageRef {
-  if ("messageId" in message) {
-    return { sourceId: message.sourceId, messageId: message.messageId };
+  if ('messageId' in message) {
+    return { sourceId: message.sourceId, messageId: message.messageId }
   }
-  return { sourceId: message.sourceId, messageId: message.id };
+  return { sourceId: message.sourceId, messageId: message.id }
 }
 
 function toMailSelection(
   queryClient: ReturnType<typeof useQueryClient>,
   message: MailSelection | MessageSummary | SourceMessageRef,
 ): MailSelection | null {
-  if ("conversationId" in message) {
-    if ("messageId" in message) {
-      return message;
+  if ('conversationId' in message) {
+    if ('messageId' in message) {
+      return message
     }
     return {
       conversationId: message.conversationId,
       messageId: message.id,
       sourceId: message.sourceId,
-    };
+    }
   }
 
-  const conversationId = findConversationIdForMessage(queryClient, message);
+  const conversationId = findConversationIdForMessage(queryClient, message)
   if (!conversationId) {
-    return null;
+    return null
   }
 
   return {
     conversationId,
     messageId: message.messageId,
     sourceId: message.sourceId,
-  };
+  }
 }
 
 function synthesizeKeywords(
-  message: Partial<Pick<MessageSummary, "isFlagged" | "isRead" | "keywords">>,
+  message: Partial<Pick<MessageSummary, 'isFlagged' | 'isRead' | 'keywords'>>,
 ) {
   if (message.keywords) {
-    return message.keywords;
+    return message.keywords
   }
 
-  const keywords: string[] = [];
+  const keywords: string[] = []
   if (message.isRead) {
-    keywords.push("$seen");
+    keywords.push('$seen')
   }
   if (message.isFlagged) {
-    keywords.push("$flagged");
+    keywords.push('$flagged')
   }
-  return keywords;
+  return keywords
 }
 
 function resolveKeywordState(
   queryClient: ReturnType<typeof useQueryClient>,
   message: ReadToggleTarget | FlagToggleTarget | MessageSummary,
 ) {
-  if ("keywords" in message && Array.isArray(message.keywords)) {
-    return deriveKeywordState(message.keywords);
+  if ('keywords' in message && Array.isArray(message.keywords)) {
+    return deriveKeywordState(message.keywords)
   }
 
-  const target = toSourceMessageRef(message);
+  const target = toSourceMessageRef(message)
   const cachedMessage = queryClient.getQueryData<MessageDetail>(
     mailKeys.message(target.sourceId, target.messageId),
-  );
+  )
   if (cachedMessage) {
-    return deriveKeywordState(cachedMessage.keywords);
+    return deriveKeywordState(cachedMessage.keywords)
   }
 
-  return deriveKeywordState(synthesizeKeywords(message));
+  return deriveKeywordState(synthesizeKeywords(message))
 }
 
 function applyKeywordToggle(
   current: string[],
-  keyword: "$flagged" | "$seen",
+  keyword: '$flagged' | '$seen',
   enabled: boolean,
 ) {
   if (enabled) {
-    return current.includes(keyword) ? current : [...current, keyword];
+    return current.includes(keyword) ? current : [...current, keyword]
   }
-  return current.filter((candidate) => candidate !== keyword);
+  return current.filter((candidate) => candidate !== keyword)
 }
 
 function invalidateMessageScope(
@@ -165,16 +165,16 @@ function invalidateMessageScope(
 ) {
   queryClient.invalidateQueries({
     queryKey: mailKeys.message(target.sourceId, target.messageId),
-  });
+  })
   if (conversationId) {
     queryClient.invalidateQueries({
       queryKey: mailKeys.conversation(conversationId),
-    });
+    })
     queryClient.invalidateQueries({
       queryKey: mailKeys.conversationSummary(conversationId),
-    });
+    })
   }
-  queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  queryClient.invalidateQueries({ queryKey: ['conversations'] })
 }
 
 /**
@@ -186,179 +186,206 @@ function invalidateMessageScope(
  * @spec docs/L1-ui#data-fetching
  */
 export function useEmailActions() {
-  const queryClient = useQueryClient();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const queryClient = useQueryClient()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const mutation = useMutation({
     mutationFn: async (input: MutationInput) => {
       const command =
-        "mailboxRole" in input
-          ? await replaceMailboxCommandByRole(queryClient, input.target, input.mailboxRole)
-          : input.command;
-      return performMessageCommand(input.target.messageId, command, input.target.sourceId);
+        'mailboxRole' in input
+          ? await replaceMailboxCommandByRole(
+              queryClient,
+              input.target,
+              input.mailboxRole,
+            )
+          : input.command
+      return performMessageCommand(
+        input.target.messageId,
+        command,
+        input.target.sourceId,
+      )
     },
     onMutate: (input): MutationContext => {
-      setErrorMessage(null);
+      setErrorMessage(null)
 
       const conversationId =
         input.conversationId ??
-        findConversationIdForMessage(queryClient, input.target);
-      const snapshots: QuerySnapshot[] = [];
-      let incomplete = false;
+        findConversationIdForMessage(queryClient, input.target)
+      const snapshots: QuerySnapshot[] = []
+      let incomplete = false
 
-      if (conversationId && "optimisticKeywordPatch" in input && input.optimisticKeywordPatch) {
+      if (
+        conversationId &&
+        'optimisticKeywordPatch' in input &&
+        input.optimisticKeywordPatch
+      ) {
         const optimisticResult = applyKeywordPatch(
           queryClient,
           { ...input.target, conversationId },
           input.optimisticKeywordPatch,
-        );
-        snapshots.push(...optimisticResult.snapshots);
-        incomplete = optimisticResult.incomplete;
+        )
+        snapshots.push(...optimisticResult.snapshots)
+        incomplete = optimisticResult.incomplete
       }
 
       return {
         conversationId,
         incomplete,
-        isKeywordMutation: "optimisticKeywordPatch" in input && !!input.optimisticKeywordPatch,
+        isKeywordMutation:
+          'optimisticKeywordPatch' in input && !!input.optimisticKeywordPatch,
         snapshots,
         target: input.target,
-      };
+      }
     },
     onSuccess: (data, input, context) => {
-      recordLocalMutationEvents(data.events);
+      recordLocalMutationEvents(data.events)
 
-      const conversationId = context?.conversationId ?? data.detail?.conversationId ?? null;
+      const conversationId =
+        context?.conversationId ?? data.detail?.conversationId ?? null
 
       if (context?.isKeywordMutation && data.detail && conversationId) {
         const merged = mergeMessageDetail(
           queryClient,
           data.detail,
           conversationId,
-        );
+        )
         if (!merged) {
-          context.incomplete = true;
+          context.incomplete = true
         }
-        queryClient.invalidateQueries({ queryKey: ["sidebar"] });
-        queryClient.invalidateQueries({ queryKey: ["smart-mailboxes"] });
-        return;
+        queryClient.invalidateQueries({ queryKey: ['sidebar'] })
+        queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] })
+        return
       }
 
-      queryClient.invalidateQueries({ queryKey: ["sidebar"] });
-      queryClient.invalidateQueries({ queryKey: ["smart-mailboxes"] });
-      invalidateMessageScope(queryClient, input.target, conversationId);
+      queryClient.invalidateQueries({ queryKey: ['sidebar'] })
+      queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] })
+      invalidateMessageScope(queryClient, input.target, conversationId)
     },
     onError: (error, _input, context) => {
       if (context?.snapshots.length) {
-        restoreSnapshots(queryClient, context.snapshots);
+        restoreSnapshots(queryClient, context.snapshots)
       }
-      setErrorMessage(error.message);
+      setErrorMessage(error.message)
     },
     onSettled: (_data, _error, _input, context) => {
       if (context?.isKeywordMutation && context.incomplete) {
-        invalidateMessageScope(queryClient, context.target, context.conversationId);
+        invalidateMessageScope(
+          queryClient,
+          context.target,
+          context.conversationId,
+        )
       }
     },
-  });
+  })
 
   return {
     toggleRead: (message: ReadToggleTarget | MessageSummary) => {
-      const selection = toMailSelection(queryClient, message);
-      const previous = resolveKeywordState(queryClient, message);
-      const nextKeywords = applyKeywordToggle(previous.keywords, "$seen", !previous.isRead);
-      mutation.mutate({
-        command: previous.isRead
-          ? { kind: "setKeywords", add: [], remove: ["$seen"] }
-          : { kind: "setKeywords", add: ["$seen"], remove: [] },
-        conversationId: selection?.conversationId,
-        optimisticKeywordPatch: {
-          next: deriveKeywordState(nextKeywords),
-          previous,
-        },
-        target: toSourceMessageRef(message),
-      });
-    },
-    toggleFlag: (message: FlagToggleTarget | MessageSummary) => {
-      const selection = toMailSelection(queryClient, message);
-      const previous = resolveKeywordState(queryClient, message);
+      const selection = toMailSelection(queryClient, message)
+      const previous = resolveKeywordState(queryClient, message)
       const nextKeywords = applyKeywordToggle(
         previous.keywords,
-        "$flagged",
-        !previous.isFlagged,
-      );
+        '$seen',
+        !previous.isRead,
+      )
       mutation.mutate({
-        command: previous.isFlagged
-          ? { kind: "setKeywords", add: [], remove: ["$flagged"] }
-          : { kind: "setKeywords", add: ["$flagged"], remove: [] },
+        command: previous.isRead
+          ? { kind: 'setKeywords', add: [], remove: ['$seen'] }
+          : { kind: 'setKeywords', add: ['$seen'], remove: [] },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),
           previous,
         },
         target: toSourceMessageRef(message),
-      });
+      })
+    },
+    toggleFlag: (message: FlagToggleTarget | MessageSummary) => {
+      const selection = toMailSelection(queryClient, message)
+      const previous = resolveKeywordState(queryClient, message)
+      const nextKeywords = applyKeywordToggle(
+        previous.keywords,
+        '$flagged',
+        !previous.isFlagged,
+      )
+      mutation.mutate({
+        command: previous.isFlagged
+          ? { kind: 'setKeywords', add: [], remove: ['$flagged'] }
+          : { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+        conversationId: selection?.conversationId,
+        optimisticKeywordPatch: {
+          next: deriveKeywordState(nextKeywords),
+          previous,
+        },
+        target: toSourceMessageRef(message),
+      })
     },
     archive: (target: SourceMessageRef) => {
       mutation.mutate(
         {
-          conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
-          mailboxRole: "archive",
+          conversationId:
+            findConversationIdForMessage(queryClient, target) ?? undefined,
+          mailboxRole: 'archive',
           target,
         },
         {
           onSuccess: () => {
-            toast("Message archived", {
+            toast('Message archived', {
               duration: 5000,
               action: {
-                label: "Undo",
+                label: 'Undo',
                 onClick: () =>
                   mutation.mutate({
                     conversationId:
-                      findConversationIdForMessage(queryClient, target) ?? undefined,
-                    mailboxRole: "inbox",
+                      findConversationIdForMessage(queryClient, target) ??
+                      undefined,
+                    mailboxRole: 'inbox',
                     target,
                   }),
               },
-            });
+            })
           },
         },
-      );
+      )
     },
     trash: (target: SourceMessageRef) => {
       mutation.mutate(
         {
-          conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
-          mailboxRole: "trash",
+          conversationId:
+            findConversationIdForMessage(queryClient, target) ?? undefined,
+          mailboxRole: 'trash',
           target,
         },
         {
           onSuccess: () => {
-            toast("Message trashed", {
+            toast('Message trashed', {
               duration: 5000,
               action: {
-                label: "Undo",
+                label: 'Undo',
                 onClick: () =>
                   mutation.mutate({
                     conversationId:
-                      findConversationIdForMessage(queryClient, target) ?? undefined,
-                    mailboxRole: "inbox",
+                      findConversationIdForMessage(queryClient, target) ??
+                      undefined,
+                    mailboxRole: 'inbox',
                     target,
                   }),
               },
-            });
+            })
           },
         },
-      );
+      )
     },
     deletePermanently: (target: SourceMessageRef) =>
       mutation.mutate({
-        command: { kind: "destroy" },
-        conversationId: findConversationIdForMessage(queryClient, target) ?? undefined,
+        command: { kind: 'destroy' },
+        conversationId:
+          findConversationIdForMessage(queryClient, target) ?? undefined,
         target,
       }),
     clearError: () => setErrorMessage(null),
     errorMessage,
     isPending: mutation.isPending,
-  };
+  }
 }
 
 async function replaceMailboxCommandByRole(
@@ -367,14 +394,14 @@ async function replaceMailboxCommandByRole(
   role: KnownMailboxRole,
 ): Promise<MessageCommand> {
   const sidebar =
-    queryClient.getQueryData<SidebarResponse>(["sidebar"]) ??
+    queryClient.getQueryData<SidebarResponse>(['sidebar']) ??
     (await queryClient.ensureQueryData({
       queryFn: fetchSidebar,
-      queryKey: ["sidebar"],
-    }));
-  const mailbox = requiredMailboxByRole(sidebar, target.sourceId, role);
+      queryKey: ['sidebar'],
+    }))
+  const mailbox = requiredMailboxByRole(sidebar, target.sourceId, role)
   return {
-    kind: "replaceMailboxes",
+    kind: 'replaceMailboxes',
     mailboxIds: [mailbox.id],
-  };
+  }
 }

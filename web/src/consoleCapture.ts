@@ -5,64 +5,75 @@
  *
  * Call `installConsoleCapture()` once at app startup, only in Tauri context.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from '@tauri-apps/api/core'
 
 const CONSOLE_LEVEL_MAP: Record<string, string> = {
-  log: "info",
-  info: "info",
-  debug: "debug",
-  warn: "warn",
-  error: "error",
-};
+  log: 'info',
+  info: 'info',
+  debug: 'debug',
+  warn: 'warn',
+  error: 'error',
+}
 
 /** Pino log objects have a numeric `level` field — skip them to avoid
  *  double-sending (pino's write handler already forwards these). */
 function isPinoObject(arg: unknown): boolean {
-  return typeof arg === "object" && arg !== null && typeof (arg as Record<string, unknown>).level === "number";
+  return (
+    typeof arg === 'object' &&
+    arg !== null &&
+    typeof (arg as Record<string, unknown>).level === 'number'
+  )
 }
 
 function formatArgs(args: unknown[]): string {
   return args
     .map((a) => {
-      if (typeof a === "string") return a;
-      try { return JSON.stringify(a); }
-      catch { return String(a); }
+      if (typeof a === 'string') return a
+      try {
+        return JSON.stringify(a)
+      } catch {
+        return String(a)
+      }
     })
-    .join(" ");
+    .join(' ')
 }
 
 export function installConsoleCapture(): void {
   for (const [method, level] of Object.entries(CONSOLE_LEVEL_MAP)) {
-    const original = (console as unknown as Record<string, unknown>)[method] as (...args: unknown[]) => void;
-    (console as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
-      original.apply(console, args);
-      if (args.length === 1 && isPinoObject(args[0])) return;
-      invoke("log_from_frontend", {
+    const original = (console as unknown as Record<string, unknown>)[
+      method
+    ] as (...args: unknown[]) => void
+    ;(console as unknown as Record<string, unknown>)[method] = (
+      ...args: unknown[]
+    ) => {
+      original.apply(console, args)
+      if (args.length === 1 && isPinoObject(args[0])) return
+      invoke('log_from_frontend', {
         level,
-        domain: "webview",
+        domain: 'webview',
         message: formatArgs(args),
-      }).catch(() => {});
-    };
+      }).catch(() => {})
+    }
   }
 
-  window.addEventListener("error", (event) => {
-    invoke("log_from_frontend", {
-      level: "error",
-      domain: "webview",
+  window.addEventListener('error', (event) => {
+    invoke('log_from_frontend', {
+      level: 'error',
+      domain: 'webview',
       message: `Uncaught ${event.error?.stack ?? event.message}`,
-    }).catch(() => {});
-  });
+    }).catch(() => {})
+  })
 
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason;
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason
     const message =
       reason instanceof Error
-        ? reason.stack ?? reason.message
-        : String(reason);
-    invoke("log_from_frontend", {
-      level: "error",
-      domain: "webview",
+        ? (reason.stack ?? reason.message)
+        : String(reason)
+    invoke('log_from_frontend', {
+      level: 'error',
+      domain: 'webview',
       message: `Unhandled rejection: ${message}`,
-    }).catch(() => {});
-  });
+    }).catch(() => {})
+  })
 }
