@@ -14,97 +14,83 @@ dependents:
 
 ## Query grammar
 
-The query language uses a PEG grammar parsed in Rust. Free text without a prefix searches across from, to, subject, and body (compiled to JMAP's `text` filter). Prefixed terms restrict the search to a specific field. Boolean logic follows standard precedence: NOT binds tightest, then AND (implicit on whitespace), then OR. Parentheses override precedence.
+The query language is parsed in Rust and compiles to the same smart-mailbox rule tree used by saved mailboxes. Free text without a prefix searches sender, subject, and synced preview. Prefixed terms restrict the search to a specific field. Whitespace between tokens is implicit AND. A leading `-` negates the following token.
 
 ```peg
-Query       <- OrExpr
-OrExpr      <- AndExpr ('OR' AndExpr)*
-AndExpr     <- NotExpr (NotExpr)*          # implicit AND on whitespace
-NotExpr     <- '-' Atom / 'NOT' Atom / Atom
-Atom        <- '(' OrExpr ')' / Prefix / FreeText
+Query       <- Token*
+Token       <- '-'? (Prefix / FreeText)
 
 Prefix      <- PrefixName ':' Value
-PrefixName  <- 'f' / 'from' / 'to' / 'cc' / 'bcc' / 'subject' / 'body'
-             / 'participant'               # desugars to OR(from, to, cc)
+PrefixName  <- 'f' / 'from' / 'sender' / 'subject' / 's' / 'body' / 'preview'
              / 'is' / 'has' / 'in' / 'tag'
-             / 'before' / 'after' / 'date' / 'during'
+             / 'keyword' / 'mailbox' / 'source' / 'account'
+             / 'before' / 'after' / 'date'
              / 'newer' / 'older'
-             / 'size'
-             / 'header'                    # client-only, v2
-             / 'id' / 'threadid'
+             / 'id' / 'thread' / 'threadid'
 
-Value       <- QuotedString / DateRange / DateExpr / SizeExpr / Word
+Value       <- QuotedString / DateExpr / RelativeDate / Word
 QuotedString <- '"' [^"]* '"'
 Word        <- [^\s()]+
 
 DateExpr    <- RelativeDate / AbsoluteDate / NamedDate
 RelativeDate <- [0-9]+ [dwmy]             # 2d, 3w, 1m, 1y
 AbsoluteDate <- [0-9]{4} '-' [0-9]{2} '-' [0-9]{2}
-NamedDate   <- 'today' / 'yesterday' / 'thisweek' / 'thismonth' / 'thisyear'
-DateRange   <- DateExpr '..' DateExpr
 
-SizeExpr    <- [0-9]+ ('k' / 'K' / 'm' / 'M')   # kilobytes or megabytes
-
-FreeText    <- QuotedString / Word         # searches subject + body + from
+FreeText    <- QuotedString / Word         # searches sender + subject + preview
 ```
 
 A query like `from:alice subject:"weekly report" newer:2w` parses into three AND-ed atoms: a from prefix, a quoted subject prefix, and a relative date prefix.
 
-The short `f:` alias is equivalent to `from:`. The client accepts optional
-whitespace after `f:`/`from:` and trims the field value, so `f: Posthaste` and
-`f: Posthaste Author` are valid. A `f:`/`from:` value extends until the next
-recognized prefix, allowing chained queries such as
-`Account Creation f: Posthaste`.
+The short `f:` alias is equivalent to `from:`, and `s:` is equivalent to
+`subject:`. Text-like prefixes accept optional whitespace after the colon and
+consume words until the next recognized prefix, so `f: Posthaste Author` and
+`subject: account creation from:posthaste` are valid.
 
-## Prefix-to-JMAP mapping
+## Prefix mapping
 
-Each prefix compiles to a specific JMAP FilterCondition property. The mapping is fixed at compile time except for `in:`, which requires resolving mailbox names to IDs against the local cache.
+Each prefix compiles to a specific local smart-mailbox field or group of fields.
 
-| Prefix           | JMAP FilterCondition property       | Notes                                                              |
+| Prefix           | Local field                         | Notes                                                              |
 | ---------------- | ----------------------------------- | ------------------------------------------------------------------ |
-| `f:` / `from:`   | `from`                              | Matches address or display name                                    |
-| `to:`            | `to`                                |                                                                    |
-| `cc:`            | `cc`                                |                                                                    |
-| `bcc:`           | `bcc`                               |                                                                    |
-| `subject:`       | `subject`                           |                                                                    |
-| `body:`          | `body`                              | Full-text body search                                              |
-| `participant:`   | OR(from, to, cc)                    | Desugars at compilation                                            |
+| `f:` / `from:` / `sender:` | `from`                     | Matches address or display name                                    |
+| `subject:` / `s:` | `subject`                         |                                                                    |
+| `body:` / `preview:` | `preview`                       | Searches synced preview text, not full fetched bodies yet          |
 | `is:unread`      | `notKeyword: "$seen"`               | Inverted: unread = absence of `$seen`                              |
+| `is:read`        | `hasKeyword: "$seen"`               |                                                                    |
 | `is:flagged`     | `hasKeyword: { "$flagged": true }`  |                                                                    |
-| `is:draft`       | `hasKeyword: { "$draft": true }`    |                                                                    |
-| `is:answered`    | `hasKeyword: { "$answered": true }` |                                                                    |
+| `is:unflagged`   | `notKeyword: "$flagged"`            |                                                                    |
 | `has:attachment` | `hasAttachment: true`               |                                                                    |
-| `in:`            | `inMailbox`                         | Matches mailbox name or role (inbox, drafts, sent, trash, archive) |
-| `-in:`           | `inMailboxOtherThan`                | Negated mailbox membership                                         |
+| `in:` / `mailbox:` | `inMailbox`                       | Matches mailbox role, mailbox ID, or mailbox display name          |
 | `tag:`           | `hasKeyword`                        | Custom JMAP keywords (Fastmail labels)                             |
+| `keyword:`       | `hasKeyword`                        | Alias for `tag:`                                                   |
+| `source:` / `account:` | local source condition         | Matches account/source ID exactly or account/source name by text    |
 | `before:`        | `before`                            | Exclusive upper bound                                              |
 | `after:`         | `after`                             | Inclusive lower bound                                              |
 | `date:`          | `after` + `before`                  | Single date = that day (after 00:00, before 23:59:59)              |
-| `during:`        | `after` + `before`                  | Date range: `during:3m..1m`                                        |
 | `newer:`         | `after`                             | Relative: `newer:2w` = after (now - 2 weeks)                       |
 | `older:`         | `before`                            | Relative: `older:1y` = before (now - 1 year)                       |
-| `size:`          | `size`                              | `size:>1M`, `size:<100k` with comparison operators                 |
-| `header:`        | N/A (client-only, v2)               | Arbitrary header match, requires local index                       |
-| `id:`            | `Email/get` by ID                   | Direct lookup, not a query                                         |
+| `id:`            | message ID                          | Exact local message ID                                             |
 | `threadid:`      | `threadId` filter                   | All emails in a thread                                             |
-| Free text        | `text` (JMAP's combined field)      | Searches from + to + subject + body                                |
+| `thread:`        | `threadId` filter                   | Alias for `threadid:`                                              |
+| Free text        | local text condition                | Searches sender, subject, and synced preview                       |
 
 ## Filter compilation
 
-The compiler takes a parsed query AST and produces a `JmapFilter` for server execution and an optional `LocalPredicate` for client-side post-filtering. For MVP, all supported prefixes compile to JMAP FilterCondition. The `header:` prefix is the only client-only predicate and is deferred to v2.
+The compiler takes parsed query tokens and produces a `SmartMailboxRule` for server execution against the local SQLite projection. Unsupported prefixes are rejected rather than silently ignored.
 
 Compilation rules:
 
-- `AND` nodes become `FilterOperator { operator: "AND", conditions: [...] }`
-- `OR` nodes become `FilterOperator { operator: "OR", conditions: [...] }`
-- `NOT` / `-` becomes `FilterOperator { operator: "NOT", conditions: [inner] }`
-- `participant:X` desugars to `OR(from:X, to:X, cc:X)`
+- Whitespace-separated tokens become an `All` group
+- Field aliases such as `f:` and `s:` normalize to the same rule nodes as their long forms
+- `-` wraps the token's node or group in negation
+- `from:X` desugars to `OR(from_name:X, from_email:X)`
 - `is:unread` compiles to `NOT hasKeyword("$seen")` because JMAP tracks "seen", not "unread"
-- `in:inbox` resolves the mailbox name or role to a mailbox ID via the local cache before compilation
+- `in:inbox` desugars to `OR(mailbox_role:inbox, mailbox_id:inbox, mailbox_name contains inbox)`
+- `source:X` desugars to `OR(source_id:X, source_name contains X)`
 - Date prefixes convert relative expressions to absolute ISO 8601 timestamps at compilation time
-- Free text (no prefix) compiles to JMAP's `text` filter, which searches across all text fields
+- Free text desugars to a local text condition over sender, subject, and synced preview.
 
-The mailbox resolution step uses an in-memory map of mailbox names and roles to IDs, maintained by the Rust sync engine (updated on each `Mailbox/changes` cycle). The compiler does not query SQLite at runtime for this; the in-memory map is cheaper and avoids contention. If a mailbox name cannot be resolved, the compiler returns a typed error rather than silently dropping the filter.
+The current REST search path compiles query text to the same smart-mailbox rule tree used by saved smart mailboxes, then executes that rule against the local SQLite projection. It intentionally does not maintain a separate frontend search index.
 
 ## Smart mailbox data model
 
@@ -183,7 +169,7 @@ The toolbar search field accepts the full query language. As the user types, the
 
 - Prefix names: typing `fr` suggests `from:`
 - Mailbox names: after `in:`, suggest mailbox names from the local cache
-- Contact names: after `from:`, `to:`, or `cc:`, suggest addresses from locally cached email participants
+- Contact names: after `from:`/`f:`, suggest addresses from locally cached senders
 - Keywords: after `tag:`, suggest known JMAP keywords
 - Named dates: after `before:`, `after:`, or `date:`, suggest `today`, `yesterday`, `thisweek`, `thismonth`, `thisyear`
 
@@ -192,11 +178,9 @@ Completion is local-only, drawing from the SQLite cache. No network requests dur
 ### Execution pipeline
 
 1. Parse query text into AST
-2. Compile AST to JMAP FilterCondition (plus optional local predicate for v2)
-3. Execute `Email/query` with the filter, without collapsing threads by default
-4. Fetch `SearchSnippet/get` for the matching email IDs to get highlighted previews
-5. Apply local predicate if present (v2)
-6. Display results in the message list with mailbox badges and highlighted snippets
+2. Compile parsed tokens to a `SmartMailboxRule`
+3. Execute the rule through the backend message-page query path, without collapsing threads by default
+4. Display results in the message list with mailbox badges
 
 Search results and mailbox views default to flat mode: individual messages, not collapsed by thread. A thread command may add a `threadId` filter when the user wants to inspect one thread.
 
@@ -300,16 +284,13 @@ Rendered as an SVG element (or HTML Canvas) at the top of the thread detail pane
 
 | ID                   | Sev.   | Assertion                                                                                  |
 | -------------------- | ------ | ------------------------------------------------------------------------------------------ |
-| grammar-parse        | MUST   | Every query that conforms to the PEG grammar parses without error                          |
-| grammar-roundtrip    | SHOULD | Parsing then serializing a query produces an equivalent (not necessarily identical) string |
-| compile-jmap         | MUST   | Queries using only standard prefixes compile to valid JMAP FilterCondition                 |
-| compile-participant  | MUST   | `participant:X` compiles to `OR(from:X, to:X, cc:X)`                                       |
-| compile-unread       | MUST   | `is:unread` compiles to `NOT hasKeyword("$seen")`                                          |
-| compile-mailbox      | MUST   | `in:inbox` resolves to the Inbox mailbox ID before compilation                             |
+| grammar-parse        | MUST   | Every query that conforms to the supported token grammar parses without error              |
+| compile-local-rule   | MUST   | Queries using supported prefixes compile to a SmartMailboxRule                             |
+| compile-unread       | MUST   | `is:unread` compiles to an unread local rule                                               |
+| compile-mailbox      | MUST   | `in:inbox` compiles to a mailbox role or mailbox ID rule                                   |
 | compile-date         | MUST   | Relative dates resolve to absolute timestamps at compilation time                          |
 | smartmailbox-persist | MUST   | Smart mailbox query_text is persisted and parseable across grammar versions                |
 | smartmailbox-refresh | SHOULD | Smart mailbox results refresh on each sync cycle                                           |
-| search-snippet       | SHOULD | Search results include highlighted snippets from SearchSnippet/get                         |
 | drilldown-click      | MUST   | Clicking a header field populates the search bar with the corresponding prefix query       |
 | drilldown-shift      | MUST   | Shift+clicking a header field appends to the current query with AND                        |
 | thread-order         | MUST   | Thread conversation view orders messages by receivedAt                                     |

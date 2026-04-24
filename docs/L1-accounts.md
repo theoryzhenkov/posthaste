@@ -139,7 +139,7 @@ Smart mailbox rules are recursive: a `rule` contains `nodes` which are either `c
 
 ### Condition fields and operators
 
-Fields: `source_id`, `source_name`, `mailbox_id`, `mailbox_role`, `is_read`, `is_flagged`, `has_attachment`, `keyword`, `from_name`, `from_email`, `subject`, `preview`, `received_at`.
+Fields: `source_id`, `source_name`, `message_id`, `thread_id`, `mailbox_id`, `mailbox_name`, `mailbox_role`, `is_read`, `is_flagged`, `has_attachment`, `keyword`, `from_name`, `from_email`, `subject`, `preview`, `received_at`.
 
 Operators: `equals`, `in`, `contains`, `before`, `after`, `on_or_before`, `on_or_after`.
 

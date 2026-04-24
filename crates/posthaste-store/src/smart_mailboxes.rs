@@ -564,7 +564,9 @@ fn compile_smart_mailbox_condition(
 ) -> Result<String, StoreError> {
     let fragment = match condition.field {
         SmartMailboxField::SourceId => compile_simple_field("m.account_id", condition, params)?,
-        SmartMailboxField::SourceName => compile_simple_field("a.name", condition, params)?,
+        SmartMailboxField::SourceName => compile_text_field("a.name", condition, params)?,
+        SmartMailboxField::MessageId => compile_simple_field("m.id", condition, params)?,
+        SmartMailboxField::ThreadId => compile_simple_field("m.thread_id", condition, params)?,
         SmartMailboxField::FromName => compile_text_field("m.from_name", condition, params)?,
         SmartMailboxField::FromEmail => compile_text_field("m.from_email", condition, params)?,
         SmartMailboxField::Subject => compile_text_field("m.subject", condition, params)?,
@@ -580,6 +582,19 @@ fn compile_smart_mailbox_condition(
                 WHERE mm.account_id = m.account_id
                   AND mm.message_id = m.id
                   AND mm.mailbox_id",
+            condition,
+            params,
+        )?,
+        SmartMailboxField::MailboxName => compile_exists_text_membership(
+            "EXISTS (
+                SELECT 1
+                FROM message_mailbox mm
+                JOIN mailbox b
+                  ON b.account_id = mm.account_id
+                 AND b.id = mm.mailbox_id
+                WHERE mm.account_id = m.account_id
+                  AND mm.message_id = m.id
+                  AND b.name",
             condition,
             params,
         )?,
@@ -726,6 +741,44 @@ fn compile_exists_membership(
                 expect_string_value(&condition.value)?.to_string(),
             ));
             " = ?".to_string()
+        }
+        SmartMailboxOperator::In => {
+            let values = expect_strings_value(&condition.value)?;
+            let placeholders = push_placeholders(values, params);
+            format!(" IN ({placeholders})")
+        }
+        _ => {
+            return Err(StoreError::Failure(format!(
+                "unsupported operator {:?} for field {:?}",
+                condition.operator, condition.field
+            )))
+        }
+    };
+    Ok(format!("{prefix}{suffix}\n            )"))
+}
+
+/// Compiles text membership via an EXISTS subquery, currently used for mailbox
+/// display names.
+fn compile_exists_text_membership(
+    prefix: &str,
+    condition: &SmartMailboxCondition,
+    params: &mut Vec<SqlValue>,
+) -> Result<String, StoreError> {
+    let suffix = match condition.operator {
+        SmartMailboxOperator::Equals => {
+            params.push(SqlValue::Text(
+                expect_string_value(&condition.value)?.to_string(),
+            ));
+            " = ?".to_string()
+        }
+        SmartMailboxOperator::Contains => {
+            params.push(SqlValue::Text(format!(
+                "%{}%",
+                expect_string_value(&condition.value)?.to_lowercase()
+            )));
+            " IS NOT NULL
+                  AND LOWER(b.name) LIKE ?"
+                .to_string()
         }
         SmartMailboxOperator::In => {
             let values = expect_strings_value(&condition.value)?;

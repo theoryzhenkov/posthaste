@@ -824,7 +824,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use posthaste_domain::{
-        MessageRecord, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+        search, MessageRecord, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
         SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
         SmartMailboxValue, SyncCursor,
     };
@@ -1140,6 +1140,54 @@ mod tests {
         assert_eq!(page.items[0].source_id, primary);
         assert_eq!(page.items[0].mailbox_ids, vec![MailboxId::from("inbox")]);
         assert!(page.next_cursor.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_message_query_executes_richer_filters() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary Account")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![
+                MessageRecord {
+                    id: MessageId::from("match"),
+                    source_thread_id: ThreadId::from("thread-match"),
+                    subject: Some("Posthaste account created".to_string()),
+                    mailbox_ids: vec![MailboxId::from("archive")],
+                    keywords: Vec::new(),
+                    ..sample_message("match", "archive", Some("mime-match"))
+                },
+                MessageRecord {
+                    id: MessageId::from("read-message"),
+                    source_thread_id: ThreadId::from("thread-match"),
+                    subject: Some("Posthaste account created".to_string()),
+                    mailbox_ids: vec![MailboxId::from("archive")],
+                    keywords: vec!["$seen".to_string()],
+                    ..sample_message("read-message", "archive", Some("mime-read"))
+                },
+            ],
+            "state",
+        )?;
+
+        let rule = search::parse_query(
+            "source: Primary Account in:Archive is:unread subject:account created id:match thread:thread-match",
+        )
+        .map_err(StoreError::Failure)?;
+        let page = store.query_message_page_by_rule(
+            &rule,
+            10,
+            None,
+            MessageSortField::Date,
+            SortDirection::Desc,
+        )?;
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id.as_str(), "match");
+        assert!(!page.items[0].is_read);
         Ok(())
     }
 
