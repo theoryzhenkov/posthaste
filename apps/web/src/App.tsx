@@ -32,7 +32,6 @@ import {
   ResizablePanelGroup,
 } from './components/ui/resizable'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
-import { useDebouncedValue } from './hooks/useDebouncedValue'
 import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
 import { mailKeys, type MailSelection } from './mailState'
@@ -84,7 +83,6 @@ function MailClient() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const debouncedQuery = useDebouncedValue(searchQuery, 300)
   const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const theme = useDesignTheme()
@@ -505,7 +503,7 @@ function MailClient() {
                 onSelectMessage={handleSelectMessageRef}
                 onClearSelection={handleClearSelectedMessage}
                 actions={actions}
-                searchQuery={debouncedQuery}
+                searchQuery={searchQuery}
               />
             </ResizablePanel>
             {isMessageDetailOpen && (
