@@ -181,6 +181,8 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 **Automation rules**: `AccountOverview`, `CreateAccountRequest`, and `PatchAccountRequest` include `automationRules`. Each rule has `id`, `name`, `enabled`, `triggers`, `scope`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. PATCH replaces the full rule list when `automationRules` is present and preserves it when omitted. Rule IDs must be unique, enabled rules need at least one trigger and one action, tag actions must target non-system keywords, and mailbox IDs must be non-empty where used.
 
+The frontend may expose smart-mailbox-scoped actions, but these still persist through account `automationRules`. A smart-mailbox action is represented as an account automation with an ID prefix owned by that smart mailbox and a condition combining the smart-mailbox rule with the action rule's own condition.
+
 ## Secret management
 
 Account secrets are opaque authentication material. For JMAP accounts this may be an OAuth token set, a provider API token, or a development credential accepted by the provider. The API must not assume that the value is a Fastmail app-specific password.

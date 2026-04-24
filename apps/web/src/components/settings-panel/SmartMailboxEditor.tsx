@@ -9,12 +9,14 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { createSmartMailbox, updateSmartMailbox } from '../../api/client'
 import type {
+  AccountOverview,
   CreateSmartMailboxInput,
   SmartMailbox,
   SmartMailboxSummary,
   UpdateSmartMailboxInput,
 } from '../../api/types'
 import { Button } from '../ui/button'
+import { SmartMailboxAutomationFields } from './AutomationActionsEditor'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
 import { RuleGroupEditor } from './RuleGroupEditor'
 import {
@@ -50,7 +52,9 @@ export function SmartMailboxEditor({
   editorTarget,
   editingSmartMailbox,
   summary,
+  accounts,
   onSaved,
+  onAutomationAccountsSaved,
   onDeleted,
   onReorder,
   reorderPendingKey,
@@ -58,7 +62,9 @@ export function SmartMailboxEditor({
   editorTarget: SmartMailboxEditorTarget
   editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
   summary: SmartMailboxSummary | null
+  accounts: AccountOverview[]
   onSaved: (smartMailbox: SmartMailbox) => Promise<void>
+  onAutomationAccountsSaved: (accounts: AccountOverview[]) => Promise<void>
   onDeleted: (smartMailboxId: string) => Promise<void>
   onReorder: (mailbox: SmartMailboxSummary, position: number) => void
   reorderPendingKey: string | null
@@ -189,6 +195,23 @@ export function SmartMailboxEditor({
           }
         />
       </SettingsSection>
+
+      {editorTarget !== 'new' &&
+        editingSmartMailbox &&
+        'rule' in editingSmartMailbox && (
+          <SettingsSection title="Actions">
+            <SmartMailboxAutomationFields
+              accounts={accounts}
+              smartMailbox={editingSmartMailbox}
+              disabledReason={
+                hasUnsavedChanges
+                  ? 'Save mailbox definition before applying actions'
+                  : null
+              }
+              onSaved={onAutomationAccountsSaved}
+            />
+          </SettingsSection>
+        )}
 
       <SettingsFooter>
         {errorMessage && (
