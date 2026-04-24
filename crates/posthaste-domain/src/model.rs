@@ -660,7 +660,10 @@ pub enum SmartMailboxGroupOperator {
 pub enum SmartMailboxField {
     SourceId,
     SourceName,
+    MessageId,
+    ThreadId,
     MailboxId,
+    MailboxName,
     MailboxRole,
     IsRead,
     IsFlagged,
