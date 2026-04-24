@@ -31,6 +31,7 @@ import {
   normalizeAccountInitials,
 } from './helpers'
 import { FeedbackBanner, Field, StatusDot } from './shared'
+import { SettingsFooter, SettingsPageHeader, SettingsSection } from './shared'
 import type { EditorTarget } from './types'
 import type { AccountFormState } from './types'
 
@@ -143,44 +144,45 @@ export function AccountEditor({
 
   return (
     <div className="pb-8">
-      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
+      <SettingsPageHeader
+        title={
+          editorTarget === 'new'
+            ? 'New account'
+            : (editingAccount?.name ?? 'Account')
+        }
+        leading={
           <AccountMark
             appearance={formAppearance}
             className="size-10 rounded-md text-[14px]"
           />
-          <div className="min-w-0">
-            <h1 className="truncate text-[20px] font-semibold leading-tight text-foreground">
-              {editorTarget === 'new'
-                ? 'New account'
-                : (editingAccount?.name ?? 'Account')}
-            </h1>
-            <p className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-              {isEditing && editingAccount ? (
-                <>
-                  <StatusDot
-                    status={editingAccount.status}
-                    className="size-1.5"
-                  />
-                  <span className="font-mono uppercase tracking-[0.12em]">
-                    {editingAccount.status}
-                  </span>
-                </>
-              ) : (
-                'Configure the account, then apply it.'
-              )}
-            </p>
-          </div>
-        </div>
-
-        {isEditing && editingAccount ? (
-          <AccountActions
-            account={editingAccount}
-            onCommand={onCommand}
-            isCommandPending={isCommandPending}
-          />
-        ) : null}
-      </header>
+        }
+        meta={
+          <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            {isEditing && editingAccount ? (
+              <>
+                <StatusDot
+                  status={editingAccount.status}
+                  className="size-1.5"
+                />
+                <span className="font-mono uppercase tracking-[0.12em]">
+                  {editingAccount.status}
+                </span>
+              </>
+            ) : (
+              'Configure the account, then apply it.'
+            )}
+          </p>
+        }
+        actions={
+          isEditing && editingAccount ? (
+            <AccountActions
+              account={editingAccount}
+              onCommand={onCommand}
+              isCommandPending={isCommandPending}
+            />
+          ) : null
+        }
+      />
 
       {editingAccount?.lastSyncError && (
         <div className="mt-4">
@@ -190,7 +192,7 @@ export function AccountEditor({
         </div>
       )}
 
-      <AccountEditorGroup title="Identity">
+      <SettingsSection title="Identity">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Account name"
@@ -225,18 +227,18 @@ export function AccountEditor({
             }
           />
         </label>
-      </AccountEditorGroup>
+      </SettingsSection>
 
-      <AccountEditorGroup title="Appearance">
+      <SettingsSection title="Appearance">
         <AccountAppearanceFields
           accountId={isEditing ? editingAccount.id : null}
           form={form}
           onChange={setForm}
           onSaved={onSaved}
         />
-      </AccountEditorGroup>
+      </SettingsSection>
 
-      <AccountEditorGroup title="Server">
+      <SettingsSection title="Server">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Base URL"
@@ -255,9 +257,9 @@ export function AccountEditor({
             }
           />
         </div>
-      </AccountEditorGroup>
+      </SettingsSection>
 
-      <AccountEditorGroup title="Password">
+      <SettingsSection title="Password">
         {editingAccount?.transport.secret.configured && (
           <p className="-mt-1 text-[12px] text-muted-foreground">
             A password is configured. Enter a new one to replace it.
@@ -281,9 +283,9 @@ export function AccountEditor({
             }))
           }
         />
-      </AccountEditorGroup>
+      </SettingsSection>
 
-      <FormFooter>
+      <SettingsFooter>
         {verification?.identityEmail && (
           <FeedbackBanner tone="success">
             Verified identity: {verification.identityEmail}
@@ -324,7 +326,7 @@ export function AccountEditor({
             {hasUnsavedAccountChanges ? 'Unsaved changes' : 'Saved'}
           </span>
         </div>
-      </FormFooter>
+      </SettingsFooter>
 
       {isEditing && editingAccount && (
         <DangerSection
@@ -334,32 +336,6 @@ export function AccountEditor({
         />
       )}
     </div>
-  )
-}
-
-function FormFooter({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="grid gap-3 pt-2 md:grid-cols-[140px_1fr]">
-      <div aria-hidden />
-      <div className="min-w-0 space-y-3">{children}</div>
-    </div>
-  )
-}
-
-function AccountEditorGroup({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="grid gap-3 py-5 md:grid-cols-[140px_1fr]">
-      <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        {title}
-      </h2>
-      <div className="min-w-0 space-y-3">{children}</div>
-    </section>
   )
 }
 
@@ -507,45 +483,40 @@ function DangerSection({
   isCommandPending: boolean
 }) {
   return (
-    <section className="grid gap-3 pt-16 md:grid-cols-[140px_1fr]">
-      <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-destructive">
-        Danger
-      </h2>
-      <div>
-        <p className="mb-3 text-[12px] text-muted-foreground">
-          Remove this account and its synced local data.
-        </p>
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              size="sm"
+    <SettingsSection title="Danger" tone="danger" className="pt-16">
+      <p className="mb-3 text-[12px] text-muted-foreground">
+        Remove this account and its synced local data.
+      </p>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            size="sm"
+            variant="destructive"
+            type="button"
+            disabled={isCommandPending}
+          >
+            Delete
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove &ldquo;{account.name}&rdquo; and all
+              synced data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
               variant="destructive"
-              type="button"
-              disabled={isCommandPending}
+              onClick={() => onCommand('delete', account)}
             >
-              Delete
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete account?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove &ldquo;{account.name}&rdquo; and
-                all synced data. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={() => onCommand('delete', account)}
-              >
-                Delete account
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    </section>
+              Delete account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SettingsSection>
   )
 }

@@ -27,6 +27,7 @@ import {
 } from '@/design'
 import { useDesignTheme } from '@/hooks/useDesignTheme'
 import { cn } from '@/lib/utils'
+import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
 
 const themeModeLabels = {
   dark: 'Dark',
@@ -191,11 +192,8 @@ function GlassMeshEditor() {
   }
 
   return (
-    <section>
-      <h2 className="mb-2 text-[13px] font-semibold text-foreground">
-        Glass mesh
-      </h2>
-      <div className="grid gap-4 rounded-lg border border-border-soft bg-bg-elev/45 p-4 lg:grid-cols-[minmax(240px,320px)_1fr]">
+    <SettingsSection title="Glass mesh">
+      <div className="grid gap-4 lg:grid-cols-[minmax(240px,320px)_1fr]">
         <div
           ref={meshRef}
           role="application"
@@ -351,7 +349,7 @@ function GlassMeshEditor() {
           </div>
         </div>
       </div>
-    </section>
+    </SettingsSection>
   )
 }
 
@@ -360,21 +358,14 @@ export function AppearancePane() {
   const activeAccent = accentColor(theme.accentHue)
 
   return (
-    <div className="mx-auto flex max-w-[760px] flex-col">
-      <header>
-        <h1 className="text-[24px] font-semibold leading-tight text-foreground">
-          Appearance
-        </h1>
-        <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
-          Choose the built-in theme, color mode, and interface density.
-        </p>
-      </header>
+    <SettingsPage>
+      <SettingsPageHeader
+        title="Appearance"
+        description="Choose the built-in theme, color mode, and interface density."
+      />
 
-      <div className="mt-7 space-y-7">
-        <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">
-            Theme
-          </h2>
+      <div>
+        <SettingsSection title="Theme">
           <div className="grid gap-2 sm:grid-cols-2">
             {palettePresetIds.map((presetId) => {
               const preset = palettePresets[presetId]
@@ -419,64 +410,56 @@ export function AppearancePane() {
               )
             })}
           </div>
-        </section>
+        </SettingsSection>
 
-        <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">
-            Accent
-          </h2>
-          <div className="overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
-            <div className="flex min-h-[72px] flex-col gap-4 px-4 py-4">
-              <div className="flex items-center gap-3">
-                <span
-                  className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border-soft shadow-[var(--shadow-pane)]"
-                  style={{ backgroundColor: activeAccent }}
-                >
-                  <Paintbrush
-                    size={17}
-                    strokeWidth={1.7}
-                    className="text-primary-foreground"
-                  />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium text-foreground">
-                    App color
-                  </p>
-                  <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Hue is adjustable; contrast and saturation stay within the
-                    app range.
-                  </p>
-                </div>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {theme.accentHue}°
-                </span>
-              </div>
-
-              <label className="block">
-                <span className="sr-only">Accent hue</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={359}
-                  step={1}
-                  value={theme.accentHue}
-                  onChange={(event) =>
-                    theme.setAccentHue(Number(event.target.value))
-                  }
-                  className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
-                  style={{ background: hueGradient }}
+        <SettingsSection title="Accent">
+          <div className="flex min-h-[72px] flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <span
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border-soft shadow-[var(--shadow-pane)]"
+                style={{ backgroundColor: activeAccent }}
+              >
+                <Paintbrush
+                  size={17}
+                  strokeWidth={1.7}
+                  className="text-primary-foreground"
                 />
-              </label>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-foreground">
+                  App color
+                </p>
+                <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                  Hue is adjustable; contrast and saturation stay within the app
+                  range.
+                </p>
+              </div>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {theme.accentHue}°
+              </span>
             </div>
+
+            <label className="block">
+              <span className="sr-only">Accent hue</span>
+              <input
+                type="range"
+                min={0}
+                max={359}
+                step={1}
+                value={theme.accentHue}
+                onChange={(event) =>
+                  theme.setAccentHue(Number(event.target.value))
+                }
+                className="ph-hue-range h-4 w-full cursor-pointer appearance-none rounded-full border border-border-soft bg-transparent accent-primary"
+                style={{ background: hueGradient }}
+              />
+            </label>
           </div>
-        </section>
+        </SettingsSection>
 
         {theme.palettePreset === 'glass' && <GlassMeshEditor />}
 
-        <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">
-            Mode
-          </h2>
+        <SettingsSection title="Mode">
           <div className="inline-flex rounded-lg border border-border-soft bg-bg-elev/45 p-1">
             {themeModes.map((mode) => {
               const Icon = themeModeIcons[mode]
@@ -499,12 +482,9 @@ export function AppearancePane() {
               )
             })}
           </div>
-        </section>
+        </SettingsSection>
 
-        <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-foreground">
-            Density
-          </h2>
+        <SettingsSection title="Density">
           <div className="inline-flex rounded-lg border border-border-soft bg-bg-elev/45 p-1">
             {uiDensities.map((density) => {
               const isActive = theme.density === density
@@ -525,8 +505,8 @@ export function AppearancePane() {
               )
             })}
           </div>
-        </section>
+        </SettingsSection>
       </div>
-    </div>
+    </SettingsPage>
   )
 }

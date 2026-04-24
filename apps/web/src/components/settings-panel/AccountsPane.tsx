@@ -4,12 +4,19 @@
  * @spec docs/L1-api#account-crud-lifecycle
  */
 import type { UseMutationResult } from '@tanstack/react-query'
-import { ArrowLeft, Plus, UserPlus } from 'lucide-react'
+import { Plus, UserPlus } from 'lucide-react'
 import type { AccountOverview } from '../../api/types'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
-import { StatusDot } from './shared'
+import {
+  SettingsBackButton,
+  SettingsEmptyState,
+  SettingsList,
+  SettingsPage,
+  SettingsPageHeader,
+  StatusDot,
+} from './shared'
 import type { EditorTarget } from './types'
 
 export function AccountsPane({
@@ -53,18 +60,13 @@ export function AccountsPane({
   if (selectedAccountId !== null) {
     return (
       <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
-        <div className="mx-auto max-w-[760px]">
-          <Button
-            aria-label="Back to accounts"
-            size="sm"
-            variant="ghost"
-            type="button"
+        <SettingsPage>
+          <SettingsBackButton
+            ariaLabel="Back to accounts"
             onClick={onBackToAccounts}
-            className="mb-3 h-7 rounded-md px-2 text-[12px] text-muted-foreground hover:bg-[var(--list-hover)] hover:text-foreground"
           >
-            <ArrowLeft size={14} strokeWidth={1.5} />
             Accounts
-          </Button>
+          </SettingsBackButton>
 
           {selectedAccountId === 'new' || editingAccount ? (
             <AccountEditor
@@ -80,35 +82,29 @@ export function AccountsPane({
           ) : (
             <AccountsEmptyState onCreateAccount={onCreateAccount} />
           )}
-        </div>
+        </SettingsPage>
       </section>
     )
   }
 
   return (
     <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
-      <div className="mx-auto flex max-w-[760px] flex-col">
-        <header>
-          <h1 className="text-[24px] font-semibold leading-tight text-foreground">
-            Connected accounts
-          </h1>
-          <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
-            Connect each mail source PostHaste should sync. Accounts keep their
-            own credentials, status, and sync controls.
-          </p>
-        </header>
+      <SettingsPage>
+        <SettingsPageHeader
+          title="Connected accounts"
+          description="Connect each mail source PostHaste should sync. Accounts keep their own credentials, status, and sync controls."
+        />
 
         {accounts.length === 0 ? (
           <div className="mt-10">
             <AccountsEmptyState onCreateAccount={onCreateAccount} />
           </div>
         ) : (
-          <div className="mt-7 overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
-            <div className="flex min-h-[48px] items-center justify-between gap-3 border-b border-border-soft px-4">
-              <h2 className="text-[13px] font-semibold text-foreground">
-                {accounts.length} connected{' '}
-                {accounts.length === 1 ? 'account' : 'accounts'}
-              </h2>
+          <SettingsList
+            title={`${accounts.length} connected ${
+              accounts.length === 1 ? 'account' : 'accounts'
+            }`}
+            actions={
               <Button
                 aria-label="New account"
                 size="icon-sm"
@@ -119,7 +115,8 @@ export function AccountsPane({
               >
                 <Plus size={14} strokeWidth={1.8} />
               </Button>
-            </div>
+            }
+          >
             {accounts.map((account) => (
               <AccountListRow
                 key={account.id}
@@ -135,9 +132,9 @@ export function AccountsPane({
                 onClick={() => onSelectAccount(account.id)}
               />
             ))}
-          </div>
+          </SettingsList>
         )}
-      </div>
+      </SettingsPage>
     </section>
   )
 }
@@ -196,28 +193,22 @@ function AccountsEmptyState({
   onCreateAccount: () => void
 }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border-soft bg-bg-elev/45 px-6 text-center">
-      <UserPlus
-        size={36}
-        strokeWidth={1.5}
-        className="text-muted-foreground/40"
-      />
-      <div className="mt-4">
-        <p className="text-[13px] font-medium">No accounts yet</p>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          Add one to start syncing your mail.
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant="outline"
-        type="button"
-        onClick={onCreateAccount}
-        className="mt-4 rounded-md border-border bg-bg-elev"
-      >
-        <Plus size={13} strokeWidth={2} />
-        New account
-      </Button>
-    </div>
+    <SettingsEmptyState
+      icon={<UserPlus size={36} strokeWidth={1.5} />}
+      title="No accounts yet"
+      description="Add one to start syncing your mail."
+      action={
+        <Button
+          size="sm"
+          variant="outline"
+          type="button"
+          onClick={onCreateAccount}
+          className="rounded-md border-border bg-bg-elev"
+        >
+          <Plus size={13} strokeWidth={2} />
+          New account
+        </Button>
+      }
+    />
   )
 }

@@ -3,11 +3,18 @@
  *
  * @spec docs/L1-api#smart-mailbox-crud
  */
-import { ArrowLeft, FolderSearch, Plus } from 'lucide-react'
+import { FolderSearch, Plus } from 'lucide-react'
 import type { SmartMailbox, SmartMailboxSummary } from '../../api/types'
 import { brandAccents } from '../../design/tokens'
 import { Button } from '../ui/button'
 import { SmartMailboxEditor } from './SmartMailboxEditor'
+import {
+  SettingsBackButton,
+  SettingsEmptyState,
+  SettingsList,
+  SettingsPage,
+  SettingsPageHeader,
+} from './shared'
 import type { SmartMailboxEditorTarget } from './types'
 
 const MAILBOX_ACCENTS = {
@@ -92,18 +99,13 @@ export function SmartMailboxesPane({
   if (selectedMailboxId !== null) {
     return (
       <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
-        <div className="mx-auto max-w-[760px]">
-          <Button
-            aria-label="Back to mailboxes"
-            size="sm"
-            variant="ghost"
-            type="button"
+        <SettingsPage>
+          <SettingsBackButton
+            ariaLabel="Back to mailboxes"
             onClick={onBackToMailboxes}
-            className="mb-3 h-7 rounded-md px-2 text-[12px] text-muted-foreground hover:bg-[var(--list-hover)] hover:text-foreground"
           >
-            <ArrowLeft size={14} strokeWidth={1.5} />
             Mailboxes & Rules
-          </Button>
+          </SettingsBackButton>
 
           {actionError && (
             <p className="mb-4 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
@@ -125,23 +127,18 @@ export function SmartMailboxesPane({
           ) : (
             <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
           )}
-        </div>
+        </SettingsPage>
       </section>
     )
   }
 
   return (
     <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
-      <div className="mx-auto flex max-w-[760px] flex-col">
-        <header>
-          <h1 className="text-[24px] font-semibold leading-tight text-foreground">
-            Smart mailboxes
-          </h1>
-          <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
-            Saved views filter messages into focused mailboxes without changing
-            source accounts. Use them for inboxes, rules, and repeat workflows.
-          </p>
-        </header>
+      <SettingsPage>
+        <SettingsPageHeader
+          title="Smart mailboxes"
+          description="Saved views filter messages into focused mailboxes without changing source accounts. Use them for inboxes, rules, and repeat workflows."
+        />
 
         {actionError && (
           <p className="mt-6 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
@@ -154,13 +151,12 @@ export function SmartMailboxesPane({
             <SmartMailboxesEmptyState onCreateMailbox={onCreateMailbox} />
           </div>
         ) : (
-          <div className="mt-7 overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
-            <div className="flex min-h-[48px] items-center justify-between gap-3 border-b border-border-soft px-4">
-              <h2 className="text-[13px] font-semibold text-foreground">
-                {smartMailboxes.length} saved{' '}
-                {smartMailboxes.length === 1 ? 'view' : 'views'}
-              </h2>
-              <div className="flex items-center gap-2">
+          <SettingsList
+            title={`${smartMailboxes.length} saved ${
+              smartMailboxes.length === 1 ? 'view' : 'views'
+            }`}
+            actions={
+              <>
                 <Button
                   size="sm"
                   variant="outline"
@@ -181,8 +177,9 @@ export function SmartMailboxesPane({
                 >
                   <Plus size={14} strokeWidth={1.8} />
                 </Button>
-              </div>
-            </div>
+              </>
+            }
+          >
             {smartMailboxes.map((mailbox) => (
               <MailboxListRow
                 key={mailbox.id}
@@ -193,9 +190,9 @@ export function SmartMailboxesPane({
                 onClick={() => onSelectMailbox(mailbox.id)}
               />
             ))}
-          </div>
+          </SettingsList>
         )}
-      </div>
+      </SettingsPage>
     </section>
   )
 }
@@ -262,28 +259,22 @@ function SmartMailboxesEmptyState({
   onCreateMailbox: () => void
 }) {
   return (
-    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border-soft bg-bg-elev/45 px-6 text-center">
-      <FolderSearch
-        size={36}
-        strokeWidth={1.5}
-        className="text-muted-foreground/40"
-      />
-      <div className="mt-4">
-        <p className="text-[13px] font-medium">No smart mailboxes yet</p>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          Create a saved view to keep important mail easy to find.
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant="outline"
-        type="button"
-        onClick={onCreateMailbox}
-        className="mt-4 rounded-md border-border bg-bg-elev"
-      >
-        <Plus size={13} strokeWidth={2} />
-        New mailbox
-      </Button>
-    </div>
+    <SettingsEmptyState
+      icon={<FolderSearch size={36} strokeWidth={1.5} />}
+      title="No smart mailboxes yet"
+      description="Create a saved view to keep important mail easy to find."
+      action={
+        <Button
+          size="sm"
+          variant="outline"
+          type="button"
+          onClick={onCreateMailbox}
+          className="rounded-md border-border bg-bg-elev"
+        >
+          <Plus size={13} strokeWidth={2} />
+          New mailbox
+        </Button>
+      }
+    />
   )
 }
