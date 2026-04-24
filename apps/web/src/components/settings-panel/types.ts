@@ -14,6 +14,8 @@ export interface AccountFormState {
   name: string
   fullName: string
   emailPatternsText: string
+  appearanceInitials: string
+  appearanceColorHue: number
   baseUrl: string
   username: string
   password: string

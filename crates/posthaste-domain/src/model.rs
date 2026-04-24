@@ -230,6 +230,28 @@ pub struct AccountTransportSettings {
     pub secret_ref: Option<SecretRef>,
 }
 
+/// User-facing visual identity for an account.
+///
+/// @spec docs/L1-accounts#toml-schema
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum AccountAppearance {
+    Initials {
+        initials: String,
+        color_hue: u16,
+    },
+    Image {
+        image_id: String,
+        initials: String,
+        color_hue: u16,
+    },
+}
+
 /// Full persisted configuration for a mail account.
 ///
 /// @spec docs/L1-accounts#toml-schema
@@ -242,6 +264,7 @@ pub struct AccountSettings {
     pub email_patterns: Vec<String>,
     pub driver: AccountDriver,
     pub enabled: bool,
+    pub appearance: Option<AccountAppearance>,
     pub transport: AccountTransportSettings,
     pub created_at: String,
     pub updated_at: String,
@@ -321,6 +344,7 @@ pub struct AccountOverview {
     pub email_patterns: Vec<String>,
     pub driver: AccountDriver,
     pub enabled: bool,
+    pub appearance: AccountAppearance,
     pub transport: AccountTransportOverview,
     pub created_at: String,
     pub updated_at: String,

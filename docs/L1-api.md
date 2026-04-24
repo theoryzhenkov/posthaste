@@ -36,6 +36,8 @@ All endpoints are prefixed with `/v1`.
 | POST | `/accounts/{account_id}/verify` | `verify_account` | -- | `VerificationResponse` |
 | POST | `/accounts/{account_id}/enable` | `enable_account` | -- | `OkResponse` |
 | POST | `/accounts/{account_id}/disable` | `disable_account` | -- | `OkResponse` |
+| POST | `/accounts/{account_id}/logo` | `upload_account_logo` | raw image bytes | `AccountOverview` |
+| GET | `/account-assets/logos/{image_id}` | `get_account_logo` | -- | image bytes |
 
 ### Smart mailboxes
 
@@ -161,6 +163,8 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 **Verify**: `POST /accounts/{id}/verify` attempts a JMAP session discovery and returns whether the connection succeeded, the primary identity email, and whether push is supported.
 
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
+
+**Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 
 ## Secret management
 

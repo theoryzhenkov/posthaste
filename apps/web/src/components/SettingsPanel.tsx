@@ -317,7 +317,7 @@ export function SettingsPanel({
       ? 'account:none'
       : effectiveEditorTarget === 'new'
         ? 'account:new'
-        : `account:${effectiveEditorTarget}:${editingAccount?.updatedAt ?? 'pending'}`
+        : `account:${effectiveEditorTarget}`
   const smartMailboxEditorKey =
     effectiveSmartMailboxTarget === null
       ? 'mailbox:none'

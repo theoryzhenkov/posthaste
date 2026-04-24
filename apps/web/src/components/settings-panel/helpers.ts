@@ -26,9 +26,18 @@ export const EMPTY_FORM: AccountFormState = {
   name: '',
   fullName: '',
   emailPatternsText: '',
+  appearanceInitials: 'A',
+  appearanceColorHue: 0,
   baseUrl: '',
   username: '',
   password: '',
+}
+
+export function emptyAccountForm(): AccountFormState {
+  return {
+    ...EMPTY_FORM,
+    appearanceColorHue: Math.floor(Math.random() * 361),
+  }
 }
 
 /** Default empty form state for creating a new smart mailbox. */
@@ -50,6 +59,8 @@ export function formFromAccount(account: AccountOverview): AccountFormState {
     name: account.name,
     fullName: account.fullName ?? '',
     emailPatternsText: account.emailPatterns?.join('\n') ?? '',
+    appearanceInitials: normalizeAccountInitials(account.appearance.initials),
+    appearanceColorHue: account.appearance.colorHue,
     baseUrl: account.transport.baseUrl ?? '',
     username: account.transport.username ?? '',
     password: '',
@@ -216,6 +227,7 @@ export function buildCreateAccountPayload(
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     driver: 'jmap',
     enabled: true,
+    appearance: buildAccountAppearanceInput(form),
     transport: {
       baseUrl: form.baseUrl,
       username: form.username,
@@ -235,12 +247,35 @@ export function buildUpdateAccountPayload(
     name: form.name.trim(),
     fullName: form.fullName.trim() || null,
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
+    appearance: buildAccountAppearanceInput(form),
     transport: {
       baseUrl: form.baseUrl,
       username: form.username,
     },
     secret: buildSecretInput(form),
   }
+}
+
+export function buildAccountAppearanceInput(
+  form: AccountFormState,
+): CreateAccountInput['appearance'] {
+  const initials = normalizeAccountInitials(
+    form.appearanceInitials || form.name,
+  )
+  const colorHue = Math.min(
+    360,
+    Math.max(0, Math.round(form.appearanceColorHue)),
+  )
+  return {
+    kind: 'initials',
+    initials,
+    colorHue,
+  }
+}
+
+export function normalizeAccountInitials(value: string): string {
+  const trimmed = value.trim().toUpperCase()
+  return trimmed.length === 0 ? 'A' : Array.from(trimmed).slice(0, 1).join('')
 }
 
 /** Map account status to Tailwind color classes for the status badge. */

@@ -1,8 +1,8 @@
 use posthaste_domain::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings, SecretKind,
-    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
+    AppSettings, SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +80,7 @@ pub struct SourceToml {
     pub driver: DriverToml,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    pub appearance: Option<AccountAppearanceToml>,
     #[serde(default)]
     pub transport: TransportToml,
     pub created_at: Option<String>,
@@ -101,6 +102,25 @@ pub struct TransportToml {
     pub base_url: Option<String>,
     pub username: Option<String>,
     pub secret_ref: Option<SecretRefToml>,
+}
+
+/// TOML `[appearance]` section for user-customizable account marks.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(
+    rename_all = "snake_case",
+    rename_all_fields = "snake_case",
+    tag = "kind"
+)]
+pub enum AccountAppearanceToml {
+    Initials {
+        initials: String,
+        color_hue: u16,
+    },
+    Image {
+        image_id: String,
+        initials: String,
+        color_hue: u16,
+    },
 }
 
 /// Credential reference: OS keyring (`os`) or environment variable (`env`).
@@ -136,6 +156,24 @@ impl SourceToml {
                 DriverToml::Mock => AccountDriver::Mock,
             },
             enabled: self.enabled,
+            appearance: self.appearance.as_ref().map(|appearance| match appearance {
+                AccountAppearanceToml::Initials {
+                    initials,
+                    color_hue,
+                } => AccountAppearance::Initials {
+                    initials: initials.clone(),
+                    color_hue: *color_hue,
+                },
+                AccountAppearanceToml::Image {
+                    image_id,
+                    initials,
+                    color_hue,
+                } => AccountAppearance::Image {
+                    image_id: image_id.clone(),
+                    initials: initials.clone(),
+                    color_hue: *color_hue,
+                },
+            }),
             transport: AccountTransportSettings {
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
@@ -172,6 +210,27 @@ impl SourceToml {
                 AccountDriver::Mock => DriverToml::Mock,
             },
             enabled: settings.enabled,
+            appearance: settings
+                .appearance
+                .as_ref()
+                .map(|appearance| match appearance {
+                    AccountAppearance::Initials {
+                        initials,
+                        color_hue,
+                    } => AccountAppearanceToml::Initials {
+                        initials: initials.clone(),
+                        color_hue: *color_hue,
+                    },
+                    AccountAppearance::Image {
+                        image_id,
+                        initials,
+                        color_hue,
+                    } => AccountAppearanceToml::Image {
+                        image_id: image_id.clone(),
+                        initials: initials.clone(),
+                        color_hue: *color_hue,
+                    },
+                }),
             transport: TransportToml {
                 base_url: settings.transport.base_url.clone(),
                 username: settings.transport.username.clone(),
@@ -540,6 +599,10 @@ mod tests {
             email_patterns: vec!["user@example.com".to_string(), "*@example.net".to_string()],
             driver: AccountDriver::Jmap,
             enabled: true,
+            appearance: Some(AccountAppearance::Initials {
+                initials: "MF".to_string(),
+                color_hue: 245,
+            }),
             transport: AccountTransportSettings {
                 base_url: Some("https://api.fastmail.com".to_string()),
                 username: Some("user@example.com".to_string()),

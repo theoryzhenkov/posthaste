@@ -142,6 +142,7 @@ pub fn import_bootstrap(
             email_patterns: account.email_patterns.clone(),
             driver: account.driver.clone(),
             enabled: account.enabled.unwrap_or(true),
+            appearance: None,
             transport: AccountTransportSettings {
                 base_url: account.transport.base_url.clone(),
                 username: account.transport.username.clone(),
