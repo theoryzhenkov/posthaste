@@ -8,7 +8,7 @@ set -euo pipefail
 
 BASE="${POSTHASTE_STALWART_URL:-http://127.0.0.1:8080}"
 ADMIN="admin:${POSTHASTE_STALWART_ADMIN_PASSWORD}"
-DOMAIN="localhost"
+DOMAIN="${POSTHASTE_STALWART_DOMAIN:-example.org}"
 USER="dev"
 EMAIL="${USER}@${DOMAIN}"
 STALWART_DATA_ROOT="${POSTHASTE_STALWART_DATA:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/data}"
@@ -57,13 +57,79 @@ ensure_user() {
       -d "{\"type\":\"individual\",\"name\":\"$USER\",\"description\":\"Posthaste dev mailbox\",\"secrets\":[\"$POSTHASTE_STALWART_USER_PASSWORD\"],\"emails\":[\"$EMAIL\"]}" >/dev/null
     echo "created user $USER ($EMAIL)"
   fi
-  # Always reconcile role + password so re-running with a new password updates the secret.
+  # Always reconcile role, address, and password so re-running updates the dev account.
   curl -sf -u "$ADMIN" -X PATCH "$BASE/api/principal/$USER" \
     -H 'Content-Type: application/json' \
     -d "[
       {\"action\":\"set\",\"field\":\"roles\",\"value\":[\"user\"]},
+      {\"action\":\"set\",\"field\":\"emails\",\"value\":[\"$EMAIL\"]},
       {\"action\":\"set\",\"field\":\"secrets\",\"value\":[\"$POSTHASTE_STALWART_USER_PASSWORD\"]}
     ]" >/dev/null
+}
+
+ensure_jmap_identity() {
+  local session account_id request response created_id
+
+  if ! command -v jq >/dev/null; then
+    echo "jq is required to seed the dev JMAP identity" >&2
+    exit 1
+  fi
+
+  session=$(curl -sfL -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/.well-known/jmap")
+  account_id=$(printf '%s' "$session" | jq -r '.primaryAccounts["urn:ietf:params:jmap:mail"] // empty')
+  if [[ -z "$account_id" ]]; then
+    echo "could not discover JMAP mail account for $USER" >&2
+    exit 1
+  fi
+
+  request=$(jq -cn --arg account_id "$account_id" '{
+    using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+    methodCalls: [[
+      "Identity/get",
+      {
+        accountId: $account_id,
+        properties: ["id", "name", "email"]
+      },
+      "0"
+    ]]
+  }')
+  response=$(curl -sf -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/jmap/" \
+    -H 'Content-Type: application/json' \
+    -d "$request")
+
+  if printf '%s' "$response" | jq -e --arg email "$EMAIL" \
+    '.methodResponses[0][1].list[]? | select(.email == $email)' >/dev/null; then
+    echo "JMAP identity $EMAIL already exists"
+    return
+  fi
+
+  request=$(jq -cn --arg account_id "$account_id" --arg email "$EMAIL" '{
+    using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+    methodCalls: [[
+      "Identity/set",
+      {
+        accountId: $account_id,
+        create: {
+          "posthaste-dev": {
+            name: "Posthaste Dev",
+            email: $email
+          }
+        }
+      },
+      "0"
+    ]]
+  }')
+  response=$(curl -sf -u "$USER:$POSTHASTE_STALWART_USER_PASSWORD" "$BASE/jmap/" \
+    -H 'Content-Type: application/json' \
+    -d "$request")
+  created_id=$(printf '%s' "$response" | jq -r \
+    '.methodResponses[0][1].created["posthaste-dev"].id // empty')
+  if [[ -z "$created_id" ]]; then
+    echo "failed to create JMAP identity for $EMAIL: $response" >&2
+    exit 1
+  fi
+
+  echo "created JMAP identity $EMAIL"
 }
 
 stage_fixture_maildir() {
@@ -116,6 +182,7 @@ import_fixture_messages() {
 wait_for_stalwart
 ensure_domain
 ensure_user
+ensure_jmap_identity
 import_fixture_messages
 mkdir -p "$STATE_ROOT"
 touch "$SEED_READY_MARKER"

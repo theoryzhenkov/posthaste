@@ -3,12 +3,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use jmap_client::client::Client;
 use jmap_client::core::error::MethodErrorType;
-use jmap_client::{email, identity};
+use jmap_client::{email, identity, mailbox};
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, BlobId,
-    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageAttachment, MessageId,
-    MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncCursor, SyncObject,
+    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId,
+    MessageAttachment, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, now_iso8601 as domain_now_iso8601,
+    synthesize_plain_text_raw_mime,
 };
 
 use tracing::{debug, info, instrument};
@@ -126,6 +126,31 @@ impl LiveJmapGateway {
             }
         }
         request.send().await.map_err(map_gateway_error)
+    }
+
+    async fn fetch_mailbox_id_by_role(
+        &self,
+        role: mailbox::Role,
+    ) -> Result<MailboxId, GatewayError> {
+        let mut request = self.client.build();
+        request.get_mailbox().properties([
+            mailbox::Property::Id,
+            mailbox::Property::Name,
+            mailbox::Property::Role,
+        ]);
+        let mut response = self.send_request(request).await?;
+        let mailboxes = required_method_response(response.pop_method_response(), "Mailbox/get")?
+            .unwrap_get_mailbox()
+            .map_err(map_gateway_error)?
+            .take_list();
+
+        mailboxes
+            .into_iter()
+            .find(|mailbox| mailbox.role() == role)
+            .and_then(|mailbox| mailbox.id().map(|id| MailboxId::from(id.to_string())))
+            .ok_or_else(|| {
+                GatewayError::Rejected(format!("required {:?} mailbox not available", role))
+            })
     }
 }
 
@@ -496,10 +521,13 @@ impl MailGateway for LiveJmapGateway {
         request_data: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
         let identity = fetch_send_identity(self, account_id).await?;
+        let drafts_mailbox_id = self.fetch_mailbox_id_by_role(mailbox::Role::Drafts).await?;
+        let sent_mailbox_id = self.fetch_mailbox_id_by_role(mailbox::Role::Sent).await?;
         let html_body = render_markdown(&request_data.body);
 
         let mut request = self.client.build();
         let email_obj = request.set_email().create();
+        email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
         email_obj.from([(identity.name.as_str(), identity.email.as_str())]);
         if !request_data.to.is_empty() {
             email_obj.to(request_data.to.iter().map(recipient_to_address));
@@ -530,23 +558,41 @@ impl MailGateway for LiveJmapGateway {
             email_obj.references(references.split_whitespace().collect::<Vec<_>>());
         }
 
-        let submission = request.set_email_submission().create();
+        let submission_set = request.set_email_submission();
+        let submission = submission_set.create();
         submission.email_id("#c0");
         submission.identity_id(identity.id.as_str());
+        submission_set
+            .arguments()
+            .on_success_update_email("c0")
+            .mailbox_id(drafts_mailbox_id.as_str(), false)
+            .mailbox_id(sent_mailbox_id.as_str(), true);
         let response = self.send_request(request).await?;
         let mut responses = response.unwrap_method_responses();
-        if responses.len() != 2 {
-            return Err(GatewayError::Rejected(
-                "send response missing method results".to_string(),
-            ));
-        }
-        responses
-            .remove(0)
-            .unwrap_set_email()
-            .map_err(map_gateway_error)?;
-        responses
-            .remove(0)
-            .unwrap_set_email_submission()
+        let mut email_set = required_method_response(
+            (!responses.is_empty()).then(|| responses.remove(0)),
+            "Email/set create",
+        )?
+        .unwrap_set_email()
+        .map_err(map_gateway_error)?;
+        email_set.created("c0").map_err(map_gateway_error)?;
+
+        let mut submission_set = required_method_response(
+            (!responses.is_empty()).then(|| responses.remove(0)),
+            "EmailSubmission/set create",
+        )?
+        .unwrap_set_email_submission()
+        .map_err(map_gateway_error)?;
+        submission_set.created("c0").map_err(map_gateway_error)?;
+
+        let sent_update = required_method_response(
+            (!responses.is_empty()).then(|| responses.remove(0)),
+            "Email/set sent update",
+        )?
+        .unwrap_set_email()
+        .map_err(map_gateway_error)?;
+        sent_update
+            .unwrap_update_errors()
             .map_err(map_gateway_error)?;
         Ok(())
     }
@@ -584,8 +630,9 @@ pub(crate) fn map_gateway_error(error: jmap_client::Error) -> GatewayError {
         jmap_client::Error::Method(method) => match method.p_type {
             MethodErrorType::StateMismatch => GatewayError::StateMismatch,
             MethodErrorType::CannotCalculateChanges => GatewayError::CannotCalculateChanges,
-            _ => GatewayError::Rejected(format!("{:?}", method.p_type)),
+            _ => GatewayError::Rejected(method.to_string()),
         },
+        jmap_client::Error::Set(error) => GatewayError::Rejected(error.to_string()),
         other => GatewayError::Network(other.to_string()),
     }
 }
@@ -750,6 +797,25 @@ mod tests {
         match error {
             GatewayError::Rejected(message) => {
                 assert_eq!(message, "Email/get response missing");
+            }
+            other => panic!("expected rejected error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_errors_become_gateway_rejected_errors() {
+        let set_error: jmap_client::core::set::SetError<String> =
+            serde_json::from_value(serde_json::json!({
+                "type": "noRecipients",
+                "description": "No recipients found in email."
+            }))
+            .expect("set error should deserialize");
+
+        let error = map_gateway_error(set_error.into());
+
+        match error {
+            GatewayError::Rejected(message) => {
+                assert_eq!(message, "noRecipients: No recipients found in email.");
             }
             other => panic!("expected rejected error, got {other:?}"),
         }
