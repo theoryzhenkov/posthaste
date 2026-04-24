@@ -25,6 +25,7 @@ import type {
   Mailbox,
   SidebarResponse,
   SidebarSmartMailbox,
+  TagSummary,
 } from '../api/types'
 import { cn } from '../lib/utils'
 import {
@@ -66,6 +67,7 @@ interface SidebarProps {
     mailboxId: string,
     name: string,
   ) => void
+  onSelectTag: (tag: string) => void
   onSyncSource: (sourceId: string) => void
 }
 
@@ -183,18 +185,11 @@ function displaySmartMailboxName(name: string): string {
 function partitionSmartMailboxes(smartMailboxes: SidebarSmartMailbox[]) {
   const quick: SidebarSmartMailbox[] = []
   const smart: SidebarSmartMailbox[] = []
-  const tags: SidebarSmartMailbox[] = []
 
   for (const mailbox of smartMailboxes) {
     const priority = smartMailboxPriority(mailbox.name)
     if (priority !== 99) {
       quick.push(mailbox)
-      continue
-    }
-
-    const role = mailboxRoleFromName(mailbox.name)
-    if (role === null) {
-      tags.push(mailbox)
       continue
     }
 
@@ -206,9 +201,8 @@ function partitionSmartMailboxes(smartMailboxes: SidebarSmartMailbox[]) {
       smartMailboxPriority(left.name) - smartMailboxPriority(right.name),
   )
   smart.sort((left, right) => left.name.localeCompare(right.name))
-  tags.sort((left, right) => left.name.localeCompare(right.name))
 
-  return { quick, smart, tags }
+  return { quick, smart }
 }
 
 function itemButtonClass(isSelected: boolean, depth = 0): string {
@@ -286,6 +280,26 @@ function ViewItem({
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+/** Tag row with unread badge. */
+function TagItem({ tag, onSelect }: { tag: TagSummary; onSelect: () => void }) {
+  return (
+    <button className={itemButtonClass(false)} onClick={onSelect} type="button">
+      <span
+        className="flex w-4 justify-center"
+        style={{ color: smartMailboxAccent(tag.name) }}
+      >
+        {smartMailboxIcon(tag.name)}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{tag.name}</span>
+      {tag.unreadMessages > 0 && (
+        <span className="font-mono text-[11px] font-medium tabular-nums text-muted-foreground/80">
+          {tag.unreadMessages}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -506,6 +520,7 @@ export function Sidebar({
   onOpenSmartMailboxSettings,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
+  onSelectTag,
   onSyncSource,
 }: SidebarProps) {
   const {
@@ -525,6 +540,7 @@ export function Sidebar({
     () => partitionSmartMailboxes(sidebar?.smartMailboxes ?? []),
     [sidebar?.smartMailboxes],
   )
+  const tags = sidebar?.tags ?? []
   const sources = useMemo(
     () =>
       (sidebar?.sources ?? []).map((source) => {
@@ -615,7 +631,7 @@ export function Sidebar({
               </div>
             )}
 
-            {groupedSmartMailboxes.tags.length > 0 && (
+            {tags.length > 0 && (
               <>
                 <SectionHeader
                   label="Tags"
@@ -623,21 +639,11 @@ export function Sidebar({
                   onToggle={() => {}}
                 />
                 <div className="space-y-0.5 py-1">
-                  {groupedSmartMailboxes.tags.map((smartMailbox) => (
-                    <ViewItem
-                      key={smartMailbox.id}
-                      id={smartMailbox.id}
-                      name={smartMailbox.name}
-                      unreadMessages={smartMailbox.unreadMessages}
-                      accent={smartMailboxAccent(smartMailbox.name)}
-                      isSelected={
-                        selectedView?.kind === 'smart-mailbox' &&
-                        selectedView.id === smartMailbox.id
-                      }
-                      onSelect={() =>
-                        onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
-                      }
-                      onOpenSettings={onOpenSmartMailboxSettings}
+                  {tags.map((tag) => (
+                    <TagItem
+                      key={tag.name}
+                      tag={tag}
+                      onSelect={() => onSelectTag(tag.name)}
                     />
                   ))}
                 </div>

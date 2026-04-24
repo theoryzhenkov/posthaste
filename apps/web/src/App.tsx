@@ -15,7 +15,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { useDefaultLayout } from 'react-resizable-panels'
 import { toast, Toaster } from 'sonner'
-import { fetchAccounts, fetchMessage, triggerSync } from './api/client'
+import {
+  fetchAccounts,
+  fetchMessage,
+  fetchSidebar,
+  triggerSync,
+} from './api/client'
 import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { CommandPalette } from './components/CommandPalette'
@@ -25,6 +30,7 @@ import { MessageList } from './components/MessageList'
 import { SettingsOverlay } from './components/SettingsOverlay'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
+import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import {
   ResizableHandle,
@@ -81,6 +87,7 @@ function MailClient() {
     string | null
   >(null)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  const [isTagEditorOpen, setIsTagEditorOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const lastAutoSeenKeyRef = useRef<string | null>(null)
@@ -98,6 +105,10 @@ function MailClient() {
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
+  })
+  const { data: sidebar } = useQuery({
+    queryKey: queryKeys.sidebar,
+    queryFn: fetchSidebar,
   })
 
   const enabledAccounts = useMemo(
@@ -220,6 +231,13 @@ function MailClient() {
     })
   }, [actions, selectedMessage])
 
+  const handleOpenTagEditor = useCallback(() => {
+    if (!selectedMessage) {
+      return
+    }
+    setIsTagEditorOpen(true)
+  }, [selectedMessage])
+
   const resolveComposeSourceId = useCallback(() => {
     return (
       selectedMessage?.sourceId ??
@@ -336,6 +354,11 @@ function MailClient() {
       if (event.key === '/') {
         event.preventDefault()
         setIsCommandPaletteOpen(true)
+        return
+      }
+      if (event.key.toLowerCase() === 'l' && selectedMessage) {
+        event.preventDefault()
+        handleOpenTagEditor()
       }
     }
 
@@ -347,6 +370,7 @@ function MailClient() {
     handleCompose,
     handleReply,
     handleToggleFlag,
+    handleOpenTagEditor,
     isCommandPaletteOpen,
     searchQuery,
     selectedMessage,
@@ -406,6 +430,11 @@ function MailClient() {
     setSelectedMessage(null)
   }
 
+  function handleSelectTag(tag: string) {
+    setSearchQuery(`tag:${tag}`)
+    setSelectedMessage(null)
+  }
+
   if (isLoading) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -432,6 +461,7 @@ function MailClient() {
         onPlaceholderAction={handlePlaceholderAction}
         onReply={handleReply}
         onShowShortcuts={() => setShowShortcuts(true)}
+        onTag={handleOpenTagEditor}
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
           setSettingsCategory(null)
@@ -480,6 +510,7 @@ function MailClient() {
             }
             onSelectSmartMailbox={handleSelectSmartMailbox}
             onSelectSourceMailbox={handleSelectSourceMailbox}
+            onSelectTag={handleSelectTag}
             onSyncSource={(sourceId) => syncSourceMutation.mutate(sourceId)}
           />
         </ResizablePanel>
@@ -568,6 +599,14 @@ function MailClient() {
 
       {showShortcuts && (
         <ShortcutReference onClose={() => setShowShortcuts(false)} />
+      )}
+      {isTagEditorOpen && selectedMessageQuery.data && (
+        <TagEditor
+          actions={actions}
+          knownTags={sidebar?.tags ?? []}
+          message={selectedMessageQuery.data}
+          onClose={() => setIsTagEditorOpen(false)}
+        />
       )}
       {composeIntent && (
         <ComposeOverlay

@@ -626,8 +626,13 @@ function candidatesForPrefix(
         { value: 'attachment', label: 'attachment', detail: 'Message has' },
       ]
     case 'tag':
-      return uniqueCandidates(
-        context.messages.flatMap((message) =>
+      return uniqueCandidates([
+        ...(context.sidebar?.tags.map((tag) => ({
+          value: tag.name,
+          label: tag.name,
+          detail: 'Tag',
+        })) ?? []),
+        ...context.messages.flatMap((message) =>
           message.keywords
             .filter((keyword) => !keyword.startsWith('$'))
             .map((keyword) => ({
@@ -636,7 +641,7 @@ function candidatesForPrefix(
               detail: 'Keyword',
             })),
         ),
-      )
+      ])
     case 'from':
       return uniqueCandidates(
         context.messages.flatMap((message) => {

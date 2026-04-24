@@ -632,6 +632,17 @@ pub struct SidebarSmartMailbox {
     pub total_messages: i64,
 }
 
+/// User-facing tag derived from non-system JMAP keywords.
+///
+/// @spec docs/L1-api#navigation
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagSummary {
+    pub name: String,
+    pub unread_messages: i64,
+    pub total_messages: i64,
+}
+
 /// Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.
 ///
 /// @spec docs/L1-api#navigation
@@ -639,6 +650,7 @@ pub struct SidebarSmartMailbox {
 #[serde(rename_all = "camelCase")]
 pub struct SidebarResponse {
     pub smart_mailboxes: Vec<SidebarSmartMailbox>,
+    pub tags: Vec<TagSummary>,
     pub sources: Vec<SidebarSource>,
 }
 

@@ -25,8 +25,8 @@ use posthaste_domain::{
     SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
     SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
     SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
-    SyncWriteStore, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -434,6 +434,42 @@ impl MessageListStore for DatabaseStore {
             sort_field,
             sort_direction,
         )
+    }
+}
+
+impl TagReadStore for DatabaseStore {
+    fn list_tags(&self, account_id: &AccountId) -> Result<Vec<TagSummary>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT mk.keyword,
+                        SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) AS unread_messages,
+                        COUNT(*) AS total_messages
+                 FROM message_keyword mk
+                 JOIN message m
+                   ON m.account_id = mk.account_id
+                  AND m.id = mk.message_id
+                 WHERE mk.account_id = ?1
+                   AND mk.keyword NOT LIKE '$%'
+                 GROUP BY mk.keyword
+                 ORDER BY LOWER(mk.keyword), mk.keyword",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(params![account_id.as_str()], |row| {
+                Ok(TagSummary {
+                    name: row.get(0)?,
+                    unread_messages: row.get(1)?,
+                    total_messages: row.get(2)?,
+                })
+            })
+            .map_err(sql_to_store_error)?;
+
+        let mut tags = Vec::new();
+        for row in rows {
+            tags.push(row.map_err(sql_to_store_error)?);
+        }
+        Ok(tags)
     }
 }
 
@@ -1188,6 +1224,50 @@ mod tests {
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id.as_str(), "match");
         assert!(!page.items[0].is_read);
+        Ok(())
+    }
+
+    #[test]
+    fn list_tags_returns_user_keywords_with_counts() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![
+                MessageRecord {
+                    id: MessageId::from("read-newsletter"),
+                    keywords: vec!["$seen".to_string(), "newsletter".to_string()],
+                    ..sample_message("read-newsletter", "inbox", Some("mime-read-newsletter"))
+                },
+                MessageRecord {
+                    id: MessageId::from("unread-newsletter"),
+                    keywords: vec!["newsletter".to_string(), "work".to_string()],
+                    ..sample_message("unread-newsletter", "inbox", Some("mime-unread-newsletter"))
+                },
+            ],
+            "state",
+        )?;
+
+        let tags = store.list_tags(&account)?;
+
+        assert_eq!(
+            tags,
+            vec![
+                TagSummary {
+                    name: "newsletter".to_string(),
+                    unread_messages: 1,
+                    total_messages: 2,
+                },
+                TagSummary {
+                    name: "work".to_string(),
+                    unread_messages: 1,
+                    total_messages: 1,
+                },
+            ]
+        );
         Ok(())
     }
 
