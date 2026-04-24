@@ -163,7 +163,7 @@ fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiErro
 }
 
 /// Validate required fields for an account: non-empty ID and name, plus
-/// base URL, username, and configured secret for JMAP accounts.
+/// base URL and configured secret for JMAP accounts.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
 pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(), ApiError> {
@@ -196,25 +196,11 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
                 "JMAP base URL is required",
             ));
         }
-        if account
-            .transport
-            .username
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none()
-        {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_account",
-                "JMAP username is required",
-            ));
-        }
         if account.transport.secret_ref.is_none() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_account",
-                "JMAP password must be configured before saving the account",
+                "JMAP secret must be configured before saving the account",
             ));
         }
     }
