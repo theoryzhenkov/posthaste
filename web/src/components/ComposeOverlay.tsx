@@ -4,8 +4,8 @@
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L1-compose#mime-structure
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Mail, Reply, Send, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Loader2, Mail, Reply, Send, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -13,47 +13,49 @@ import {
   useRef,
   useState,
   type SetStateAction,
-} from "react";
-import { toast } from "sonner";
+} from 'react'
+import { toast } from 'sonner'
 
-import { fetchIdentity, fetchReplyContext, sendMessage } from "@/api/client";
-import type { Recipient, SendMessageInput } from "@/api/types";
-import { cn } from "@/lib/utils";
+import { fetchIdentity, fetchReplyContext, sendMessage } from '@/api/client'
+import type { Recipient, SendMessageInput } from '@/api/types'
+import { cn } from '@/lib/utils'
 
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { Button } from './ui/button'
+import { Input } from './ui/input'
 
 export type ComposeIntent =
-  | { kind: "new"; sourceId: string }
-  | { kind: "reply"; sourceId: string; messageId: string };
+  | { kind: 'new'; sourceId: string }
+  | { kind: 'reply'; sourceId: string; messageId: string }
 
 interface ComposeOverlayProps {
-  intent: ComposeIntent;
-  onClose: () => void;
+  intent: ComposeIntent
+  onClose: () => void
 }
 
 interface ComposeForm {
-  to: string;
-  cc: string;
-  bcc: string;
-  subject: string;
-  body: string;
+  to: string
+  cc: string
+  bcc: string
+  subject: string
+  body: string
 }
 
 const EMPTY_FORM: ComposeForm = {
-  to: "",
-  cc: "",
-  bcc: "",
-  subject: "",
-  body: "",
-};
+  to: '',
+  cc: '',
+  bcc: '',
+  subject: '',
+  body: '',
+}
 
 function formatRecipient(recipient: Recipient): string {
-  return recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email;
+  return recipient.name
+    ? `${recipient.name} <${recipient.email}>`
+    : recipient.email
 }
 
 function formatRecipients(recipients: Recipient[]): string {
-  return recipients.map(formatRecipient).join(", ");
+  return recipients.map(formatRecipient).join(', ')
 }
 
 function parseRecipients(value: string): Recipient[] {
@@ -62,16 +64,16 @@ function parseRecipients(value: string): Recipient[] {
     .map((part) => part.trim())
     .filter(Boolean)
     .map((part) => {
-      const match = part.match(/^(.*)<([^>]+)>$/);
+      const match = part.match(/^(.*)<([^>]+)>$/)
       if (!match) {
-        return { name: null, email: part };
+        return { name: null, email: part }
       }
-      const name = match[1].trim().replace(/^"|"$/g, "");
+      const name = match[1].trim().replace(/^"|"$/g, '')
       return {
         name: name || null,
         email: match[2].trim(),
-      };
-    });
+      }
+    })
 }
 
 function buildSendInput(form: ComposeForm): SendMessageInput {
@@ -83,176 +85,182 @@ function buildSendInput(form: ComposeForm): SendMessageInput {
     body: form.body,
     inReplyTo: null,
     references: null,
-  };
+  }
 }
 
 export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const queryClient = useQueryClient();
+  const panelRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const queryClient = useQueryClient()
   const identityQuery = useQuery({
-    queryKey: ["identity", intent.sourceId],
+    queryKey: ['identity', intent.sourceId],
     queryFn: () => fetchIdentity(intent.sourceId),
-  });
+  })
   const replyContextQuery = useQuery({
     queryKey:
-      intent.kind === "reply"
-        ? ["reply-context", intent.sourceId, intent.messageId]
-        : ["reply-context", null],
+      intent.kind === 'reply'
+        ? ['reply-context', intent.sourceId, intent.messageId]
+        : ['reply-context', null],
     queryFn: () =>
       fetchReplyContext(
         intent.sourceId,
-        intent.kind === "reply" ? intent.messageId : "",
+        intent.kind === 'reply' ? intent.messageId : '',
       ),
-    enabled: intent.kind === "reply",
-  });
+    enabled: intent.kind === 'reply',
+  })
 
   const composeKey =
-    intent.kind === "reply" ? `${intent.sourceId}:${intent.messageId}` : intent.sourceId;
+    intent.kind === 'reply'
+      ? `${intent.sourceId}:${intent.messageId}`
+      : intent.sourceId
 
   const initialForm = useMemo<ComposeForm>(() => {
-    if (intent.kind === "new") {
-      return EMPTY_FORM;
+    if (intent.kind === 'new') {
+      return EMPTY_FORM
     }
     if (!replyContextQuery.data) {
-      return EMPTY_FORM;
+      return EMPTY_FORM
     }
     const quoted = replyContextQuery.data.quotedBody
       ? `\n\n${replyContextQuery.data.quotedBody}`
-      : "";
+      : ''
     return {
       to: formatRecipients(replyContextQuery.data.to),
-      cc: "",
-      bcc: "",
+      cc: '',
+      bcc: '',
       subject: replyContextQuery.data.replySubject,
       body: quoted,
-    };
-  }, [intent.kind, replyContextQuery.data]);
+    }
+  }, [intent.kind, replyContextQuery.data])
   const formResetKey =
-    intent.kind === "reply"
-      ? `${composeKey}:${replyContextQuery.data ? "ready" : "loading"}`
-      : composeKey;
+    intent.kind === 'reply'
+      ? `${composeKey}:${replyContextQuery.data ? 'ready' : 'loading'}`
+      : composeKey
   const [composeState, setComposeState] = useState(() => ({
     errorMessage: null as string | null,
     form: initialForm,
     resetKey: formResetKey,
-  }));
+  }))
 
   if (composeState.resetKey !== formResetKey) {
     setComposeState({
       errorMessage: null,
       form: initialForm,
       resetKey: formResetKey,
-    });
+    })
   }
 
   const form =
-    composeState.resetKey === formResetKey ? composeState.form : initialForm;
+    composeState.resetKey === formResetKey ? composeState.form : initialForm
   const errorMessage =
-    composeState.resetKey === formResetKey ? composeState.errorMessage : null;
+    composeState.resetKey === formResetKey ? composeState.errorMessage : null
   const setForm = useCallback((nextForm: SetStateAction<ComposeForm>) => {
     setComposeState((current) => ({
       ...current,
-      form:
-        typeof nextForm === "function"
-          ? nextForm(current.form)
-          : nextForm,
-    }));
-  }, []);
+      form: typeof nextForm === 'function' ? nextForm(current.form) : nextForm,
+    }))
+  }, [])
   const setErrorMessage = useCallback((message: string | null) => {
     setComposeState((current) => ({
       ...current,
       errorMessage: message,
-    }));
-  }, []);
+    }))
+  }, [])
 
   useEffect(() => {
-    if (intent.kind === "reply" && replyContextQuery.data) {
-      requestAnimationFrame(() => bodyRef.current?.focus());
+    if (intent.kind === 'reply' && replyContextQuery.data) {
+      requestAnimationFrame(() => bodyRef.current?.focus())
     }
-  }, [composeKey, intent.kind, replyContextQuery.data]);
+  }, [composeKey, intent.kind, replyContextQuery.data])
 
   const sendMutation = useMutation({
-    mutationFn: (input: SendMessageInput) => sendMessage(intent.sourceId, input),
+    mutationFn: (input: SendMessageInput) =>
+      sendMessage(intent.sourceId, input),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["sidebar"] }),
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-      ]);
-      toast("Message sent");
-      onClose();
+        queryClient.invalidateQueries({ queryKey: ['sidebar'] }),
+        queryClient.invalidateQueries({ queryKey: ['conversations'] }),
+      ])
+      toast('Message sent')
+      onClose()
     },
     onError: (error) => {
-      setErrorMessage(error.message);
+      setErrorMessage(error.message)
     },
-  });
+  })
 
-  const isPreparingReply = intent.kind === "reply" && replyContextQuery.isLoading;
+  const isPreparingReply =
+    intent.kind === 'reply' && replyContextQuery.isLoading
   const fromLabel = useMemo(() => {
     if (identityQuery.isError) {
-      return "Sender unavailable";
+      return 'Sender unavailable'
     }
-    const identity = identityQuery.data;
+    const identity = identityQuery.data
     if (!identity) {
-      return "Loading sender...";
+      return 'Loading sender...'
     }
-    return identity.name ? `${identity.name} <${identity.email}>` : identity.email;
-  }, [identityQuery.data, identityQuery.isError]);
+    return identity.name
+      ? `${identity.name} <${identity.email}>`
+      : identity.email
+  }, [identityQuery.data, identityQuery.isError])
 
-  function setField<K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) {
-    setForm((current) => ({ ...current, [field]: value }));
+  function setField<K extends keyof ComposeForm>(
+    field: K,
+    value: ComposeForm[K],
+  ) {
+    setForm((current) => ({ ...current, [field]: value }))
   }
 
   function validate(input: SendMessageInput): string | null {
     if (input.to.length === 0) {
-      return "Add at least one recipient.";
+      return 'Add at least one recipient.'
     }
     if (input.to.some((recipient) => recipient.email.trim().length === 0)) {
-      return "Recipient email addresses cannot be empty.";
+      return 'Recipient email addresses cannot be empty.'
     }
     if (input.subject.length === 0) {
-      return "Add a subject.";
+      return 'Add a subject.'
     }
     if (input.body.trim().length === 0) {
-      return "Write a message body.";
+      return 'Write a message body.'
     }
-    return null;
+    return null
   }
 
   const handleSubmit = useCallback(() => {
-    const input = buildSendInput(form);
-    if (intent.kind === "reply" && replyContextQuery.data) {
-      input.inReplyTo = replyContextQuery.data.inReplyTo;
-      input.references = replyContextQuery.data.references;
+    const input = buildSendInput(form)
+    if (intent.kind === 'reply' && replyContextQuery.data) {
+      input.inReplyTo = replyContextQuery.data.inReplyTo
+      input.references = replyContextQuery.data.references
     }
-    const validationError = validate(input);
+    const validationError = validate(input)
     if (validationError) {
-      setErrorMessage(validationError);
-      return;
+      setErrorMessage(validationError)
+      return
     }
-    setErrorMessage(null);
-    sendMutation.mutate(input);
-  }, [form, intent.kind, replyContextQuery.data, sendMutation, setErrorMessage]);
+    setErrorMessage(null)
+    sendMutation.mutate(input)
+  }, [form, intent.kind, replyContextQuery.data, sendMutation, setErrorMessage])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-        event.preventDefault();
-        handleSubmit();
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault()
+        handleSubmit()
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleSubmit, onClose]);
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleSubmit, onClose])
 
   function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>) {
     if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
-      onClose();
+      onClose()
     }
   }
 
@@ -267,13 +275,15 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       >
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-white/10 px-3">
           <div className="flex size-7 items-center justify-center rounded-[7px] bg-white/8 text-white/72">
-            {intent.kind === "reply" ? <Reply size={15} /> : <Mail size={15} />}
+            {intent.kind === 'reply' ? <Reply size={15} /> : <Mail size={15} />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">
-              {intent.kind === "reply" ? "Reply" : "New Message"}
+              {intent.kind === 'reply' ? 'Reply' : 'New Message'}
             </div>
-            <div className="truncate text-[11px] text-white/48">{fromLabel}</div>
+            <div className="truncate text-[11px] text-white/48">
+              {fromLabel}
+            </div>
           </div>
           <Button
             type="button"
@@ -291,8 +301,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           <ComposeLine label="To">
             <Input
               value={form.to}
-              autoFocus={intent.kind === "new"}
-              onChange={(event) => setField("to", event.target.value)}
+              autoFocus={intent.kind === 'new'}
+              onChange={(event) => setField('to', event.target.value)}
               className="h-7 border-white/10 bg-white/6 text-[13px] text-white placeholder:text-white/32 focus-visible:ring-white/16"
               placeholder="name@example.com"
             />
@@ -300,21 +310,21 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           <ComposeLine label="Cc">
             <Input
               value={form.cc}
-              onChange={(event) => setField("cc", event.target.value)}
+              onChange={(event) => setField('cc', event.target.value)}
               className="h-7 border-white/10 bg-white/6 text-[13px] text-white placeholder:text-white/32 focus-visible:ring-white/16"
             />
           </ComposeLine>
           <ComposeLine label="Bcc">
             <Input
               value={form.bcc}
-              onChange={(event) => setField("bcc", event.target.value)}
+              onChange={(event) => setField('bcc', event.target.value)}
               className="h-7 border-white/10 bg-white/6 text-[13px] text-white placeholder:text-white/32 focus-visible:ring-white/16"
             />
           </ComposeLine>
           <ComposeLine label="Subject">
             <Input
               value={form.subject}
-              onChange={(event) => setField("subject", event.target.value)}
+              onChange={(event) => setField('subject', event.target.value)}
               className="h-7 border-white/10 bg-white/6 text-[13px] text-white placeholder:text-white/32 focus-visible:ring-white/16"
               placeholder="Subject"
             />
@@ -331,7 +341,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
             <textarea
               ref={bodyRef}
               value={form.body}
-              onChange={(event) => setField("body", event.target.value)}
+              onChange={(event) => setField('body', event.target.value)}
               className="ph-scroll h-full w-full resize-none bg-transparent px-5 py-4 font-mono text-[13px] leading-6 text-white outline-none placeholder:text-white/32"
               placeholder="Message"
               spellCheck
@@ -342,11 +352,11 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <div className="flex min-h-12 shrink-0 items-center gap-3 border-t border-white/10 px-4 py-2">
           <div
             className={cn(
-              "min-w-0 flex-1 truncate text-[12px]",
-              errorMessage ? "text-destructive" : "text-white/42",
+              'min-w-0 flex-1 truncate text-[12px]',
+              errorMessage ? 'text-destructive' : 'text-white/42',
             )}
           >
-            {errorMessage ?? "Ready"}
+            {errorMessage ?? 'Ready'}
           </div>
           <Button
             type="button"
@@ -372,20 +382,22 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
 function ComposeLine({
   children,
   label,
 }: {
-  children: React.ReactNode;
-  label: string;
+  children: React.ReactNode
+  label: string
 }) {
   return (
     <label className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-right text-[12px] font-medium text-white/48">{label}</span>
+      <span className="text-right text-[12px] font-medium text-white/48">
+        {label}
+      </span>
       {children}
     </label>
-  );
+  )
 }

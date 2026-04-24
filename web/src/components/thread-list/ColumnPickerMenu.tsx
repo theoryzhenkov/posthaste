@@ -5,14 +5,14 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "../ui/context-menu";
-import { ALL_COLUMNS, type ColumnId, getColumnDef } from "./columns";
+} from '../ui/context-menu'
+import { ALL_COLUMNS, type ColumnId, getColumnDef } from './columns'
 
 interface ColumnPickerMenuProps {
-  activeColumns: ColumnId[];
-  onToggle: (columnId: ColumnId) => void;
-  onReset: () => void;
-  children: React.ReactNode;
+  activeColumns: ColumnId[]
+  onToggle: (columnId: ColumnId) => void
+  onReset: () => void
+  children: React.ReactNode
 }
 
 export function ColumnPickerMenu({
@@ -21,14 +21,14 @@ export function ColumnPickerMenu({
   onReset,
   children,
 }: ColumnPickerMenuProps) {
-  const activeSet = new Set(activeColumns);
+  const activeSet = new Set(activeColumns)
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         {ALL_COLUMNS.map((id) => {
-          const def = getColumnDef(id);
+          const def = getColumnDef(id)
           return (
             <ContextMenuCheckboxItem
               key={id}
@@ -37,13 +37,11 @@ export function ColumnPickerMenu({
             >
               {def.label}
             </ContextMenuCheckboxItem>
-          );
+          )
         })}
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={onReset}>
-          Revert to Default
-        </ContextMenuItem>
+        <ContextMenuItem onSelect={onReset}>Revert to Default</ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
-  );
+  )
 }

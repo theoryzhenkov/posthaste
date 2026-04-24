@@ -6,20 +6,17 @@
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import type {
-  SmartMailboxCondition,
-  SmartMailboxGroup,
-} from "../../api/types";
-import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
-import { Input } from "../ui/input";
+import type { SmartMailboxCondition, SmartMailboxGroup } from '../../api/types'
+import { Button } from '../ui/button'
+import { Checkbox } from '../ui/checkbox'
+import { Input } from '../ui/input'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from '../ui/select'
 import {
   defaultCondition,
   defaultGroup,
@@ -29,7 +26,7 @@ import {
   parseField,
   parseGroupOperator,
   parseOperator,
-} from "./helpers";
+} from './helpers'
 
 /**
  * Recursive editor for a `SmartMailboxGroup` node.
@@ -41,14 +38,16 @@ export function RuleGroupEditor({
   group,
   onChange,
 }: {
-  group: SmartMailboxGroup;
-  onChange: (group: SmartMailboxGroup) => void;
+  group: SmartMailboxGroup
+  onChange: (group: SmartMailboxGroup) => void
 }) {
   return (
     <div className="space-y-3 rounded-md border border-border-soft bg-bg-elev/55 p-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div className="grid gap-1.5 text-[13px]">
-          <span className="text-[12px] font-medium text-muted-foreground">Match</span>
+          <span className="text-[12px] font-medium text-muted-foreground">
+            Match
+          </span>
           <Select
             value={group.operator}
             onValueChange={(value) =>
@@ -86,7 +85,12 @@ export function RuleGroupEditor({
             size="sm"
             variant="outline"
             type="button"
-            onClick={() => onChange({ ...group, nodes: [...group.nodes, defaultCondition()] })}
+            onClick={() =>
+              onChange({
+                ...group,
+                nodes: [...group.nodes, defaultCondition()],
+              })
+            }
           >
             Add condition
           </Button>
@@ -94,7 +98,9 @@ export function RuleGroupEditor({
             size="sm"
             variant="outline"
             type="button"
-            onClick={() => onChange({ ...group, nodes: [...group.nodes, defaultGroup()] })}
+            onClick={() =>
+              onChange({ ...group, nodes: [...group.nodes, defaultGroup()] })
+            }
           >
             Add group
           </Button>
@@ -112,7 +118,7 @@ export function RuleGroupEditor({
             key={index}
             className="rounded-md border border-border-soft bg-background/80 p-3"
           >
-            {node.type === "condition" ? (
+            {node.type === 'condition' ? (
               <ConditionEditor
                 condition={node}
                 onChange={(condition) =>
@@ -126,7 +132,9 @@ export function RuleGroupEditor({
                 onRemove={() =>
                   onChange({
                     ...group,
-                    nodes: group.nodes.filter((_, currentIndex) => currentIndex !== index),
+                    nodes: group.nodes.filter(
+                      (_, currentIndex) => currentIndex !== index,
+                    ),
                   })
                 }
               />
@@ -140,7 +148,9 @@ export function RuleGroupEditor({
                     onClick={() =>
                       onChange({
                         ...group,
-                        nodes: group.nodes.filter((_, currentIndex) => currentIndex !== index),
+                        nodes: group.nodes.filter(
+                          (_, currentIndex) => currentIndex !== index,
+                        ),
                       })
                     }
                   >
@@ -153,7 +163,9 @@ export function RuleGroupEditor({
                     onChange({
                       ...group,
                       nodes: group.nodes.map((current, currentIndex) =>
-                        currentIndex === index ? { type: "group", ...child } : current,
+                        currentIndex === index
+                          ? { type: 'group', ...child }
+                          : current,
                       ),
                     })
                   }
@@ -164,7 +176,7 @@ export function RuleGroupEditor({
         ))}
       </div>
     </div>
-  );
+  )
 }
 
 /**
@@ -176,31 +188,33 @@ function ConditionEditor({
   onChange,
   onRemove,
 }: {
-  condition: SmartMailboxCondition;
-  onChange: (condition: SmartMailboxCondition) => void;
-  onRemove: () => void;
+  condition: SmartMailboxCondition
+  onChange: (condition: SmartMailboxCondition) => void
+  onRemove: () => void
 }) {
-  const operators = operatorOptionsForField(condition.field);
-  const usesList = condition.operator === "in";
+  const operators = operatorOptionsForField(condition.field)
+  const usesList = condition.operator === 'in'
   const isBooleanField =
-    condition.field === "isRead" ||
-    condition.field === "isFlagged" ||
-    condition.field === "hasAttachment";
+    condition.field === 'isRead' ||
+    condition.field === 'isFlagged' ||
+    condition.field === 'hasAttachment'
 
   return (
     <div className="space-y-3">
       <div className="grid gap-2 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_auto]">
         <div className="grid gap-1 text-[13px]">
-          <span className="text-[12px] font-medium text-muted-foreground">Field</span>
+          <span className="text-[12px] font-medium text-muted-foreground">
+            Field
+          </span>
           <Select
             value={condition.field}
             onValueChange={(value) => {
-              const field = parseField(value, condition.field);
-              const nextOperator = operatorOptionsForField(field)[0];
+              const field = parseField(value, condition.field)
+              const nextOperator = operatorOptionsForField(field)[0]
               onChange({
                 ...defaultCondition(field),
                 operator: nextOperator,
-              });
+              })
             }}
           >
             <SelectTrigger className="h-8 rounded-md border-border bg-background text-[13px] shadow-none">
@@ -227,12 +241,12 @@ function ConditionEditor({
                 value,
                 condition.field,
                 condition.operator,
-              );
+              )
               onChange({
                 ...condition,
                 operator,
-                value: operator === "in" ? [] : isBooleanField ? false : "",
-              });
+                value: operator === 'in' ? [] : isBooleanField ? false : '',
+              })
             }}
           >
             <SelectTrigger className="h-8 rounded-md border-border bg-background text-[13px] shadow-none">
@@ -249,14 +263,16 @@ function ConditionEditor({
         </div>
 
         <div className="grid gap-1 text-[13px]">
-          <span className="text-[12px] font-medium text-muted-foreground">Value</span>
+          <span className="text-[12px] font-medium text-muted-foreground">
+            Value
+          </span>
           {isBooleanField ? (
             <Select
               value={String(Boolean(condition.value))}
               onValueChange={(value) =>
                 onChange({
                   ...condition,
-                  value: value === "true",
+                  value: value === 'true',
                 })
               }
             >
@@ -273,16 +289,16 @@ function ConditionEditor({
               className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
               value={
                 Array.isArray(condition.value)
-                  ? condition.value.join(", ")
+                  ? condition.value.join(', ')
                   : String(condition.value)
               }
-              placeholder={usesList ? "comma, separated, values" : "value"}
+              placeholder={usesList ? 'comma, separated, values' : 'value'}
               onChange={(event) =>
                 onChange({
                   ...condition,
                   value: usesList
                     ? event.target.value
-                        .split(",")
+                        .split(',')
                         .map((value) => value.trim())
                         .filter(Boolean)
                     : event.target.value,
@@ -309,5 +325,5 @@ function ConditionEditor({
         Negate condition
       </label>
     </div>
-  );
+  )
 }
