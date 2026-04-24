@@ -8,4 +8,4 @@ serve:
 
 # Build docs
 build:
-    uv run mkdocs build
+    uv run mkdocs build --strict

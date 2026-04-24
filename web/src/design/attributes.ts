@@ -1,26 +1,27 @@
 export const designStorageKeys = {
-  themeMode: "posthaste.themeMode.v3",
-  palettePreset: "posthaste.palettePreset.v3",
-  uiDensity: "posthaste.uiDensity.v3",
-} as const;
+  themeMode: 'posthaste.themeMode.v3',
+  palettePreset: 'posthaste.palettePreset.v3',
+  uiDensity: 'posthaste.uiDensity.v3',
+} as const
 
-export type DesignStorageKeyName = keyof typeof designStorageKeys;
-export type DesignStorageKey = (typeof designStorageKeys)[DesignStorageKeyName];
+export type DesignStorageKeyName = keyof typeof designStorageKeys
+export type DesignStorageKey = (typeof designStorageKeys)[DesignStorageKeyName]
 
 export const designDataAttributes = {
-  themeMode: "data-theme-mode",
-  resolvedThemeMode: "data-resolved-theme-mode",
-  palettePreset: "data-palette-preset",
-  paletteStyle: "data-palette-style",
-  uiDensity: "data-ui-density",
-} as const;
+  themeMode: 'data-theme-mode',
+  resolvedThemeMode: 'data-resolved-theme-mode',
+  palettePreset: 'data-palette-preset',
+  paletteStyle: 'data-palette-style',
+  uiDensity: 'data-ui-density',
+} as const
 
-export type DesignDataAttributeName = keyof typeof designDataAttributes;
+export type DesignDataAttributeName = keyof typeof designDataAttributes
 export type DesignDataAttribute =
-  (typeof designDataAttributes)[DesignDataAttributeName];
+  (typeof designDataAttributes)[DesignDataAttributeName]
 
 export const designClassNames = {
-  dark: "dark",
-} as const;
+  dark: 'dark',
+} as const
 
-export type DesignClassName = (typeof designClassNames)[keyof typeof designClassNames];
+export type DesignClassName =
+  (typeof designClassNames)[keyof typeof designClassNames]

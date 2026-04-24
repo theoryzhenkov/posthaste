@@ -1,12 +1,12 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 
 @theme inline {
-  --font-sans: "Geist Variable", sans-serif;
-  --font-mono: "Geist Mono Variable", monospace;
+  --font-sans: 'Geist Variable', sans-serif;
+  --font-mono: 'Geist Mono Variable', monospace;
   --font-heading: var(--font-sans);
 
   --color-background: var(--background);
@@ -142,7 +142,8 @@
   --hover-bg: oklch(0.94 0.008 70);
   --focus-soft: color-mix(in oklab, var(--ring) 24%, transparent);
   --shadow-popover: 0 20px 48px rgb(40 30 20 / 0.14);
-  --shadow-pane: 0 1px 2px rgb(40 30 20 / 0.06), 0 4px 16px rgb(40 30 20 / 0.04);
+  --shadow-pane:
+    0 1px 2px rgb(40 30 20 / 0.06), 0 4px 16px rgb(40 30 20 / 0.04);
 
   --ph-font-size-meta: 0.6875rem;
   --ph-font-size-ui: 0.75rem;
@@ -177,18 +178,18 @@
   --muted-foreground: oklch(0.72 0.008 70);
   --accent: oklch(0.29 0.008 60);
   --accent-foreground: oklch(0.94 0.005 80);
-  --destructive: #F87171;
+  --destructive: #f87171;
   --border: oklch(0.32 0.008 60);
   --input: oklch(0.32 0.008 60);
   --ring: oklch(0.68 0.15 250);
   --sidebar: oklch(0.195 0.008 55);
   --sidebar-foreground: oklch(0.9 0.005 78);
-  --sidebar-primary: #6FADE8;
-  --sidebar-primary-foreground: #0E1114;
+  --sidebar-primary: #6fade8;
+  --sidebar-primary-foreground: #0e1114;
   --sidebar-accent: oklch(0.26 0.008 58);
   --sidebar-accent-foreground: oklch(0.94 0.005 80);
   --sidebar-border: oklch(0.28 0.008 60);
-  --sidebar-ring: #77B1EC;
+  --sidebar-ring: #77b1ec;
   --chrome: oklch(0.185 0.008 55);
   --chrome-foreground: oklch(0.9 0.005 78);
   --panel: oklch(0.27 0.008 60);
@@ -217,21 +218,21 @@
   --shadow-pane: 0 2px 6px rgb(0 0 0 / 0.32), 0 18px 44px rgb(0 0 0 / 0.24);
 }
 
-[data-ui-density="compact"] {
+[data-ui-density='compact'] {
   --density-toolbar-height: 2.375rem;
   --density-sidebar-row-height: 1.5rem;
   --density-message-row-height: 1.5rem;
   --density-pane-padding: 0.625rem;
 }
 
-[data-ui-density="cozy"] {
+[data-ui-density='cozy'] {
   --density-toolbar-height: 2.625rem;
   --density-sidebar-row-height: 1.75rem;
   --density-message-row-height: 1.875rem;
   --density-pane-padding: 0.75rem;
 }
 
-[data-ui-density="comfortable"] {
+[data-ui-density='comfortable'] {
   --density-toolbar-height: 2.875rem;
   --density-sidebar-row-height: 2rem;
   --density-message-row-height: 3rem;
@@ -247,7 +248,9 @@
     font-size: var(--ph-font-size-body);
     line-height: 1.45;
   }
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: 100%;
   }
   body {
@@ -266,7 +269,12 @@
 @layer utilities {
   .ph-scroll {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 32%, transparent) transparent;
+    scrollbar-color: color-mix(
+        in oklab,
+        var(--muted-foreground) 32%,
+        transparent
+      )
+      transparent;
   }
 
   .ph-scroll::-webkit-scrollbar {
@@ -290,5 +298,4 @@
   .ph-focus-ring {
     @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-ring/50;
   }
-
 }

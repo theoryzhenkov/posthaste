@@ -17,12 +17,19 @@ setup:
 # Format all code
 fmt:
     just backend fmt
-    just frontend lint-fix
+    just frontend fmt
 
-# Lint / clippy everything
+# Check formatting without modifying files
+fmt-check:
+    just backend fmt-check
+    just frontend fmt-check
+
+# Lint, typecheck, format-check, and docs build
 check:
+    just fmt-check
     just backend check
     just frontend check
+    just docs build
 
 # Run all tests
 test *args:

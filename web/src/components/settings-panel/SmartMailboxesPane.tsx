@@ -3,12 +3,12 @@
  *
  * @spec docs/L1-api#smart-mailbox-crud
  */
-import { ArrowLeft, FolderSearch, Plus } from "lucide-react";
-import type { SmartMailbox, SmartMailboxSummary } from "../../api/types";
-import { brandAccents } from "../../design/tokens";
-import { Button } from "../ui/button";
-import { SmartMailboxEditor } from "./SmartMailboxEditor";
-import type { SmartMailboxEditorTarget } from "./types";
+import { ArrowLeft, FolderSearch, Plus } from 'lucide-react'
+import type { SmartMailbox, SmartMailboxSummary } from '../../api/types'
+import { brandAccents } from '../../design/tokens'
+import { Button } from '../ui/button'
+import { SmartMailboxEditor } from './SmartMailboxEditor'
+import type { SmartMailboxEditorTarget } from './types'
 
 const MAILBOX_ACCENTS = {
   blue: brandAccents.blue,
@@ -17,40 +17,40 @@ const MAILBOX_ACCENTS = {
   amber: brandAccents.amber,
   violet: brandAccents.violet,
   rose: brandAccents.rose,
-  muted: "oklch(0.60 0.008 70)",
-} as const;
+  muted: 'oklch(0.60 0.008 70)',
+} as const
 
 function smartMailboxAccent(name: string): string {
-  const normalized = name.trim().toLowerCase();
+  const normalized = name.trim().toLowerCase()
   switch (normalized) {
-    case "inbox":
-    case "all inboxes":
-    case "all mail":
-    case "today":
-    case "archive":
-    case "work":
-      return MAILBOX_ACCENTS.blue;
-    case "flagged":
-    case "relevant":
-    case "sent":
-    case "follow-up":
-      return MAILBOX_ACCENTS.coral;
-    case "read later":
-    case "read-later":
-    case "junk":
-    case "spam":
-      return MAILBOX_ACCENTS.amber;
-    case "bills":
-    case "billing":
-    case "drafts":
-      return MAILBOX_ACCENTS.violet;
-    case "newsletters":
-    case "personal":
-      return MAILBOX_ACCENTS.sage;
-    case "trash":
-      return MAILBOX_ACCENTS.rose;
+    case 'inbox':
+    case 'all inboxes':
+    case 'all mail':
+    case 'today':
+    case 'archive':
+    case 'work':
+      return MAILBOX_ACCENTS.blue
+    case 'flagged':
+    case 'relevant':
+    case 'sent':
+    case 'follow-up':
+      return MAILBOX_ACCENTS.coral
+    case 'read later':
+    case 'read-later':
+    case 'junk':
+    case 'spam':
+      return MAILBOX_ACCENTS.amber
+    case 'bills':
+    case 'billing':
+    case 'drafts':
+      return MAILBOX_ACCENTS.violet
+    case 'newsletters':
+    case 'personal':
+      return MAILBOX_ACCENTS.sage
+    case 'trash':
+      return MAILBOX_ACCENTS.rose
     default:
-      return MAILBOX_ACCENTS.muted;
+      return MAILBOX_ACCENTS.muted
   }
 }
 
@@ -69,24 +69,25 @@ export function SmartMailboxesPane({
   onSaved,
   onDeleted,
 }: {
-  smartMailboxes: SmartMailboxSummary[];
-  selectedMailboxId: SmartMailboxEditorTarget | null;
-  editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null;
-  editorKey: string;
-  actionPendingKey: string | null;
-  actionError: string | null;
-  onSelectMailbox: (mailboxId: string) => void;
-  onBackToMailboxes: () => void;
-  onCreateMailbox: () => void;
-  onResetDefaults: () => void;
-  onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void;
-  onSaved: (mailbox: SmartMailbox) => Promise<void>;
-  onDeleted: (mailboxId: string) => Promise<void>;
+  smartMailboxes: SmartMailboxSummary[]
+  selectedMailboxId: SmartMailboxEditorTarget | null
+  editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
+  editorKey: string
+  actionPendingKey: string | null
+  actionError: string | null
+  onSelectMailbox: (mailboxId: string) => void
+  onBackToMailboxes: () => void
+  onCreateMailbox: () => void
+  onResetDefaults: () => void
+  onReorderMailbox: (mailbox: SmartMailboxSummary, position: number) => void
+  onSaved: (mailbox: SmartMailbox) => Promise<void>
+  onDeleted: (mailboxId: string) => Promise<void>
 }) {
   const selectedMailbox =
-    selectedMailboxId === null || selectedMailboxId === "new"
+    selectedMailboxId === null || selectedMailboxId === 'new'
       ? null
-      : smartMailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
+      : (smartMailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ??
+        null)
 
   if (selectedMailboxId !== null) {
     return (
@@ -110,7 +111,7 @@ export function SmartMailboxesPane({
             </p>
           )}
 
-          {selectedMailboxId === "new" || editingSmartMailbox ? (
+          {selectedMailboxId === 'new' || editingSmartMailbox ? (
             <SmartMailboxEditor
               key={editorKey}
               editorTarget={selectedMailboxId}
@@ -126,7 +127,7 @@ export function SmartMailboxesPane({
           )}
         </div>
       </section>
-    );
+    )
   }
 
   return (
@@ -156,8 +157,8 @@ export function SmartMailboxesPane({
           <div className="mt-7 overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
             <div className="flex min-h-[48px] items-center justify-between gap-3 border-b border-border-soft px-4">
               <h2 className="text-[13px] font-semibold text-foreground">
-                {smartMailboxes.length} saved{" "}
-                {smartMailboxes.length === 1 ? "view" : "views"}
+                {smartMailboxes.length} saved{' '}
+                {smartMailboxes.length === 1 ? 'view' : 'views'}
               </h2>
               <div className="flex items-center gap-2">
                 <Button
@@ -188,7 +189,7 @@ export function SmartMailboxesPane({
                 accent={smartMailboxAccent(mailbox.name)}
                 label={mailbox.name}
                 sublabel={`${mailbox.totalMessages} messages · ${mailbox.unreadMessages} unread`}
-                isDefault={mailbox.kind === "default"}
+                isDefault={mailbox.kind === 'default'}
                 onClick={() => onSelectMailbox(mailbox.id)}
               />
             ))}
@@ -196,7 +197,7 @@ export function SmartMailboxesPane({
         )}
       </div>
     </section>
-  );
+  )
 }
 
 function MailboxListRow({
@@ -206,11 +207,11 @@ function MailboxListRow({
   isDefault,
   onClick,
 }: {
-  accent: string;
-  label: string;
-  sublabel?: string;
-  isDefault?: boolean;
-  onClick: () => void;
+  accent: string
+  label: string
+  sublabel?: string
+  isDefault?: boolean
+  onClick: () => void
 }) {
   return (
     <button
@@ -252,17 +253,21 @@ function MailboxListRow({
         Edit
       </span>
     </button>
-  );
+  )
 }
 
 function SmartMailboxesEmptyState({
   onCreateMailbox,
 }: {
-  onCreateMailbox: () => void;
+  onCreateMailbox: () => void
 }) {
   return (
     <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border-soft bg-bg-elev/45 px-6 text-center">
-      <FolderSearch size={36} strokeWidth={1.5} className="text-muted-foreground/40" />
+      <FolderSearch
+        size={36}
+        strokeWidth={1.5}
+        className="text-muted-foreground/40"
+      />
       <div className="mt-4">
         <p className="text-[13px] font-medium">No smart mailboxes yet</p>
         <p className="mt-1 text-[13px] text-muted-foreground">
@@ -280,5 +285,5 @@ function SmartMailboxesEmptyState({
         New mailbox
       </Button>
     </div>
-  );
+  )
 }

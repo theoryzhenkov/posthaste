@@ -4,32 +4,21 @@
  * @spec docs/L1-api#smart-mailbox-crud
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
-import {
-  createSmartMailbox,
-  updateSmartMailbox,
-} from "../../api/client";
+import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
+import { createSmartMailbox, updateSmartMailbox } from '../../api/client'
 import type {
   CreateSmartMailboxInput,
   SmartMailbox,
   SmartMailboxSummary,
   UpdateSmartMailboxInput,
-} from "../../api/types";
-import { Button } from "../ui/button";
-import {
-  EMPTY_SMART_MAILBOX_FORM,
-  formFromSmartMailbox,
-} from "./helpers";
-import { RuleGroupEditor } from "./RuleGroupEditor";
-import {
-  FeedbackBanner,
-  Field,
-  SectionCard,
-  SectionHeader,
-} from "./shared";
-import type { SmartMailboxEditorTarget } from "./types";
+} from '../../api/types'
+import { Button } from '../ui/button'
+import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
+import { RuleGroupEditor } from './RuleGroupEditor'
+import { FeedbackBanner, Field, SectionCard, SectionHeader } from './shared'
+import type { SmartMailboxEditorTarget } from './types'
 
 /**
  * Smart mailbox editor form: create new or edit existing smart mailboxes.
@@ -48,50 +37,52 @@ export function SmartMailboxEditor({
   onReorder,
   reorderPendingKey,
 }: {
-  editorTarget: SmartMailboxEditorTarget;
-  editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null;
-  summary: SmartMailboxSummary | null;
-  onSaved: (smartMailbox: SmartMailbox) => Promise<void>;
-  onDeleted: (smartMailboxId: string) => Promise<void>;
-  onReorder: (mailbox: SmartMailboxSummary, position: number) => void;
-  reorderPendingKey: string | null;
+  editorTarget: SmartMailboxEditorTarget
+  editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
+  summary: SmartMailboxSummary | null
+  onSaved: (smartMailbox: SmartMailbox) => Promise<void>
+  onDeleted: (smartMailboxId: string) => Promise<void>
+  onReorder: (mailbox: SmartMailboxSummary, position: number) => void
+  reorderPendingKey: string | null
 }) {
   const [form, setForm] = useState(() =>
-    editingSmartMailbox ? formFromSmartMailbox(editingSmartMailbox) : EMPTY_SMART_MAILBOX_FORM,
-  );
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    editingSmartMailbox
+      ? formFromSmartMailbox(editingSmartMailbox)
+      : EMPTY_SMART_MAILBOX_FORM,
+  )
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: async (currentForm: typeof form) => {
-      if (editorTarget === "new") {
+      if (editorTarget === 'new') {
         const payload: CreateSmartMailboxInput = {
           name: currentForm.name.trim(),
           position: currentForm.position,
           rule: currentForm.rule,
-        };
-        return createSmartMailbox(payload);
+        }
+        return createSmartMailbox(payload)
       }
 
       const payload: UpdateSmartMailboxInput = {
         name: currentForm.name.trim(),
         position: currentForm.position,
         rule: currentForm.rule,
-      };
-      return updateSmartMailbox(editorTarget, payload);
+      }
+      return updateSmartMailbox(editorTarget, payload)
     },
     onSuccess: async (smartMailbox) => {
-      setFeedback(`Saved ${smartMailbox.name}.`);
-      setErrorMessage(null);
-      await onSaved(smartMailbox);
+      setFeedback(`Saved ${smartMailbox.name}.`)
+      setErrorMessage(null)
+      await onSaved(smartMailbox)
     },
     onError: (error: Error) => {
-      setFeedback(null);
-      setErrorMessage(error.message);
+      setFeedback(null)
+      setErrorMessage(error.message)
     },
-  });
+  })
 
-  const isEditing = editorTarget !== "new";
+  const isEditing = editorTarget !== 'new'
 
   return (
     <div>
@@ -99,14 +90,14 @@ export function SmartMailboxEditor({
         <SectionHeader
           eyebrow="Mailbox editor"
           title={
-            editorTarget === "new"
-              ? "New smart mailbox"
-              : editingSmartMailbox?.name ?? "Smart mailbox"
+            editorTarget === 'new'
+              ? 'New smart mailbox'
+              : (editingSmartMailbox?.name ?? 'Smart mailbox')
           }
           description={
-            editorTarget === "new"
-              ? "A saved message query that powers a virtual mailbox."
-              : "Saved queries power unified mailboxes and custom filtered views."
+            editorTarget === 'new'
+              ? 'A saved message query that powers a virtual mailbox.'
+              : 'Saved queries power unified mailboxes and custom filtered views.'
           }
           actions={
             isEditing ? (
@@ -117,7 +108,9 @@ export function SmartMailboxEditor({
                       size="sm"
                       variant="outline"
                       type="button"
-                      onClick={() => onReorder(summary, Math.max(0, summary.position - 1))}
+                      onClick={() =>
+                        onReorder(summary, Math.max(0, summary.position - 1))
+                      }
                       disabled={reorderPendingKey !== null}
                       aria-label="Move up"
                     >
@@ -152,16 +145,15 @@ export function SmartMailboxEditor({
       <div>
         <div>
           <SectionCard>
-            <SectionHeader
-              eyebrow="Definition"
-              title="Mailbox name"
-            />
+            <SectionHeader eyebrow="Definition" title="Mailbox name" />
 
             <Field
               label="Name"
               value={form.name}
               placeholder="Important"
-              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, name: value }))
+              }
             />
           </SectionCard>
 
@@ -184,7 +176,9 @@ export function SmartMailboxEditor({
 
             <RuleGroupEditor
               group={form.rule.root}
-              onChange={(root) => setForm((current) => ({ ...current, rule: { root } }))}
+              onChange={(root) =>
+                setForm((current) => ({ ...current, rule: { root } }))
+              }
             />
           </SectionCard>
         </div>
@@ -197,8 +191,12 @@ export function SmartMailboxEditor({
               description="Save the current smart mailbox or reset the form back to its loaded state."
             />
 
-            {feedback && <FeedbackBanner tone="success">{feedback}</FeedbackBanner>}
-            {errorMessage && <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>}
+            {feedback && (
+              <FeedbackBanner tone="success">{feedback}</FeedbackBanner>
+            )}
+            {errorMessage && (
+              <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>
+            )}
 
             <div className="flex flex-wrap gap-1.5">
               <Button
@@ -207,7 +205,7 @@ export function SmartMailboxEditor({
                 disabled={saveMutation.isPending}
                 className="bg-brand-coral text-white hover:bg-brand-coral/90"
               >
-                {editorTarget === "new" ? "Create mailbox" : "Save mailbox"}
+                {editorTarget === 'new' ? 'Create mailbox' : 'Save mailbox'}
               </Button>
               <Button
                 type="button"
@@ -227,5 +225,5 @@ export function SmartMailboxEditor({
         </div>
       </div>
     </div>
-  );
+  )
 }

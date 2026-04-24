@@ -4,8 +4,8 @@
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#secret-management
  */
-import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,39 +16,36 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "../ui/alert-dialog";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
-import { Input } from "../ui/input";
+} from '../ui/alert-dialog'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Checkbox } from '../ui/checkbox'
+import { Input } from '../ui/input'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { createAccount, updateAccount, verifyAccount } from "../../api/client";
-import type {
-  AccountOverview,
-  VerificationResponse,
-} from "../../api/types";
-import { formatRelativeTime } from "../../utils/relativeTime";
+} from '../ui/select'
+import { createAccount, updateAccount, verifyAccount } from '../../api/client'
+import type { AccountOverview, VerificationResponse } from '../../api/types'
+import { formatRelativeTime } from '../../utils/relativeTime'
 import {
   buildCreateAccountPayload,
   buildUpdateAccountPayload,
   EMPTY_FORM,
   formFromAccount,
   parseAccountDriver,
-} from "./helpers";
+} from './helpers'
 import {
   FeedbackBanner,
   Field,
   SectionCard,
   SectionHeader,
   StatusDot,
-} from "./shared";
-import type { EditorTarget } from "./types";
+} from './shared'
+import type { EditorTarget } from './types'
 
 /**
  * Account editor form: create new or edit existing accounts.
@@ -67,60 +64,62 @@ export function AccountEditor({
   onCommand,
   isCommandPending,
 }: {
-  editorTarget: EditorTarget;
-  editingAccount: AccountOverview | null;
-  onSaved: (account: AccountOverview) => Promise<void>;
-  onVerified: () => Promise<void>;
+  editorTarget: EditorTarget
+  editingAccount: AccountOverview | null
+  onSaved: (account: AccountOverview) => Promise<void>
+  onVerified: () => Promise<void>
   onCommand: (
-    action: "enable" | "disable" | "delete" | "sync",
+    action: 'enable' | 'disable' | 'delete' | 'sync',
     account: AccountOverview,
-  ) => void;
-  isCommandPending: boolean;
+  ) => void
+  isCommandPending: boolean
 }) {
   const [form, setForm] = useState(() =>
     editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
-  );
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [verification, setVerification] = useState<VerificationResponse | null>(null);
+  )
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [verification, setVerification] = useState<VerificationResponse | null>(
+    null,
+  )
 
   const saveMutation = useMutation({
     mutationFn: (currentForm: typeof form) =>
-      editorTarget === "new"
+      editorTarget === 'new'
         ? createAccount(buildCreateAccountPayload(currentForm))
         : updateAccount(editorTarget, buildUpdateAccountPayload(currentForm)),
     onSuccess: async (account) => {
-      setFeedback(`Saved ${account.name}.`);
-      setErrorMessage(null);
-      setVerification(null);
-      await onSaved(account);
+      setFeedback(`Saved ${account.name}.`)
+      setErrorMessage(null)
+      setVerification(null)
+      await onSaved(account)
     },
     onError: (error: Error) => {
-      setFeedback(null);
-      setErrorMessage(error.message);
+      setFeedback(null)
+      setErrorMessage(error.message)
     },
-  });
+  })
 
   const verifyMutation = useMutation({
     mutationFn: (accountId: string) => verifyAccount(accountId),
     onSuccess: async (result) => {
-      setVerification(result);
+      setVerification(result)
       setFeedback(
         result.identityEmail
           ? `Verified ${result.identityEmail}.`
-          : "Account verified.",
-      );
-      setErrorMessage(null);
-      await onVerified();
+          : 'Account verified.',
+      )
+      setErrorMessage(null)
+      await onVerified()
     },
     onError: (error: Error) => {
-      setVerification(null);
-      setFeedback(null);
-      setErrorMessage(error.message);
+      setVerification(null)
+      setFeedback(null)
+      setErrorMessage(error.message)
     },
-  });
+  })
 
-  const isEditing = editorTarget !== "new" && editingAccount !== null;
+  const isEditing = editorTarget !== 'new' && editingAccount !== null
 
   return (
     <div>
@@ -128,14 +127,14 @@ export function AccountEditor({
         <SectionHeader
           eyebrow="Account editor"
           title={
-            editorTarget === "new"
-              ? "New account"
-              : editingAccount?.name ?? "Account"
+            editorTarget === 'new'
+              ? 'New account'
+              : (editingAccount?.name ?? 'Account')
           }
           description={
-            editorTarget === "new"
-              ? "Configure transport details, then save and verify the connection."
-              : "Update credentials, review sync status, or run account-level actions."
+            editorTarget === 'new'
+              ? 'Configure transport details, then save and verify the connection.'
+              : 'Update credentials, review sync status, or run account-level actions.'
           }
           actions={
             isEditing && editingAccount ? (
@@ -150,7 +149,9 @@ export function AccountEditor({
           }
         />
 
-        {isEditing && editingAccount && <AccountStatusStrip account={editingAccount} />}
+        {isEditing && editingAccount && (
+          <AccountStatusStrip account={editingAccount} />
+        )}
       </SectionCard>
 
       <SectionCard>
@@ -159,15 +160,19 @@ export function AccountEditor({
         <Field
           label="Account name"
           value={form.name}
-          onChange={(value) => setForm((current) => ({ ...current, name: value }))}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, name: value }))
+          }
         />
 
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_10rem]">
           <Field
             label="Account ID"
             value={form.id}
-            disabled={editorTarget !== "new"}
-            onChange={(value) => setForm((current) => ({ ...current, id: value }))}
+            disabled={editorTarget !== 'new'}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, id: value }))
+            }
           />
           <label className="grid gap-1.5 text-[13px]">
             <span className="text-[12px] font-medium text-muted-foreground">
@@ -212,13 +217,17 @@ export function AccountEditor({
             label="Base URL"
             value={form.baseUrl}
             placeholder="https://mail.example.com/jmap"
-            onChange={(value) => setForm((current) => ({ ...current, baseUrl: value }))}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, baseUrl: value }))
+            }
           />
           <Field
             label="Username"
             value={form.username}
             placeholder="you@example.com"
-            onChange={(value) => setForm((current) => ({ ...current, username: value }))}
+            onChange={(value) =>
+              setForm((current) => ({ ...current, username: value }))
+            }
           />
         </div>
       </SectionCard>
@@ -240,38 +249,39 @@ export function AccountEditor({
         />
 
         <div className="flex flex-wrap gap-1.5">
-          {(["keep", "replace", "clear"] as const).map((mode) => {
+          {(['keep', 'replace', 'clear'] as const).map((mode) => {
             const showKeep =
-              mode !== "keep" || Boolean(editingAccount?.transport.secret.configured);
+              mode !== 'keep' ||
+              Boolean(editingAccount?.transport.secret.configured)
             if (!showKeep) {
-              return null;
+              return null
             }
             return (
               <Button
                 key={mode}
                 size="sm"
                 type="button"
-                variant={form.secretMode === mode ? "default" : "outline"}
+                variant={form.secretMode === mode ? 'default' : 'outline'}
                 onClick={() => {
                   if (
-                    mode === "clear" &&
+                    mode === 'clear' &&
                     editingAccount?.transport.secret.configured &&
                     !window.confirm(
-                      "Are you sure? The stored password will be permanently removed.",
+                      'Are you sure? The stored password will be permanently removed.',
                     )
                   ) {
-                    return;
+                    return
                   }
                   setForm((current) => ({
                     ...current,
                     secretMode: mode,
-                    password: mode === "replace" ? current.password : "",
-                  }));
+                    password: mode === 'replace' ? current.password : '',
+                  }))
                 }}
               >
                 {mode}
               </Button>
-            );
+            )
           })}
         </div>
 
@@ -280,9 +290,11 @@ export function AccountEditor({
           type="password"
           className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
           value={form.password}
-          disabled={form.secretMode !== "replace"}
+          disabled={form.secretMode !== 'replace'}
           placeholder={
-            form.secretMode === "replace" ? "Enter a new password" : "Password hidden"
+            form.secretMode === 'replace'
+              ? 'Enter a new password'
+              : 'Password hidden'
           }
           onChange={(event) =>
             setForm((current) => ({
@@ -302,7 +314,9 @@ export function AccountEditor({
             Verified identity: {verification.identityEmail}
           </FeedbackBanner>
         )}
-        {errorMessage && <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>}
+        {errorMessage && (
+          <FeedbackBanner tone="error">{errorMessage}</FeedbackBanner>
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           <Button
@@ -311,13 +325,15 @@ export function AccountEditor({
             disabled={saveMutation.isPending}
             className="bg-brand-coral text-white hover:bg-brand-coral/90"
           >
-            {editorTarget === "new" ? "Create account" : "Save changes"}
+            {editorTarget === 'new' ? 'Create account' : 'Save changes'}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={() =>
-              setForm(editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM)
+              setForm(
+                editingAccount ? formFromAccount(editingAccount) : EMPTY_FORM,
+              )
             }
           >
             Reset form
@@ -325,7 +341,7 @@ export function AccountEditor({
         </div>
       </SectionCard>
     </div>
-  );
+  )
 }
 
 function AccountActions({
@@ -335,14 +351,14 @@ function AccountActions({
   isVerifying,
   isCommandPending,
 }: {
-  account: AccountOverview;
+  account: AccountOverview
   onCommand: (
-    action: "enable" | "disable" | "delete" | "sync",
+    action: 'enable' | 'disable' | 'delete' | 'sync',
     account: AccountOverview,
-  ) => void;
-  onVerify: () => void;
-  isVerifying: boolean;
-  isCommandPending: boolean;
+  ) => void
+  onVerify: () => void
+  isVerifying: boolean
+  isCommandPending: boolean
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -359,7 +375,7 @@ function AccountActions({
         size="sm"
         variant="outline"
         type="button"
-        onClick={() => onCommand("sync", account)}
+        onClick={() => onCommand('sync', account)}
         disabled={isCommandPending}
       >
         Sync
@@ -369,11 +385,11 @@ function AccountActions({
         variant="outline"
         type="button"
         onClick={() =>
-          onCommand(account.enabled ? "disable" : "enable", account)
+          onCommand(account.enabled ? 'disable' : 'enable', account)
         }
         disabled={isCommandPending}
       >
-        {account.enabled ? "Disable" : "Enable"}
+        {account.enabled ? 'Disable' : 'Enable'}
       </Button>
       <AlertDialog>
         <AlertDialogTrigger asChild>
@@ -385,15 +401,15 @@ function AccountActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete account?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove &ldquo;{account.name}&rdquo; and all synced
-              data. This cannot be undone.
+              This will permanently remove &ldquo;{account.name}&rdquo; and all
+              synced data. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={() => onCommand("delete", account)}
+              onClick={() => onCommand('delete', account)}
             >
               Delete account
             </AlertDialogAction>
@@ -401,7 +417,7 @@ function AccountActions({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
+  )
 }
 
 function AccountStatusStrip({ account }: { account: AccountOverview }) {
@@ -415,8 +431,10 @@ function AccountStatusStrip({ account }: { account: AccountOverview }) {
           </span>
         </span>
         <span>
-          Last sync:{" "}
-          {account.lastSyncAt ? formatRelativeTime(account.lastSyncAt) : "never"}
+          Last sync:{' '}
+          {account.lastSyncAt
+            ? formatRelativeTime(account.lastSyncAt)
+            : 'never'}
         </span>
         <span>Real-time: {account.push}</span>
         <span>{account.driver.toUpperCase()}</span>
@@ -427,5 +445,5 @@ function AccountStatusStrip({ account }: { account: AccountOverview }) {
         </p>
       )}
     </>
-  );
+  )
 }

@@ -3,14 +3,14 @@
  *
  * @spec docs/L1-api#account-crud-lifecycle
  */
-import type { UseMutationResult } from "@tanstack/react-query";
-import { ArrowLeft, Plus, UserPlus } from "lucide-react";
-import type { AccountOverview } from "../../api/types";
-import { brandAccents } from "../../design/tokens";
-import { AccountEditor } from "./AccountEditor";
-import { Button } from "../ui/button";
-import { StatusDot } from "./shared";
-import type { EditorTarget } from "./types";
+import type { UseMutationResult } from '@tanstack/react-query'
+import { ArrowLeft, Plus, UserPlus } from 'lucide-react'
+import type { AccountOverview } from '../../api/types'
+import { brandAccents } from '../../design/tokens'
+import { AccountEditor } from './AccountEditor'
+import { Button } from '../ui/button'
+import { StatusDot } from './shared'
+import type { EditorTarget } from './types'
 
 const ACCOUNT_ACCENTS = [
   brandAccents.blue,
@@ -18,15 +18,15 @@ const ACCOUNT_ACCENTS = [
   brandAccents.sage,
   brandAccents.violet,
   brandAccents.amber,
-] as const;
+] as const
 
 function accountAccent(account: AccountOverview): string {
-  const seed = `${account.id}:${account.name}`;
-  let hash = 0;
+  const seed = `${account.id}:${account.name}`
+  let hash = 0
   for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0
   }
-  return ACCOUNT_ACCENTS[hash % ACCOUNT_ACCENTS.length];
+  return ACCOUNT_ACCENTS[hash % ACCOUNT_ACCENTS.length]
 }
 
 export function AccountsPane({
@@ -42,25 +42,28 @@ export function AccountsPane({
   onVerified,
   commandMutation,
 }: {
-  accounts: AccountOverview[];
-  selectedAccountId: EditorTarget | null;
-  editingAccount: AccountOverview | null;
-  editorKey: string;
-  onSelectAccount: (accountId: string) => void;
-  onBackToAccounts: () => void;
-  onCreateAccount: () => void;
+  accounts: AccountOverview[]
+  selectedAccountId: EditorTarget | null
+  editingAccount: AccountOverview | null
+  editorKey: string
+  onSelectAccount: (accountId: string) => void
+  onBackToAccounts: () => void
+  onCreateAccount: () => void
   onCommand: (
-    action: "enable" | "disable" | "delete" | "sync",
+    action: 'enable' | 'disable' | 'delete' | 'sync',
     account: AccountOverview,
-  ) => void;
-  onSaved: (account: AccountOverview) => Promise<void>;
-  onVerified: () => Promise<void>;
+  ) => void
+  onSaved: (account: AccountOverview) => Promise<void>
+  onVerified: () => Promise<void>
   commandMutation: UseMutationResult<
     unknown,
     Error,
-    { action: "enable" | "disable" | "delete" | "sync"; account: AccountOverview },
+    {
+      action: 'enable' | 'disable' | 'delete' | 'sync'
+      account: AccountOverview
+    },
     unknown
-  >;
+  >
 }) {
   if (selectedAccountId !== null) {
     return (
@@ -78,7 +81,7 @@ export function AccountsPane({
             Accounts
           </Button>
 
-          {selectedAccountId === "new" || editingAccount ? (
+          {selectedAccountId === 'new' || editingAccount ? (
             <AccountEditor
               key={editorKey}
               editorTarget={selectedAccountId}
@@ -93,7 +96,7 @@ export function AccountsPane({
           )}
         </div>
       </section>
-    );
+    )
   }
 
   return (
@@ -104,8 +107,8 @@ export function AccountsPane({
             Connected accounts
           </h1>
           <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
-            Connect each mail source PostHaste should sync. Accounts keep their own
-            credentials, status, and sync controls.
+            Connect each mail source PostHaste should sync. Accounts keep their
+            own credentials, status, and sync controls.
           </p>
         </header>
 
@@ -117,7 +120,8 @@ export function AccountsPane({
           <div className="mt-7 overflow-hidden rounded-lg border border-border-soft bg-bg-elev/45">
             <div className="flex min-h-[48px] items-center justify-between gap-3 border-b border-border-soft px-4">
               <h2 className="text-[13px] font-semibold text-foreground">
-                {accounts.length} connected {accounts.length === 1 ? "account" : "accounts"}
+                {accounts.length} connected{' '}
+                {accounts.length === 1 ? 'account' : 'accounts'}
               </h2>
               <Button
                 aria-label="New account"
@@ -147,7 +151,7 @@ export function AccountsPane({
         )}
       </div>
     </section>
-  );
+  )
 }
 
 function AccountListRow({
@@ -158,12 +162,12 @@ function AccountListRow({
   leading,
   onClick,
 }: {
-  accent: string;
-  label: string;
-  sublabel?: string;
-  isDefault?: boolean;
-  leading: React.ReactNode;
-  onClick: () => void;
+  accent: string
+  label: string
+  sublabel?: string
+  isDefault?: boolean
+  leading: React.ReactNode
+  onClick: () => void
 }) {
   return (
     <button
@@ -205,17 +209,21 @@ function AccountListRow({
         Edit
       </span>
     </button>
-  );
+  )
 }
 
 function AccountsEmptyState({
   onCreateAccount,
 }: {
-  onCreateAccount: () => void;
+  onCreateAccount: () => void
 }) {
   return (
     <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border-soft bg-bg-elev/45 px-6 text-center">
-      <UserPlus size={36} strokeWidth={1.5} className="text-muted-foreground/40" />
+      <UserPlus
+        size={36}
+        strokeWidth={1.5}
+        className="text-muted-foreground/40"
+      />
       <div className="mt-4">
         <p className="text-[13px] font-medium">No accounts yet</p>
         <p className="mt-1 text-[13px] text-muted-foreground">
@@ -233,5 +241,5 @@ function AccountsEmptyState({
         New account
       </Button>
     </div>
-  );
+  )
 }

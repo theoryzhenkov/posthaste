@@ -1,9 +1,9 @@
 /** @spec docs/L1-api#endpoint-table */
-export type AccountDriver = "jmap" | "mock";
+export type AccountDriver = 'jmap' | 'mock'
 
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
-  defaultAccountId: string | null;
+  defaultAccountId: string | null
 }
 
 /**
@@ -11,48 +11,54 @@ export interface AppSettings {
  * @spec docs/L1-api#secret-management
  */
 export interface SecretStatus {
-  storage: "env" | "os";
-  configured: boolean;
-  label: string | null;
+  storage: 'env' | 'os'
+  configured: boolean
+  label: string | null
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export type KnownMailboxRole =
-  | "inbox"
-  | "archive"
-  | "drafts"
-  | "sent"
-  | "junk"
-  | "trash";
+  | 'inbox'
+  | 'archive'
+  | 'drafts'
+  | 'sent'
+  | 'junk'
+  | 'trash'
 
 /**
  * Summary of a configured account, including transport and sync status.
  * @spec docs/L1-api#account-crud-lifecycle
  */
 export interface AccountOverview {
-  id: string;
-  name: string;
-  driver: AccountDriver;
-  enabled: boolean;
+  id: string
+  name: string
+  driver: AccountDriver
+  enabled: boolean
   transport: {
-    baseUrl: string | null;
-    username: string | null;
-    secret: SecretStatus;
-  };
-  createdAt: string;
-  updatedAt: string;
-  isDefault: boolean;
-  status: "ready" | "syncing" | "degraded" | "authError" | "offline" | "disabled";
-  push: "connected" | "reconnecting" | "unsupported" | "disabled";
-  lastSyncAt: string | null;
-  lastSyncError: string | null;
-  lastSyncErrorCode: string | null;
+    baseUrl: string | null
+    username: string | null
+    secret: SecretStatus
+  }
+  createdAt: string
+  updatedAt: string
+  isDefault: boolean
+  status:
+    | 'ready'
+    | 'syncing'
+    | 'degraded'
+    | 'authError'
+    | 'offline'
+    | 'disabled'
+  push: 'connected' | 'reconnecting' | 'unsupported' | 'disabled'
+  lastSyncAt: string | null
+  lastSyncError: string | null
+  lastSyncErrorCode: string | null
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountTransportInput {
-  baseUrl: string;
-  username: string;
+  baseUrl: string
+  username: string
 }
 
 /**
@@ -60,18 +66,18 @@ export interface AccountTransportInput {
  * @spec docs/L1-api#secret-management
  */
 export interface SecretInstructionInput {
-  mode: "keep" | "replace" | "clear";
-  password?: string;
+  mode: 'keep' | 'replace' | 'clear'
+  password?: string
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface CreateAccountInput {
-  id: string;
-  name: string;
-  driver: AccountDriver;
-  enabled: boolean;
-  transport: AccountTransportInput;
-  secret: SecretInstructionInput;
+  id: string
+  name: string
+  driver: AccountDriver
+  enabled: boolean
+  transport: AccountTransportInput
+  secret: SecretInstructionInput
 }
 
 /**
@@ -79,67 +85,67 @@ export interface CreateAccountInput {
  * @spec docs/L1-api#account-crud-lifecycle
  */
 export interface UpdateAccountInput {
-  name?: string;
-  driver?: AccountDriver;
-  enabled?: boolean;
-  transport?: Partial<AccountTransportInput>;
-  secret?: SecretInstructionInput;
+  name?: string
+  driver?: AccountDriver
+  enabled?: boolean
+  transport?: Partial<AccountTransportInput>
+  secret?: SecretInstructionInput
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface VerificationResponse {
-  ok: boolean;
-  identityEmail: string | null;
-  pushSupported: boolean;
+  ok: boolean
+  identityEmail: string | null
+  pushSupported: boolean
 }
 
 /** @spec docs/L1-api#compose */
 export interface Identity {
-  id: string;
-  name: string;
-  email: string;
+  id: string
+  name: string
+  email: string
 }
 
 /** @spec docs/L1-api#compose */
 export interface Recipient {
-  name: string | null;
-  email: string;
+  name: string | null
+  email: string
 }
 
 /** @spec docs/L1-api#compose */
 export interface ReplyContext {
-  to: Recipient[];
-  cc: Recipient[];
-  replySubject: string;
-  forwardSubject: string;
-  quotedBody: string | null;
-  inReplyTo: string | null;
-  references: string | null;
+  to: Recipient[]
+  cc: Recipient[]
+  replySubject: string
+  forwardSubject: string
+  quotedBody: string | null
+  inReplyTo: string | null
+  references: string | null
 }
 
 /** @spec docs/L1-api#compose */
 export interface SendMessageInput {
-  to: Recipient[];
-  cc: Recipient[];
-  bcc: Recipient[];
-  subject: string;
-  body: string;
-  inReplyTo: string | null;
-  references: string | null;
+  to: Recipient[]
+  cc: Recipient[]
+  bcc: Recipient[]
+  subject: string
+  body: string
+  inReplyTo: string | null
+  references: string | null
 }
 
 /** @spec docs/L1-api#error-format */
 export interface OkResponse {
-  ok: boolean;
+  ok: boolean
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export interface Mailbox {
-  id: string;
-  name: string;
-  role: KnownMailboxRole | null;
-  unreadEmails: number;
-  totalEmails: number;
+  id: string
+  name: string
+  role: KnownMailboxRole | null
+  unreadEmails: number
+  totalEmails: number
 }
 
 /**
@@ -147,21 +153,21 @@ export interface Mailbox {
  * @spec docs/L1-ui#messagelist
  */
 export interface MessageSummary {
-  id: string;
-  sourceId: string;
-  sourceName: string;
-  sourceThreadId: string;
-  conversationId: string;
-  subject: string | null;
-  fromName: string | null;
-  fromEmail: string | null;
-  preview: string | null;
-  receivedAt: string;
-  hasAttachment: boolean;
-  isRead: boolean;
-  isFlagged: boolean;
-  mailboxIds: string[];
-  keywords: string[];
+  id: string
+  sourceId: string
+  sourceName: string
+  sourceThreadId: string
+  conversationId: string
+  subject: string | null
+  fromName: string | null
+  fromEmail: string | null
+  preview: string | null
+  receivedAt: string
+  hasAttachment: boolean
+  isRead: boolean
+  isFlagged: boolean
+  mailboxIds: string[]
+  keywords: string[]
 }
 
 /**
@@ -169,23 +175,23 @@ export interface MessageSummary {
  * @spec docs/L1-sync#body-lazy
  */
 export interface RawMessageRef {
-  path: string;
-  sha256: string;
-  size: number;
-  mimeType: string;
-  fetchedAt: string;
+  path: string
+  sha256: string
+  size: number
+  mimeType: string
+  fetchedAt: string
 }
 
 export interface MessageAttachment {
-  id: string;
-  blobId: string;
-  partId: string | null;
-  filename: string | null;
-  mimeType: string;
-  size: number;
-  disposition: string | null;
-  cid: string | null;
-  isInline: boolean;
+  id: string
+  blobId: string
+  partId: string | null
+  filename: string | null
+  mimeType: string
+  size: number
+  disposition: string | null
+  cid: string | null
+  isInline: boolean
 }
 
 /**
@@ -193,10 +199,10 @@ export interface MessageAttachment {
  * @spec docs/L1-api#message-body-sanitization
  */
 export interface MessageDetail extends MessageSummary {
-  bodyHtml: string | null;
-  bodyText: string | null;
-  rawMessage: RawMessageRef | null;
-  attachments: MessageAttachment[];
+  bodyHtml: string | null
+  bodyText: string | null
+  rawMessage: RawMessageRef | null
+  attachments: MessageAttachment[]
 }
 
 /**
@@ -204,102 +210,102 @@ export interface MessageDetail extends MessageSummary {
  * @spec docs/L1-api#endpoint-table
  */
 export interface SourceMessageRef {
-  sourceId: string;
-  messageId: string;
+  sourceId: string
+  messageId: string
 }
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxKind = "default" | "user";
+export type SmartMailboxKind = 'default' | 'user'
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxGroupOperator = "all" | "any";
+export type SmartMailboxGroupOperator = 'all' | 'any'
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxField =
-  | "sourceId"
-  | "sourceName"
-  | "mailboxId"
-  | "mailboxRole"
-  | "isRead"
-  | "isFlagged"
-  | "hasAttachment"
-  | "keyword"
-  | "fromName"
-  | "fromEmail"
-  | "subject"
-  | "preview"
-  | "receivedAt";
+  | 'sourceId'
+  | 'sourceName'
+  | 'mailboxId'
+  | 'mailboxRole'
+  | 'isRead'
+  | 'isFlagged'
+  | 'hasAttachment'
+  | 'keyword'
+  | 'fromName'
+  | 'fromEmail'
+  | 'subject'
+  | 'preview'
+  | 'receivedAt'
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxOperator =
-  | "equals"
-  | "in"
-  | "contains"
-  | "before"
-  | "after"
-  | "onOrBefore"
-  | "onOrAfter";
+  | 'equals'
+  | 'in'
+  | 'contains'
+  | 'before'
+  | 'after'
+  | 'onOrBefore'
+  | 'onOrAfter'
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxValue = string | string[] | boolean;
+export type SmartMailboxValue = string | string[] | boolean
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxGroup {
-  operator: SmartMailboxGroupOperator;
-  negated: boolean;
-  nodes: SmartMailboxRuleNode[];
+  operator: SmartMailboxGroupOperator
+  negated: boolean
+  nodes: SmartMailboxRuleNode[]
 }
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxCondition {
-  type: "condition";
-  field: SmartMailboxField;
-  operator: SmartMailboxOperator;
-  negated: boolean;
-  value: SmartMailboxValue;
+  type: 'condition'
+  field: SmartMailboxField
+  operator: SmartMailboxOperator
+  negated: boolean
+  value: SmartMailboxValue
 }
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxRuleGroup {
-  type: "group";
-  operator: SmartMailboxGroupOperator;
-  negated: boolean;
-  nodes: SmartMailboxRuleNode[];
+  type: 'group'
+  operator: SmartMailboxGroupOperator
+  negated: boolean
+  nodes: SmartMailboxRuleNode[]
 }
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
-export type SmartMailboxRuleNode = SmartMailboxRuleGroup | SmartMailboxCondition;
+export type SmartMailboxRuleNode = SmartMailboxRuleGroup | SmartMailboxCondition
 
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export interface SmartMailboxRule {
-  root: SmartMailboxGroup;
+  root: SmartMailboxGroup
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailbox {
-  id: string;
-  name: string;
-  position: number;
-  kind: SmartMailboxKind;
-  defaultKey: string | null;
-  parentId: string | null;
-  rule: SmartMailboxRule;
-  createdAt: string;
-  updatedAt: string;
+  id: string
+  name: string
+  position: number
+  kind: SmartMailboxKind
+  defaultKey: string | null
+  parentId: string | null
+  rule: SmartMailboxRule
+  createdAt: string
+  updatedAt: string
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface SmartMailboxSummary {
-  id: string;
-  name: string;
-  position: number;
-  kind: SmartMailboxKind;
-  defaultKey: string | null;
-  parentId: string | null;
-  unreadMessages: number;
-  totalMessages: number;
-  createdAt: string;
-  updatedAt: string;
+  id: string
+  name: string
+  position: number
+  kind: SmartMailboxKind
+  defaultKey: string | null
+  parentId: string | null
+  unreadMessages: number
+  totalMessages: number
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -307,20 +313,20 @@ export interface SmartMailboxSummary {
  * @spec docs/L1-sync#conversation-pagination
  */
 export interface ConversationSummary {
-  id: string;
-  subject: string | null;
-  preview: string | null;
-  fromName: string | null;
-  fromEmail: string | null;
-  latestReceivedAt: string;
-  unreadCount: number;
-  messageCount: number;
-  sourceIds: string[];
-  sourceNames: string[];
-  latestMessage: SourceMessageRef;
-  latestSourceName: string;
-  hasAttachment: boolean;
-  isFlagged: boolean;
+  id: string
+  subject: string | null
+  preview: string | null
+  fromName: string | null
+  fromEmail: string | null
+  latestReceivedAt: string
+  unreadCount: number
+  messageCount: number
+  sourceIds: string[]
+  sourceNames: string[]
+  latestMessage: SourceMessageRef
+  latestSourceName: string
+  hasAttachment: boolean
+  isFlagged: boolean
 }
 
 /**
@@ -328,8 +334,8 @@ export interface ConversationSummary {
  * @spec docs/L1-api#cursor-pagination
  */
 export interface ConversationPage {
-  items: ConversationSummary[];
-  nextCursor: string | null;
+  items: ConversationSummary[]
+  nextCursor: string | null
 }
 
 /**
@@ -337,30 +343,30 @@ export interface ConversationPage {
  * @spec docs/L1-ui#messagedetail-and-emailframe
  */
 export interface ConversationView {
-  id: string;
-  subject: string | null;
-  messages: MessageSummary[];
+  id: string
+  subject: string | null
+  messages: MessageSummary[]
 }
 
 /** @spec docs/L1-ui#component-hierarchy */
 export interface SidebarSmartMailbox {
-  id: string;
-  name: string;
-  unreadMessages: number;
-  totalMessages: number;
+  id: string
+  name: string
+  unreadMessages: number
+  totalMessages: number
 }
 
 /** @spec docs/L1-ui#component-hierarchy */
 export interface SidebarSource {
-  id: string;
-  name: string;
-  mailboxes: Mailbox[];
+  id: string
+  name: string
+  mailboxes: Mailbox[]
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export interface SidebarResponse {
-  smartMailboxes: SidebarSmartMailbox[];
-  sources: SidebarSource[];
+  smartMailboxes: SidebarSmartMailbox[]
+  sources: SidebarSource[]
 }
 
 /**
@@ -368,19 +374,19 @@ export interface SidebarResponse {
  * @spec docs/L1-api#sse-event-stream
  */
 export interface DomainEvent {
-  seq: number;
-  accountId: string;
-  topic: string;
-  occurredAt: string;
-  mailboxId: string | null;
-  messageId: string | null;
-  payload: Record<string, unknown>;
+  seq: number
+  accountId: string
+  topic: string
+  occurredAt: string
+  mailboxId: string | null
+  messageId: string | null
+  payload: Record<string, unknown>
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export interface MessageCommandResult {
-  detail: MessageDetail | null;
-  events: DomainEvent[];
+  detail: MessageDetail | null
+  events: DomainEvent[]
 }
 
 /**
@@ -388,22 +394,22 @@ export interface MessageCommandResult {
  * @spec docs/L1-api#endpoint-table
  */
 export type MessageCommand =
-  | { kind: "setKeywords"; add: string[]; remove: string[] }
-  | { kind: "addToMailbox"; mailboxId: string }
-  | { kind: "removeFromMailbox"; mailboxId: string }
-  | { kind: "replaceMailboxes"; mailboxIds: string[] }
-  | { kind: "destroy" };
+  | { kind: 'setKeywords'; add: string[]; remove: string[] }
+  | { kind: 'addToMailbox'; mailboxId: string }
+  | { kind: 'removeFromMailbox'; mailboxId: string }
+  | { kind: 'replaceMailboxes'; mailboxIds: string[] }
+  | { kind: 'destroy' }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface CreateSmartMailboxInput {
-  name: string;
-  position?: number;
-  rule: SmartMailboxRule;
+  name: string
+  position?: number
+  rule: SmartMailboxRule
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export interface UpdateSmartMailboxInput {
-  name?: string;
-  position?: number;
-  rule?: SmartMailboxRule;
+  name?: string
+  position?: number
+  rule?: SmartMailboxRule
 }

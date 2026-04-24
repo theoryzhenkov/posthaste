@@ -7,7 +7,7 @@
  *
  * @spec docs/L1-api#endpoint-table
  */
-import { ApiError } from "./errors";
+import { ApiError } from './errors'
 import type {
   AccountOverview,
   AppSettings,
@@ -30,23 +30,23 @@ import type {
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
-} from "./types";
+} from './types'
 
 function normalizeApiBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
+  return baseUrl.replace(/\/+$/, '')
 }
 
 function resolveBaseUrl(): string {
-  const port = (window as unknown as Record<string, unknown>).__POSTHASTE_PORT__;
-  if (typeof port === "number") {
-    return `http://127.0.0.1:${port}/v1`;
+  const port = (window as unknown as Record<string, unknown>).__POSTHASTE_PORT__
+  if (typeof port === 'number') {
+    return `http://127.0.0.1:${port}/v1`
   }
   return normalizeApiBaseUrl(
-    import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:3001/v1",
-  );
+    import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3001/v1',
+  )
 }
 
-const BASE_URL = resolveBaseUrl();
+const BASE_URL = resolveBaseUrl()
 
 export function buildMessageAttachmentUrl(
   sourceId: string,
@@ -56,77 +56,83 @@ export function buildMessageAttachmentUrl(
 ): string {
   const url = new URL(
     `${BASE_URL}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
-  );
+  )
   if (options?.download) {
-    url.searchParams.set("download", "1");
+    url.searchParams.set('download', '1')
   }
-  return url.toString();
+  return url.toString()
 }
 
 /** Parse a non-OK response into a structured {@link ApiError}. */
 async function parseError(response: Response): Promise<never> {
-  let message = response.statusText;
-  let code: string | undefined;
+  let message = response.statusText
+  let code: string | undefined
 
   try {
     const payload = (await response.json()) as {
-      code?: string;
-      message?: string;
-    };
-    message = payload.message ?? message;
-    code = payload.code;
+      code?: string
+      message?: string
+    }
+    message = payload.message ?? message
+    code = payload.code
   } catch {
     // Preserve the HTTP status text when the body is not JSON.
   }
 
-  throw new ApiError(response.status, response.statusText, message, code);
+  throw new ApiError(response.status, response.statusText, message, code)
 }
 
 /** Low-level fetch wrapper that throws {@link ApiError} on non-OK responses. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, init);
+  const response = await fetch(`${BASE_URL}${path}`, init)
   if (!response.ok) {
-    return parseError(response);
+    return parseError(response)
   }
-  return response.json() as Promise<T>;
+  return response.json() as Promise<T>
 }
 
 /** Convenience wrapper for JSON-bodied requests (POST / PATCH). */
-function jsonRequest<T>(path: string, method: string, body?: unknown): Promise<T> {
+function jsonRequest<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+): Promise<T> {
   return request<T>(path, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  })
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchSettings(): Promise<AppSettings> {
-  return request<AppSettings>("/settings");
+  return request<AppSettings>('/settings')
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function patchSettings(
   input: Partial<AppSettings>,
 ): Promise<AppSettings> {
-  return jsonRequest<AppSettings>("/settings", "PATCH", input);
+  return jsonRequest<AppSettings>('/settings', 'PATCH', input)
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchAccounts(): Promise<AccountOverview[]> {
-  return request<AccountOverview[]>("/accounts");
+  return request<AccountOverview[]>('/accounts')
 }
 
 /** @spec docs/L1-api#endpoint-table */
-export async function fetchAccount(accountId: string): Promise<AccountOverview> {
-  return request<AccountOverview>(`/accounts/${accountId}`);
+export async function fetchAccount(
+  accountId: string,
+): Promise<AccountOverview> {
+  return request<AccountOverview>(`/accounts/${accountId}`)
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export async function createAccount(
   input: CreateAccountInput,
 ): Promise<AccountOverview> {
-  return jsonRequest<AccountOverview>("/accounts", "POST", input);
+  return jsonRequest<AccountOverview>('/accounts', 'POST', input)
 }
 
 /**
@@ -137,12 +143,12 @@ export async function updateAccount(
   accountId: string,
   input: UpdateAccountInput,
 ): Promise<AccountOverview> {
-  return jsonRequest<AccountOverview>(`/accounts/${accountId}`, "PATCH", input);
+  return jsonRequest<AccountOverview>(`/accounts/${accountId}`, 'PATCH', input)
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export async function deleteAccount(accountId: string): Promise<OkResponse> {
-  return request<OkResponse>(`/accounts/${accountId}`, { method: "DELETE" });
+  return request<OkResponse>(`/accounts/${accountId}`, { method: 'DELETE' })
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
@@ -150,45 +156,49 @@ export async function verifyAccount(
   accountId: string,
 ): Promise<VerificationResponse> {
   return request<VerificationResponse>(`/accounts/${accountId}/verify`, {
-    method: "POST",
-  });
+    method: 'POST',
+  })
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export async function enableAccount(accountId: string): Promise<OkResponse> {
-  return request<OkResponse>(`/accounts/${accountId}/enable`, { method: "POST" });
+  return request<OkResponse>(`/accounts/${accountId}/enable`, {
+    method: 'POST',
+  })
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export async function disableAccount(accountId: string): Promise<OkResponse> {
-  return request<OkResponse>(`/accounts/${accountId}/disable`, { method: "POST" });
+  return request<OkResponse>(`/accounts/${accountId}/disable`, {
+    method: 'POST',
+  })
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchMailboxes(accountId: string): Promise<Mailbox[]> {
-  return request<Mailbox[]>(`/sources/${accountId}/mailboxes`);
+  return request<Mailbox[]>(`/sources/${accountId}/mailboxes`)
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchSidebar(): Promise<SidebarResponse> {
-  return request<SidebarResponse>("/sidebar");
+  return request<SidebarResponse>('/sidebar')
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export async function fetchSmartMailboxes(): Promise<SmartMailboxSummary[]> {
-  return request<SmartMailboxSummary[]>("/smart-mailboxes");
+  return request<SmartMailboxSummary[]>('/smart-mailboxes')
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export async function createSmartMailbox(
   input: CreateSmartMailboxInput,
 ): Promise<SmartMailbox> {
-  return jsonRequest<SmartMailbox>("/smart-mailboxes", "POST", input);
+  return jsonRequest<SmartMailbox>('/smart-mailboxes', 'POST', input)
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export async function fetchSmartMailbox(id: string): Promise<SmartMailbox> {
-  return request<SmartMailbox>(`/smart-mailboxes/${id}`);
+  return request<SmartMailbox>(`/smart-mailboxes/${id}`)
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
@@ -196,26 +206,28 @@ export async function updateSmartMailbox(
   id: string,
   input: UpdateSmartMailboxInput,
 ): Promise<SmartMailbox> {
-  return jsonRequest<SmartMailbox>(`/smart-mailboxes/${id}`, "PATCH", input);
+  return jsonRequest<SmartMailbox>(`/smart-mailboxes/${id}`, 'PATCH', input)
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
 export async function deleteSmartMailbox(id: string): Promise<OkResponse> {
-  return request<OkResponse>(`/smart-mailboxes/${id}`, { method: "DELETE" });
+  return request<OkResponse>(`/smart-mailboxes/${id}`, { method: 'DELETE' })
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
-export async function resetDefaultSmartMailboxes(): Promise<SmartMailboxSummary[]> {
-  return request<SmartMailboxSummary[]>("/smart-mailboxes:reset-defaults", {
-    method: "POST",
-  });
+export async function resetDefaultSmartMailboxes(): Promise<
+  SmartMailboxSummary[]
+> {
+  return request<SmartMailboxSummary[]>('/smart-mailboxes:reset-defaults', {
+    method: 'POST',
+  })
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchSmartMailboxMessages(
   id: string,
 ): Promise<MessageSummary[]> {
-  return request<MessageSummary[]>(`/smart-mailboxes/${id}/messages`);
+  return request<MessageSummary[]>(`/smart-mailboxes/${id}/messages`)
 }
 
 /**
@@ -225,33 +237,33 @@ export async function fetchSmartMailboxMessages(
 export async function fetchSmartMailboxConversations(
   id: string,
   input?: {
-    limit?: number;
-    cursor?: string | null;
-    sort?: string;
-    sortDir?: string;
-    q?: string;
+    limit?: number
+    cursor?: string | null
+    sort?: string
+    sortDir?: string
+    q?: string
   },
 ): Promise<ConversationPage> {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams()
   if (input?.limit !== undefined) {
-    params.set("limit", String(input.limit));
+    params.set('limit', String(input.limit))
   }
   if (input?.cursor) {
-    params.set("cursor", input.cursor);
+    params.set('cursor', input.cursor)
   }
   if (input?.sort) {
-    params.set("sort", input.sort);
+    params.set('sort', input.sort)
   }
   if (input?.sortDir) {
-    params.set("sortDir", input.sortDir);
+    params.set('sortDir', input.sortDir)
   }
   if (input?.q) {
-    params.set("q", input.q);
+    params.set('q', input.q)
   }
-  const search = params.toString();
+  const search = params.toString()
   return request<ConversationPage>(
-    `/smart-mailboxes/${id}/conversations${search ? `?${search}` : ""}`,
-  );
+    `/smart-mailboxes/${id}/conversations${search ? `?${search}` : ''}`,
+  )
 }
 
 /**
@@ -259,47 +271,47 @@ export async function fetchSmartMailboxConversations(
  * @spec docs/L1-api#cursor-pagination
  */
 export async function fetchConversations(input?: {
-  sourceId?: string | null;
-  mailboxId?: string | null;
-  limit?: number;
-  cursor?: string | null;
-  sort?: string;
-  sortDir?: string;
-  q?: string;
+  sourceId?: string | null
+  mailboxId?: string | null
+  limit?: number
+  cursor?: string | null
+  sort?: string
+  sortDir?: string
+  q?: string
 }): Promise<ConversationPage> {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams()
   if (input?.sourceId) {
-    params.set("sourceId", input.sourceId);
+    params.set('sourceId', input.sourceId)
   }
   if (input?.mailboxId) {
-    params.set("mailboxId", input.mailboxId);
+    params.set('mailboxId', input.mailboxId)
   }
   if (input?.limit !== undefined) {
-    params.set("limit", String(input.limit));
+    params.set('limit', String(input.limit))
   }
   if (input?.cursor) {
-    params.set("cursor", input.cursor);
+    params.set('cursor', input.cursor)
   }
   if (input?.sort) {
-    params.set("sort", input.sort);
+    params.set('sort', input.sort)
   }
   if (input?.sortDir) {
-    params.set("sortDir", input.sortDir);
+    params.set('sortDir', input.sortDir)
   }
   if (input?.q) {
-    params.set("q", input.q);
+    params.set('q', input.q)
   }
-  const search = params.toString();
+  const search = params.toString()
   return request<ConversationPage>(
-    `/views/conversations${search ? `?${search}` : ""}`,
-  );
+    `/views/conversations${search ? `?${search}` : ''}`,
+  )
 }
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchConversation(
   conversationId: string,
 ): Promise<ConversationView> {
-  return request<ConversationView>(`/views/conversations/${conversationId}`);
+  return request<ConversationView>(`/views/conversations/${conversationId}`)
 }
 
 /**
@@ -310,7 +322,7 @@ export async function fetchMessage(
   messageId: string,
   sourceId: string,
 ): Promise<MessageDetail> {
-  return request<MessageDetail>(`/sources/${sourceId}/messages/${messageId}`);
+  return request<MessageDetail>(`/sources/${sourceId}/messages/${messageId}`)
 }
 
 /** @spec docs/L1-api#endpoint-table */
@@ -318,13 +330,13 @@ export async function fetchSourceMessages(
   sourceId: string,
   mailboxId: string | null,
 ): Promise<MessageSummary[]> {
-  const search = mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : "";
-  return request<MessageSummary[]>(`/sources/${sourceId}/messages${search}`);
+  const search = mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ''
+  return request<MessageSummary[]>(`/sources/${sourceId}/messages${search}`)
 }
 
 /** @spec docs/L1-api#compose */
 export async function fetchIdentity(sourceId: string): Promise<Identity> {
-  return request<Identity>(`/sources/${sourceId}/identity`);
+  return request<Identity>(`/sources/${sourceId}/identity`)
 }
 
 /** @spec docs/L1-api#compose */
@@ -334,7 +346,7 @@ export async function fetchReplyContext(
 ): Promise<ReplyContext> {
   return request<ReplyContext>(
     `/sources/${sourceId}/messages/${messageId}/reply-context`,
-  );
+  )
 }
 
 /** @spec docs/L1-api#compose */
@@ -342,7 +354,11 @@ export async function sendMessage(
   sourceId: string,
   input: SendMessageInput,
 ): Promise<OkResponse> {
-  return jsonRequest<OkResponse>(`/sources/${sourceId}/commands/send`, "POST", input);
+  return jsonRequest<OkResponse>(
+    `/sources/${sourceId}/commands/send`,
+    'POST',
+    input,
+  )
 }
 
 /**
@@ -355,37 +371,40 @@ export async function performMessageCommand(
   sourceId: string,
 ): Promise<MessageCommandResult> {
   switch (command.kind) {
-    case "setKeywords":
+    case 'setKeywords':
       return jsonRequest<MessageCommandResult>(
         `/sources/${sourceId}/commands/messages/${messageId}/set-keywords`,
-        "POST",
+        'POST',
         {
           add: command.add,
           remove: command.remove,
         },
-      );
-    case "addToMailbox":
+      )
+    case 'addToMailbox':
       return jsonRequest<MessageCommandResult>(
         `/sources/${sourceId}/commands/messages/${messageId}/add-to-mailbox`,
-        "POST",
+        'POST',
         { mailboxId: command.mailboxId },
-      );
-    case "removeFromMailbox":
+      )
+    case 'removeFromMailbox':
       return jsonRequest<MessageCommandResult>(
         `/sources/${sourceId}/commands/messages/${messageId}/remove-from-mailbox`,
-        "POST",
+        'POST',
         { mailboxId: command.mailboxId },
-      );
-    case "replaceMailboxes":
+      )
+    case 'replaceMailboxes':
       return jsonRequest<MessageCommandResult>(
         `/sources/${sourceId}/commands/messages/${messageId}/replace-mailboxes`,
-        "POST",
+        'POST',
         { mailboxIds: command.mailboxIds },
-      );
-    case "destroy":
-      return request<MessageCommandResult>(`/sources/${sourceId}/commands/messages/${messageId}/destroy`, {
-        method: "POST",
-      });
+      )
+    case 'destroy':
+      return request<MessageCommandResult>(
+        `/sources/${sourceId}/commands/messages/${messageId}/destroy`,
+        {
+          method: 'POST',
+        },
+      )
   }
 }
 
@@ -395,8 +414,8 @@ export async function triggerSync(
 ): Promise<{ ok: boolean; eventCount: number }> {
   return request<{ ok: boolean; eventCount: number }>(
     `/sources/${sourceId}/commands/sync`,
-    { method: "POST" },
-  );
+    { method: 'POST' },
+  )
 }
 
 /**
@@ -404,16 +423,16 @@ export async function triggerSync(
  * @spec docs/L1-api#sse-event-stream
  */
 export function buildEventsUrl(input?: {
-  accountId?: string;
-  afterSeq?: number | null;
+  accountId?: string
+  afterSeq?: number | null
 }): string {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams()
   if (input?.accountId) {
-    params.set("accountId", input.accountId);
+    params.set('accountId', input.accountId)
   }
   if (input?.afterSeq != null) {
-    params.set("afterSeq", String(input.afterSeq));
+    params.set('afterSeq', String(input.afterSeq))
   }
-  const search = params.toString();
-  return `${BASE_URL}/events${search ? `?${search}` : ""}`;
+  const search = params.toString()
+  return `${BASE_URL}/events${search ? `?${search}` : ''}`
 }

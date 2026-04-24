@@ -6,14 +6,14 @@
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#smart-mailbox-crud
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   FolderSearch,
   Mailbox,
   Settings as SettingsIcon,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import {
   deleteAccount,
   deleteSmartMailbox,
@@ -27,56 +27,53 @@ import {
   resetDefaultSmartMailboxes,
   triggerSync,
   updateSmartMailbox,
-} from "../api/client";
-import type {
-  AccountOverview,
-  SmartMailboxSummary,
-} from "../api/types";
-import { AccountsPane } from "./settings-panel/AccountsPane";
-import { GeneralPane } from "./settings-panel/GeneralPane";
-import { SmartMailboxesPane } from "./settings-panel/SmartMailboxesPane";
-import { brandAccents } from "../design/tokens";
-import { cn } from "../lib/utils";
-import { Button } from "./ui/button";
+} from '../api/client'
+import type { AccountOverview, SmartMailboxSummary } from '../api/types'
+import { AccountsPane } from './settings-panel/AccountsPane'
+import { GeneralPane } from './settings-panel/GeneralPane'
+import { SmartMailboxesPane } from './settings-panel/SmartMailboxesPane'
+import { brandAccents } from '../design/tokens'
+import { cn } from '../lib/utils'
+import { Button } from './ui/button'
 import type {
   EditorTarget,
   SmartMailboxEditorTarget,
-} from "./settings-panel/types";
+} from './settings-panel/types'
 
-type SettingsCategory = "general" | "accounts" | "mailboxes";
+type SettingsCategory = 'general' | 'accounts' | 'mailboxes'
 
 const SETTINGS_CATEGORIES = [
   {
-    id: "general",
-    label: "General",
-    description: "Default account and workspace-wide preferences.",
+    id: 'general',
+    label: 'General',
+    description: 'Default account and workspace-wide preferences.',
     icon: SettingsIcon,
     accent: brandAccents.blue,
   },
   {
-    id: "accounts",
-    label: "Accounts",
-    description: "Connected mail sources, sync state, and credentials.",
+    id: 'accounts',
+    label: 'Accounts',
+    description: 'Connected mail sources, sync state, and credentials.',
     icon: Mailbox,
     accent: brandAccents.coral,
   },
   {
-    id: "mailboxes",
-    label: "Mailboxes & Rules",
-    description: "Smart mailboxes and rules that shape your views.",
+    id: 'mailboxes',
+    label: 'Mailboxes & Rules',
+    description: 'Smart mailboxes and rules that shape your views.',
     icon: FolderSearch,
     accent: brandAccents.violet,
   },
-] as const;
+] as const
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 interface SettingsPanelProps {
-  accounts: AccountOverview[];
-  activeAccountId: string | null;
-  initialCategory?: SettingsCategory;
-  onActiveAccountChange: (accountId: string | null) => void;
-  onClose?: () => void;
-  shell?: "page" | "overlay";
+  accounts: AccountOverview[]
+  activeAccountId: string | null
+  initialCategory?: SettingsCategory
+  onActiveAccountChange: (accountId: string | null) => void
+  onClose?: () => void
+  shell?: 'page' | 'overlay'
 }
 
 /**
@@ -91,165 +88,174 @@ export function SettingsPanel({
   initialCategory,
   onActiveAccountChange,
   onClose,
-  shell = "page",
+  shell = 'page',
 }: SettingsPanelProps) {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
 
-  const [activeCategory, setActiveCategory] =
-    useState<SettingsCategory>(initialCategory ?? "general");
-  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
+    initialCategory ?? 'general',
+  )
+  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null)
   const [smartMailboxEditorTarget, setSmartMailboxEditorTarget] =
-    useState<SmartMailboxEditorTarget | null>(null);
+    useState<SmartMailboxEditorTarget | null>(null)
   const [smartMailboxActionPendingKey, setSmartMailboxActionPendingKey] =
-    useState<string | null>(null);
-  const [smartMailboxActionError, setSmartMailboxActionError] =
-    useState<string | null>(null);
+    useState<string | null>(null)
+  const [smartMailboxActionError, setSmartMailboxActionError] = useState<
+    string | null
+  >(null)
 
   useEffect(() => {
     if (initialCategory !== undefined) {
-      setActiveCategory(initialCategory);
+      setActiveCategory(initialCategory)
     }
-  }, [initialCategory]);
+  }, [initialCategory])
 
   const settingsQuery = useQuery({
-    queryKey: ["settings"],
+    queryKey: ['settings'],
     queryFn: fetchSettings,
-  });
+  })
   const smartMailboxListQuery = useQuery({
-    queryKey: ["smart-mailboxes"],
+    queryKey: ['smart-mailboxes'],
     queryFn: fetchSmartMailboxes,
-  });
+  })
 
   const effectiveEditorTarget =
     editorTarget !== null &&
-    editorTarget !== "new" &&
+    editorTarget !== 'new' &&
     !accounts.some((account) => account.id === editorTarget)
       ? null
-      : editorTarget;
+      : editorTarget
   const editorAccountId =
-    effectiveEditorTarget === null || effectiveEditorTarget === "new"
+    effectiveEditorTarget === null || effectiveEditorTarget === 'new'
       ? null
-      : effectiveEditorTarget;
+      : effectiveEditorTarget
   const accountQuery = useQuery({
-    queryKey: ["account", editorAccountId],
+    queryKey: ['account', editorAccountId],
     queryFn: () => fetchAccount(editorAccountId!),
     enabled: editorAccountId !== null,
-  });
+  })
   const editingAccount =
     accountQuery.data ??
     accounts.find((account) => account.id === editorAccountId) ??
-    null;
+    null
 
-  const smartMailboxSummaries = smartMailboxListQuery.data ?? [];
+  const smartMailboxSummaries = smartMailboxListQuery.data ?? []
   const effectiveSmartMailboxTarget =
     smartMailboxEditorTarget !== null &&
-    smartMailboxEditorTarget !== "new" &&
-    !smartMailboxSummaries.some((mailbox) => mailbox.id === smartMailboxEditorTarget)
+    smartMailboxEditorTarget !== 'new' &&
+    !smartMailboxSummaries.some(
+      (mailbox) => mailbox.id === smartMailboxEditorTarget,
+    )
       ? null
-      : smartMailboxEditorTarget;
+      : smartMailboxEditorTarget
   const editingSmartMailboxId =
-    effectiveSmartMailboxTarget === null || effectiveSmartMailboxTarget === "new"
+    effectiveSmartMailboxTarget === null ||
+    effectiveSmartMailboxTarget === 'new'
       ? null
-      : effectiveSmartMailboxTarget;
+      : effectiveSmartMailboxTarget
   const smartMailboxQuery = useQuery({
-    queryKey: ["smart-mailbox", editingSmartMailboxId],
+    queryKey: ['smart-mailbox', editingSmartMailboxId],
     queryFn: () => fetchSmartMailbox(editingSmartMailboxId!),
     enabled: editingSmartMailboxId !== null,
-  });
+  })
   const editingSmartMailbox =
     smartMailboxQuery.data ??
-    smartMailboxSummaries.find((mailbox) => mailbox.id === editingSmartMailboxId) ??
-    null;
+    smartMailboxSummaries.find(
+      (mailbox) => mailbox.id === editingSmartMailboxId,
+    ) ??
+    null
 
   const invalidateAccountQueries = async (accountId?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["settings"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+      queryClient.invalidateQueries({ queryKey: ['settings'] }),
+      queryClient.invalidateQueries({ queryKey: ['accounts'] }),
       accountId
-        ? queryClient.invalidateQueries({ queryKey: ["account", accountId] })
+        ? queryClient.invalidateQueries({ queryKey: ['account', accountId] })
         : Promise.resolve(),
-    ]);
-  };
+    ])
+  }
 
   const invalidateSmartMailboxQueries = async (smartMailboxId?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["sidebar"] }),
-      queryClient.invalidateQueries({ queryKey: ["messages"] }),
-      queryClient.invalidateQueries({ queryKey: ["smart-mailboxes"] }),
+      queryClient.invalidateQueries({ queryKey: ['sidebar'] }),
+      queryClient.invalidateQueries({ queryKey: ['messages'] }),
+      queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] }),
       smartMailboxId
-        ? queryClient.invalidateQueries({ queryKey: ["smart-mailbox", smartMailboxId] })
+        ? queryClient.invalidateQueries({
+            queryKey: ['smart-mailbox', smartMailboxId],
+          })
         : Promise.resolve(),
-    ]);
-  };
+    ])
+  }
 
   const runSmartMailboxAction = async (
     pendingKey: string,
     action: () => Promise<void>,
   ) => {
     if (smartMailboxActionPendingKey !== null) {
-      return;
+      return
     }
-    setSmartMailboxActionError(null);
-    setSmartMailboxActionPendingKey(pendingKey);
+    setSmartMailboxActionError(null)
+    setSmartMailboxActionPendingKey(pendingKey)
     try {
-      await action();
+      await action()
     } catch (error) {
       setSmartMailboxActionError(
-        error instanceof Error ? error.message : "Smart mailbox action failed.",
-      );
+        error instanceof Error ? error.message : 'Smart mailbox action failed.',
+      )
     } finally {
-      setSmartMailboxActionPendingKey(null);
+      setSmartMailboxActionPendingKey(null)
     }
-  };
+  }
 
   const handleResetSmartMailboxes = () => {
-    void runSmartMailboxAction("reset-defaults", async () => {
-      await resetDefaultSmartMailboxes();
-      await invalidateSmartMailboxQueries();
-      setSmartMailboxEditorTarget(null);
-    });
-  };
+    void runSmartMailboxAction('reset-defaults', async () => {
+      await resetDefaultSmartMailboxes()
+      await invalidateSmartMailboxQueries()
+      setSmartMailboxEditorTarget(null)
+    })
+  }
 
   const handleReorderSmartMailbox = (
     mailbox: SmartMailboxSummary,
     position: number,
   ) => {
     void runSmartMailboxAction(`reorder:${mailbox.id}`, async () => {
-      await updateSmartMailbox(mailbox.id, { position });
-      await invalidateSmartMailboxQueries(mailbox.id);
-    });
-  };
+      await updateSmartMailbox(mailbox.id, { position })
+      await invalidateSmartMailboxQueries(mailbox.id)
+    })
+  }
 
   const defaultMutation = useMutation({
     mutationFn: (accountId: string | null) =>
       patchSettings({ defaultAccountId: accountId }),
     onSuccess: async () => {
-      await invalidateAccountQueries();
+      await invalidateAccountQueries()
     },
-  });
+  })
 
   const commandMutation = useMutation({
     mutationFn: async ({
       action,
       account,
     }: {
-      action: "enable" | "disable" | "delete" | "sync";
-      account: AccountOverview;
+      action: 'enable' | 'disable' | 'delete' | 'sync'
+      account: AccountOverview
     }) => {
       switch (action) {
-        case "enable":
-          return enableAccount(account.id);
-        case "disable":
-          return disableAccount(account.id);
-        case "delete":
-          return deleteAccount(account.id);
-        case "sync":
-          return triggerSync(account.id);
+        case 'enable':
+          return enableAccount(account.id)
+        case 'disable':
+          return disableAccount(account.id)
+        case 'delete':
+          return deleteAccount(account.id)
+        case 'sync':
+          return triggerSync(account.id)
       }
     },
     onSuccess: async (_result, variables) => {
-      await invalidateAccountQueries(variables.account.id);
-      if (variables.action === "delete") {
+      await invalidateAccountQueries(variables.account.id)
+      if (variables.action === 'delete') {
         const fallbackAccountId =
           accounts.find(
             (account) =>
@@ -260,40 +266,40 @@ export function SettingsPanel({
           accounts.find(
             (account) => account.id !== variables.account.id && account.enabled,
           )?.id ??
-          null;
+          null
         if (activeAccountId === variables.account.id) {
-          onActiveAccountChange(fallbackAccountId);
+          onActiveAccountChange(fallbackAccountId)
         }
         if (effectiveEditorTarget === variables.account.id) {
-          setEditorTarget(null);
+          setEditorTarget(null)
         }
       }
     },
-  });
+  })
 
   const editorKey =
     effectiveEditorTarget === null
-      ? "account:none"
-      : effectiveEditorTarget === "new"
-      ? "account:new"
-      : `account:${effectiveEditorTarget}:${editingAccount?.updatedAt ?? "pending"}`;
+      ? 'account:none'
+      : effectiveEditorTarget === 'new'
+        ? 'account:new'
+        : `account:${effectiveEditorTarget}:${editingAccount?.updatedAt ?? 'pending'}`
   const smartMailboxEditorKey =
     effectiveSmartMailboxTarget === null
-      ? "mailbox:none"
-      : effectiveSmartMailboxTarget === "new"
-      ? "mailbox:new"
-      : `mailbox:${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? "pending"}`;
+      ? 'mailbox:none'
+      : effectiveSmartMailboxTarget === 'new'
+        ? 'mailbox:new'
+        : `mailbox:${effectiveSmartMailboxTarget}:${editingSmartMailbox?.updatedAt ?? 'pending'}`
   function handleSelectCategory(category: SettingsCategory) {
-    setActiveCategory(category);
-    setEditorTarget(null);
-    setSmartMailboxEditorTarget(null);
+    setActiveCategory(category)
+    setEditorTarget(null)
+    setSmartMailboxEditorTarget(null)
   }
 
   return (
     <section
       className={cn(
-        "flex h-full min-h-0 w-full flex-col overflow-hidden text-card-foreground md:flex-row",
-        shell === "overlay" ? "bg-background" : "bg-card",
+        'flex h-full min-h-0 w-full flex-col overflow-hidden text-card-foreground md:flex-row',
+        shell === 'overlay' ? 'bg-background' : 'bg-card',
       )}
     >
       <SettingsRail
@@ -306,18 +312,20 @@ export function SettingsPanel({
 
       <main className="min-w-0 flex-1 bg-background">
         <div className="h-full min-h-0 overflow-hidden bg-transparent">
-          {activeCategory === "general" && (
+          {activeCategory === 'general' && (
             <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
               <GeneralPane
                 accounts={accounts}
                 defaultAccountId={settingsQuery.data?.defaultAccountId}
-                onDefaultAccountChange={(accountId) => defaultMutation.mutate(accountId)}
+                onDefaultAccountChange={(accountId) =>
+                  defaultMutation.mutate(accountId)
+                }
                 isPending={defaultMutation.isPending}
               />
             </div>
           )}
 
-          {activeCategory === "accounts" && (
+          {activeCategory === 'accounts' && (
             <AccountsPane
               accounts={accounts}
               selectedAccountId={effectiveEditorTarget}
@@ -325,20 +333,22 @@ export function SettingsPanel({
               editorKey={editorKey}
               onSelectAccount={(accountId) => setEditorTarget(accountId)}
               onBackToAccounts={() => setEditorTarget(null)}
-              onCreateAccount={() => setEditorTarget("new")}
+              onCreateAccount={() => setEditorTarget('new')}
               onCommand={(action, account) =>
                 commandMutation.mutate({ action, account })
               }
               onSaved={async (account) => {
-                await invalidateAccountQueries(account.id);
-                setEditorTarget(account.id);
+                await invalidateAccountQueries(account.id)
+                setEditorTarget(account.id)
               }}
-              onVerified={() => invalidateAccountQueries(editorAccountId ?? undefined)}
+              onVerified={() =>
+                invalidateAccountQueries(editorAccountId ?? undefined)
+              }
               commandMutation={commandMutation}
             />
           )}
 
-          {activeCategory === "mailboxes" && (
+          {activeCategory === 'mailboxes' && (
             <SmartMailboxesPane
               smartMailboxes={smartMailboxSummaries}
               selectedMailboxId={effectiveSmartMailboxTarget}
@@ -346,26 +356,28 @@ export function SettingsPanel({
               editorKey={smartMailboxEditorKey}
               actionPendingKey={smartMailboxActionPendingKey}
               actionError={smartMailboxActionError}
-              onSelectMailbox={(mailboxId) => setSmartMailboxEditorTarget(mailboxId)}
+              onSelectMailbox={(mailboxId) =>
+                setSmartMailboxEditorTarget(mailboxId)
+              }
               onBackToMailboxes={() => setSmartMailboxEditorTarget(null)}
-              onCreateMailbox={() => setSmartMailboxEditorTarget("new")}
+              onCreateMailbox={() => setSmartMailboxEditorTarget('new')}
               onResetDefaults={handleResetSmartMailboxes}
               onReorderMailbox={handleReorderSmartMailbox}
               onSaved={async (mailbox) => {
-                await invalidateSmartMailboxQueries(mailbox.id);
-                setSmartMailboxEditorTarget(mailbox.id);
+                await invalidateSmartMailboxQueries(mailbox.id)
+                setSmartMailboxEditorTarget(mailbox.id)
               }}
               onDeleted={async (mailboxId) => {
-                await deleteSmartMailbox(mailboxId);
-                await invalidateSmartMailboxQueries();
-                setSmartMailboxEditorTarget(null);
+                await deleteSmartMailbox(mailboxId)
+                await invalidateSmartMailboxQueries()
+                setSmartMailboxEditorTarget(null)
               }}
             />
           )}
         </div>
       </main>
     </section>
-  );
+  )
 }
 
 function SettingsRail({
@@ -375,11 +387,11 @@ function SettingsRail({
   onClose,
   onSelect,
 }: {
-  activeCategory: SettingsCategory;
-  accountCount: number;
-  smartMailboxCount: number;
-  onClose?: () => void;
-  onSelect: (category: SettingsCategory) => void;
+  activeCategory: SettingsCategory
+  accountCount: number
+  smartMailboxCount: number
+  onClose?: () => void
+  onSelect: (category: SettingsCategory) => void
 }) {
   return (
     <aside className="flex max-h-[190px] min-h-0 w-full shrink-0 flex-col border-b border-sidebar-border bg-sidebar text-sidebar-foreground md:h-full md:max-h-none md:w-[210px] md:border-b-0 md:border-r">
@@ -404,14 +416,14 @@ function SettingsRail({
         </p>
         <div className="space-y-1">
           {SETTINGS_CATEGORIES.map((category) => {
-            const Icon = category.icon;
-            const isActive = category.id === activeCategory;
+            const Icon = category.icon
+            const isActive = category.id === activeCategory
             const count =
-              category.id === "accounts"
+              category.id === 'accounts'
                 ? accountCount
-                : category.id === "mailboxes"
-                ? smartMailboxCount
-                : null;
+                : category.id === 'mailboxes'
+                  ? smartMailboxCount
+                  : null
 
             return (
               <button
@@ -424,10 +436,10 @@ function SettingsRail({
                     : undefined,
                 }}
                 className={cn(
-                  "group flex h-[28px] w-full items-center gap-2 rounded-[5px] px-2 text-left text-[13px] font-medium transition-colors",
+                  'group flex h-[28px] w-full items-center gap-2 rounded-[5px] px-2 text-left text-[13px] font-medium transition-colors',
                   isActive
-                    ? "text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                    ? 'text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground',
                 )}
               >
                 <Icon
@@ -445,7 +457,7 @@ function SettingsRail({
                   </span>
                 )}
               </button>
-            );
+            )
           })}
         </div>
       </nav>
@@ -454,5 +466,5 @@ function SettingsRail({
         v1.0.0 · JMAP 0.3
       </div>
     </aside>
-  );
+  )
 }

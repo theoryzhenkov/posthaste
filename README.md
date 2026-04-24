@@ -62,7 +62,7 @@ just mkdocs build  # build docs into site/
 | Backend | Rust + Axum | Owns protocol, sync, storage, and API |
 | Storage | SQLite via rusqlite | Embedded, zero-config, portable |
 | Frontend | React + TypeScript | Component model, React Query caching, keyboard handling |
-| Build tool | Vite + npm scripts | Fast dev server and builds |
+| Build tool | Vite + Bun scripts | Fast dev server and builds |
 | HTML sanitization | ammonia (Rust) | Whitelist-based, built on html5ever |
 | Markdown | pulldown-cmark (Rust) | CommonMark + GFM extensions |
 

@@ -3,14 +3,14 @@
  *
  * @spec docs/L1-api#account-crud-lifecycle
  */
-import type { AccountOverview } from "../../api/types";
+import type { AccountOverview } from '../../api/types'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from '../ui/select'
 
 export function GeneralPane({
   accounts,
@@ -18,10 +18,10 @@ export function GeneralPane({
   onDefaultAccountChange,
   isPending,
 }: {
-  accounts: AccountOverview[];
-  defaultAccountId: string | null | undefined;
-  onDefaultAccountChange: (accountId: string | null) => void;
-  isPending: boolean;
+  accounts: AccountOverview[]
+  defaultAccountId: string | null | undefined
+  onDefaultAccountChange: (accountId: string | null) => void
+  isPending: boolean
 }) {
   return (
     <div className="mx-auto flex max-w-[760px] flex-col">
@@ -30,7 +30,8 @@ export function GeneralPane({
           General
         </h1>
         <p className="mt-2 max-w-[620px] text-[13px] leading-6 text-muted-foreground">
-          Choose the default account PostHaste should use when no source is selected.
+          Choose the default account PostHaste should use when no source is
+          selected.
         </p>
       </header>
 
@@ -46,14 +47,15 @@ export function GeneralPane({
                   Default account
                 </p>
                 <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                  Used when a compose flow does not already have account context.
+                  Used when a compose flow does not already have account
+                  context.
                 </p>
               </div>
               <div className="w-full shrink-0 sm:w-[280px]">
                 <Select
-                  value={defaultAccountId ?? "__none__"}
+                  value={defaultAccountId ?? '__none__'}
                   onValueChange={(value) =>
-                    onDefaultAccountChange(value === "__none__" ? null : value)
+                    onDefaultAccountChange(value === '__none__' ? null : value)
                   }
                   disabled={isPending}
                 >
@@ -75,5 +77,5 @@ export function GeneralPane({
         </section>
       </div>
     </div>
-  );
+  )
 }

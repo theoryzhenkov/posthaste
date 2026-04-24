@@ -1,8 +1,8 @@
-export const uiDensities = ["compact", "cozy", "comfortable"] as const;
+export const uiDensities = ['compact', 'cozy', 'comfortable'] as const
 
-export type UiDensity = (typeof uiDensities)[number];
+export type UiDensity = (typeof uiDensities)[number]
 
-export const defaultUiDensity = "compact" as const satisfies UiDensity;
+export const defaultUiDensity = 'compact' as const satisfies UiDensity
 
 export const uiDensitySettings = {
   compact: {
@@ -23,12 +23,12 @@ export const uiDensitySettings = {
 } as const satisfies Record<
   UiDensity,
   {
-    rowHeight: number;
-    controlHeight: number;
-    gap: number;
+    rowHeight: number
+    controlHeight: number
+    gap: number
   }
->;
+>
 
 export function isUiDensity(value: string): value is UiDensity {
-  return uiDensities.includes(value as UiDensity);
+  return uiDensities.includes(value as UiDensity)
 }

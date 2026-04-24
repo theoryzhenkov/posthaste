@@ -5,14 +5,14 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from "@dnd-kit/core";
+} from '@dnd-kit/core'
 import {
   SortableContext,
   arrayMove,
   horizontalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { ColumnPickerMenu } from "./ColumnPickerMenu";
-import { SortableColumnHeader } from "./SortableColumnHeader";
+} from '@dnd-kit/sortable'
+import { ColumnPickerMenu } from './ColumnPickerMenu'
+import { SortableColumnHeader } from './SortableColumnHeader'
 import {
   SORTABLE_COLUMNS,
   type ColumnId,
@@ -21,18 +21,18 @@ import {
   type ThreadListLayout,
   getColumnBasis,
   getColumnDef,
-} from "./columns";
+} from './columns'
 
 interface ThreadListHeaderProps {
-  columns: ColumnId[];
-  layout: ThreadListLayout;
-  sort: SortConfig;
-  widths: ColumnWidths;
-  onResetColumns: () => void;
-  onResizeColumn: (columnId: ColumnId, width: number) => void;
-  onReorderColumns: (columns: ColumnId[]) => void;
-  onToggleColumn: (columnId: ColumnId) => void;
-  onToggleSort: (columnId: ColumnId) => void;
+  columns: ColumnId[]
+  layout: ThreadListLayout
+  sort: SortConfig
+  widths: ColumnWidths
+  onResetColumns: () => void
+  onResizeColumn: (columnId: ColumnId, width: number) => void
+  onReorderColumns: (columns: ColumnId[]) => void
+  onToggleColumn: (columnId: ColumnId) => void
+  onToggleSort: (columnId: ColumnId) => void
 }
 
 export function ThreadListHeader({
@@ -48,17 +48,17 @@ export function ThreadListHeader({
 }: ThreadListHeaderProps) {
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-  );
+  )
 
   function handleColumnDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
+    const { active, over } = event
     if (!over || active.id === over.id) {
-      return;
+      return
     }
 
-    const oldIndex = columns.indexOf(active.id as ColumnId);
-    const newIndex = columns.indexOf(over.id as ColumnId);
-    onReorderColumns(arrayMove(columns, oldIndex, newIndex));
+    const oldIndex = columns.indexOf(active.id as ColumnId)
+    const newIndex = columns.indexOf(over.id as ColumnId)
+    onReorderColumns(arrayMove(columns, oldIndex, newIndex))
   }
 
   return (
@@ -81,11 +81,11 @@ export function ThreadListHeader({
             strategy={horizontalListSortingStrategy}
           >
             {columns.map((colId) => {
-              const def = getColumnDef(colId);
-              const isFirstColumn = colId === columns[0];
-              const isLastColumn = colId === columns[columns.length - 1];
-              const isSortable = SORTABLE_COLUMNS.has(colId);
-              const canResize = def.resizable === true;
+              const def = getColumnDef(colId)
+              const isFirstColumn = colId === columns[0]
+              const isLastColumn = colId === columns[columns.length - 1]
+              const isSortable = SORTABLE_COLUMNS.has(colId)
+              const canResize = def.resizable === true
               return (
                 <SortableColumnHeader
                   key={colId}
@@ -94,20 +94,28 @@ export function ThreadListHeader({
                   icon={def.header}
                   align={def.align}
                   isSortable={isSortable}
-                  resizeBasis={canResize ? getColumnBasis(colId, widths) : undefined}
+                  resizeBasis={
+                    canResize ? getColumnBasis(colId, widths) : undefined
+                  }
                   resizeMinWidth={def.minWidth ?? def.basis}
-                  sortDirection={sort.columnId === colId ? sort.direction : undefined}
+                  sortDirection={
+                    sort.columnId === colId ? sort.direction : undefined
+                  }
                   showResizeDivider={!isLastColumn}
-                  resizePlacement={isLastColumn ? "end-edge" : "interior"}
+                  resizePlacement={isLastColumn ? 'end-edge' : 'interior'}
                   showStartResizeHandle={canResize && isFirstColumn}
                   onSort={() => onToggleSort(colId)}
-                  onResize={canResize ? (width) => onResizeColumn(colId, width) : undefined}
+                  onResize={
+                    canResize
+                      ? (width) => onResizeColumn(colId, width)
+                      : undefined
+                  }
                 />
-              );
+              )
             })}
           </SortableContext>
         </DndContext>
       </div>
     </ColumnPickerMenu>
-  );
+  )
 }
