@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -7,11 +6,10 @@ use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
     ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedGateway,
-    SharedStore, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId,
-    SmartMailboxRule, SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId,
-    ThreadView,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedStore, SidebarResponse,
+    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxRule,
+    SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId, ThreadView,
     EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
@@ -27,48 +25,19 @@ enum MessageMutation<'a> {
 /// Orchestrates domain logic by composing gateway, store, and config ports.
 ///
 /// `MailService` is the primary entry point for all business operations.
-/// It owns no I/O -- all external interactions flow through injected trait objects.
+/// It owns no I/O or live connection registry -- external interactions flow
+/// through explicit trait objects supplied by the application layer.
 ///
 /// @spec docs/L0-api#rust-owns-everything
 pub struct MailService {
     store: SharedStore,
     config: SharedConfigRepository,
-    gateways: RwLock<HashMap<String, SharedGateway>>,
 }
 
 impl MailService {
     /// Create a new service with the given store and config repository.
     pub fn new(store: Arc<dyn MailStore>, config: Arc<dyn ConfigRepository>) -> Self {
-        Self {
-            store,
-            config,
-            gateways: RwLock::new(HashMap::new()),
-        }
-    }
-
-    /// Builder-style: register a gateway for an account (used in tests).
-    pub fn with_gateway(mut self, account_id: &AccountId, gateway: Arc<dyn MailGateway>) -> Self {
-        self.gateways
-            .get_mut()
-            .expect("gateway registry lock poisoned")
-            .insert(account_id.to_string(), gateway);
-        self
-    }
-
-    /// Register or replace a gateway for a live account.
-    pub fn set_gateway(&self, account_id: &AccountId, gateway: SharedGateway) {
-        self.gateways
-            .write()
-            .expect("gateway registry lock poisoned")
-            .insert(account_id.to_string(), gateway);
-    }
-
-    /// Unregister a gateway when an account is deleted or disabled.
-    pub fn remove_gateway(&self, account_id: &AccountId) {
-        self.gateways
-            .write()
-            .expect("gateway registry lock poisoned")
-            .remove(account_id.as_str());
+        Self { store, config }
     }
 
     // -- Config delegates --
@@ -379,6 +348,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        gateway: Option<&dyn MailGateway>,
     ) -> Result<CommandResult, ServiceError> {
         let detail = self
             .store
@@ -394,7 +364,7 @@ impl MailService {
             });
         }
 
-        let Some(gateway) = self.gateway(account_id) else {
+        let Some(gateway) = gateway else {
             return Ok(CommandResult {
                 detail: Some(detail),
                 events: Vec::new(),
@@ -412,8 +382,9 @@ impl MailService {
         &self,
         account_id: &AccountId,
         blob_id: &crate::BlobId,
+        gateway: &dyn MailGateway,
     ) -> Result<Vec<u8>, ServiceError> {
-        self.required_gateway(account_id)?
+        gateway
             .download_blob(account_id, blob_id)
             .await
             .map_err(Into::into)
@@ -426,8 +397,8 @@ impl MailService {
         &self,
         account_id: &AccountId,
         trigger: SyncTrigger,
+        gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let gateway = self.required_gateway(account_id)?;
         let cursors = self.store.get_sync_cursors(account_id)?;
         let batch = gateway.sync(account_id, &cursors).await?;
         let mut events = self.store.apply_sync_batch(account_id, &batch)?;
@@ -483,9 +454,9 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         mutation: MessageMutation<'_>,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
-        let gateway = self.required_gateway(account_id)?;
         let outcome = match mutation {
             MessageMutation::SetKeywords(command) => {
                 gateway
@@ -545,11 +516,13 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &SetKeywordsCommand,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         self.apply_message_mutation(
             account_id,
             message_id,
             MessageMutation::SetKeywords(command),
+            gateway,
         )
         .await
     }
@@ -562,11 +535,13 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &ReplaceMailboxesCommand,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         self.apply_message_mutation(
             account_id,
             message_id,
             MessageMutation::ReplaceMailboxes(command),
+            gateway,
         )
         .await
     }
@@ -579,6 +554,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &AddToMailboxCommand,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         let mut mailbox_ids = self.store.get_message_mailboxes(account_id, message_id)?;
         if !mailbox_ids
@@ -591,6 +567,7 @@ impl MailService {
             account_id,
             message_id,
             &ReplaceMailboxesCommand { mailbox_ids },
+            gateway,
         )
         .await
     }
@@ -603,6 +580,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &RemoveFromMailboxCommand,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         let mailbox_ids = self
             .store
@@ -614,6 +592,7 @@ impl MailService {
             account_id,
             message_id,
             &ReplaceMailboxesCommand { mailbox_ids },
+            gateway,
         )
         .await
     }
@@ -625,8 +604,9 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        self.apply_message_mutation(account_id, message_id, MessageMutation::Destroy)
+        self.apply_message_mutation(account_id, message_id, MessageMutation::Destroy, gateway)
             .await
     }
 
@@ -643,8 +623,11 @@ impl MailService {
     /// Fetch the primary sender identity from the gateway.
     ///
     /// @spec docs/L1-jmap#methods-used
-    pub async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, ServiceError> {
-        let gateway = self.required_gateway(account_id)?;
+    pub async fn fetch_identity(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+    ) -> Result<Identity, ServiceError> {
         gateway.fetch_identity(account_id).await.map_err(Into::into)
     }
 
@@ -653,8 +636,8 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
+        gateway: &dyn MailGateway,
     ) -> Result<crate::ReplyContext, ServiceError> {
-        let gateway = self.required_gateway(account_id)?;
         gateway
             .fetch_reply_context(account_id, message_id)
             .await
@@ -668,31 +651,12 @@ impl MailService {
         &self,
         account_id: &AccountId,
         request: &SendMessageRequest,
+        gateway: &dyn MailGateway,
     ) -> Result<(), ServiceError> {
-        let gateway = self.required_gateway(account_id)?;
         gateway
             .send_message(account_id, request)
             .await
             .map_err(Into::into)
-    }
-
-    /// Look up a gateway for an account, returning `None` if none is registered.
-    fn gateway(&self, account_id: &AccountId) -> Option<SharedGateway> {
-        self.gateways
-            .read()
-            .expect("gateway registry lock poisoned")
-            .get(account_id.as_str())
-            .cloned()
-    }
-
-    /// Look up a gateway, returning `GatewayError::Unavailable` if none is registered.
-    fn required_gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
-        self.gateways
-            .read()
-            .expect("gateway registry lock poisoned")
-            .get(account_id.as_str())
-            .cloned()
-            .ok_or_else(|| crate::GatewayError::Unavailable(account_id.to_string()).into())
     }
 }
 
@@ -1290,8 +1254,8 @@ mod tests {
         let account = AccountId::from("primary");
         let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
         let config = Arc::new(TestConfig::default());
-        let service = MailService::new(store.clone(), config)
-            .with_gateway(&account, Arc::new(MutationGateway::with_revision(1)));
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_revision(1);
 
         service
             .set_keywords(
@@ -1301,6 +1265,7 @@ mod tests {
                     add: vec!["$flagged".to_string()],
                     remove: Vec::new(),
                 },
+                &gateway,
             )
             .await
             .expect("flagging should succeed");
@@ -1321,6 +1286,7 @@ mod tests {
                     add: Vec::new(),
                     remove: vec!["$flagged".to_string()],
                 },
+                &gateway,
             )
             .await
             .expect("unflagging should succeed");
@@ -1339,8 +1305,8 @@ mod tests {
         let account = AccountId::from("primary");
         let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
         let config = Arc::new(TestConfig::default());
-        let service = MailService::new(store.clone(), config)
-            .with_gateway(&account, Arc::new(MutationGateway::with_revision(1)));
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_revision(1);
 
         service
             .set_keywords(
@@ -1350,6 +1316,7 @@ mod tests {
                     add: vec!["$flagged".to_string()],
                     remove: Vec::new(),
                 },
+                &gateway,
             )
             .await
             .expect("first mutation should succeed");
@@ -1360,6 +1327,7 @@ mod tests {
                 &ReplaceMailboxesCommand {
                     mailbox_ids: vec![MailboxId::from("archive")],
                 },
+                &gateway,
             )
             .await
             .expect("second mutation should succeed");
@@ -1385,8 +1353,8 @@ mod tests {
         let account = AccountId::from("primary");
         let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
         let config = Arc::new(TestConfig::default());
-        let service = MailService::new(store.clone(), config)
-            .with_gateway(&account, Arc::new(MutationGateway::with_revision(2)));
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_revision(2);
 
         let error = service
             .set_keywords(
@@ -1396,41 +1364,12 @@ mod tests {
                     add: vec!["$flagged".to_string()],
                     remove: Vec::new(),
                 },
+                &gateway,
             )
             .await
             .expect_err("mismatch should be returned to the caller");
 
         assert_eq!(error.code(), "state_mismatch");
-        assert_eq!(
-            store
-                .get_cursor(&account, SyncObject::Message)
-                .expect("cursor lookup should succeed")
-                .expect("cursor should exist")
-                .state,
-            "message-1"
-        );
-    }
-
-    #[tokio::test]
-    async fn message_mutations_require_a_registered_gateway() {
-        let account = AccountId::from("primary");
-        let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-        let config = Arc::new(TestConfig::default());
-        let service = MailService::new(store.clone(), config);
-
-        let error = service
-            .set_keywords(
-                &account,
-                &MessageId::from("message-1"),
-                &SetKeywordsCommand {
-                    add: vec!["$flagged".to_string()],
-                    remove: Vec::new(),
-                },
-            )
-            .await
-            .expect_err("mutations without a gateway should fail");
-
-        assert_eq!(error.code(), "gateway_unavailable");
         assert_eq!(
             store
                 .get_cursor(&account, SyncObject::Message)
