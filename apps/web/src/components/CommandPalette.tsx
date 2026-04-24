@@ -2,6 +2,8 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import {
   Archive,
   Clock3,
+  CircleHelp,
+  ListFilter,
   Keyboard,
   MessageSquareText,
   PenSquare,
@@ -19,6 +21,7 @@ import type { MessageSummary } from '@/api/types'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
 import { queryKeys } from '@/queryKeys'
+import { getQueryCompletions, getQueryHelpEntries } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
 
 import { FloatingPanel } from './FloatingPanel'
@@ -45,41 +48,16 @@ type PaletteCommandId =
   | 'shortcuts'
   | 'account'
 
-type PaletteEntry =
-  | {
-      id: string
-      kind: 'command'
-      label: string
-      keywords: string
-      icon: React.ReactNode
-      onSelect: () => void
-    }
-  | {
-      id: string
-      kind: 'message'
-      label: string
-      sub: string
-      keywords: string
-      icon: React.ReactNode
-      onSelect: () => void
-    }
-  | {
-      id: string
-      kind: 'contact'
-      label: string
-      keywords: string
-      icon: React.ReactNode
-      onSelect: () => void
-    }
-  | {
-      id: string
-      kind: 'mailbox'
-      label: string
-      sub: string
-      keywords: string
-      icon: React.ReactNode
-      onSelect: () => void
-    }
+type PaletteEntry = {
+  id: string
+  kind: 'command' | 'message' | 'contact' | 'mailbox' | 'query'
+  label: string
+  sub?: string
+  keywords: string
+  icon: React.ReactNode
+  closeOnSelect?: boolean
+  onSelect: () => void
+}
 
 interface CommandPaletteProps {
   hasSelectedMessage: boolean
@@ -298,6 +276,49 @@ export function CommandPalette({
   const results = useMemo(() => {
     const normalized = normalizeQuery(query)
 
+    const queryCompletions = getQueryCompletions(query, {
+      sidebar,
+      messages: cachedMessages,
+    }).map<PaletteEntry>((completion) => ({
+      id: completion.id,
+      kind: 'query',
+      label: completion.label,
+      sub: completion.detail,
+      keywords: `${completion.label} ${completion.detail}`,
+      icon: (
+        <ListFilter
+          size={15}
+          strokeWidth={1.7}
+          className="text-muted-foreground"
+        />
+      ),
+      closeOnSelect: false,
+      onSelect: () => {
+        setQuery(completion.replacement)
+        setSelectedIndex(null)
+      },
+    }))
+
+    const queryHelp = getQueryHelpEntries(query).map<PaletteEntry>((entry) => ({
+      id: entry.id,
+      kind: 'query',
+      label: entry.label,
+      sub: entry.detail,
+      keywords: entry.keywords,
+      icon: (
+        <CircleHelp
+          size={15}
+          strokeWidth={1.7}
+          className="text-muted-foreground"
+        />
+      ),
+      closeOnSelect: false,
+      onSelect: () => {
+        setQuery(entry.replacement)
+        setSelectedIndex(null)
+      },
+    }))
+
     const commands: PaletteEntry[] = [
       {
         id: 'compose',
@@ -479,7 +500,9 @@ export function CommandPalette({
     }
 
     return [
+      { label: 'Suggestions', items: queryCompletions },
       { label: 'Messages', items: messages },
+      { label: 'Query Language', items: queryHelp },
       { label: 'Commands', items: commands },
       { label: 'Contacts', items: contacts },
       { label: 'Mailboxes', items: mailboxes.slice(0, 6) },
@@ -522,7 +545,9 @@ export function CommandPalette({
 
   function runEntry(entry: PaletteEntry) {
     entry.onSelect()
-    onClose()
+    if (entry.closeOnSelect !== false) {
+      onClose()
+    }
   }
 
   function applyCurrentQuery() {
@@ -654,7 +679,7 @@ export function CommandPalette({
                     {item.icon}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {'sub' in item && item.sub && (
+                  {item.sub && (
                     <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
                       {item.sub}
                     </span>

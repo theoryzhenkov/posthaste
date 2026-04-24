@@ -163,17 +163,23 @@ Group values are computed by executing the parent query and extracting distinct 
 
 ## Search UX
 
-### Toolbar search
+### Query help and autosuggest
 
-The toolbar search field accepts the full query language. As the user types, the input provides contextual autocompletion:
+The command/search palette owns in-app query language help and contextual
+autosuggest. Suggestions are derived from local read models, so typing remains
+instant and does not introduce a separate backend search path:
 
 - Prefix names: typing `fr` suggests `from:`
 - Mailbox names: after `in:`, suggest mailbox names from the local cache
 - Contact names: after `from:`/`f:`, suggest addresses from locally cached senders
 - Keywords: after `tag:`, suggest known JMAP keywords
-- Named dates: after `before:`, `after:`, or `date:`, suggest `today`, `yesterday`, `thisweek`, `thismonth`, `thisyear`
+- Relative dates: after `newer:` or `older:`, suggest values like `1d`, `1w`, and `1m`
+- Exact dates: after `before:`, `after:`, or `date:`, suggest an ISO calendar date
 
-Completion is local-only, drawing from the SQLite cache. No network requests during typing.
+The help surface lists supported prefixes and concise examples inside the same
+floating panel. Selecting a suggestion or help row rewrites only the current
+query text and keeps the palette open, so users can complete a query without
+losing context.
 
 ### Execution pipeline
 
