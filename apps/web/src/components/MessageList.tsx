@@ -1,40 +1,35 @@
 /**
- * Paginated, virtualized conversation list with live prepend and keyboard navigation.
+ * Virtualized, message-first middle pane.
  *
- * Uses manual fixed-row virtualization (no library), seek-based cursor pagination,
- * and anchored scroll adjustment on live prepends.
+ * The list displays individual messages by default. Thread viewing is a filter
+ * concern: selecting a message still lets the reader load its surrounding
+ * conversation, but the middle pane itself does not collapse rows by thread.
  *
  * @spec docs/L1-ui#messagelist
  * @spec docs/L1-ui#keyboard-shortcuts
  */
-import {
-  useInfiniteQuery,
-  useQueryClient,
-  useQueries,
-  type InfiniteData,
-} from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  fetchConversations,
-  fetchSmartMailboxConversations,
-} from '../api/client'
-import type { ConversationSummary, DomainEvent } from '../api/types'
+  applyAccountNamesToMessages,
+  useAccountDirectory,
+} from '../accountDirectory'
+import { fetchSmartMailboxMessages, fetchSourceMessages } from '../api/client'
+import type { DomainEvent, MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { MAIL_DOMAIN_EVENT_NAME } from '../hooks/useDaemonEvents'
-import {
-  getConversationSummary,
-  mailKeys,
-  normalizeConversationPage,
-  readConversationIds,
-  type ConversationPageSlice,
-  type MailSelection,
-} from '../mailState'
+import type { MailSelection } from '../mailState'
 import { AlertCircle, Inbox, MousePointerClick } from 'lucide-react'
 import type { SidebarSelection } from './Sidebar'
 import { MessageRow } from './MessageRow'
-import { type SortConfig, buildThreadListLayout } from './thread-list/columns'
+import {
+  type ColumnId,
+  type SortConfig,
+  buildThreadListLayout,
+} from './thread-list/columns'
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
+import { queryKeys } from '../queryKeys'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -46,55 +41,30 @@ interface MessageListProps {
 }
 
 /** @spec docs/L1-ui#messagelist */
-const PAGE_SIZE = 100
-/** @spec docs/L1-ui#messagelist */
 const ROW_HEIGHT = 30
 const OVERSCAN_ROWS = 6
-const LOAD_MORE_THRESHOLD_PX = 800
-const TOP_REFRESH_THRESHOLD_PX = 24
 /** Per-view scroll offset cache to restore position on view switch. */
 const scrollOffsetByView = new Map<string, number>()
 
-/**
- * Fetch a conversation page for the currently selected sidebar view,
- * routing to the appropriate API endpoint.
- * @spec docs/L1-api#cursor-pagination
- */
-function fetchConversationPageForView(
-  selectedView: SidebarSelection,
-  cursor: string | null,
-  sort: SortConfig,
-  q?: string,
-) {
-  const sortParams = { sort: sort.columnId, sortDir: sort.direction, q }
-  if (selectedView.kind === 'smart-mailbox') {
-    return fetchSmartMailboxConversations(selectedView.id, {
-      limit: PAGE_SIZE,
-      cursor,
-      ...sortParams,
-    })
-  }
-  return fetchConversations({
-    sourceId: selectedView.sourceId,
-    mailboxId: selectedView.mailboxId,
-    limit: PAGE_SIZE,
-    cursor,
-    ...sortParams,
-  })
+function messageKey(message: MessageSummary): string {
+  return `${message.sourceId}:${message.id}`
 }
 
-/** Stable string key for a sidebar selection, used for scroll-offset caching. */
-function conversationViewKey(selectedView: SidebarSelection | null): string {
+function selectionKey(selection: MailSelection | null): string | null {
+  return selection ? `${selection.sourceId}:${selection.messageId}` : null
+}
+
+function viewKey(selectedView: SidebarSelection | null, searchQuery?: string) {
+  const query = searchQuery ? `?q=${searchQuery}` : ''
   if (!selectedView) {
-    return 'none'
+    return `none${query}`
   }
   if (selectedView.kind === 'smart-mailbox') {
-    return `smart:${selectedView.id}`
+    return `smart:${selectedView.id}${query}`
   }
-  return `source:${selectedView.sourceId}:${selectedView.mailboxId}`
+  return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}`
 }
 
-/** Check whether an SSE event could affect the currently displayed view. */
 function eventMayAffectView(
   payload: DomainEvent,
   selectedView: SidebarSelection | null,
@@ -113,14 +83,88 @@ function eventMayAffectView(
   )
 }
 
+function compareNullableText(a: string | null, b: string | null): number {
+  return (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' })
+}
+
+function compareBoolean(a: boolean, b: boolean): number {
+  return Number(a) - Number(b)
+}
+
+function compareMessages(
+  a: MessageSummary,
+  b: MessageSummary,
+  columnId: ColumnId,
+): number {
+  switch (columnId) {
+    case 'date':
+      return Date.parse(a.receivedAt) - Date.parse(b.receivedAt)
+    case 'from':
+      return compareNullableText(
+        a.fromName ?? a.fromEmail,
+        b.fromName ?? b.fromEmail,
+      )
+    case 'subject':
+      return compareNullableText(a.subject, b.subject)
+    case 'source':
+      return compareNullableText(a.sourceName, b.sourceName)
+    case 'flagged':
+      return compareBoolean(a.isFlagged, b.isFlagged)
+    case 'attachment':
+      return compareBoolean(a.hasAttachment, b.hasAttachment)
+    case 'unread':
+      return compareBoolean(!a.isRead, !b.isRead)
+    case 'preview':
+      return compareNullableText(a.preview, b.preview)
+    case 'tags':
+      return compareNullableText(a.keywords.join(' '), b.keywords.join(' '))
+  }
+}
+
+function sortMessages(messages: MessageSummary[], sort: SortConfig) {
+  const direction = sort.direction === 'asc' ? 1 : -1
+  return [...messages].sort((a, b) => {
+    const primary = compareMessages(a, b, sort.columnId) * direction
+    if (primary !== 0) {
+      return primary
+    }
+    return messageKey(a).localeCompare(messageKey(b))
+  })
+}
+
+function matchesSearch(message: MessageSummary, searchQuery?: string): boolean {
+  const query = searchQuery?.trim().toLowerCase()
+  if (!query) {
+    return true
+  }
+  const haystack = [
+    message.subject,
+    message.preview,
+    message.fromName,
+    message.fromEmail,
+    message.sourceName,
+    message.keywords.join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(query)
+}
+
+async function fetchMessagesForView(selectedView: SidebarSelection) {
+  if (selectedView.kind === 'smart-mailbox') {
+    return fetchSmartMailboxMessages(selectedView.id)
+  }
+  return fetchSourceMessages(selectedView.sourceId, selectedView.mailboxId)
+}
+
 /**
- * Conversation list panel: the middle column of the three-column layout.
+ * Message list panel: the middle column of the three-column layout.
  *
- * Handles pagination, manual virtualization, live prepend on domain events,
- * per-view scroll restoration, and keyboard shortcuts (j/k, arrows, archive, trash).
+ * Handles individual-message loading, manual virtualization, live refresh on
+ * domain events, per-view scroll restoration, and keyboard shortcuts.
  *
  * @spec docs/L1-ui#messagelist
- * @spec docs/L1-ui#live-prepend-behavior
  * @spec docs/L1-ui#keyboard-shortcuts
  */
 export function MessageList({
@@ -130,7 +174,6 @@ export function MessageList({
   actions,
   searchQuery,
 }: MessageListProps) {
-  const queryClient = useQueryClient()
   const {
     columns,
     sort,
@@ -145,202 +188,70 @@ export function MessageList({
     () => buildThreadListLayout(columns, widths),
     [columns, widths],
   )
-  const queryKey = useMemo(
-    () => mailKeys.view(selectedView, sort, searchQuery),
-    [selectedView, sort, searchQuery],
-  )
-  const viewKey = useMemo(
-    () => conversationViewKey(selectedView),
-    [selectedView],
+  const currentViewKey = useMemo(
+    () => viewKey(selectedView, searchQuery),
+    [selectedView, searchQuery],
   )
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const restoredViewKeyRef = useRef<string | null>(null)
-  const refreshInFlightRef = useRef(false)
-  const refreshQueuedRef = useRef(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
-  const [isRefreshingTop, setIsRefreshingTop] = useState(false)
+  const accountDirectory = useAccountDirectory()
 
   const {
-    data,
+    data: rawMessages = [],
     isLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    fetchNextPage,
     refetch,
     error,
-  } = useInfiniteQuery({
-    queryKey,
-    queryFn: async ({ pageParam }) =>
-      normalizeConversationPage(
-        queryClient,
-        await fetchConversationPageForView(
-          selectedView!,
-          pageParam,
-          sort,
-          searchQuery,
-        ),
-      ),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => lastPage.nextCursor,
+  } = useQuery({
+    queryKey: queryKeys.messages(selectedView),
+    queryFn: () => fetchMessagesForView(selectedView!),
     enabled: selectedView !== null,
   })
 
-  const conversationIds = useMemo(() => readConversationIds(data), [data])
+  const displayMessages = useMemo(
+    () => applyAccountNamesToMessages(rawMessages, accountDirectory),
+    [accountDirectory, rawMessages],
+  )
 
-  /**
-   * Refetch the first page and prepend any new conversations, adjusting
-   * `scrollTop` to keep the visible viewport anchored.
-   * @spec docs/L1-ui#live-prepend-behavior
-   */
-  const refreshFirstPage = useCallback(async () => {
-    if (!selectedView) {
-      return
-    }
-    if (refreshInFlightRef.current) {
-      refreshQueuedRef.current = true
-      return
-    }
-
-    refreshInFlightRef.current = true
-    setIsRefreshingTop(true)
-    try {
-      const fetchedPage = await fetchConversationPageForView(
-        selectedView,
-        null,
+  const messages = useMemo(
+    () =>
+      sortMessages(
+        displayMessages.filter((message) =>
+          matchesSearch(message, searchQuery),
+        ),
         sort,
-        searchQuery,
-      )
-      const firstPage = normalizeConversationPage(queryClient, fetchedPage)
-      let insertedCount = 0
-      queryClient.setQueryData<
-        InfiniteData<ConversationPageSlice, string | null>
-      >(queryKey, (current) => {
-        if (!current || current.pages.length === 0) {
-          insertedCount = firstPage.itemIds.length
-          return {
-            pages: [firstPage],
-            pageParams: [null],
-          }
-        }
+      ),
+    [displayMessages, searchQuery, sort],
+  )
+  const selectedKey = selectionKey(selection)
 
-        const loadedIds = current.pages.flatMap((page) => page.itemIds)
-        const currentTopConversationId = loadedIds[0] ?? null
-        const prependedIds: string[] = []
-        for (const itemId of firstPage.itemIds) {
-          if (
-            currentTopConversationId !== null &&
-            itemId === currentTopConversationId
-          ) {
-            break
-          }
-          prependedIds.push(itemId)
-        }
-        insertedCount = prependedIds.length
-
-        const prependedIdSet = new Set(prependedIds)
-        const pages = current.pages.map((page, index) => {
-          const retainedIds = page.itemIds.filter(
-            (itemId) => !prependedIdSet.has(itemId),
-          )
-
-          if (index === 0) {
-            return {
-              ...page,
-              itemIds: [...prependedIds, ...retainedIds],
-              nextCursor: firstPage.nextCursor,
-            }
-          }
-
-          return {
-            ...page,
-            itemIds: retainedIds,
-          }
-        })
-
-        return {
-          ...current,
-          pages,
-        }
-      })
-
-      if (
-        insertedCount > 0 &&
-        scrollTop > TOP_REFRESH_THRESHOLD_PX &&
-        scrollContainerRef.current
-      ) {
-        const nextScrollTop =
-          scrollContainerRef.current.scrollTop + insertedCount * ROW_HEIGHT
-        scrollContainerRef.current.scrollTop = nextScrollTop
-        scrollOffsetByView.set(viewKey, nextScrollTop)
-        setScrollTop(nextScrollTop)
-      }
-    } finally {
-      refreshInFlightRef.current = false
-      setIsRefreshingTop(false)
-      if (refreshQueuedRef.current) {
-        refreshQueuedRef.current = false
-        void refreshFirstPage()
-      }
-    }
-  }, [
-    queryClient,
-    queryKey,
-    scrollTop,
-    searchQuery,
-    selectedView,
-    sort,
-    viewKey,
-  ])
-
-  /** Move selection to the next or previous conversation. */
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
-      if (conversationIds.length === 0) return
+      if (messages.length === 0) return
 
-      const currentIndex = conversationIds.findIndex(
-        (conversationId) => conversationId === selection?.conversationId,
+      const currentIndex = messages.findIndex(
+        (message) => messageKey(message) === selectedKey,
       )
       const nextIndex =
         currentIndex === -1
           ? direction === 1
             ? 0
-            : conversationIds.length - 1
+            : messages.length - 1
           : currentIndex + direction
 
-      if (nextIndex < 0) {
-        return
-      }
-      if (nextIndex >= conversationIds.length) {
-        if (direction === 1 && hasNextPage && !isFetchingNextPage) {
-          void fetchNextPage()
-        }
+      if (nextIndex < 0 || nextIndex >= messages.length) {
         return
       }
 
-      const nextConversationId = conversationIds[nextIndex]
-      const nextConversation = getConversationSummary(
-        queryClient,
-        nextConversationId,
-      )
-      if (!nextConversation) {
-        return
-      }
+      const nextMessage = messages[nextIndex]
       onSelectMessage({
-        conversationId: nextConversation.id,
-        sourceId: nextConversation.latestMessage.sourceId,
-        messageId: nextConversation.latestMessage.messageId,
+        conversationId: nextMessage.conversationId,
+        sourceId: nextMessage.sourceId,
+        messageId: nextMessage.id,
       })
     },
-    [
-      conversationIds,
-      queryClient,
-      fetchNextPage,
-      hasNextPage,
-      isFetchingNextPage,
-      onSelectMessage,
-      selection?.conversationId,
-    ],
+    [messages, onSelectMessage, selectedKey],
   )
 
   // Keyboard shortcuts -- suppressed when an input has focus.
@@ -387,19 +298,20 @@ export function MessageList({
   // Reset scroll-restore tracking on view change.
   useEffect(() => {
     restoredViewKeyRef.current = null
-  }, [viewKey])
+  }, [currentViewKey])
 
   // Restore scroll position when switching views.
   useEffect(() => {
     const node = scrollContainerRef.current
-    if (!node || restoredViewKeyRef.current === viewKey) {
+    if (!node || restoredViewKeyRef.current === currentViewKey) {
       return
     }
-    const savedOffset = scrollOffsetByView.get(viewKey) ?? 0
-    restoredViewKeyRef.current = viewKey
+    const savedOffset = scrollOffsetByView.get(currentViewKey) ?? 0
+    restoredViewKeyRef.current = currentViewKey
     node.scrollTop = savedOffset
-    setScrollTop(savedOffset)
-  }, [viewKey, conversationIds.length])
+    const frame = requestAnimationFrame(() => setScrollTop(savedOffset))
+    return () => cancelAnimationFrame(frame)
+  }, [currentViewKey, messages.length])
 
   // Track viewport height for virtualization.
   useEffect(() => {
@@ -416,34 +328,14 @@ export function MessageList({
     return () => resizeObserver.disconnect()
   }, [])
 
-  // Fetch next page when near the bottom.
-  useEffect(() => {
-    const node = scrollContainerRef.current
-    if (!node || !hasNextPage || isFetchingNextPage) {
-      return
-    }
-
-    const remaining = node.scrollHeight - (node.scrollTop + node.clientHeight)
-    if (remaining <= LOAD_MORE_THRESHOLD_PX) {
-      void fetchNextPage()
-    }
-  }, [
-    conversationIds.length,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    scrollTop,
-    viewportHeight,
-  ])
-
-  // Listen for domain events and refresh the first page.
+  // Listen for domain events and refresh messages.
   useEffect(() => {
     function handleDomainEvent(event: Event) {
       const payload = (event as CustomEvent<DomainEvent>).detail
       if (!eventMayAffectView(payload, selectedView)) {
         return
       }
-      void refreshFirstPage()
+      void refetch()
     }
 
     window.addEventListener(
@@ -455,7 +347,7 @@ export function MessageList({
         MAIL_DOMAIN_EVENT_NAME,
         handleDomainEvent as EventListener,
       )
-  }, [refreshFirstPage, scrollTop, selectedView])
+  }, [refetch, selectedView])
 
   const handleScroll = useCallback(() => {
     const node = scrollContainerRef.current
@@ -463,52 +355,21 @@ export function MessageList({
       return
     }
     setScrollTop(node.scrollTop)
-    scrollOffsetByView.set(viewKey, node.scrollTop)
-  }, [viewKey])
+    scrollOffsetByView.set(currentViewKey, node.scrollTop)
+  }, [currentViewKey])
 
-  const totalRows = conversationIds.length
-  const safeViewportHeight = viewportHeight || ROW_HEIGHT * 8
-  const startIndex = Math.max(
-    0,
-    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS,
-  )
-  const endIndex = Math.min(
-    totalRows,
-    Math.ceil((scrollTop + safeViewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
-  )
-  const topSpacerHeight = startIndex * ROW_HEIGHT
-  const bottomSpacerHeight = (totalRows - endIndex) * ROW_HEIGHT
-  const visibleConversationIds = conversationIds.slice(startIndex, endIndex)
-  const visibleConversations = useQueries({
-    queries: visibleConversationIds.map((conversationId) => ({
-      queryKey: mailKeys.conversationSummary(conversationId),
-    })),
-    combine: (results) =>
-      results
-        .map((result) => result.data)
-        .filter(
-          (conversation): conversation is ConversationSummary => !!conversation,
-        ),
-  })
   useEffect(() => {
-    if (!selectedView || selection || conversationIds.length === 0) {
+    if (!selectedView || selection || messages.length === 0) {
       return
     }
 
-    const firstConversation = getConversationSummary(
-      queryClient,
-      conversationIds[0],
-    )
-    if (!firstConversation) {
-      return
-    }
-
+    const firstMessage = messages[0]
     onSelectMessage({
-      conversationId: firstConversation.id,
-      sourceId: firstConversation.latestMessage.sourceId,
-      messageId: firstConversation.latestMessage.messageId,
+      conversationId: firstMessage.conversationId,
+      sourceId: firstMessage.sourceId,
+      messageId: firstMessage.id,
     })
-  }, [conversationIds, onSelectMessage, queryClient, selectedView, selection])
+  }, [messages, onSelectMessage, selectedView, selection])
 
   if (!selectedView) {
     return (
@@ -529,6 +390,20 @@ export function MessageList({
       </div>
     )
   }
+
+  const totalRows = messages.length
+  const safeViewportHeight = viewportHeight || ROW_HEIGHT * 8
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS,
+  )
+  const endIndex = Math.min(
+    totalRows,
+    Math.ceil((scrollTop + safeViewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
+  )
+  const topSpacerHeight = startIndex * ROW_HEIGHT
+  const bottomSpacerHeight = (totalRows - endIndex) * ROW_HEIGHT
+  const visibleMessages = messages.slice(startIndex, endIndex)
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
@@ -589,7 +464,7 @@ export function MessageList({
                   className="text-destructive/50"
                 />
                 <p className="text-sm text-destructive">
-                  Failed to load threads
+                  Failed to load messages
                 </p>
                 <button
                   type="button"
@@ -600,7 +475,7 @@ export function MessageList({
                 </button>
               </div>
             )}
-            {!isLoading && !error && conversationIds.length === 0 && (
+            {!isLoading && !error && messages.length === 0 && (
               <div className="flex flex-col items-center gap-3 px-3 py-12">
                 <Inbox
                   size={40}
@@ -609,7 +484,7 @@ export function MessageList({
                 />
                 <div className="text-center">
                   <p className="text-sm font-medium text-muted-foreground">
-                    No threads here yet
+                    No messages here yet
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground/60">
                     Messages will appear as they arrive
@@ -617,22 +492,22 @@ export function MessageList({
                 </div>
               </div>
             )}
-            {conversationIds.length > 0 && (
+            {messages.length > 0 && (
               <>
                 <div style={{ height: topSpacerHeight }} />
-                {visibleConversations.map((conversation, index) => (
-                  <div key={conversation.id} style={{ height: ROW_HEIGHT }}>
+                {visibleMessages.map((message, index) => (
+                  <div key={messageKey(message)} style={{ height: ROW_HEIGHT }}>
                     <MessageRow
-                      message={conversation}
-                      isSelected={conversation.id === selection?.conversationId}
+                      message={message}
+                      isSelected={messageKey(message) === selectedKey}
                       isStriped={(startIndex + index) % 2 === 1}
                       columns={columns}
                       layout={tableLayout}
                       onSelect={() =>
                         onSelectMessage({
-                          conversationId: conversation.id,
-                          sourceId: conversation.latestMessage.sourceId,
-                          messageId: conversation.latestMessage.messageId,
+                          conversationId: message.conversationId,
+                          sourceId: message.sourceId,
+                          messageId: message.id,
                         })
                       }
                     />
@@ -640,13 +515,6 @@ export function MessageList({
                 ))}
                 <div style={{ height: bottomSpacerHeight }} />
               </>
-            )}
-            {(isFetchingNextPage || isRefreshingTop) && (
-              <p className="border-t border-[var(--list-divider)] bg-[var(--list-zebra)] px-4 py-2 text-[11px] text-muted-foreground">
-                {isRefreshingTop
-                  ? 'Refreshing threads...'
-                  : 'Loading more threads...'}
-              </p>
             )}
           </div>
         </div>

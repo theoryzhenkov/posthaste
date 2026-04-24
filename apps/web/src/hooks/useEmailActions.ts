@@ -30,6 +30,7 @@ import {
   type MailSelection,
   type QuerySnapshot,
 } from '../mailState'
+import { queryKeys } from '../queryKeys'
 
 /** Message reference augmented with optional keyword fields for optimistic patching. */
 type ReadToggleTarget = MailSelection &
@@ -252,13 +253,13 @@ export function useEmailActions() {
         if (!merged) {
           context.incomplete = true
         }
-        queryClient.invalidateQueries({ queryKey: ['sidebar'] })
-        queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] })
+        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+        queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: ['sidebar'] })
-      queryClient.invalidateQueries({ queryKey: ['smart-mailboxes'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+      queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
       invalidateMessageScope(queryClient, input.target, conversationId)
     },
     onError: (error, _input, context) => {
@@ -291,6 +292,23 @@ export function useEmailActions() {
         command: previous.isRead
           ? { kind: 'setKeywords', add: [], remove: ['$seen'] }
           : { kind: 'setKeywords', add: ['$seen'], remove: [] },
+        conversationId: selection?.conversationId,
+        optimisticKeywordPatch: {
+          next: deriveKeywordState(nextKeywords),
+          previous,
+        },
+        target: toSourceMessageRef(message),
+      })
+    },
+    markRead: (message: ReadToggleTarget | MessageSummary) => {
+      const selection = toMailSelection(queryClient, message)
+      const previous = resolveKeywordState(queryClient, message)
+      if (previous.isRead) {
+        return
+      }
+      const nextKeywords = applyKeywordToggle(previous.keywords, '$seen', true)
+      mutation.mutate({
+        command: { kind: 'setKeywords', add: ['$seen'], remove: [] },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),

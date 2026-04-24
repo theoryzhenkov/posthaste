@@ -5,7 +5,7 @@ import { SettingsPanel } from './SettingsPanel'
 interface SettingsOverlayProps {
   accounts: AccountOverview[]
   activeAccountId: string | null
-  initialCategory?: 'general' | 'accounts' | 'mailboxes'
+  initialCategory?: 'general' | 'appearance' | 'accounts' | 'mailboxes'
   onActiveAccountChange: (accountId: string | null) => void
   onClose: () => void
 }

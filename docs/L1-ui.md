@@ -1,7 +1,7 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-04-23
+modified: 2026-04-24
 reviewed: 2026-04-24
 depends:
   - path: docs/L0-ui
@@ -39,9 +39,9 @@ App
         │   └── Account mailbox sections
         ├── MessageList
         │   ├── Column header bar (SortableColumnHeader + ColumnResizeHandle)
-        │   ├── Paginated conversation query
+        │   ├── Message query for the selected mailbox or smart mailbox
         │   ├── Virtualized visible rows
-        │   └── Bottom load-more sentinel
+        │   └── Live refresh hook
         └── MessageDetail
             ├── Metadata header
             ├── Tag strip
@@ -59,32 +59,34 @@ The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L
 
 React Query manages server state, but different surfaces use different strategies:
 
-- `["accounts"]` loads configured account overviews.
-- `["sidebar"]` loads enabled sources plus smart mailbox summaries.
-- `["conversations", ...viewKey]` uses `useInfiniteQuery` against conversation endpoints and returns `ConversationPage { items, nextCursor }`.
-- `["conversation", conversationId]` loads the selected conversation's message summaries.
-- `["message", sourceId, messageId]` loads full message detail, including lazily fetched body content when needed.
+- `queryKeys.accounts` loads configured account overviews.
+- `queryKeys.sidebar` loads enabled sources plus smart mailbox summaries.
+- `queryKeys.messages(selectedView)` loads individual message summaries for the selected mailbox or smart mailbox.
+- `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
+- `mailKeys.message(sourceId, messageId)` loads full message detail, including lazily fetched body content when needed.
 
-Mutations still use query invalidation for local actions, but the conversation list does not rely on broad invalidation for live arrivals because it is paginated and virtualized.
+Mutable account display fields are canonical in the accounts query. Message and sidebar DTOs may contain `sourceName` snapshots, but the UI resolves visible account names from `sourceId -> account.name` through the account directory selector.
+
+Domain events and mutation results update caches through the centralized domain cache helper. Components should not invent ad hoc cache keys or scatter account/message invalidation rules locally. The message list still listens for live domain events and refreshes the current view when a relevant message or mailbox event arrives.
 
 ## MessageList
 
-`MessageList` is conversation-first and currently does manual fixed-row virtualization rather than depending on a virtualization library.
+`MessageList` is message-first and currently does manual fixed-row virtualization rather than depending on a virtualization library.
 
-- Page size is `100`.
 - Row height follows the visual density contract: `24px` compact, `30px` standard, `48px` roomy.
-- Pagination is seek-based using an opaque cursor returned by the backend.
+- Rows represent individual `MessageSummary` records, not grouped threads.
 - The visible slice is derived from `scrollTop`, `viewportHeight`, and overscan rows.
 - Scroll offset is preserved per selected mailbox or smart-mailbox key.
-- Near the bottom of the scroll container, the list fetches the next page.
+- Sorting is applied over the currently loaded individual messages.
+- Thread viewing is not the default list mode. When the user wants a thread, a command may apply a thread filter to the message list.
 
-Each row represents a conversation summary, not an individual message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
+Each row represents one message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
 
 ## Column configuration
 
 Columns are reorderable (drag-and-drop via dnd-kit), sortable (click header), and resizable (drag right edge via `ColumnResizeHandle`).
 
-`useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is forwarded to the backend via `sort` and `sortDir` query params -- the backend performs the sort, not the frontend. Available sort fields: `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment`; default is `date` DESC.
+`useColumnConfig` manages column visibility, order, sort field/direction, and per-column pixel widths. Sort is applied to the loaded message rows in the frontend. Available sort fields: `date`, `from`, `subject`, `source`, `flagged`, `attachment`; default is `date` DESC.
 
 Column widths are stored as pixel overrides (`ColumnWidths = Partial<Record<ColumnId, number>>`). Columns without an override use their default CSS grid width from the column definition's `gridWidth`. `buildGridTemplate` accepts optional width overrides and emits pixel values for overridden columns.
 
@@ -94,19 +96,15 @@ All column config (visibility, order, sort, widths) is persisted to localStorage
 
 Incoming domain events are received through `useDaemonEvents`, which dispatches a browser `CustomEvent` used by `MessageList`.
 
-When a relevant event arrives:
-
-- the first conversation page is refetched
-- newly arrived top rows are prepended into the cached first page
-- if the user is scrolled away from the top, `scrollTop` is increased by `insertedCount * ROW_HEIGHT`
-
-This preserves the visible viewport while still making the new conversation immediately available at the actual top of the list. The user can scroll upward to see it.
+When a relevant event arrives, the current message query is refetched. Scroll offsets are keyed by selected view so refreshes and mailbox switches preserve the user's current position where possible.
 
 ## MessageDetail And EmailFrame
 
 `MessageDetail` loads both the selected conversation and the selected message detail. The conversation drives the thread switcher; the message detail drives the currently visible body.
 
 The message switcher intentionally enumerates message summaries inside the selected conversation rather than duplicating the middle-pane list. Messages are deduped by `(sourceId, messageId)` and ordered by `receivedAt`.
+
+When an unread selected message detail successfully loads, the client marks that message as read by adding the JMAP `$seen` keyword through the backend message command API. This is a one-way automatic read transition; explicitly marking a message unread remains a user command.
 
 `EmailFrame` renders wrapped `srcdoc` HTML inside a sandboxed iframe with `allow-same-origin`. It is full-height within the detail body container, so long newsletters scroll inside the iframe rather than forcing the entire right pane to expand. This fixed-height viewport was introduced to solve broken scrolling in long HTML emails.
 
@@ -150,7 +148,7 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 ## Invariants
 
 - Frontend never talks to JMAP directly; all data flows through the Rust API
-- Conversation rows come from conversation endpoints, not raw message list endpoints
+- Message list rows come from message endpoints and are not grouped by thread by default
 - Email HTML is sanitized in Rust; frontend renders only sanitized HTML in a sandboxed iframe
 - Long HTML messages scroll inside the iframe or detail body instead of auto-expanding the pane
 - The conversation list preserves scroll position under live prepends
@@ -164,7 +162,7 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 | ID | Sev. | Assertion |
 |----|------|-----------|
 | ui-no-jmap | MUST | Frontend never makes JMAP calls directly |
-| conversation-api | MUST | Middle pane reads from conversation endpoints, not unbounded raw message endpoints |
+| message-list-message-first | MUST | Middle pane displays individual messages by default, not grouped thread summaries |
 | iframe-sandbox | MUST | Email HTML rendered in sandboxed iframe with no script execution |
 | sanitize-in-rust | MUST | HTML sanitization runs in Rust via ammonia before HTML reaches frontend |
 | tracking-pixel-strip | SHOULD | 1x1 tracking pixels stripped during sanitization |

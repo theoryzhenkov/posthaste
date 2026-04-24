@@ -63,7 +63,7 @@ Each prefix compiles to a specific JMAP FilterCondition property. The mapping is
 | `subject:` | `subject` | |
 | `body:` | `body` | Full-text body search |
 | `participant:` | OR(from, to, cc) | Desugars at compilation |
-| `is:unread` | `hasKeyword: { "$seen": false }` | Inverted: unread = NOT $seen |
+| `is:unread` | `notKeyword: "$seen"` | Inverted: unread = absence of `$seen` |
 | `is:flagged` | `hasKeyword: { "$flagged": true }` | |
 | `is:draft` | `hasKeyword: { "$draft": true }` | |
 | `is:answered` | `hasKeyword: { "$answered": true }` | |
@@ -187,12 +187,12 @@ Completion is local-only, drawing from the SQLite cache. No network requests dur
 
 1. Parse query text into AST
 2. Compile AST to JMAP FilterCondition (plus optional local predicate for v2)
-3. Execute `Email/query` with the filter, using `collapseThreads: true` in threaded mode
+3. Execute `Email/query` with the filter, without collapsing threads by default
 4. Fetch `SearchSnippet/get` for the matching email IDs to get highlighted previews
 5. Apply local predicate if present (v2)
 6. Display results in the message list with mailbox badges and highlighted snippets
 
-Search results default to flat mode (individual messages, not collapsed by thread). Mailbox views default to threaded mode. The user can toggle between modes via a toolbar button.
+Search results and mailbox views default to flat mode: individual messages, not collapsed by thread. A thread command may add a `threadId` filter when the user wants to inspect one thread.
 
 ### Clickable drill-down
 
@@ -222,9 +222,9 @@ Each expanded message shows sender, date, rendered HTML body, and attachment lis
 
 ### Message list threading
 
-Mailbox views default to threaded mode: messages are grouped by `threadId`, each thread shows a count, and a disclosure triangle expands inline. Sort is by the newest message in each thread. Search results default to flat mode (individual messages). A toolbar toggle switches between modes.
+Mailbox views default to individual messages, not grouped threads. A later thread command may apply a `threadId` filter to the message list when the user wants to inspect one thread in isolation. The reader may still load the selected message's surrounding conversation for context, but the middle-pane list remains message-first.
 
-Keyboard navigation: up/down moves between threads (or messages in flat mode), right arrow expands a thread, left arrow collapses it.
+Keyboard navigation moves between individual messages.
 
 ## Thread Arcs
 

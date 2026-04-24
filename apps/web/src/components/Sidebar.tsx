@@ -10,6 +10,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { useAccountDirectory } from '../accountDirectory'
 import { fetchSidebar } from '../api/client'
 import type {
   Mailbox,
@@ -22,6 +23,7 @@ import {
   renderMailboxRoleIcon,
   smartMailboxFallbackIcon,
 } from '../mailboxRoles'
+import { queryKeys } from '../queryKeys'
 
 /**
  * Discriminated union representing the current sidebar selection.
@@ -417,15 +419,24 @@ export function Sidebar({
     error,
     refetch,
   } = useQuery({
-    queryKey: ['sidebar'],
+    queryKey: queryKeys.sidebar,
     queryFn: fetchSidebar,
   })
+  const accountDirectory = useAccountDirectory()
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
   const groupedSmartMailboxes = useMemo(
     () => partitionSmartMailboxes(sidebar?.smartMailboxes ?? []),
     [sidebar?.smartMailboxes],
+  )
+  const sources = useMemo(
+    () =>
+      (sidebar?.sources ?? []).map((source) => {
+        const name = accountDirectory.resolveAccountName(source.id, source.name)
+        return name === source.name ? source : { ...source, name }
+      }),
+    [accountDirectory, sidebar?.sources],
   )
 
   return (
@@ -539,7 +550,7 @@ export function Sidebar({
             />
             {!sourcesCollapsed && (
               <div className="space-y-2 py-1">
-                {sidebar.sources.map((source) => (
+                {sources.map((source) => (
                   <SourceSection
                     key={source.id}
                     source={source}

@@ -80,7 +80,9 @@ poll_interval_seconds = 300     # optional, sync poll interval
 ```toml
 id = "primary"
 name = "My Fastmail"
-driver = "jmap"                 # "jmap" or "mock"
+full_name = "Example User"      # optional, sender/display name
+email_patterns = ["user@example.com", "*@example.net"]
+driver = "jmap"                 # internal; UI-created accounts use JMAP
 enabled = true                  # default: true
 
 [transport]
@@ -91,6 +93,10 @@ username = "user@example.com"  # optional; omit for bearer-token auth
 kind = "os"                     # "os" (keyring) or "env" (environment variable)
 key = "account:primary"
 ```
+
+`id` is an internal stable identifier used for config filenames, local data scoping, and keyring references. UI-created accounts derive it from the account name or first configured email pattern rather than asking the user to supply it.
+
+`full_name` identifies the person behind the account. `email_patterns` lists owned sender addresses and may include catch-all patterns such as `*@example.net`.
 
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 

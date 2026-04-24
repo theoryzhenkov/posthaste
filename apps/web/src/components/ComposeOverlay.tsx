@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { fetchIdentity, fetchReplyContext, sendMessage } from '@/api/client'
 import type { Recipient, SendMessageInput } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { queryKeys } from '@/queryKeys'
 
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -178,7 +179,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       sendMessage(intent.sourceId, input),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['sidebar'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
         queryClient.invalidateQueries({ queryKey: ['conversations'] }),
       ])
       toast('Message sent')
