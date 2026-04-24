@@ -14,7 +14,7 @@ import {
   User,
   UserPlus,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { fetchSidebar, fetchSourceMessages } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
@@ -72,6 +72,7 @@ interface CommandPaletteProps {
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
   onPlaceholderAction: (label: string) => void
+  onRejectSearchPreview: () => void
   onReply: () => void
   onSelectMessage: (message: MessageSummary) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
@@ -212,6 +213,7 @@ export function CommandPalette({
   onOpenShortcuts,
   onPlaceholderAction,
   onPreviewSearch,
+  onRejectSearchPreview,
   onReply,
   onSelectMessage,
   onSelectSmartMailbox,
@@ -220,6 +222,7 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  const hasPreviewedSearchRef = useRef(false)
   const queryValidation = useMemo(() => validateSearchQuery(query), [query])
   const serverQuery =
     queryValidation.state === 'valid' ? normalizeAppliedSearchQuery(query) : ''
@@ -261,6 +264,7 @@ export function CommandPalette({
     if (!canPreviewSearch || hasPreviewSearchError) {
       return
     }
+    hasPreviewedSearchRef.current = true
     onPreviewSearch(debouncedServerQuery)
   }, [
     canPreviewSearch,
@@ -562,6 +566,7 @@ export function CommandPalette({
       return
     }
     onApplySearch(normalized)
+    hasPreviewedSearchRef.current = false
     onClose()
   }
 
@@ -575,6 +580,10 @@ export function CommandPalette({
 
     if (event.key === 'Escape') {
       event.preventDefault()
+      if (hasPreviewedSearchRef.current) {
+        onRejectSearchPreview()
+        hasPreviewedSearchRef.current = false
+      }
       onClose()
       return
     }
