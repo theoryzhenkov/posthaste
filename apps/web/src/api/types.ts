@@ -26,17 +26,33 @@ export type KnownMailboxRole =
   | 'trash'
 
 /** @spec docs/L1-api#account-crud-lifecycle */
-export interface MailboxActionRule {
+export type AutomationTrigger = 'messageArrived' | 'messageChanged' | 'manual'
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export type AutomationScope =
+  | { kind: 'account' }
+  | { kind: 'mailbox'; mailboxId: string }
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export type AutomationAction =
+  | { kind: 'applyTag'; tag: string }
+  | { kind: 'removeTag'; tag: string }
+  | { kind: 'markRead' }
+  | { kind: 'markUnread' }
+  | { kind: 'flag' }
+  | { kind: 'unflag' }
+  | { kind: 'moveToMailbox'; mailboxId: string }
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface AutomationRule {
   id: string
-  mailboxId: string
-  condition: {
-    kind: 'fromContains'
-    value: string
-  }
-  action: {
-    kind: 'applyTag'
-    tag: string
-  }
+  name: string
+  enabled: boolean
+  triggers: AutomationTrigger[]
+  scope: AutomationScope
+  condition: SmartMailboxRule
+  actions: AutomationAction[]
+  backfill: boolean
 }
 
 /**
@@ -51,7 +67,7 @@ export interface AccountOverview {
   driver: AccountDriver
   enabled: boolean
   appearance: AccountAppearance
-  mailboxActionRules: MailboxActionRule[]
+  automationRules: AutomationRule[]
   transport: {
     baseUrl: string | null
     username: string | null
@@ -111,7 +127,7 @@ export interface CreateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
-  mailboxActionRules?: MailboxActionRule[]
+  automationRules?: AutomationRule[]
   transport: AccountTransportInput
   secret: SecretInstructionInput
 }
@@ -127,7 +143,7 @@ export interface UpdateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
-  mailboxActionRules?: MailboxActionRule[]
+  automationRules?: AutomationRule[]
   transport?: Partial<AccountTransportInput>
   secret?: SecretInstructionInput
 }
