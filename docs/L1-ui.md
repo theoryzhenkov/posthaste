@@ -48,10 +48,11 @@ App
                 ├── Tag strip
                 ├── Attachment strip
                 └── EmailFrame or text fallback
-    ├── CommandPalette
+    ├── FloatingPanel
+    │   ├── CommandPalette
+    │   ├── ShortcutReference
+    │   └── Compose
     ├── SettingsOverlay
-    ├── ShortcutReference
-    └── Compose
 ```
 
 The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L2-ui-visual-reference.md). L1 owns interaction and data rules; L2 owns dimensions, colors, typography, and visual states.
@@ -124,9 +125,12 @@ When an unread selected message detail successfully loads, the client marks that
 
 The reader header, attachment strip, and plain text body must follow the L2 visual contract. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or turn the whole pane into a full-width white document viewer.
 
-## Search bar
+## Command Search
 
-Search lives in the global action bar. In its resting state it behaves like a command-palette entry point: search icon, `Search mail` label, and a mono `Cmd+K` hint. Focused state expands to a structured query input.
+Command search lives in the global action bar as an icon button that opens the
+unified command/search palette. The action bar does not contain an editable
+search field. When a query is applied, the current filter is rendered as a
+compact chip next to the command-search icon with a clear button.
 
 Search syntax and backend execution are defined by [L1-search](L1-search.md). The visual treatment is defined by L2.
 
@@ -140,7 +144,7 @@ Settings detail pages use shared settings primitives: a centered `SettingsPage`,
 
 Account editing follows that shared property-page pattern. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
 
-Command palette, settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity.
+Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved or pinned so the user can keep reading and interacting with the underlying mail UI.
 
 ## Keyboard shortcuts
 
@@ -150,7 +154,7 @@ Command palette, settings, mailbox editor, shortcuts, onboarding, and compose sh
 | `Cmd/Ctrl+,` | Open settings |
 | `Cmd/Ctrl+N` | Compose new message |
 | `?` | Open keyboard shortcuts |
-| `Esc` | Deselect the open message |
+| `Esc` | Deselect the open message, or clear the active filter when no message is open |
 | `j` / `k` or Down / Up | Next / previous conversation |
 | `e` or `y` | Archive |
 | `#` or `Backspace` | Delete (move to Trash) |
@@ -161,6 +165,13 @@ The original keyboard plan is broader than the current implementation. The short
 ## Keyboard implementation
 
 Keyboard handling is split between shell-level commands and list-level navigation. Window-level handlers must ignore focused inputs and route commands based on the current selection.
+
+The command palette owns its own keyboard state while open. Palette results are
+not selected by default after opening or typing. Enter opens the selected row,
+while Enter with no selected row applies the current query as a message-list
+filter. Shift+Enter and Option/Alt+Enter always apply the query as a filter.
+The panel closes on outside interaction unless pinned. List navigation shortcuts
+ignore modified key chords, so `Cmd/Ctrl+K` cannot also trigger `k` navigation.
 
 ## Undo system
 

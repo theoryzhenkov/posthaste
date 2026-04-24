@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
   Clock3,
@@ -12,12 +12,18 @@ import {
   User,
   UserPlus,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
-import { fetchSidebar } from '@/api/client'
-import type { ConversationSummary } from '@/api/types'
+import { fetchSidebar, fetchSourceMessages } from '@/api/client'
+import type { MessageSummary } from '@/api/types'
 import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
+import { queryKeys } from '@/queryKeys'
+import {
+  matchesMessageSearch,
+  normalizeAppliedSearchQuery,
+} from '@/searchQuery'
 
+import { FloatingPanel } from './FloatingPanel'
 import {
   Command,
   CommandEmpty,
@@ -25,7 +31,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandShortcut,
 } from './ui/command'
 
 type SettingsCategory = 'general' | 'accounts' | 'mailboxes'
@@ -48,7 +53,6 @@ type PaletteEntry =
       kind: 'command'
       label: string
       keywords: string
-      shortcut?: string
       icon: React.ReactNode
       onSelect: () => void
     }
@@ -89,7 +93,7 @@ interface CommandPaletteProps {
   onOpenShortcuts: () => void
   onPlaceholderAction: (label: string) => void
   onReply: () => void
-  onSelectConversation: (conversation: ConversationSummary) => void
+  onSelectMessage: (message: MessageSummary) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
@@ -107,13 +111,48 @@ function matchesQuery(query: string, text: string): boolean {
   return query.length === 0 || text.toLowerCase().includes(query)
 }
 
-function formatMessageSubline(conversation: ConversationSummary): string {
-  const sender = conversation.fromName ?? conversation.fromEmail ?? 'Unknown'
+type SidebarData = Awaited<ReturnType<typeof fetchSidebar>>
+
+function resolveMessageMailbox(
+  sidebar: SidebarData | undefined,
+  message: MessageSummary,
+) {
+  const source = sidebar?.sources.find((item) => item.id === message.sourceId)
+  if (!source) {
+    return null
+  }
+
+  const mailbox =
+    message.mailboxIds
+      .map((mailboxId) =>
+        source.mailboxes.find((candidate) => candidate.id === mailboxId),
+      )
+      .find(Boolean) ?? null
+
+  return mailbox ? { mailbox, source } : null
+}
+
+function formatMessageSubline(
+  message: MessageSummary,
+  sidebar: SidebarData | undefined,
+): string {
+  const sender = message.fromName ?? message.fromEmail ?? 'Unknown'
+  const mailbox = resolveMessageMailbox(sidebar, message)
+  const location = mailbox
+    ? `${mailbox.source.name} / ${mailbox.mailbox.name}`
+    : message.sourceName
   const received = new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
-  }).format(new Date(conversation.latestReceivedAt))
-  return `${sender} · ${received}`
+  }).format(new Date(message.receivedAt))
+  return `${sender} · ${location} · ${received}`
+}
+
+const NO_SELECTION_VALUE = '__posthaste_no_selection__'
+const COMMAND_PANEL_STORAGE_KEY = 'posthaste.commandPalette.panelOffset'
+
+function entryValue(entry: PaletteEntry): string {
+  return `${entry.kind}:${entry.id}`
 }
 
 function commandIcon(id: PaletteCommandId): React.ReactNode {
@@ -192,35 +231,45 @@ export function CommandPalette({
   onOpenShortcuts,
   onPlaceholderAction,
   onReply,
-  onSelectConversation,
+  onSelectMessage,
   onSelectSmartMailbox,
   onSelectSourceMailbox,
   onToggleFlag,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
-  const panelRef = useRef<HTMLDivElement>(null)
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const queryClient = useQueryClient()
   const { data: sidebar } = useQuery({
     queryKey: ['sidebar'],
     queryFn: fetchSidebar,
   })
+  const sourceMessageQueries = useQueries({
+    queries: (sidebar?.sources ?? []).map((source) => ({
+      queryKey: [...queryKeys.messagesRoot, 'source-all', source.id] as const,
+      queryFn: () => fetchSourceMessages(source.id, null),
+    })),
+  })
+  const fetchedSourceMessages = useMemo(
+    () => sourceMessageQueries.flatMap((source) => source.data ?? []),
+    [sourceMessageQueries],
+  )
 
-  const cachedConversations = useMemo(() => {
-    const deduped = new Map<string, ConversationSummary>()
-    for (const [
-      ,
-      conversation,
-    ] of queryClient.getQueriesData<ConversationSummary>({
-      queryKey: ['conversation-summary'],
+  const cachedMessages = useMemo(() => {
+    const deduped = new Map<string, MessageSummary>()
+    for (const message of fetchedSourceMessages) {
+      deduped.set(`${message.sourceId}:${message.id}`, message)
+    }
+    for (const [, messages] of queryClient.getQueriesData<MessageSummary[]>({
+      queryKey: queryKeys.messagesRoot,
     })) {
-      if (conversation) {
-        deduped.set(conversation.id, conversation)
+      for (const message of messages ?? []) {
+        deduped.set(`${message.sourceId}:${message.id}`, message)
       }
     }
     return [...deduped.values()].sort((left, right) =>
-      right.latestReceivedAt.localeCompare(left.latestReceivedAt),
+      right.receivedAt.localeCompare(left.receivedAt),
     )
-  }, [queryClient])
+  }, [fetchedSourceMessages, queryClient])
 
   const results = useMemo(() => {
     const normalized = normalizeQuery(query)
@@ -230,7 +279,6 @@ export function CommandPalette({
         id: 'compose',
         kind: 'command' as const,
         label: 'Compose new message',
-        shortcut: '⌘N',
         keywords: 'compose new message draft',
         icon: commandIcon('compose'),
         onSelect: onCompose,
@@ -239,7 +287,6 @@ export function CommandPalette({
         id: 'reply',
         kind: 'command' as const,
         label: 'Reply',
-        shortcut: '⌘R',
         keywords: 'reply respond answer',
         icon: commandIcon('reply'),
         onSelect: onReply,
@@ -248,7 +295,6 @@ export function CommandPalette({
         id: 'archive',
         kind: 'command' as const,
         label: 'Archive selected',
-        shortcut: 'E',
         keywords: 'archive selected',
         icon: commandIcon('archive'),
         onSelect: onArchive,
@@ -257,7 +303,6 @@ export function CommandPalette({
         id: 'flag',
         kind: 'command' as const,
         label: 'Flag message',
-        shortcut: '⇧⌘L',
         keywords: 'flag star selected',
         icon: commandIcon('flag'),
         onSelect: onToggleFlag,
@@ -266,7 +311,6 @@ export function CommandPalette({
         id: 'snooze',
         kind: 'command' as const,
         label: 'Snooze…',
-        shortcut: 'H',
         keywords: 'snooze later remind',
         icon: commandIcon('snooze'),
         onSelect: () => onPlaceholderAction('Snooze'),
@@ -291,7 +335,6 @@ export function CommandPalette({
         id: 'settings',
         kind: 'command' as const,
         label: 'Open Settings',
-        shortcut: '⌘,',
         keywords: 'settings preferences',
         icon: commandIcon('settings'),
         onSelect: () => onOpenSettings(),
@@ -300,7 +343,6 @@ export function CommandPalette({
         id: 'shortcuts',
         kind: 'command' as const,
         label: 'Keyboard shortcuts',
-        shortcut: '?',
         keywords: 'keyboard shortcuts help',
         icon: commandIcon('shortcuts'),
         onSelect: onOpenShortcuts,
@@ -320,27 +362,15 @@ export function CommandPalette({
           !['archive', 'flag', 'reply'].includes(entry.id)),
     )
 
-    const messages = cachedConversations
-      .filter((conversation) =>
-        matchesQuery(
-          normalized,
-          [
-            conversation.subject,
-            conversation.preview,
-            conversation.fromName,
-            conversation.fromEmail,
-          ]
-            .filter(Boolean)
-            .join(' '),
-        ),
-      )
-      .slice(0, 6)
-      .map<PaletteEntry>((conversation) => ({
-        id: conversation.id,
+    const messages = cachedMessages
+      .filter((message) => matchesMessageSearch(message, query))
+      .slice(0, 8)
+      .map<PaletteEntry>((message) => ({
+        id: `${message.sourceId}:${message.id}`,
         kind: 'message',
-        label: conversation.subject ?? '(no subject)',
-        sub: formatMessageSubline(conversation),
-        keywords: `${conversation.subject ?? ''} ${conversation.preview ?? ''} ${conversation.fromName ?? ''} ${conversation.fromEmail ?? ''}`,
+        label: message.subject ?? '(no subject)',
+        sub: formatMessageSubline(message, sidebar),
+        keywords: `${message.subject ?? ''} ${message.preview ?? ''} ${message.fromName ?? ''} ${message.fromEmail ?? ''}`,
         icon: (
           <MessageSquareText
             size={15}
@@ -348,15 +378,23 @@ export function CommandPalette({
             className="text-muted-foreground"
           />
         ),
-        onSelect: () => onSelectConversation(conversation),
+        onSelect: () => {
+          const mailbox = resolveMessageMailbox(sidebar, message)
+          if (mailbox) {
+            onSelectSourceMailbox(
+              message.sourceId,
+              mailbox.mailbox.id,
+              `${mailbox.source.name} / ${mailbox.mailbox.name}`,
+            )
+          }
+          onSelectMessage(message)
+        },
       }))
 
     const contacts = [
       ...new Set(
-        cachedConversations
-          .map(
-            (conversation) => conversation.fromName ?? conversation.fromEmail,
-          )
+        cachedMessages
+          .map((message) => message.fromName ?? message.fromEmail)
           .filter(Boolean),
       ),
     ]
@@ -418,13 +456,13 @@ export function CommandPalette({
     }
 
     return [
-      { label: 'Commands', items: commands },
       { label: 'Messages', items: messages },
+      { label: 'Commands', items: commands },
       { label: 'Contacts', items: contacts },
       { label: 'Mailboxes', items: mailboxes.slice(0, 6) },
     ].filter((group) => group.items.length > 0)
   }, [
-    cachedConversations,
+    cachedMessages,
     hasSelectedMessage,
     onApplySearch,
     onArchive,
@@ -433,7 +471,7 @@ export function CommandPalette({
     onOpenShortcuts,
     onPlaceholderAction,
     onReply,
-    onSelectConversation,
+    onSelectMessage,
     onSelectSmartMailbox,
     onSelectSourceMailbox,
     onToggleFlag,
@@ -441,119 +479,169 @@ export function CommandPalette({
     sidebar,
   ])
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-      }
+  const flatEntries = useMemo(
+    () => results.flatMap((group) => group.items),
+    [results],
+  )
+  const activeSelectedIndex =
+    selectedIndex !== null && selectedIndex < flatEntries.length
+      ? selectedIndex
+      : null
+  const selectedValue =
+    activeSelectedIndex === null
+      ? NO_SELECTION_VALUE
+      : entryValue(flatEntries[activeSelectedIndex])
+
+  function handleQueryChange(value: string) {
+    setQuery(value)
+    setSelectedIndex(null)
+  }
+
+  function runEntry(entry: PaletteEntry) {
+    entry.onSelect()
+    onClose()
+  }
+
+  function applyCurrentQuery() {
+    const normalized = normalizeAppliedSearchQuery(query)
+    if (!normalized) {
+      return
+    }
+    onApplySearch(normalized)
+    onClose()
+  }
+
+  function handlePaletteKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const isDownKey =
+      event.key === 'ArrowDown' ||
+      (event.key === 'j' && (activeSelectedIndex !== null || event.ctrlKey))
+    const isUpKey =
+      event.key === 'ArrowUp' ||
+      (event.key === 'k' && (activeSelectedIndex !== null || event.ctrlKey))
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClose()
+      return
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+    if (isDownKey) {
+      event.preventDefault()
+      if (flatEntries.length === 0) {
+        setSelectedIndex(null)
+        return
+      }
+      setSelectedIndex((current) => {
+        const bounded =
+          current !== null && current < flatEntries.length ? current : null
+        return bounded === null
+          ? 0
+          : Math.min(bounded + 1, flatEntries.length - 1)
+      })
+      return
+    }
 
-  function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
-      onClose()
+    if (isUpKey) {
+      event.preventDefault()
+      if (flatEntries.length === 0) {
+        setSelectedIndex(null)
+        return
+      }
+      setSelectedIndex((current) => {
+        const bounded =
+          current !== null && current < flatEntries.length ? current : null
+        if (bounded === null) {
+          return flatEntries.length - 1
+        }
+        return bounded === 0 ? null : bounded - 1
+      })
+      return
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (event.shiftKey || event.altKey) {
+        applyCurrentQuery()
+        return
+      }
+      if (activeSelectedIndex !== null) {
+        runEntry(flatEntries[activeSelectedIndex])
+        return
+      }
+      applyCurrentQuery()
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-start justify-center bg-[rgba(6,4,12,0.46)] px-4 pt-[9vh] backdrop-blur-[22px] backdrop-saturate-150"
-      onMouseDown={handleBackdropClick}
+    <Command
+      shouldFilter={false}
+      loop={false}
+      value={selectedValue}
+      className="contents"
+      onValueChange={(value) => {
+        const nextIndex = flatEntries.findIndex(
+          (entry) => entryValue(entry) === value,
+        )
+        setSelectedIndex(nextIndex === -1 ? null : nextIndex)
+      }}
+      onKeyDown={handlePaletteKeyDown}
     >
-      <div
-        ref={panelRef}
-        className="w-full max-w-[40rem] overflow-hidden rounded-[14px] border border-white/10 bg-[rgba(22,20,28,0.88)] text-white shadow-[0_28px_80px_rgba(0,0,0,0.6)]"
+      <FloatingPanel
+        panelLabel="command palette"
+        storageKey={COMMAND_PANEL_STORAGE_KEY}
+        closeIgnoreSelector="[data-command-search-trigger='true']"
+        className="max-w-[40rem]"
+        header={
+          <CommandInput
+            autoFocus
+            value={query}
+            onValueChange={handleQueryChange}
+            placeholder="Search messages, contacts, commands..."
+            wrapperClassName="min-w-0 flex-1 h-12 px-3"
+          />
+        }
+        onClose={onClose}
       >
-        <Command shouldFilter={false} loop>
-          <div className="border-b border-white/10 px-4">
-            <div className="flex items-center gap-3">
-              <CommandInput
-                autoFocus
-                value={query}
-                onValueChange={setQuery}
-                placeholder="Search messages, contacts, commands…"
-                className="text-white placeholder:text-white/42"
-                wrapperClassName="h-12"
-              />
-              <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                Esc
-              </CommandShortcut>
-            </div>
-          </div>
-
-          <CommandList className="ph-scroll px-0 py-1.5">
-            <CommandEmpty>No results. Try a different query.</CommandEmpty>
-            {results.map((group) => (
-              <CommandGroup
-                key={group.label}
-                heading={group.label}
-                className="py-1"
-              >
-                {group.items.map((item) => (
-                  <CommandItem
-                    key={item.id}
-                    value={`${item.kind}:${item.id}:${item.keywords}`}
-                    className="mx-0 px-4 py-2.5 text-white/94 data-[selected=true]:bg-white/8"
-                    onSelect={() => {
-                      item.onSelect()
-                      onClose()
-                    }}
-                  >
-                    <span className="flex size-4 shrink-0 items-center justify-center">
-                      {item.icon}
+        <CommandList className="ph-scroll px-0 py-1.5">
+          <CommandEmpty>No results. Try a different query.</CommandEmpty>
+          {flatEntries.length > 0 && (
+            <CommandItem
+              aria-hidden="true"
+              value={NO_SELECTION_VALUE}
+              className="hidden"
+              onSelect={() => setSelectedIndex(null)}
+            />
+          )}
+          {results.map((group) => (
+            <CommandGroup
+              key={group.label}
+              heading={group.label}
+              className="py-1"
+            >
+              {group.items.map((item) => (
+                <CommandItem
+                  key={item.id}
+                  value={entryValue(item)}
+                  className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
+                  onSelect={() => {
+                    runEntry(item)
+                  }}
+                >
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {item.icon}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {'sub' in item && item.sub && (
+                    <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
+                      {item.sub}
                     </span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {item.label}
-                    </span>
-                    {'sub' in item && item.sub && (
-                      <span className="max-w-[14rem] truncate text-[12px] text-white/52">
-                        {item.sub}
-                      </span>
-                    )}
-                    {'shortcut' in item && item.shortcut && (
-                      <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                        {item.shortcut}
-                      </CommandShortcut>
-                    )}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-
-          <div className="flex items-center gap-4 border-t border-white/10 px-4 py-2 font-mono text-[10px] font-semibold tracking-[0.08em] text-white/48">
-            <span className="flex items-center gap-1.5">
-              <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                ↑
-              </CommandShortcut>
-              <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                ↓
-              </CommandShortcut>
-              navigate
-            </span>
-            <span className="flex items-center gap-1.5">
-              <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                ↵
-              </CommandShortcut>
-              select
-            </span>
-            <span className="flex items-center gap-1.5">
-              <CommandShortcut className="border-white/12 bg-white/8 text-white/58">
-                Esc
-              </CommandShortcut>
-              close
-            </span>
-            <div className="flex-1" />
-            <span className="uppercase tracking-[0.18em] text-white/40">
-              posthaste
-            </span>
-          </div>
-        </Command>
-      </div>
-    </div>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </FloatingPanel>
+    </Command>
   )
 }

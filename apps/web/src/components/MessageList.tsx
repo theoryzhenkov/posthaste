@@ -31,6 +31,7 @@ import {
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
+import { matchesMessageSearch } from '../searchQuery'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -134,25 +135,6 @@ function sortMessages(messages: MessageSummary[], sort: SortConfig) {
   })
 }
 
-function matchesSearch(message: MessageSummary, searchQuery?: string): boolean {
-  const query = searchQuery?.trim().toLowerCase()
-  if (!query) {
-    return true
-  }
-  const haystack = [
-    message.subject,
-    message.preview,
-    message.fromName,
-    message.fromEmail,
-    message.sourceName,
-    message.keywords.join(' '),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-  return haystack.includes(query)
-}
-
 async function fetchMessagesForView(selectedView: SidebarSelection) {
   if (selectedView.kind === 'smart-mailbox') {
     return fetchSmartMailboxMessages(selectedView.id)
@@ -221,7 +203,7 @@ export function MessageList({
     () =>
       sortMessages(
         displayMessages.filter((message) =>
-          matchesSearch(message, searchQuery),
+          matchesMessageSearch(message, searchQuery),
         ),
         sort,
       ),
@@ -262,6 +244,7 @@ export function MessageList({
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
 
       switch (event.key) {
         case 'j':

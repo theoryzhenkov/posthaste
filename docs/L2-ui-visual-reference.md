@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-04-23
-reviewed: 2026-04-23
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -139,30 +139,26 @@ Icon-only utility buttons for shortcuts, settings, and theme:
 - Shortcut button uses Geist Mono `13px`, weight `700`.
 - Settings and theme icons use `14px`.
 
-## Query Search
+## Command Search
 
-Resting search:
+Resting command-search control:
 
-- Width: `220px`.
-- Height: `26px`.
+- Icon button, `28px` square.
 - Radius: `6px`.
-- Padding: `0 8px`.
-- Gap: `6px`.
 - Background: `bgElev`.
 - Border: `1px solid borderSoft`.
-- Cursor: text if it opens command/search.
-- Icon: search, `12px`, `fgFaint`.
-- Label: `Search mail`, Geist `12px`, `fgFaint`.
-- Right hint: `Cmd+K`, Geist Mono `11px`, `fgFaint`, padding `1px 5px`, radius `3px`, background `bg`, border `1px solid borderSoft`.
+- Icon: command/search glyph, `14px`, `fgFaint`.
+- Cursor: default button pointer.
 
-Focused or non-empty search:
+Active filter chip:
 
-- Width: `340px`.
+- Height: `28px`.
+- Max width: `24rem`.
+- Radius: `6px`.
 - Border: `1px solid focusRing`.
-- Box shadow: `0 0 0 2px color-mix(in oklab, focusRing 30%, transparent)`.
-- Input font: Geist Mono `12px`.
-- Input text color: `fg`.
-- Placeholder: `from:maya tag:work date:>2026-04-01`.
+- Box shadow: `0 0 0 2px color-mix(in oklab, focusRing 18%, transparent)`.
+- Font: Geist Mono `11px`.
+- Contains the applied query and an icon-only clear button.
 
 ## Sidebar
 
@@ -245,13 +241,13 @@ Sidebar row counters:
 
 Smart rows:
 
-| Mailbox | Icon | Accent |
-|---|---|---|
-| Relevant | `Sparkle` | `accent.coral` |
-| Read Later | `Snooze` | `accent.amber` |
-| Bills | `Tag` | `accent.violet` |
-| Newsletters | `Layers` | `accent.sage` |
-| Today | `Bolt` | `accent.blue` |
+| Mailbox     | Icon      | Accent          |
+| ----------- | --------- | --------------- |
+| Relevant    | `Sparkle` | `accent.coral`  |
+| Read Later  | `Snooze`  | `accent.amber`  |
+| Bills       | `Tag`     | `accent.violet` |
+| Newsletters | `Layers`  | `accent.sage`   |
+| Today       | `Bolt`    | `accent.blue`   |
 
 When a smart row has an edit handler and is hovered, the count is replaced by an edit rules button:
 
@@ -315,17 +311,17 @@ Columns have two layout types:
 
 Default columns:
 
-| ID | Type | Basis | Resizable | Label | Alignment |
-|---|---|---:|---|---|---|
-| `unread` | fixed | `28px` | No | circle icon | center |
-| `flag` | fixed | `28px` | No | flag icon | center |
-| `attach` | fixed | `28px` | No | attachment icon | center |
-| `threadSize` | fixed | `72px` | Yes | `Count` | right |
-| `subject` | stretch, grow `1` | `320px` | Yes | `Subject` | left |
-| `from` | fixed | `180px` | Yes | `From` | left |
-| `date` | fixed | `128px` | Yes | `Date Received` | left |
-| `account` | fixed | `72px` | Yes | `Account` | right |
-| `tags` | stretch, grow `0.5` | `140px` | Yes | `Tags` | left |
+| ID           | Type                |   Basis | Resizable | Label           | Alignment |
+| ------------ | ------------------- | ------: | --------- | --------------- | --------- |
+| `unread`     | fixed               |  `28px` | No        | circle icon     | center    |
+| `flag`       | fixed               |  `28px` | No        | flag icon       | center    |
+| `attach`     | fixed               |  `28px` | No        | attachment icon | center    |
+| `threadSize` | fixed               |  `72px` | Yes       | `Count`         | right     |
+| `subject`    | stretch, grow `1`   | `320px` | Yes       | `Subject`       | left      |
+| `from`       | fixed               | `180px` | Yes       | `From`          | left      |
+| `date`       | fixed               | `128px` | Yes       | `Date Received` | left      |
+| `account`    | fixed               |  `72px` | Yes       | `Account`       | right     |
+| `tags`       | stretch, grow `0.5` | `140px` | Yes       | `Tags`          | left      |
 
 Minimum widths:
 
@@ -588,31 +584,44 @@ Reader body:
 - Body does not center itself in the handoff; it begins at the left padding. If HTML iframe constraints require centering for compatibility, the visual result must still preserve the `720px` readable width and avoid full-pane white slabs.
 - Links use `accent.coralDeep`, no underline, with `1px dotted accent.coral` bottom border.
 
-## Command Palette
+## Floating Panel
 
-The command palette opens from `Cmd/Ctrl+K` and the search control.
+Command search, keyboard shortcuts, and compose use the shared floating panel.
 
 Overlay:
 
 - Absolute inset `0`.
 - Z-index: `2500`.
 - Align top center.
-- Padding top: `9%`.
-- Background: `rgba(6,4,12,0.4)`.
-- Backdrop filter: `blur(22px) saturate(150%)`.
-- Animation: modal fade in around `0.16s`.
+- Padding top: `54px`.
+- Pointer-events none on the overlay root and pointer-events auto on the panel.
+- No background scrim or backdrop blur; the app remains visible and interactive.
+- Outside pointer interaction closes the panel unless it is pinned.
+- Dragged panel offset is persisted locally and restored on the next open.
+- During drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
+
+Panel sheet:
+
+- Default width: caller-specific, max width constrained by viewport.
+- Max width: `92vw`.
+- Background: soft diagonal gradient mixing `brand-coral`, `ring`, and `panel`; the mix must derive from root theme variables so light, dark, and glass presets keep contrast.
+- Border: `1px solid color-mix(in oklab, brand-coral 22%, border)`.
+- Radius: `14px`.
+- Shadow: `0 28px 80px rgba(0,0,0,0.24)` in light mode, stronger in dark mode.
+- Overflow: hidden.
+- Text color: theme foreground tokens, not hard-coded white.
+- Font: Geist.
+- Move and pin icon buttons sit at the left of the input row. Move drags the panel around the screen and persists the final placement; pin keeps it open during outside interaction.
+- The close button is icon-only and aligned to the far right independently of header content width.
+
+## Command Palette
+
+The command palette opens from `Cmd/Ctrl+K` and the command-search control.
 
 Palette sheet:
 
 - Width: `640px`.
-- Max width: `92vw`.
-- Background: `rgba(22,20,28,0.88)`.
-- Border: `1px solid rgba(255,255,255,0.08)`.
-- Radius: `14px`.
-- Shadow: `0 28px 80px rgba(0,0,0,0.6)`.
-- Overflow: hidden.
-- Text color: `fg`.
-- Font: Geist.
+- Uses the shared floating panel shell.
 
 Input row:
 
@@ -624,7 +633,7 @@ Input row:
 - Input padding: `0 12px`.
 - Font size: `16px`.
 - Placeholder: `Search messages, contacts, commands...`.
-- Right kbd: `Esc`.
+- Right close button: icon-only `X`, aligned to the far right.
 
 Results:
 
@@ -632,18 +641,11 @@ Results:
 - Padding: `6px 0`.
 - Group label: padding `4px 16px`, Geist Mono `11px`, uppercase, letter spacing `0.7px`, weight `600`, color `fgFaint`.
 - Row: full width, display flex, align center, gap `10px`, padding `8px 16px`, border none.
-- Active row background: `rgba(255,255,255,0.08)`.
+- Active row background: theme hover background.
 - Row font: Geist `13px`.
 - Icon: `15px`, `fgMuted`.
 - Subtext: Geist `12px`, `fgMuted`, max width `240px`.
-
-Footer:
-
-- Padding: `8px 16px`.
-- Top border: `1px solid borderSoft`.
-- Font: Geist Mono `11px`.
-- Color: `fgFaint`.
-- Shows `Up/Down navigate`, `Enter select`, `Esc close`, and `posthaste`.
+- No visible keyboard shortcut hints are shown in the command palette.
 
 ## Settings Sheet
 
@@ -833,26 +835,16 @@ Editor content:
 - Footer padding: `14px 22px`, top border `1px solid borderSoft`.
 - Footer hint: Geist Mono `11px`, `fgMuted`.
 
-## Compose Modal
+## Compose Panel
 
-Compose is a centered modal with a mail-window header.
-
-Backdrop:
-
-- Absolute inset `0`.
-- Background: `rgba(10,8,6,0.5)`.
-- Backdrop filter: `blur(4px) saturate(140%)`.
-- Z-index: `100`.
+Compose uses the shared floating panel shell with a mail-window header.
 
 Sheet:
 
-- Width: `700px`.
-- Max width: `92%`.
-- Max height: `92%`.
-- Background: `bgReader`.
-- Radius: `12px`.
-- Border: `1px solid border`.
-- Shadow: `0 28px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.03) inset`.
+- Width: `860px`.
+- Max width: `92vw`.
+- Height: `min(760px, calc(100vh - 40px))`.
+- Background, radius, border, shadow, move/pin/close controls, outside-close behavior, and persisted placement come from the shared floating panel.
 - Flex column.
 
 Header:
@@ -962,17 +954,17 @@ Elements with `ph-scroll` use thin custom scrollbars:
 
 ## Assertions
 
-| ID | Sev. | Assertion |
-|---|---|---|
-| default-dark-neutral | MUST | The default shell uses dark neutral tokens, not the old light-first theme or the glass preset |
-| locked-type-ramp | MUST | UI components use only the documented type ramp unless this spec is updated |
-| signal-separation | MUST | Coral, blue, and slate-blue remain separate brand/flag, unread, and selection signals |
-| actionbar-order | MUST | The action bar uses the reference control order from traffic lights through theme toggle |
-| sidebar-order | MUST | The sidebar section order is quick filters, Smart, Tags, Accounts |
-| account-counter-blue | MUST | Account-header unread counters use `signal.unread` as a filled blue pill with white text |
-| message-list-tabular | MUST | Standard density message rows are tabular rows, not card rows |
-| row-height-standard | MUST | Standard density message rows are `30px` high |
-| header-row-alignment | MUST | Message list header cells and row cells share the same effective column widths |
-| reader-body-width | MUST | Reader body content uses a `720px` maximum readable width |
-| settings-centered-sheet | MUST | Settings opens as a centered modal sheet over the live app shell |
-| overlays-glass-only | SHOULD | Glass blur is reserved for overlays and modals, not the default app background |
+| ID                      | Sev.   | Assertion                                                                                     |
+| ----------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| default-dark-neutral    | MUST   | The default shell uses dark neutral tokens, not the old light-first theme or the glass preset |
+| locked-type-ramp        | MUST   | UI components use only the documented type ramp unless this spec is updated                   |
+| signal-separation       | MUST   | Coral, blue, and slate-blue remain separate brand/flag, unread, and selection signals         |
+| actionbar-order         | MUST   | The action bar uses the reference control order from traffic lights through theme toggle      |
+| sidebar-order           | MUST   | The sidebar section order is quick filters, Smart, Tags, Accounts                             |
+| account-counter-blue    | MUST   | Account-header unread counters use `signal.unread` as a filled blue pill with white text      |
+| message-list-tabular    | MUST   | Standard density message rows are tabular rows, not card rows                                 |
+| row-height-standard     | MUST   | Standard density message rows are `30px` high                                                 |
+| header-row-alignment    | MUST   | Message list header cells and row cells share the same effective column widths                |
+| reader-body-width       | MUST   | Reader body content uses a `720px` maximum readable width                                     |
+| settings-centered-sheet | MUST   | Settings opens as a centered modal sheet over the live app shell                              |
+| overlays-glass-only     | SHOULD | Glass blur is reserved for overlays and modals, not the default app background                |
