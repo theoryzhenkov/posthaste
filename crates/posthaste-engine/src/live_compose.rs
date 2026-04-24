@@ -277,6 +277,17 @@ mod tests {
             Err(GatewayError::Rejected("not implemented".to_string()))
         }
 
+        async fn set_mailbox_role(
+            &self,
+            _account_id: &AccountId,
+            _mailbox_id: &MailboxId,
+            _expected_state: Option<&str>,
+            _role: Option<&str>,
+            _clear_role_from: Option<&MailboxId>,
+        ) -> Result<MutationOutcome, GatewayError> {
+            Err(GatewayError::Rejected("not implemented".to_string()))
+        }
+
         async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError> {
             self.seen_account_ids
                 .lock()

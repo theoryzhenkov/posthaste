@@ -322,6 +322,42 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Update server-side mailbox metadata and refresh the local mailbox projection.
+    ///
+    /// @spec docs/L1-api#conversations-and-messages
+    /// @spec docs/L1-jmap#methods-used
+    pub async fn set_mailbox_role(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        role: Option<&str>,
+        gateway: &dyn MailGateway,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let expected_state = self
+            .sync_state
+            .get_cursor(account_id, SyncObject::Mailbox)?;
+        let clear_role_from = match role {
+            Some(role) => self
+                .mailbox_reader
+                .list_mailboxes(account_id)?
+                .into_iter()
+                .find(|mailbox| mailbox.id != *mailbox_id && mailbox.role.as_deref() == Some(role))
+                .map(|mailbox| mailbox.id),
+            None => None,
+        };
+        gateway
+            .set_mailbox_role(
+                account_id,
+                mailbox_id,
+                expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                role,
+                clear_role_from.as_ref(),
+            )
+            .await?;
+        self.sync_account(account_id, SyncTrigger::Manual, gateway)
+            .await
+    }
+
     /// List messages, optionally filtered by mailbox.
     pub fn list_messages(
         &self,
@@ -1253,6 +1289,17 @@ mod tests {
             expected_state: Option<&str>,
         ) -> Result<MutationOutcome, GatewayError> {
             self.apply(expected_state)
+        }
+
+        async fn set_mailbox_role(
+            &self,
+            _account_id: &AccountId,
+            _mailbox_id: &MailboxId,
+            _expected_state: Option<&str>,
+            _role: Option<&str>,
+            _clear_role_from: Option<&MailboxId>,
+        ) -> Result<MutationOutcome, GatewayError> {
+            Err(GatewayError::Rejected("unused".to_string()))
         }
 
         async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {

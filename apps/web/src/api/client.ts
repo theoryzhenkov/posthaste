@@ -22,6 +22,7 @@ import type {
   MessageDetail,
   MessageSummary,
   OkResponse,
+  PatchMailboxInput,
   ReplyContext,
   SendMessageInput,
   SidebarResponse,
@@ -194,7 +195,22 @@ export async function disableAccount(accountId: string): Promise<OkResponse> {
 
 /** @spec docs/L1-api#endpoint-table */
 export async function fetchMailboxes(accountId: string): Promise<Mailbox[]> {
-  return request<Mailbox[]>(`/sources/${accountId}/mailboxes`)
+  return request<Mailbox[]>(
+    `/sources/${encodeURIComponent(accountId)}/mailboxes`,
+  )
+}
+
+/** @spec docs/L1-api#endpoint-table */
+export async function patchMailbox(
+  accountId: string,
+  mailboxId: string,
+  input: PatchMailboxInput,
+): Promise<Mailbox[]> {
+  return jsonRequest<Mailbox[]>(
+    `/sources/${encodeURIComponent(accountId)}/mailboxes/${encodeURIComponent(mailboxId)}`,
+    'PATCH',
+    input,
+  )
 }
 
 /** @spec docs/L1-api#endpoint-table */

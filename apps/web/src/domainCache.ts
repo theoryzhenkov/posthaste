@@ -74,6 +74,9 @@ export function invalidateAccountReadModels(
     void queryClient.invalidateQueries({
       queryKey: queryKeys.account(accountId),
     })
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.mailboxes(accountId),
+    })
   }
   void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
   void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })

@@ -79,6 +79,18 @@ pub trait MailGateway: Send + Sync {
         expected_state: Option<&str>,
     ) -> Result<MutationOutcome, GatewayError>;
 
+    /// Update a mailbox role via `Mailbox/set`.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    async fn set_mailbox_role(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        expected_state: Option<&str>,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
+    ) -> Result<MutationOutcome, GatewayError>;
+
     /// Fetch the primary sender identity via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

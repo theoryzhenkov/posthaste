@@ -25,6 +25,13 @@ const ROLE_ICON_MAP: Record<KnownMailboxRole, LucideIcon> = {
   trash: Trash2,
 }
 
+/** Type guard for server-provided role strings. */
+export function isKnownMailboxRole(
+  role: string | null | undefined,
+): role is KnownMailboxRole {
+  return Boolean(role && role in ROLE_ICON_MAP)
+}
+
 /** Heuristically map a mailbox or smart-mailbox name to a known role. */
 export function mailboxRoleFromName(name: string): KnownMailboxRole | null {
   switch (name.toLowerCase()) {
@@ -48,11 +55,11 @@ export function mailboxRoleFromName(name: string): KnownMailboxRole | null {
 
 /** Render the Lucide icon for a mailbox role, falling back to a generic folder icon. */
 export function renderMailboxRoleIcon(
-  role: KnownMailboxRole | null,
+  role: string | null,
   size = 14,
   fallback: LucideIcon = Folder,
 ): React.ReactNode {
-  const Icon = role ? ROLE_ICON_MAP[role] : fallback
+  const Icon = isKnownMailboxRole(role) ? ROLE_ICON_MAP[role] : fallback
   return <Icon size={size} className="shrink-0" />
 }
 

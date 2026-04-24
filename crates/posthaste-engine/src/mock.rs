@@ -35,11 +35,12 @@ impl Default for MockJmapGateway {
 }
 
 /// Build a mock mutation outcome from the current revision.
-fn mutation_outcome(state: &MockState) -> MutationOutcome {
+fn mutation_outcome(state: &MockState, object_type: SyncObject) -> MutationOutcome {
+    let prefix = object_type.as_str();
     MutationOutcome {
         cursor: Some(SyncCursor {
-            object_type: SyncObject::Message,
-            state: format!("message-{}", state.revision),
+            object_type,
+            state: format!("{prefix}-{}", state.revision),
             updated_at: "2026-03-31T10:00:00Z".to_string(),
         }),
     }
@@ -123,7 +124,7 @@ impl MailGateway for MockJmapGateway {
             .state
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
-        ensure_expected_state(&state, expected_state)?;
+        ensure_expected_state(&state, expected_state, SyncObject::Message)?;
         let message = state
             .messages
             .iter_mut()
@@ -138,7 +139,7 @@ impl MailGateway for MockJmapGateway {
             .keywords
             .retain(|keyword| !command.remove.contains(keyword));
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state))
+        Ok(mutation_outcome(&state, SyncObject::Message))
     }
 
     /// Replace a mock message's mailbox membership.
@@ -153,7 +154,7 @@ impl MailGateway for MockJmapGateway {
             .state
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
-        ensure_expected_state(&state, expected_state)?;
+        ensure_expected_state(&state, expected_state, SyncObject::Message)?;
         let message = state
             .messages
             .iter_mut()
@@ -161,7 +162,7 @@ impl MailGateway for MockJmapGateway {
             .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
         message.mailbox_ids = mailbox_ids.to_vec();
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state))
+        Ok(mutation_outcome(&state, SyncObject::Message))
     }
 
     /// Remove a message from mock state.
@@ -175,10 +176,43 @@ impl MailGateway for MockJmapGateway {
             .state
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
-        ensure_expected_state(&state, expected_state)?;
+        ensure_expected_state(&state, expected_state, SyncObject::Message)?;
         state.messages.retain(|message| &message.id != message_id);
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state))
+        Ok(mutation_outcome(&state, SyncObject::Message))
+    }
+
+    /// Update a mock mailbox role.
+    async fn set_mailbox_role(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        expected_state: Option<&str>,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
+    ) -> Result<MutationOutcome, GatewayError> {
+        validate_mailbox_role(role)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        ensure_expected_state(&state, expected_state, SyncObject::Mailbox)?;
+        if let Some(clear_role_from) = clear_role_from.filter(|id| *id != mailbox_id) {
+            let mailbox = state
+                .mailboxes
+                .iter_mut()
+                .find(|mailbox| &mailbox.id == clear_role_from)
+                .ok_or_else(|| GatewayError::Rejected("unknown mailbox".to_string()))?;
+            mailbox.role = None;
+        }
+        let mailbox = state
+            .mailboxes
+            .iter_mut()
+            .find(|mailbox| &mailbox.id == mailbox_id)
+            .ok_or_else(|| GatewayError::Rejected("unknown mailbox".to_string()))?;
+        mailbox.role = role.map(str::to_string);
+        bump_revision(&mut state);
+        Ok(mutation_outcome(&state, SyncObject::Mailbox))
     }
 
     /// Return a hard-coded mock sender identity.
@@ -241,14 +275,25 @@ impl MailGateway for MockJmapGateway {
 fn ensure_expected_state(
     state: &MockState,
     expected_state: Option<&str>,
+    object_type: SyncObject,
 ) -> Result<(), GatewayError> {
     if let Some(expected_state) = expected_state {
-        let current = format!("message-{}", state.revision);
+        let current = format!("{}-{}", object_type.as_str(), state.revision);
         if expected_state != current {
             return Err(GatewayError::StateMismatch);
         }
     }
     Ok(())
+}
+
+fn validate_mailbox_role(role: Option<&str>) -> Result<(), GatewayError> {
+    match role {
+        None | Some("archive") | Some("drafts") | Some("inbox") | Some("junk") | Some("sent")
+        | Some("trash") => Ok(()),
+        Some(other) => Err(GatewayError::Rejected(format!(
+            "unsupported mailbox role: {other}"
+        ))),
+    }
 }
 
 /// Advance the mock revision counter to simulate a new JMAP state string.
@@ -410,5 +455,43 @@ mod tests {
         let cursor = outcome.cursor.expect("cursor should be present");
         assert_eq!(cursor.object_type, SyncObject::Message);
         assert_eq!(cursor.state, "message-2");
+    }
+
+    #[tokio::test]
+    async fn set_mailbox_role_returns_updated_mailbox_cursor() {
+        let gateway = MockJmapGateway::default();
+        let outcome = gateway
+            .set_mailbox_role(
+                &AccountId::from("primary"),
+                &MailboxId::from("mb-archive"),
+                Some("mailbox-1"),
+                None,
+                None,
+            )
+            .await
+            .expect("mutation should succeed");
+
+        let cursor = outcome.cursor.expect("cursor should be present");
+        assert_eq!(cursor.object_type, SyncObject::Mailbox);
+        assert_eq!(cursor.state, "mailbox-2");
+    }
+
+    #[tokio::test]
+    async fn set_mailbox_role_can_clear_existing_owner() {
+        let gateway = MockJmapGateway::default();
+        let outcome = gateway
+            .set_mailbox_role(
+                &AccountId::from("primary"),
+                &MailboxId::from("mb-archive"),
+                Some("mailbox-1"),
+                Some("inbox"),
+                Some(&MailboxId::from("mb-inbox")),
+            )
+            .await
+            .expect("mutation should succeed");
+
+        let cursor = outcome.cursor.expect("cursor should be present");
+        assert_eq!(cursor.object_type, SyncObject::Mailbox);
+        assert_eq!(cursor.state, "mailbox-2");
     }
 }

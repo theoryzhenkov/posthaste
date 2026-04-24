@@ -261,6 +261,28 @@ impl MailGateway for LiveJmapGateway {
         crate::live_mutation::destroy_message(self, message_id, expected_state).await
     }
 
+    /// Update a mailbox role via `Mailbox/set`.
+    ///
+    /// @spec docs/L1-jmap#methods-used
+    /// @spec docs/L1-sync#conflict-model
+    async fn set_mailbox_role(
+        &self,
+        _account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        expected_state: Option<&str>,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
+    ) -> Result<MutationOutcome, GatewayError> {
+        crate::live_mutation::set_mailbox_role(
+            self,
+            mailbox_id,
+            expected_state,
+            role,
+            clear_role_from,
+        )
+        .await
+    }
+
     /// Fetch the primary sender identity for an account via `Identity/get`.
     ///
     /// @spec docs/L1-jmap#methods-used

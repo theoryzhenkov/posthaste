@@ -4,7 +4,7 @@
  * @spec docs/L1-api#account-crud-lifecycle
  * @spec docs/L1-api#secret-management
  */
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertDialog,
@@ -19,9 +19,30 @@ import {
 } from '../ui/alert-dialog'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
-import { createAccount, updateAccount, verifyAccount } from '../../api/client'
-import type { AccountOverview, VerificationResponse } from '../../api/types'
+import {
+  createAccount,
+  fetchMailboxes,
+  patchMailbox,
+  updateAccount,
+  verifyAccount,
+} from '../../api/client'
+import type {
+  AccountOverview,
+  KnownMailboxRole,
+  Mailbox,
+  VerificationResponse,
+} from '../../api/types'
+import { invalidateAccountReadModels } from '../../domainCache'
+import { isKnownMailboxRole, renderMailboxRoleIcon } from '../../mailboxRoles'
+import { queryKeys } from '../../queryKeys'
 import { AccountMark } from '../AccountMark'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import {
   buildCreateAccountPayload,
   buildAccountAppearanceInput,
@@ -37,6 +58,19 @@ import type { AccountFormState } from './types'
 
 const accountHueGradient =
   'linear-gradient(90deg, oklch(0.68 0.17 0), oklch(0.68 0.17 45), oklch(0.68 0.17 90), oklch(0.68 0.17 145), oklch(0.68 0.17 205), oklch(0.68 0.17 260), oklch(0.68 0.17 315), oklch(0.68 0.17 360))'
+
+const mailboxRoleOptions: Array<{
+  value: KnownMailboxRole | '__none__'
+  label: string
+}> = [
+  { value: '__none__', label: 'None' },
+  { value: 'inbox', label: 'Inbox' },
+  { value: 'archive', label: 'Archive' },
+  { value: 'drafts', label: 'Drafts' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'junk', label: 'Junk' },
+  { value: 'trash', label: 'Trash' },
+]
 
 function accountAppearanceSignature(
   appearance: AccountOverview['appearance'],
@@ -238,6 +272,12 @@ export function AccountEditor({
         />
       </SettingsSection>
 
+      {isEditing && editingAccount && (
+        <SettingsSection title="Mailboxes">
+          <MailboxRoleFields accountId={editingAccount.id} />
+        </SettingsSection>
+      )}
+
       <SettingsSection title="Server">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
@@ -428,6 +468,127 @@ function AccountAppearanceFields({
           </FeedbackBanner>
         )}
       </div>
+    </div>
+  )
+}
+
+function MailboxRoleFields({ accountId }: { accountId: string }) {
+  const queryClient = useQueryClient()
+  const mailboxesQuery = useQuery({
+    queryKey: queryKeys.mailboxes(accountId),
+    queryFn: () => fetchMailboxes(accountId),
+  })
+  const roleMutation = useMutation({
+    mutationFn: ({
+      mailboxId,
+      role,
+    }: {
+      mailboxId: string
+      role: KnownMailboxRole | null
+    }) => patchMailbox(accountId, mailboxId, { role }),
+    onSuccess: (mailboxes) => {
+      queryClient.setQueryData(queryKeys.mailboxes(accountId), mailboxes)
+      invalidateAccountReadModels(queryClient, accountId)
+    },
+  })
+  const mailboxes = mailboxesQuery.data ?? []
+
+  return (
+    <div className="space-y-3">
+      <div className="divide-y divide-transparent">
+        {mailboxes.map((mailbox) => (
+          <MailboxRoleRow
+            key={mailbox.id}
+            mailbox={mailbox}
+            isPending={
+              roleMutation.isPending &&
+              roleMutation.variables?.mailboxId === mailbox.id
+            }
+            onRoleChange={(role) =>
+              roleMutation.mutate({ mailboxId: mailbox.id, role })
+            }
+          />
+        ))}
+      </div>
+
+      {!mailboxesQuery.isPending && mailboxes.length === 0 && (
+        <p className="text-[12px] text-muted-foreground">
+          No synced mailboxes yet.
+        </p>
+      )}
+
+      {mailboxesQuery.error && (
+        <FeedbackBanner tone="error">
+          {mailboxesQuery.error.message}
+        </FeedbackBanner>
+      )}
+      {roleMutation.error && (
+        <FeedbackBanner tone="error">
+          {roleMutation.error.message}
+        </FeedbackBanner>
+      )}
+    </div>
+  )
+}
+
+function MailboxRoleRow({
+  mailbox,
+  isPending,
+  onRoleChange,
+}: {
+  mailbox: Mailbox
+  isPending: boolean
+  onRoleChange: (role: KnownMailboxRole | null) => void
+}) {
+  const hasUnknownRole = Boolean(
+    mailbox.role && !isKnownMailboxRole(mailbox.role),
+  )
+  const selectValue =
+    mailbox.role && (isKnownMailboxRole(mailbox.role) || hasUnknownRole)
+      ? mailbox.role
+      : '__none__'
+
+  return (
+    <div className="grid gap-3 py-2 sm:grid-cols-[1fr_180px] sm:items-center">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+          {renderMailboxRoleIcon(mailbox.role, 14)}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[13px] font-medium text-foreground">
+            {mailbox.name}
+          </p>
+          <p className="text-[12px] text-muted-foreground">
+            {mailbox.totalEmails} messages, {mailbox.unreadEmails} unread
+          </p>
+        </div>
+      </div>
+
+      <Select
+        value={selectValue}
+        disabled={isPending}
+        onValueChange={(value) =>
+          onRoleChange(
+            value === '__none__' ? null : (value as KnownMailboxRole),
+          )
+        }
+      >
+        <SelectTrigger className="h-8 w-full rounded-md border-border bg-background text-[13px] shadow-none">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {hasUnknownRole && mailbox.role && (
+            <SelectItem value={mailbox.role}>
+              Unknown: {mailbox.role}
+            </SelectItem>
+          )}
+          {mailboxRoleOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }

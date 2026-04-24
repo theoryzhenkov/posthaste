@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
@@ -230,6 +230,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .route(
             "/v1/sources/{source_id}/mailboxes",
             get(api::list_mailboxes),
+        )
+        .route(
+            "/v1/sources/{source_id}/mailboxes/{mailbox_id}",
+            patch(api::patch_mailbox),
         )
         .route(
             "/v1/sources/{source_id}/messages",
