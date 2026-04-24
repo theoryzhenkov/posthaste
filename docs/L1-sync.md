@@ -89,6 +89,8 @@ Important derived tables:
 - `event_log` stores ordered domain events with a monotonically increasing `seq`, which powers `/v1/events`.
 - `sync_cursor` stores per-account mailbox and message state strings.
 
+The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
+
 ## Conversation pagination
 
 Conversation pages are generated inside the store from the `conversation` and `message` projections using seek pagination:

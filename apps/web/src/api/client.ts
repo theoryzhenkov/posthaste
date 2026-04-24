@@ -40,6 +40,7 @@ interface MessagePageInput {
   cursor?: string | null
   sort?: MessageSortField
   sortDir?: string
+  signal?: AbortSignal
 }
 
 function normalizeApiBaseUrl(baseUrl: string): string {
@@ -290,6 +291,7 @@ export async function fetchSmartMailboxMessages(
   const search = params.toString()
   return request<MessagePage>(
     `/smart-mailboxes/${id}/messages${search ? `?${search}` : ''}`,
+    { signal: input?.signal },
   )
 }
 
@@ -416,6 +418,7 @@ export async function fetchSourceMessages(
   const search = params.toString()
   return request<MessagePage>(
     `/sources/${sourceId}/messages${search ? `?${search}` : ''}`,
+    { signal: input?.signal },
   )
 }
 

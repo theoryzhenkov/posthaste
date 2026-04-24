@@ -134,6 +134,16 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
 
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
+            CREATE INDEX IF NOT EXISTS idx_message_account_received
+                ON message (account_id, received_at, id);
+            CREATE INDEX IF NOT EXISTS idx_message_account_from_sort
+                ON message (account_id, LOWER(COALESCE(from_name, from_email, '')), id);
+            CREATE INDEX IF NOT EXISTS idx_message_account_subject_sort
+                ON message (account_id, LOWER(COALESCE(subject, '')), id);
+            CREATE INDEX IF NOT EXISTS idx_message_account_flagged_sort
+                ON message (account_id, is_flagged, id);
+            CREATE INDEX IF NOT EXISTS idx_message_account_attachment_sort
+                ON message (account_id, has_attachment, id);
             CREATE INDEX IF NOT EXISTS idx_message_conversation
                 ON message (conversation_id, received_at);
             CREATE INDEX IF NOT EXISTS idx_message_rfc_message_id

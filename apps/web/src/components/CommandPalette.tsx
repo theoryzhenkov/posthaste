@@ -12,7 +12,7 @@ import {
   User,
   UserPlus,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { fetchSidebar, fetchSourceMessages } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
@@ -98,6 +98,7 @@ interface CommandPaletteProps {
     mailboxId: string,
     name: string,
   ) => void
+  onPreviewSearch: (query: string) => void
   onToggleFlag: () => void
 }
 
@@ -228,6 +229,7 @@ export function CommandPalette({
   onOpenSettings,
   onOpenShortcuts,
   onPlaceholderAction,
+  onPreviewSearch,
   onReply,
   onSelectMessage,
   onSelectSmartMailbox,
@@ -250,10 +252,11 @@ export function CommandPalette({
         source.id,
         debouncedServerQuery,
       ] as const,
-      queryFn: () =>
+      queryFn: ({ signal }) =>
         fetchSourceMessages(source.id, null, {
           q: debouncedServerQuery,
           limit: 8,
+          signal,
         }),
       enabled: debouncedServerQuery.length > 0,
     })),
@@ -262,6 +265,25 @@ export function CommandPalette({
     () => sourceMessageQueries.flatMap((source) => source.data?.items ?? []),
     [sourceMessageQueries],
   )
+  const canPreviewSearch =
+    debouncedServerQuery.length > 0 &&
+    sourceMessageQueries.length > 0 &&
+    sourceMessageQueries.every((source) => source.isSuccess)
+  const hasPreviewSearchError = sourceMessageQueries.some(
+    (source) => source.isError,
+  )
+
+  useEffect(() => {
+    if (!canPreviewSearch || hasPreviewSearchError) {
+      return
+    }
+    onPreviewSearch(debouncedServerQuery)
+  }, [
+    canPreviewSearch,
+    debouncedServerQuery,
+    hasPreviewSearchError,
+    onPreviewSearch,
+  ])
 
   const cachedMessages = useMemo(() => {
     const deduped = new Map<string, MessageSummary>()
