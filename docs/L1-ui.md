@@ -63,7 +63,7 @@ React Query manages server state, but different surfaces use different strategie
 
 - `queryKeys.accounts` loads configured account overviews.
 - `queryKeys.mailboxes(accountId)` loads synced mailboxes for account-level settings.
-- `queryKeys.sidebar` loads enabled sources plus smart mailbox summaries.
+- `queryKeys.sidebar` loads enabled sources, smart mailbox summaries, and tag summaries.
 - `queryKeys.messages(selectedView, query, sort)` loads paginated individual message summaries for the selected mailbox or smart mailbox, with filtering and sorting executed by the backend.
 - `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
 - `mailKeys.message(sourceId, messageId)` loads full message detail, including lazily fetched body content when needed.
@@ -88,6 +88,15 @@ Domain events and mutation results update caches through the centralized domain 
 Each row represents one message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
 
 Message rows expose the same primary message actions through a right-click context menu: open, mark read/unread, flag/unflag, archive, and move to Trash. Opening the context menu selects the row first so command targets stay explicit.
+
+## Tags
+
+Tags are user-facing non-system JMAP keywords. The sidebar Tags section is
+derived from synced message keywords and selecting a tag applies a `tag:` query
+filter to the message list. The toolbar tag action opens a floating tag editor
+for the selected message. Adding or removing tags applies immediately through
+the existing message keyword mutation path, with optimistic cache updates and
+the same event reconciliation used for read and flag changes.
 
 ## Sidebar Context Menus
 

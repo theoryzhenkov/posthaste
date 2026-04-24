@@ -8,7 +8,7 @@ use crate::{
     MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
     MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand, ReplyContext,
     SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule,
-    SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
+    SortDirection, SyncBatch, SyncCursor, SyncObject, TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -151,6 +151,14 @@ pub trait MessageListStore: Send + Sync {
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<MessagePage, StoreError>;
+}
+
+/// Tag read projection for non-system JMAP keywords.
+pub trait TagReadStore: Send + Sync {
+    /// List user-facing tags for one account with unread and total counts.
+    ///
+    /// @spec docs/L1-sync#sqlite-schema
+    fn list_tags(&self, account_id: &AccountId) -> Result<Vec<TagSummary>, StoreError>;
 }
 
 /// Conversation list and detail projection for UI queries.
@@ -376,6 +384,7 @@ pub trait SourceDataStore: Send + Sync {
 pub trait MailStore:
     MailboxReadStore
     + MessageListStore
+    + TagReadStore
     + ConversationReadStore
     + MessageDetailStore
     + SmartMailboxStore
@@ -392,6 +401,7 @@ pub trait MailStore:
 impl<T> MailStore for T where
     T: MailboxReadStore
         + MessageListStore
+        + TagReadStore
         + ConversationReadStore
         + MessageDetailStore
         + SmartMailboxStore

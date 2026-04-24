@@ -402,6 +402,13 @@ export interface SidebarSmartMailbox {
   totalMessages: number
 }
 
+/** @spec docs/L1-api#endpoint-table */
+export interface TagSummary {
+  name: string
+  unreadMessages: number
+  totalMessages: number
+}
+
 /** @spec docs/L1-ui#component-hierarchy */
 export interface SidebarSource {
   id: string
@@ -412,6 +419,7 @@ export interface SidebarSource {
 /** @spec docs/L1-api#endpoint-table */
 export interface SidebarResponse {
   smartMailboxes: SidebarSmartMailbox[]
+  tags: TagSummary[]
   sources: SidebarSource[]
 }
 

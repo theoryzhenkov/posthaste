@@ -58,6 +58,11 @@ All endpoints are prefixed with `/v1`.
 |--------|------|---------|---------|----------|
 | GET | `/sidebar` | `get_sidebar` | -- | `SidebarResponse` |
 
+`SidebarResponse` includes smart mailbox summaries, real tag summaries derived
+from non-system JMAP keywords, and enabled account mailbox trees. Tag counts are
+merged across enabled accounts and exclude system keywords such as `$seen` and
+`$flagged`.
+
 ### Conversations and messages
 
 | Method | Path | Handler | Request | Response |

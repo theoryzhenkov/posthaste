@@ -9,6 +9,7 @@ import {
 
 const sidebar: SidebarResponse = {
   smartMailboxes: [],
+  tags: [],
   sources: [
     {
       id: 'primary',

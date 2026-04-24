@@ -159,6 +159,36 @@ function applyKeywordToggle(
   return current.filter((candidate) => candidate !== keyword)
 }
 
+function normalizeUserTag(tag: string): string | null {
+  const normalized = tag.trim().replace(/\s+/g, ' ')
+  if (!normalized || normalized.startsWith('$') || normalized.includes('/')) {
+    return null
+  }
+  return normalized
+}
+
+function userTagsFromKeywords(keywords: string[]): string[] {
+  return keywords.filter((keyword) => !keyword.startsWith('$'))
+}
+
+function uniqueUserTags(tags: string[]): string[] {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const tag of tags) {
+    const normalized = normalizeUserTag(tag)
+    if (!normalized) {
+      continue
+    }
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    unique.push(normalized)
+  }
+  return unique
+}
+
 function invalidateMessageScope(
   queryClient: ReturnType<typeof useQueryClient>,
   target: SourceMessageRef,
@@ -329,6 +359,39 @@ export function useEmailActions() {
         command: previous.isFlagged
           ? { kind: 'setKeywords', add: [], remove: ['$flagged'] }
           : { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+        conversationId: selection?.conversationId,
+        optimisticKeywordPatch: {
+          next: deriveKeywordState(nextKeywords),
+          previous,
+        },
+        target: toSourceMessageRef(message),
+      })
+    },
+    setUserTags: (
+      message: (ReadToggleTarget | MessageSummary) & {
+        keywords?: string[]
+      },
+      tags: string[],
+    ) => {
+      const selection = toMailSelection(queryClient, message)
+      const previous = resolveKeywordState(queryClient, message)
+      const previousUserTags = userTagsFromKeywords(previous.keywords)
+      const nextUserTags = uniqueUserTags(tags)
+      const systemKeywords = previous.keywords.filter((keyword) =>
+        keyword.startsWith('$'),
+      )
+      const add = nextUserTags.filter(
+        (tag) => !previousUserTags.some((current) => current === tag),
+      )
+      const remove = previousUserTags.filter(
+        (tag) => !nextUserTags.some((next) => next === tag),
+      )
+      if (add.length === 0 && remove.length === 0) {
+        return
+      }
+      const nextKeywords = [...systemKeywords, ...nextUserTags]
+      mutation.mutate({
+        command: { kind: 'setKeywords', add, remove },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),
