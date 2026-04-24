@@ -3,20 +3,20 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::{
-    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
-    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
+    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, AutomationAction, AutomationRule,
+    AutomationScope, AutomationTrigger, CommandResult, ConfigDiff, ConfigRepository,
+    ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
     ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
-    MailboxAction, MailboxActionCondition, MailboxActionRule, MailboxId, MailboxReadStore,
-    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
-    MessageListStore, MessageMailboxStore, MessagePage, MessageRecord, MessageSortField,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse, SidebarSmartMailbox,
-    SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection,
-    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
-    EVENT_TOPIC_SYNC_FAILED,
+    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
+    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
+    MessageRecord, MessageSortField, MessageSummary, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore,
+    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -26,43 +26,6 @@ enum MessageMutation<'a> {
     SetKeywords(&'a SetKeywordsCommand),
     ReplaceMailboxes(&'a ReplaceMailboxesCommand),
     Destroy,
-}
-
-fn matching_mailbox_action_tag<'a>(
-    rule: &'a MailboxActionRule,
-    message: &MessageRecord,
-) -> Option<&'a str> {
-    if !message
-        .mailbox_ids
-        .iter()
-        .any(|mailbox_id| mailbox_id == &rule.mailbox_id)
-    {
-        return None;
-    }
-
-    match &rule.condition {
-        MailboxActionCondition::FromContains { value }
-            if sender_matches(message, value.as_str()) =>
-        {
-            match &rule.action {
-                MailboxAction::ApplyTag { tag } => Some(tag.as_str()),
-            }
-        }
-        MailboxActionCondition::FromContains { .. } => None,
-    }
-}
-
-fn sender_matches(message: &MessageRecord, needle: &str) -> bool {
-    let needle = needle.trim().to_lowercase();
-    if needle.is_empty() {
-        return false;
-    }
-    message
-        .from_name
-        .as_deref()
-        .into_iter()
-        .chain(message.from_email.as_deref())
-        .any(|value| value.to_lowercase().contains(&needle))
 }
 
 fn condition_node(
@@ -91,56 +54,88 @@ fn negated_condition_node(
     })
 }
 
-fn mailbox_action_backfill_rule(
+fn automation_query_rule(
     account_id: &AccountId,
-    rule: &MailboxActionRule,
-    tag: &str,
-) -> Option<SmartMailboxRule> {
-    let MailboxActionCondition::FromContains { value } = &rule.condition;
-    let value = value.trim();
-    if value.is_empty() || tag.trim().is_empty() {
-        return None;
+    rule: &AutomationRule,
+    action: &AutomationAction,
+    message_ids: &[MessageId],
+) -> SmartMailboxRule {
+    let mut nodes = vec![
+        condition_node(
+            SmartMailboxField::SourceId,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(account_id.to_string()),
+        ),
+        SmartMailboxRuleNode::Group(rule.condition.root.clone()),
+    ];
+
+    if let AutomationScope::Mailbox { mailbox_id } = &rule.scope {
+        nodes.push(condition_node(
+            SmartMailboxField::MailboxId,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(mailbox_id.to_string()),
+        ));
     }
 
-    Some(SmartMailboxRule {
+    if !message_ids.is_empty() {
+        nodes.push(condition_node(
+            SmartMailboxField::MessageId,
+            SmartMailboxOperator::In,
+            SmartMailboxValue::Strings(message_ids.iter().map(ToString::to_string).collect()),
+        ));
+    }
+
+    if let Some(precondition) = automation_action_precondition(action) {
+        nodes.push(precondition);
+    }
+
+    SmartMailboxRule {
         root: SmartMailboxGroup {
             operator: SmartMailboxGroupOperator::All,
             negated: false,
-            nodes: vec![
-                condition_node(
-                    SmartMailboxField::SourceId,
-                    SmartMailboxOperator::Equals,
-                    SmartMailboxValue::String(account_id.to_string()),
-                ),
-                condition_node(
-                    SmartMailboxField::MailboxId,
-                    SmartMailboxOperator::Equals,
-                    SmartMailboxValue::String(rule.mailbox_id.to_string()),
-                ),
-                negated_condition_node(
-                    SmartMailboxField::Keyword,
-                    SmartMailboxOperator::Equals,
-                    SmartMailboxValue::String(tag.to_string()),
-                ),
-                SmartMailboxRuleNode::Group(SmartMailboxGroup {
-                    operator: SmartMailboxGroupOperator::Any,
-                    negated: false,
-                    nodes: vec![
-                        condition_node(
-                            SmartMailboxField::FromName,
-                            SmartMailboxOperator::Contains,
-                            SmartMailboxValue::String(value.to_string()),
-                        ),
-                        condition_node(
-                            SmartMailboxField::FromEmail,
-                            SmartMailboxOperator::Contains,
-                            SmartMailboxValue::String(value.to_string()),
-                        ),
-                    ],
-                }),
-            ],
+            nodes,
         },
-    })
+    }
+}
+
+fn automation_action_precondition(action: &AutomationAction) -> Option<SmartMailboxRuleNode> {
+    match action {
+        AutomationAction::ApplyTag { tag } => Some(negated_condition_node(
+            SmartMailboxField::Keyword,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(tag.clone()),
+        )),
+        AutomationAction::RemoveTag { tag } => Some(condition_node(
+            SmartMailboxField::Keyword,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(tag.clone()),
+        )),
+        AutomationAction::MarkRead => Some(condition_node(
+            SmartMailboxField::IsRead,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(false),
+        )),
+        AutomationAction::MarkUnread => Some(condition_node(
+            SmartMailboxField::IsRead,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(true),
+        )),
+        AutomationAction::Flag => Some(condition_node(
+            SmartMailboxField::IsFlagged,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(false),
+        )),
+        AutomationAction::Unflag => Some(condition_node(
+            SmartMailboxField::IsFlagged,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::Bool(true),
+        )),
+        AutomationAction::MoveToMailbox { mailbox_id } => Some(negated_condition_node(
+            SmartMailboxField::MailboxId,
+            SmartMailboxOperator::Equals,
+            SmartMailboxValue::String(mailbox_id.to_string()),
+        )),
+    }
 }
 
 /// Orchestrates domain logic by composing gateway, store, and config ports.
@@ -686,7 +681,7 @@ impl MailService {
         let batch = gateway.sync(account_id, &cursors).await?;
         let mut events = self.sync_writer.apply_sync_batch(account_id, &batch)?;
         let action_events = self
-            .apply_mailbox_actions(account_id, &batch.messages, gateway)
+            .apply_automation_rules(account_id, &batch.messages, gateway)
             .await?;
         let action_count = action_events.len();
         events.extend(action_events);
@@ -699,7 +694,7 @@ impl MailService {
                 "mailboxCount": batch.mailboxes.len(),
                 "messageCount": batch.messages.len(),
                 "deletedMessageCount": batch.deleted_message_ids.len(),
-                "mailboxActionEventCount": action_count,
+                "automationEventCount": action_count,
                 "trigger": trigger.as_str(),
             }),
         )?;
@@ -707,7 +702,7 @@ impl MailService {
         Ok(events)
     }
 
-    async fn apply_mailbox_actions(
+    async fn apply_automation_rules(
         &self,
         account_id: &AccountId,
         messages: &[MessageRecord],
@@ -716,50 +711,191 @@ impl MailService {
         let Some(account) = self.config.get_source(account_id)? else {
             return Ok(Vec::new());
         };
-        if account.mailbox_action_rules.is_empty() || messages.is_empty() {
+        if account.automation_rules.is_empty() || messages.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut events = Vec::new();
-        for message in messages {
-            let mut known_keywords = message
-                .keywords
-                .iter()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>();
-            for rule in &account.mailbox_action_rules {
-                let Some(tag) = matching_mailbox_action_tag(rule, message) else {
-                    continue;
-                };
-                if known_keywords.contains(tag) {
-                    continue;
+        let message_ids = messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect::<Vec<_>>();
+        for rule in account.automation_rules.iter().filter(|rule| {
+            rule.enabled
+                && rule
+                    .triggers
+                    .iter()
+                    .any(|trigger| trigger == &AutomationTrigger::MessageArrived)
+        }) {
+            for action in &rule.actions {
+                let query_rule = automation_query_rule(account_id, rule, action, &message_ids);
+                let page = self.smart_mailboxes.query_message_page_by_rule(
+                    &query_rule,
+                    messages.len(),
+                    None,
+                    MessageSortField::Date,
+                    SortDirection::Asc,
+                )?;
+                for message in page.items {
+                    let result = self
+                        .apply_automation_action(account_id, &message, action, gateway)
+                        .await?;
+                    events.extend(result.events);
                 }
-                let result = self
-                    .set_keywords(
-                        account_id,
-                        &message.id,
-                        &SetKeywordsCommand {
-                            add: vec![tag.to_string()],
-                            remove: Vec::new(),
-                        },
-                        gateway,
-                    )
-                    .await?;
-                known_keywords.insert(tag.to_string());
-                events.extend(result.events);
             }
         }
         Ok(events)
     }
 
-    /// Apply one bounded batch of account mailbox action rules to existing local mail.
+    async fn apply_automation_action(
+        &self,
+        account_id: &AccountId,
+        message: &MessageSummary,
+        action: &AutomationAction,
+        gateway: &dyn MailGateway,
+    ) -> Result<CommandResult, ServiceError> {
+        match action {
+            AutomationAction::ApplyTag { tag } => {
+                if message.keywords.iter().any(|keyword| keyword == tag) {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: vec![tag.clone()],
+                        remove: Vec::new(),
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::RemoveTag { tag } => {
+                if !message.keywords.iter().any(|keyword| keyword == tag) {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: Vec::new(),
+                        remove: vec![tag.clone()],
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::MarkRead => {
+                if message.is_read {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: vec!["$seen".to_string()],
+                        remove: Vec::new(),
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::MarkUnread => {
+                if !message.is_read {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: Vec::new(),
+                        remove: vec!["$seen".to_string()],
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::Flag => {
+                if message.is_flagged {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: vec!["$flagged".to_string()],
+                        remove: Vec::new(),
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::Unflag => {
+                if !message.is_flagged {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.set_keywords(
+                    account_id,
+                    &message.id,
+                    &SetKeywordsCommand {
+                        add: Vec::new(),
+                        remove: vec!["$flagged".to_string()],
+                    },
+                    gateway,
+                )
+                .await
+            }
+            AutomationAction::MoveToMailbox { mailbox_id } => {
+                if message.mailbox_ids.len() == 1
+                    && message
+                        .mailbox_ids
+                        .iter()
+                        .any(|candidate| candidate == mailbox_id)
+                {
+                    return Ok(CommandResult {
+                        detail: None,
+                        events: Vec::new(),
+                    });
+                }
+                self.replace_mailboxes(
+                    account_id,
+                    &message.id,
+                    &ReplaceMailboxesCommand {
+                        mailbox_ids: vec![mailbox_id.clone()],
+                    },
+                    gateway,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Apply one bounded batch of account automation rules to existing local mail.
     ///
     /// This is intended for low-priority background backfill. It queries the
-    /// local projection first, then applies matching tags through JMAP so the
-    /// server remains authoritative.
+    /// local projection first, then applies actions through JMAP so the server
+    /// remains authoritative.
     ///
-    /// @spec docs/L1-sync#mailbox-actions
-    pub async fn backfill_mailbox_actions_batch(
+    /// @spec docs/L1-sync#automation-actions
+    pub async fn backfill_automation_rules_batch(
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
@@ -768,7 +904,7 @@ impl MailService {
         let Some(account) = self.config.get_source(account_id)? else {
             return Ok((Vec::new(), false));
         };
-        if account.mailbox_action_rules.is_empty() || batch_size == 0 {
+        if account.automation_rules.is_empty() || batch_size == 0 {
             return Ok((Vec::new(), false));
         }
 
@@ -776,46 +912,44 @@ impl MailService {
         let mut has_more = false;
         let mut remaining = batch_size;
 
-        for rule in &account.mailbox_action_rules {
+        for rule in account
+            .automation_rules
+            .iter()
+            .filter(|rule| rule.enabled && rule.backfill)
+        {
             if remaining == 0 {
                 has_more = true;
                 break;
             }
-            let MailboxAction::ApplyTag { tag } = &rule.action;
-            let Some(query_rule) = mailbox_action_backfill_rule(account_id, rule, tag) else {
-                continue;
-            };
-            let page = self.smart_mailboxes.query_message_page_by_rule(
-                &query_rule,
-                remaining,
-                None,
-                MessageSortField::Date,
-                SortDirection::Asc,
-            )?;
-            if page.items.len() == remaining {
-                has_more = true;
-            }
-
-            for message in page.items {
-                if message.keywords.iter().any(|keyword| keyword == tag) {
-                    continue;
-                }
-                let result = self
-                    .set_keywords(
-                        account_id,
-                        &message.id,
-                        &SetKeywordsCommand {
-                            add: vec![tag.clone()],
-                            remove: Vec::new(),
-                        },
-                        gateway,
-                    )
-                    .await?;
-                events.extend(result.events);
-                remaining -= 1;
+            for action in &rule.actions {
                 if remaining == 0 {
                     has_more = true;
                     break;
+                }
+                let query_rule = automation_query_rule(account_id, rule, action, &[]);
+                let page = self.smart_mailboxes.query_message_page_by_rule(
+                    &query_rule,
+                    remaining,
+                    None,
+                    MessageSortField::Date,
+                    SortDirection::Asc,
+                )?;
+                if page.items.len() == remaining {
+                    has_more = true;
+                }
+
+                for message in page.items {
+                    let result = self
+                        .apply_automation_action(account_id, &message, action, gateway)
+                        .await?;
+                    if !result.events.is_empty() {
+                        remaining -= 1;
+                    }
+                    events.extend(result.events);
+                    if remaining == 0 {
+                        has_more = true;
+                        break;
+                    }
                 }
             }
         }
@@ -1591,7 +1725,7 @@ mod tests {
             driver: crate::AccountDriver::Mock,
             enabled: true,
             appearance: None,
-            mailbox_action_rules: Vec::new(),
+            automation_rules: Vec::new(),
             transport: Default::default(),
             created_at: crate::RFC3339_EPOCH.to_string(),
             updated_at: crate::RFC3339_EPOCH.to_string(),
@@ -1615,6 +1749,42 @@ mod tests {
             is_flagged: false,
             mailbox_ids: vec![MailboxId::from("inbox")],
             keywords,
+        }
+    }
+
+    fn sample_automation_rule() -> AutomationRule {
+        AutomationRule {
+            id: "rule-posthaste".to_string(),
+            name: "Posthaste".to_string(),
+            enabled: true,
+            triggers: vec![AutomationTrigger::MessageArrived],
+            scope: AutomationScope::Mailbox {
+                mailbox_id: MailboxId::from("inbox"),
+            },
+            condition: SmartMailboxRule {
+                root: SmartMailboxGroup {
+                    operator: SmartMailboxGroupOperator::Any,
+                    negated: false,
+                    nodes: vec![
+                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                            field: SmartMailboxField::FromName,
+                            operator: SmartMailboxOperator::Contains,
+                            negated: false,
+                            value: SmartMailboxValue::String("posthaste".to_string()),
+                        }),
+                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                            field: SmartMailboxField::FromEmail,
+                            operator: SmartMailboxOperator::Contains,
+                            negated: false,
+                            value: SmartMailboxValue::String("posthaste".to_string()),
+                        }),
+                    ],
+                },
+            },
+            actions: vec![AutomationAction::ApplyTag {
+                tag: "newsletter".to_string(),
+            }],
+            backfill: true,
         }
     }
 
@@ -1842,20 +2012,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_applies_matching_mailbox_action_tag() {
+    async fn sync_applies_matching_automation_tag() {
         let account_id = AccountId::from("primary");
         let mut account = sample_source();
-        account.mailbox_action_rules = vec![MailboxActionRule {
-            id: "rule-posthaste".to_string(),
-            mailbox_id: MailboxId::from("inbox"),
-            condition: MailboxActionCondition::FromContains {
-                value: "posthaste".to_string(),
-            },
-            action: MailboxAction::ApplyTag {
-                tag: "newsletter".to_string(),
-            },
-        }];
+        account.automation_rules = vec![sample_automation_rule()];
         let store = Arc::new(TestStore::default());
+        *store.rule_page.lock().expect("rule page lock poisoned") =
+            vec![sample_message_summary("message-1", Vec::new())];
         let config = Arc::new(TestConfig {
             sources: vec![account],
             ..Default::default()
@@ -1908,19 +2071,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mailbox_action_backfill_processes_one_bounded_batch() {
+    async fn automation_backfill_processes_one_bounded_batch() {
         let account_id = AccountId::from("primary");
         let mut account = sample_source();
-        account.mailbox_action_rules = vec![MailboxActionRule {
-            id: "rule-posthaste".to_string(),
-            mailbox_id: MailboxId::from("inbox"),
-            condition: MailboxActionCondition::FromContains {
-                value: "posthaste".to_string(),
-            },
-            action: MailboxAction::ApplyTag {
-                tag: "newsletter".to_string(),
-            },
-        }];
+        account.automation_rules = vec![sample_automation_rule()];
         let store = Arc::new(TestStore::default());
         *store.rule_page.lock().expect("rule page lock poisoned") = vec![
             sample_message_summary("message-1", Vec::new()),
@@ -1934,7 +2088,7 @@ mod tests {
         let gateway = MutationGateway::with_revision(1);
 
         let (_events, has_more) = service
-            .backfill_mailbox_actions_batch(&account_id, &gateway, 1)
+            .backfill_automation_rules_batch(&account_id, &gateway, 1)
             .await
             .expect("backfill should apply one bounded batch");
 

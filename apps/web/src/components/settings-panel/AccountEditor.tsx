@@ -28,9 +28,9 @@ import {
 } from '../../api/client'
 import type {
   AccountOverview,
+  AutomationRule,
   KnownMailboxRole,
   Mailbox,
-  MailboxActionRule,
   VerificationResponse,
 } from '../../api/types'
 import { invalidateAccountReadModels } from '../../domainCache'
@@ -277,7 +277,7 @@ export function AccountEditor({
         <SettingsSection title="Mailboxes">
           <MailboxRoleFields accountId={editingAccount.id} />
           <MailboxActionFields
-            key={`${editingAccount.id}:${mailboxActionSignature(editingAccount.mailboxActionRules ?? [])}`}
+            key={`${editingAccount.id}:${mailboxActionSignature(draftsFromAutomationRules(editingAccount.automationRules ?? []))}`}
             account={editingAccount}
             onSaved={onSaved}
           />
@@ -478,8 +478,15 @@ function AccountAppearanceFields({
   )
 }
 
-function mailboxActionSignature(rules: MailboxActionRule[]): string {
-  return JSON.stringify(normalizeMailboxActionRules(rules))
+interface MailboxActionDraft {
+  id: string
+  mailboxId: string
+  fromContains: string
+  tag: string
+}
+
+function mailboxActionSignature(rules: MailboxActionDraft[]): string {
+  return JSON.stringify(normalizeMailboxActionDrafts(rules))
 }
 
 function createRuleId(): string {
@@ -489,30 +496,131 @@ function createRuleId(): string {
   return `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-function normalizeMailboxActionRules(
-  rules: MailboxActionRule[],
-): MailboxActionRule[] {
+function normalizeMailboxActionDrafts(
+  rules: MailboxActionDraft[],
+): MailboxActionDraft[] {
   return rules.map((rule) => ({
     id: rule.id.trim(),
     mailboxId: rule.mailboxId.trim(),
-    condition: {
-      kind: 'fromContains',
-      value: rule.condition.value.trim(),
-    },
-    action: {
-      kind: 'applyTag',
-      tag: rule.action.tag.trim(),
-    },
+    fromContains: rule.fromContains.trim(),
+    tag: rule.tag.trim(),
   }))
 }
 
-function isMailboxActionRuleComplete(rule: MailboxActionRule): boolean {
+function isMailboxActionRuleComplete(rule: MailboxActionDraft): boolean {
   return (
     rule.mailboxId.trim().length > 0 &&
-    rule.condition.value.trim().length > 0 &&
-    rule.action.tag.trim().length > 0 &&
-    !rule.action.tag.trim().startsWith('$')
+    rule.fromContains.trim().length > 0 &&
+    rule.tag.trim().length > 0 &&
+    !rule.tag.trim().startsWith('$')
   )
+}
+
+function draftFromAutomationRule(
+  rule: AutomationRule,
+): MailboxActionDraft | null {
+  const scope = rule.scope.kind === 'mailbox' ? rule.scope : null
+  const action = rule.actions.find((candidate) => candidate.kind === 'applyTag')
+  const fromCondition = rule.condition.root.nodes.find(
+    (node) =>
+      node.type === 'group' &&
+      node.operator === 'any' &&
+      node.nodes.some(
+        (child) =>
+          child.type === 'condition' &&
+          child.field === 'fromName' &&
+          child.operator === 'contains',
+      ),
+  )
+  if (
+    !scope ||
+    !action ||
+    action.kind !== 'applyTag' ||
+    !fromCondition ||
+    fromCondition.type !== 'group'
+  ) {
+    return null
+  }
+  const valueNode = fromCondition.nodes.find(
+    (node) =>
+      node.type === 'condition' &&
+      node.field === 'fromName' &&
+      node.operator === 'contains' &&
+      typeof node.value === 'string',
+  )
+  return {
+    id: rule.id,
+    mailboxId: scope.mailboxId,
+    fromContains:
+      valueNode &&
+      valueNode.type === 'condition' &&
+      typeof valueNode.value === 'string'
+        ? valueNode.value
+        : '',
+    tag: action.tag,
+  }
+}
+
+function draftsFromAutomationRules(
+  rules: AutomationRule[],
+): MailboxActionDraft[] {
+  return rules
+    .map(draftFromAutomationRule)
+    .filter((rule): rule is MailboxActionDraft => rule !== null)
+}
+
+function automationRulesFromDrafts(
+  rules: MailboxActionDraft[],
+): AutomationRule[] {
+  return normalizeMailboxActionDrafts(rules).map((rule) => ({
+    id: rule.id,
+    name: `From ${rule.fromContains}`,
+    enabled: true,
+    triggers: ['messageArrived'],
+    scope: {
+      kind: 'mailbox',
+      mailboxId: rule.mailboxId,
+    },
+    condition: {
+      root: {
+        operator: 'any',
+        negated: false,
+        nodes: [
+          {
+            type: 'condition',
+            field: 'fromName',
+            operator: 'contains',
+            negated: false,
+            value: rule.fromContains,
+          },
+          {
+            type: 'condition',
+            field: 'fromEmail',
+            operator: 'contains',
+            negated: false,
+            value: rule.fromContains,
+          },
+        ],
+      },
+    },
+    actions: [{ kind: 'applyTag', tag: rule.tag }],
+    backfill: true,
+  }))
+}
+
+function mergeMailboxActionDrafts(
+  existingRules: AutomationRule[],
+  drafts: MailboxActionDraft[],
+): AutomationRule[] {
+  const editableRuleIds = new Set(
+    existingRules
+      .filter((rule) => draftFromAutomationRule(rule) !== null)
+      .map((rule) => rule.id),
+  )
+  return [
+    ...existingRules.filter((rule) => !editableRuleIds.has(rule.id)),
+    ...automationRulesFromDrafts(drafts),
+  ]
 }
 
 function MailboxActionFields({
@@ -522,11 +630,13 @@ function MailboxActionFields({
   account: AccountOverview
   onSaved: (account: AccountOverview) => Promise<void>
 }) {
-  const [rules, setRules] = useState<MailboxActionRule[]>(
-    () => account.mailboxActionRules ?? [],
+  const [rules, setRules] = useState<MailboxActionDraft[]>(() =>
+    draftsFromAutomationRules(account.automationRules ?? []),
   )
   const [savedSignature, setSavedSignature] = useState(() =>
-    mailboxActionSignature(account.mailboxActionRules ?? []),
+    mailboxActionSignature(
+      draftsFromAutomationRules(account.automationRules ?? []),
+    ),
   )
   const mailboxesQuery = useQuery({
     queryKey: queryKeys.mailboxes(account.id),
@@ -535,10 +645,15 @@ function MailboxActionFields({
   const saveMutation = useMutation({
     mutationFn: () =>
       updateAccount(account.id, {
-        mailboxActionRules: normalizeMailboxActionRules(rules),
+        automationRules: mergeMailboxActionDrafts(
+          account.automationRules ?? [],
+          rules,
+        ),
       }),
     onSuccess: async (savedAccount) => {
-      const nextRules = savedAccount.mailboxActionRules ?? []
+      const nextRules = draftsFromAutomationRules(
+        savedAccount.automationRules ?? [],
+      )
       setRules(nextRules)
       setSavedSignature(mailboxActionSignature(nextRules))
       await onSaved(savedAccount)
@@ -551,15 +666,13 @@ function MailboxActionFields({
   )
   const hasUnsavedChanges = mailboxActionSignature(rules) !== savedSignature
 
-  function updateRule(ruleId: string, patch: Partial<MailboxActionRule>) {
+  function updateRule(ruleId: string, patch: Partial<MailboxActionDraft>) {
     setRules((current) =>
       current.map((rule) =>
         rule.id === ruleId
           ? {
               ...rule,
               ...patch,
-              condition: patch.condition ?? rule.condition,
-              action: patch.action ?? rule.action,
             }
           : rule,
       ),
@@ -572,8 +685,8 @@ function MailboxActionFields({
       {
         id: createRuleId(),
         mailboxId: mailboxes[0]?.id ?? '',
-        condition: { kind: 'fromContains', value: '' },
-        action: { kind: 'applyTag', tag: '' },
+        fromContains: '',
+        tag: '',
       },
     ])
   }
@@ -664,9 +777,9 @@ function MailboxActionRow({
   onChange,
   onRemove,
 }: {
-  rule: MailboxActionRule
+  rule: MailboxActionDraft
   mailboxes: Mailbox[]
-  onChange: (patch: Partial<MailboxActionRule>) => void
+  onChange: (patch: Partial<MailboxActionDraft>) => void
   onRemove: () => void
 }) {
   return (
@@ -698,17 +811,15 @@ function MailboxActionRow({
       </label>
       <Field
         label="From includes"
-        value={rule.condition.value}
+        value={rule.fromContains}
         placeholder="Posthaste"
-        onChange={(value) =>
-          onChange({ condition: { kind: 'fromContains', value } })
-        }
+        onChange={(fromContains) => onChange({ fromContains })}
       />
       <Field
         label="Apply tag"
-        value={rule.action.tag}
+        value={rule.tag}
         placeholder="newsletter"
-        onChange={(tag) => onChange({ action: { kind: 'applyTag', tag } })}
+        onChange={(tag) => onChange({ tag })}
       />
       <Button
         type="button"

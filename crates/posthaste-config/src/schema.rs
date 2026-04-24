@@ -1,9 +1,9 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppSettings, MailboxAction, MailboxActionCondition, MailboxActionRule, MailboxId, SecretKind,
-    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AppSettings, AutomationAction, AutomationRule, AutomationScope, AutomationTrigger, MailboxId,
+    SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -83,7 +83,7 @@ pub struct SourceToml {
     pub enabled: bool,
     pub appearance: Option<AccountAppearanceToml>,
     #[serde(default)]
-    pub mailbox_actions: Vec<MailboxActionToml>,
+    pub automations: Vec<AutomationRuleToml>,
     #[serde(default)]
     pub transport: TransportToml,
     pub created_at: Option<String>,
@@ -126,27 +126,51 @@ pub enum AccountAppearanceToml {
     },
 }
 
-/// TOML `[[mailbox_actions]]` item for account-scoped automation rules.
+/// TOML `[[automations]]` item for account-scoped automation rules.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MailboxActionToml {
+pub struct AutomationRuleToml {
     pub id: String,
-    pub mailbox_id: String,
-    pub condition: MailboxActionConditionToml,
-    pub action: MailboxActionEffectToml,
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub triggers: Vec<AutomationTriggerToml>,
+    #[serde(default)]
+    pub backfill: bool,
+    pub scope: AutomationScopeToml,
+    pub condition: RuleGroupToml,
+    #[serde(default)]
+    pub actions: Vec<AutomationActionToml>,
 }
 
-/// TOML action condition. Initially only sender substring matching is supported.
+/// TOML automation trigger.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum MailboxActionConditionToml {
-    FromContains { value: String },
+#[serde(rename_all = "snake_case")]
+pub enum AutomationTriggerToml {
+    MessageArrived,
+    MessageChanged,
+    Manual,
 }
 
-/// TOML action effect. Initially only applying a user keyword/tag is supported.
+/// TOML automation scope.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
-pub enum MailboxActionEffectToml {
+pub enum AutomationScopeToml {
+    Account,
+    Mailbox { mailbox_id: String },
+}
+
+/// TOML automation action.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum AutomationActionToml {
     ApplyTag { tag: String },
+    RemoveTag { tag: String },
+    MarkRead,
+    MarkUnread,
+    Flag,
+    Unflag,
+    MoveToMailbox { mailbox_id: String },
 }
 
 /// Credential reference: OS keyring (`os`) or environment variable (`env`).
@@ -171,8 +195,8 @@ impl SourceToml {
     /// timestamps default to `RFC3339_EPOCH`.
     ///
     /// @spec docs/L1-accounts#toml-schema
-    pub fn to_account_settings(&self) -> AccountSettings {
-        AccountSettings {
+    pub fn to_account_settings(&self) -> Result<AccountSettings, String> {
+        Ok(AccountSettings {
             id: AccountId::from(self.id.as_str()),
             name: self.name.clone(),
             full_name: self.full_name.clone(),
@@ -200,26 +224,11 @@ impl SourceToml {
                     color_hue: *color_hue,
                 },
             }),
-            mailbox_action_rules: self
-                .mailbox_actions
+            automation_rules: self
+                .automations
                 .iter()
-                .map(|rule| MailboxActionRule {
-                    id: rule.id.clone(),
-                    mailbox_id: MailboxId::from(rule.mailbox_id.as_str()),
-                    condition: match &rule.condition {
-                        MailboxActionConditionToml::FromContains { value } => {
-                            MailboxActionCondition::FromContains {
-                                value: value.clone(),
-                            }
-                        }
-                    },
-                    action: match &rule.action {
-                        MailboxActionEffectToml::ApplyTag { tag } => {
-                            MailboxAction::ApplyTag { tag: tag.clone() }
-                        }
-                    },
-                })
-                .collect(),
+                .map(convert_automation_rule)
+                .collect::<Result<Vec<_>, _>>()?,
             transport: AccountTransportSettings {
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
@@ -239,7 +248,7 @@ impl SourceToml {
                 .updated_at
                 .clone()
                 .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
-        }
+        })
     }
 
     /// Builds a `SourceToml` from domain `AccountSettings` for serialization.
@@ -277,25 +286,10 @@ impl SourceToml {
                         color_hue: *color_hue,
                     },
                 }),
-            mailbox_actions: settings
-                .mailbox_action_rules
+            automations: settings
+                .automation_rules
                 .iter()
-                .map(|rule| MailboxActionToml {
-                    id: rule.id.clone(),
-                    mailbox_id: rule.mailbox_id.to_string(),
-                    condition: match &rule.condition {
-                        MailboxActionCondition::FromContains { value } => {
-                            MailboxActionConditionToml::FromContains {
-                                value: value.clone(),
-                            }
-                        }
-                    },
-                    action: match &rule.action {
-                        MailboxAction::ApplyTag { tag } => {
-                            MailboxActionEffectToml::ApplyTag { tag: tag.clone() }
-                        }
-                    },
-                })
+                .map(convert_automation_rule_to_toml)
                 .collect(),
             transport: TransportToml {
                 base_url: settings.transport.base_url.clone(),
@@ -315,6 +309,100 @@ impl SourceToml {
             created_at: Some(settings.created_at.clone()),
             updated_at: Some(settings.updated_at.clone()),
         }
+    }
+}
+
+fn convert_automation_rule(rule: &AutomationRuleToml) -> Result<AutomationRule, String> {
+    Ok(AutomationRule {
+        id: rule.id.clone(),
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        triggers: rule
+            .triggers
+            .iter()
+            .map(convert_automation_trigger)
+            .collect(),
+        scope: match &rule.scope {
+            AutomationScopeToml::Account => AutomationScope::Account,
+            AutomationScopeToml::Mailbox { mailbox_id } => AutomationScope::Mailbox {
+                mailbox_id: MailboxId::from(mailbox_id.as_str()),
+            },
+        },
+        condition: SmartMailboxRule {
+            root: convert_rule_group(&rule.condition)?,
+        },
+        actions: rule.actions.iter().map(convert_automation_action).collect(),
+        backfill: rule.backfill,
+    })
+}
+
+fn convert_automation_trigger(trigger: &AutomationTriggerToml) -> AutomationTrigger {
+    match trigger {
+        AutomationTriggerToml::MessageArrived => AutomationTrigger::MessageArrived,
+        AutomationTriggerToml::MessageChanged => AutomationTrigger::MessageChanged,
+        AutomationTriggerToml::Manual => AutomationTrigger::Manual,
+    }
+}
+
+fn convert_automation_action(action: &AutomationActionToml) -> AutomationAction {
+    match action {
+        AutomationActionToml::ApplyTag { tag } => AutomationAction::ApplyTag { tag: tag.clone() },
+        AutomationActionToml::RemoveTag { tag } => AutomationAction::RemoveTag { tag: tag.clone() },
+        AutomationActionToml::MarkRead => AutomationAction::MarkRead,
+        AutomationActionToml::MarkUnread => AutomationAction::MarkUnread,
+        AutomationActionToml::Flag => AutomationAction::Flag,
+        AutomationActionToml::Unflag => AutomationAction::Unflag,
+        AutomationActionToml::MoveToMailbox { mailbox_id } => AutomationAction::MoveToMailbox {
+            mailbox_id: MailboxId::from(mailbox_id.as_str()),
+        },
+    }
+}
+
+fn convert_automation_rule_to_toml(rule: &AutomationRule) -> AutomationRuleToml {
+    AutomationRuleToml {
+        id: rule.id.clone(),
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        triggers: rule
+            .triggers
+            .iter()
+            .map(convert_automation_trigger_to_toml)
+            .collect(),
+        backfill: rule.backfill,
+        scope: match &rule.scope {
+            AutomationScope::Account => AutomationScopeToml::Account,
+            AutomationScope::Mailbox { mailbox_id } => AutomationScopeToml::Mailbox {
+                mailbox_id: mailbox_id.to_string(),
+            },
+        },
+        condition: convert_group_to_toml(&rule.condition.root),
+        actions: rule
+            .actions
+            .iter()
+            .map(convert_automation_action_to_toml)
+            .collect(),
+    }
+}
+
+fn convert_automation_trigger_to_toml(trigger: &AutomationTrigger) -> AutomationTriggerToml {
+    match trigger {
+        AutomationTrigger::MessageArrived => AutomationTriggerToml::MessageArrived,
+        AutomationTrigger::MessageChanged => AutomationTriggerToml::MessageChanged,
+        AutomationTrigger::Manual => AutomationTriggerToml::Manual,
+    }
+}
+
+fn convert_automation_action_to_toml(action: &AutomationAction) -> AutomationActionToml {
+    match action {
+        AutomationAction::ApplyTag { tag } => AutomationActionToml::ApplyTag { tag: tag.clone() },
+        AutomationAction::RemoveTag { tag } => AutomationActionToml::RemoveTag { tag: tag.clone() },
+        AutomationAction::MarkRead => AutomationActionToml::MarkRead,
+        AutomationAction::MarkUnread => AutomationActionToml::MarkUnread,
+        AutomationAction::Flag => AutomationActionToml::Flag,
+        AutomationAction::Unflag => AutomationActionToml::Unflag,
+        AutomationAction::MoveToMailbox { mailbox_id } => AutomationActionToml::MoveToMailbox {
+            mailbox_id: mailbox_id.to_string(),
+        },
     }
 }
 
@@ -678,15 +766,38 @@ mod tests {
                 initials: "MF".to_string(),
                 color_hue: 245,
             }),
-            mailbox_action_rules: vec![MailboxActionRule {
+            automation_rules: vec![AutomationRule {
                 id: "rule-newsletters".to_string(),
-                mailbox_id: MailboxId::from("inbox"),
-                condition: MailboxActionCondition::FromContains {
-                    value: "Posthaste".to_string(),
+                name: "Newsletters".to_string(),
+                enabled: true,
+                triggers: vec![AutomationTrigger::MessageArrived],
+                scope: AutomationScope::Mailbox {
+                    mailbox_id: MailboxId::from("inbox"),
                 },
-                action: MailboxAction::ApplyTag {
+                condition: SmartMailboxRule {
+                    root: SmartMailboxGroup {
+                        operator: SmartMailboxGroupOperator::Any,
+                        negated: false,
+                        nodes: vec![
+                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                                field: SmartMailboxField::FromName,
+                                operator: SmartMailboxOperator::Contains,
+                                negated: false,
+                                value: SmartMailboxValue::String("Posthaste".to_string()),
+                            }),
+                            SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                                field: SmartMailboxField::FromEmail,
+                                operator: SmartMailboxOperator::Contains,
+                                negated: false,
+                                value: SmartMailboxValue::String("Posthaste".to_string()),
+                            }),
+                        ],
+                    },
+                },
+                actions: vec![AutomationAction::ApplyTag {
                     tag: "newsletter".to_string(),
-                },
+                }],
+                backfill: true,
             }],
             transport: AccountTransportSettings {
                 base_url: Some("https://api.fastmail.com".to_string()),
@@ -703,7 +814,7 @@ mod tests {
         let toml_struct = SourceToml::from_account_settings(&settings);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
         let parsed: SourceToml = toml::from_str(&toml_string).unwrap();
-        let round_tripped = parsed.to_account_settings();
+        let round_tripped = parsed.to_account_settings().unwrap();
 
         assert_eq!(round_tripped, settings);
     }
