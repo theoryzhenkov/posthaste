@@ -375,6 +375,18 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Count messages matching an explicit smart mailbox rule.
+    ///
+    /// @spec docs/L1-search#execution-pipeline
+    pub fn count_messages_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+    ) -> Result<(i64, i64), ServiceError> {
+        self.smart_mailboxes
+            .query_smart_mailbox_counts(rule)
+            .map_err(Into::into)
+    }
+
     /// Paginated messages matching an explicit smart mailbox rule.
     ///
     /// @spec docs/L1-search#execution-pipeline
