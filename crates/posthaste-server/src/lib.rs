@@ -104,12 +104,13 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     }
 
     let db_path = roots.state_root.join("mail.sqlite");
-    let store: Arc<dyn MailStore> = Arc::new(
+    let database_store = Arc::new(
         DatabaseStore::open(&db_path, &roots.state_root).expect("failed to initialize store"),
     );
+    let store: Arc<dyn MailStore> = database_store.clone();
 
     let config: Arc<dyn ConfigRepository> = Arc::new(config_repo);
-    let service = Arc::new(MailService::new(store.clone(), config.clone()));
+    let service = Arc::new(MailService::new(database_store.clone(), config.clone()));
 
     service
         .sync_source_projections()
