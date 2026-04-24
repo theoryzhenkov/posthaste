@@ -13,6 +13,7 @@ import type {
   ConversationView,
   DomainEvent,
   MessageDetail,
+  MessagePage,
   MessageSummary,
   SourceMessageRef,
 } from './api/types'
@@ -256,29 +257,37 @@ function patchMessageListQueries(
   keywordState: KeywordState,
 ): QuerySnapshot[] {
   const snapshots: QuerySnapshot[] = []
-  for (const [queryKey, messages] of queryClient.getQueriesData<
-    MessageSummary[]
+  for (const [queryKey, data] of queryClient.getQueriesData<
+    InfiniteData<MessagePage, string | null>
   >({
     queryKey: queryKeys.messagesRoot,
   })) {
-    if (
-      !messages?.some(
+    const hasTarget = data?.pages.some((page) =>
+      page.items.some(
         (message) =>
           message.sourceId === target.sourceId &&
           message.id === target.messageId,
-      )
-    ) {
+      ),
+    )
+    if (!data || !hasTarget) {
       continue
     }
 
     snapshots.push(snapshotQuery(queryClient, queryKey))
-    queryClient.setQueryData<MessageSummary[]>(
+    queryClient.setQueryData<InfiniteData<MessagePage, string | null>>(
       queryKey,
-      messages.map((message) =>
-        message.sourceId === target.sourceId && message.id === target.messageId
-          ? replaceMessageKeywords(message, keywordState)
-          : message,
-      ),
+      {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          items: page.items.map((message) =>
+            message.sourceId === target.sourceId &&
+            message.id === target.messageId
+              ? replaceMessageKeywords(message, keywordState)
+              : message,
+          ),
+        })),
+      },
     )
   }
   return snapshots

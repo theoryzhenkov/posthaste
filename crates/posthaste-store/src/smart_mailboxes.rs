@@ -48,6 +48,141 @@ pub(crate) fn query_messages_by_rule(
     hydrate_message_summaries(connection, rows)
 }
 
+/// Queries messages for any SQL filter with seek pagination.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(crate) fn query_message_page(
+    connection: &Connection,
+    where_clause: &str,
+    mut params: Vec<SqlValue>,
+    limit: usize,
+    cursor: Option<&MessageCursor>,
+    sort_field: MessageSortField,
+    sort_direction: SortDirection,
+) -> Result<MessagePage, StoreError> {
+    let page_limit = limit.max(1);
+    let seek_op = match sort_direction {
+        SortDirection::Desc => "<",
+        SortDirection::Asc => ">",
+    };
+    let dir = match sort_direction {
+        SortDirection::Desc => "DESC",
+        SortDirection::Asc => "ASC",
+    };
+    let sort_key = message_sort_key_expr(sort_field);
+    let page_filter = if let Some(cursor) = cursor {
+        params.push(message_cursor_sort_sql_value(
+            sort_field,
+            &cursor.sort_value,
+        )?);
+        params.push(message_cursor_sort_sql_value(
+            sort_field,
+            &cursor.sort_value,
+        )?);
+        params.push(SqlValue::Text(message_cursor_tie_key(cursor)));
+        format!("WHERE sort_key {seek_op} ? OR (sort_key = ? AND tie_key {seek_op} ?)")
+    } else {
+        String::new()
+    };
+    params.push(SqlValue::Integer((page_limit + 1) as i64));
+    let sql = format!(
+        "WITH filtered AS (
+            SELECT
+                m.id,
+                m.account_id,
+                a.name,
+                m.thread_id,
+                m.conversation_id,
+                m.subject,
+                m.from_name,
+                m.from_email,
+                m.preview,
+                m.received_at,
+                m.has_attachment,
+                m.is_read,
+                m.is_flagged,
+                {sort_key} AS sort_key,
+                m.account_id || char(31) || m.id AS tie_key
+            FROM message m
+            JOIN source_projection a
+              ON a.source_id = m.account_id
+            {where_clause}
+        )
+        SELECT
+            id,
+            account_id,
+            name,
+            thread_id,
+            conversation_id,
+            subject,
+            from_name,
+            from_email,
+            preview,
+            received_at,
+            has_attachment,
+            is_read,
+            is_flagged,
+            sort_key
+        FROM filtered
+        {page_filter}
+        ORDER BY sort_key {dir}, tie_key {dir}
+        LIMIT ?"
+    );
+    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let rows = statement
+        .query_map(params_from_iter(params), |row| {
+            let summary = row_to_message_summary_row(row)?;
+            let sort_key_value: rusqlite::types::Value = row.get(13)?;
+            Ok((summary, sort_key_value))
+        })
+        .map_err(sql_to_store_error)?;
+    let mut rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)?;
+    let has_more = rows.len() > page_limit;
+    if has_more {
+        rows.truncate(page_limit);
+    }
+    let next_cursor = if has_more {
+        rows.last().map(|(row, sort_key_value)| MessageCursor {
+            sort_value: sql_value_to_cursor_string(sort_key_value),
+            source_id: row.source_id.clone(),
+            message_id: row.id.clone(),
+        })
+    } else {
+        None
+    };
+    let rows = rows.into_iter().map(|(row, _)| row).collect();
+    Ok(MessagePage {
+        items: hydrate_message_summaries(connection, rows)?,
+        next_cursor,
+    })
+}
+
+/// Queries messages matching a smart mailbox rule with seek pagination.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(crate) fn query_message_page_by_rule(
+    connection: &Connection,
+    rule: &SmartMailboxRule,
+    limit: usize,
+    cursor: Option<&MessageCursor>,
+    sort_field: MessageSortField,
+    sort_direction: SortDirection,
+) -> Result<MessagePage, StoreError> {
+    let mut params = Vec::new();
+    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    query_message_page(
+        connection,
+        &format!("WHERE ({where_clause})"),
+        params,
+        limit,
+        cursor,
+        sort_field,
+        sort_direction,
+    )
+}
+
 /// Queries conversations matching a smart mailbox rule with seek pagination.
 ///
 /// @spec docs/L1-sync#conversation-pagination
@@ -87,6 +222,55 @@ fn sort_key_expr(sort_field: ConversationSortField) -> &'static str {
         ConversationSortField::ThreadSize => "ranked.message_count",
         ConversationSortField::Flagged => "ranked.is_flagged",
         ConversationSortField::Attachment => "ranked.has_attachment",
+    }
+}
+
+fn message_sort_key_expr(sort_field: MessageSortField) -> &'static str {
+    match sort_field {
+        MessageSortField::Date => "m.received_at",
+        MessageSortField::From => "LOWER(COALESCE(m.from_name, m.from_email, ''))",
+        MessageSortField::Subject => "LOWER(COALESCE(m.subject, ''))",
+        MessageSortField::Source => "LOWER(a.name)",
+        MessageSortField::Flagged => "m.is_flagged",
+        MessageSortField::Attachment => "m.has_attachment",
+    }
+}
+
+fn is_numeric_message_sort(sort_field: MessageSortField) -> bool {
+    matches!(
+        sort_field,
+        MessageSortField::Flagged | MessageSortField::Attachment
+    )
+}
+
+fn message_cursor_sort_sql_value(
+    sort_field: MessageSortField,
+    raw: &str,
+) -> Result<SqlValue, StoreError> {
+    if is_numeric_message_sort(sort_field) {
+        let n = raw
+            .parse::<i64>()
+            .map_err(|_| StoreError::Failure(format!("invalid numeric cursor value: {raw}")))?;
+        Ok(SqlValue::Integer(n))
+    } else {
+        Ok(SqlValue::Text(raw.to_string()))
+    }
+}
+
+fn message_cursor_tie_key(cursor: &MessageCursor) -> String {
+    format!(
+        "{}\u{1f}{}",
+        cursor.source_id.as_str(),
+        cursor.message_id.as_str()
+    )
+}
+
+fn sql_value_to_cursor_string(value: &rusqlite::types::Value) -> String {
+    match value {
+        rusqlite::types::Value::Integer(n) => n.to_string(),
+        rusqlite::types::Value::Text(s) => s.clone(),
+        rusqlite::types::Value::Real(f) => f.to_string(),
+        _ => String::new(),
     }
 }
 

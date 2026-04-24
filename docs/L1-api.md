@@ -49,7 +49,7 @@ All endpoints are prefixed with `/v1`.
 | PATCH | `/smart-mailboxes/{id}` | `patch_smart_mailbox` | `PatchSmartMailboxRequest` | `SmartMailbox` |
 | DELETE | `/smart-mailboxes/{id}` | `delete_smart_mailbox` | -- | `OkResponse` |
 | POST | `/smart-mailboxes:reset-defaults` | `reset_default_smart_mailboxes` | -- | `SmartMailboxSummary[]` |
-| GET | `/smart-mailboxes/{id}/messages` | `list_smart_mailbox_messages` | -- | `MessageSummary[]` |
+| GET | `/smart-mailboxes/{id}/messages` | `list_smart_mailbox_messages` | `ListSmartMailboxMessagesQuery` | `MessagePageResponse` |
 | GET | `/smart-mailboxes/{id}/conversations` | `list_smart_mailbox_conversations` | `ListConversationsQuery` | `ConversationPageResponse` |
 
 ### Navigation
@@ -66,7 +66,7 @@ All endpoints are prefixed with `/v1`.
 | GET | `/views/conversations/{id}` | `get_conversation` | -- | `ConversationView` |
 | GET | `/sources/{source_id}/mailboxes` | `list_mailboxes` | -- | `MailboxSummary[]` |
 | PATCH | `/sources/{source_id}/mailboxes/{mailbox_id}` | `patch_mailbox` | `PatchMailboxRequest` | `MailboxSummary[]` |
-| GET | `/sources/{source_id}/messages` | `list_source_messages` | `ListSourceMessagesQuery` | `MessageSummary[]` |
+| GET | `/sources/{source_id}/messages` | `list_source_messages` | `ListSourceMessagesQuery` | `MessagePageResponse` |
 | GET | `/sources/{source_id}/messages/{id}` | `get_message` | -- | `MessageDetail` |
 
 ### Compose
@@ -117,7 +117,7 @@ All error responses are JSON objects with three fields:
 | `config_io` | 500 |
 | (other) | 500 |
 
-Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_compose`, `invalid_mailbox`.
+Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_query`, `invalid_compose`, `invalid_mailbox`.
 
 ## Mailbox metadata
 
@@ -125,20 +125,23 @@ Request validation errors use handler-specific codes: `invalid_account`, `invali
 
 ## Cursor pagination
 
-Conversation list endpoints accept `limit`, `cursor`, `sort`, and `sort_dir` query parameters. The default limit is 100; the maximum is 250. A limit of 0 or above 250 returns `invalid_limit`.
+Conversation and message list endpoints accept `limit`, `cursor`, `sort`, `sortDir`, and `q` query parameters. The default limit is 100; the maximum is 250. A limit of 0 or above 250 returns `invalid_limit`.
+
+Message list endpoints return `MessagePageResponse { items, nextCursor }`. They accept `q` as the same search query text used by the command/search panel. For source message lists, `q` is ANDed with the selected source and optional mailbox. For smart-mailbox message lists, `q` is ANDed with the saved smart-mailbox rule. Invalid query text returns `invalid_query`.
 
 ### Sort parameters
 
 | Param | Type | Default | Values |
 |-------|------|---------|--------|
-| `sort` | `ConversationSortField?` | `Date` | `Date`, `From`, `Subject`, `Source`, `ThreadSize`, `Flagged`, `Attachment` |
-| `sort_dir` | `SortDirection?` | `Desc` | `Asc`, `Desc` |
+| `sort` | `ConversationSortField?` | `date` | `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment` |
+| `sort` | `MessageSortField?` | `date` | `date`, `from`, `subject`, `source`, `flagged`, `attachment` |
+| `sortDir` | `SortDirection?` | `desc` | `asc`, `desc` |
 
-The backend sorts by `(sort_key, conversation_id)` in the requested direction. For example, `sort=From&sort_dir=Asc` orders by sender ascending, breaking ties by conversation ID ascending.
+The backend sorts conversations by `(sort_key, conversation_id)` and messages by `(sort_key, source_id, message_id)` in the requested direction. For example, `sort=from&sortDir=asc` orders by sender ascending, breaking ties by stable IDs.
 
 ### Cursor format
 
-The cursor is an opaque string encoding `{value_len}:{sort_value}:{conversation_id}`. Clients must treat it as opaque — the `sort_value` is the value of whichever column is being sorted. The backend decodes the cursor and uses seek-based pagination to produce the next page. The response includes `nextCursor` if more results exist; `null` otherwise. Pages are strictly past the cursor in the current sort order, with no OFFSET-based skipping.
+The cursor is an opaque string. Conversation cursors encode the active sort value and conversation ID; message cursors encode the active sort value, source ID, and message ID. Clients must not inspect the format. The backend decodes the cursor and uses seek-based pagination to produce the next page. The response includes `nextCursor` if more results exist; `null` otherwise. Pages are strictly past the cursor in the current sort order, with no OFFSET-based skipping.
 
 ## SSE event stream
 
@@ -208,4 +211,4 @@ The API never returns secret values. Responses include `SecretStatus` with `stor
 | html-sanitized | MUST | Message body HTML is sanitized in Rust before reaching the response |
 | secret-redacted | MUST | Secret values are never included in API responses |
 | sparse-merge | MUST | PATCH endpoints preserve omitted fields rather than nulling them |
-| limit-bounds | MUST | Conversation limit is between 1 and 250; invalid values return 400 |
+| limit-bounds | MUST | Conversation and message limits are between 1 and 250; invalid values return 400 |

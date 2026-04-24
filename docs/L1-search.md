@@ -210,8 +210,11 @@ interaction. Dragged panel position is persisted locally and restored the next
 time the panel opens. While dragging, faint modal-width guide rails appear for
 left/center/right and top/bottom placement. When the panel reaches a rail, it
 resists movement for a short 12px breakout distance so the user can drag along
-the rail; the active rail is highlighted while resisting. As the user types, matching individual messages are shown before
-commands. No row is selected by default after opening or editing the query. Down
+the rail; the active rail is highlighted while resisting. As the user types,
+matching individual messages are fetched through the backend search endpoint and
+shown before commands. The same backend message-page query path also powers the
+main message list, so command search and mailbox filtering share query parsing,
+filter compilation, sorting, and cursor pagination. No row is selected by default after opening or editing the query. Down
 selects the first result, Up from the first result clears selection, Enter opens
 the selected result, and Enter with no selected result applies the current query
 as a persistent message list filter. Shift+Enter and Option/Alt+Enter always

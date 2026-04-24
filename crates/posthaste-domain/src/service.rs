@@ -6,13 +6,14 @@ use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
     ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
     ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
-    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageDetailStore,
-    MessageId, MessageListStore, MessageMailboxStore, MessageSummary, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
-    SmartMailboxId, SmartMailboxRule, SmartMailboxStore, SmartMailboxSummary, SortDirection,
-    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
+    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
+    MessageSortField, MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse,
+    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxRule,
+    SmartMailboxStore, SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore,
+    SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, ThreadId, ThreadView,
+    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -235,6 +236,54 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Paginated messages matching a smart mailbox's rule.
+    ///
+    /// @spec docs/L1-api#smart-mailboxes
+    pub fn list_smart_mailbox_message_page(
+        &self,
+        smart_mailbox_id: &SmartMailboxId,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, ServiceError> {
+        let mailbox = self
+            .config
+            .get_smart_mailbox(smart_mailbox_id)?
+            .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
+        self.smart_mailboxes
+            .query_message_page_by_rule(&mailbox.rule, limit, cursor, sort_field, sort_direction)
+            .map_err(Into::into)
+    }
+
+    /// List messages matching an explicit smart mailbox rule.
+    ///
+    /// @spec docs/L1-search#execution-pipeline
+    pub fn query_messages_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+    ) -> Result<Vec<MessageSummary>, ServiceError> {
+        self.smart_mailboxes
+            .query_messages_by_rule(rule)
+            .map_err(Into::into)
+    }
+
+    /// Paginated messages matching an explicit smart mailbox rule.
+    ///
+    /// @spec docs/L1-search#execution-pipeline
+    pub fn query_message_page_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, ServiceError> {
+        self.smart_mailboxes
+            .query_message_page_by_rule(rule, limit, cursor, sort_field, sort_direction)
+            .map_err(Into::into)
+    }
+
     /// Paginated conversations matching a smart mailbox's rule.
     ///
     /// @spec docs/L1-api#smart-mailboxes
@@ -366,6 +415,30 @@ impl MailService {
     ) -> Result<Vec<MessageSummary>, ServiceError> {
         self.message_lister
             .list_messages(account_id, mailbox_id)
+            .map_err(Into::into)
+    }
+
+    /// Paginated message list with seek-based cursors.
+    ///
+    /// @spec docs/L1-api#conversations-and-messages
+    pub fn list_message_page(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: Option<&MailboxId>,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, ServiceError> {
+        self.message_lister
+            .list_message_page(
+                account_id,
+                mailbox_id,
+                limit,
+                cursor,
+                sort_field,
+                sort_direction,
+            )
             .map_err(Into::into)
     }
 
@@ -923,6 +996,21 @@ mod tests {
         ) -> Result<Vec<MessageSummary>, StoreError> {
             Ok(Vec::new())
         }
+
+        fn list_message_page(
+            &self,
+            _account_id: &AccountId,
+            _mailbox_id: Option<&MailboxId>,
+            _limit: usize,
+            _cursor: Option<&MessageCursor>,
+            _sort_field: MessageSortField,
+            _sort_direction: SortDirection,
+        ) -> Result<MessagePage, StoreError> {
+            Ok(MessagePage {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
     }
 
     impl SmartMailboxStore for TestStore {
@@ -931,6 +1019,20 @@ mod tests {
             _rule: &SmartMailboxRule,
         ) -> Result<Vec<MessageSummary>, StoreError> {
             Ok(Vec::new())
+        }
+
+        fn query_message_page_by_rule(
+            &self,
+            _rule: &SmartMailboxRule,
+            _limit: usize,
+            _cursor: Option<&MessageCursor>,
+            _sort_field: MessageSortField,
+            _sort_direction: SortDirection,
+        ) -> Result<MessagePage, StoreError> {
+            Ok(MessagePage {
+                items: Vec::new(),
+                next_cursor: None,
+            })
         }
 
         fn query_conversations_by_rule(

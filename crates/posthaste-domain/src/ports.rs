@@ -5,10 +5,10 @@ use async_trait::async_trait;
 use crate::{
     AccountId, BlobId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, MutationOutcome, PushTransport,
-    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
-    SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject,
-    ThreadId, ThreadView,
+    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand, ReplyContext,
+    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule,
+    SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -138,6 +138,19 @@ pub trait MessageListStore: Send + Sync {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError>;
+
+    /// Paginated message list with seek-based cursors.
+    ///
+    /// @spec docs/L1-api#cursor-pagination
+    fn list_message_page(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: Option<&MailboxId>,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, StoreError>;
 }
 
 /// Conversation list and detail projection for UI queries.
@@ -194,6 +207,18 @@ pub trait SmartMailboxStore: Send + Sync {
         &self,
         rule: &SmartMailboxRule,
     ) -> Result<Vec<MessageSummary>, StoreError>;
+
+    /// Query messages matching a smart mailbox rule with seek pagination.
+    ///
+    /// @spec docs/L1-api#cursor-pagination
+    fn query_message_page_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, StoreError>;
 
     /// Query conversations matching a smart mailbox rule with pagination.
     ///

@@ -198,6 +198,21 @@ export interface MessageSummary {
   keywords: string[]
 }
 
+/** @spec docs/L1-api#cursor-pagination */
+export type MessageSortField =
+  | 'date'
+  | 'from'
+  | 'subject'
+  | 'source'
+  | 'flagged'
+  | 'attachment'
+
+/** @spec docs/L1-api#cursor-pagination */
+export interface MessagePage {
+  items: MessageSummary[]
+  nextCursor: string | null
+}
+
 /**
  * Reference to a raw message file stored on the backend.
  * @spec docs/L1-sync#body-lazy

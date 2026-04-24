@@ -57,15 +57,26 @@ pub(super) fn event_to_sse(event: DomainEvent) -> Result<Event, Infallible> {
 ///
 /// @spec docs/L1-api#cursor-pagination
 pub(super) fn conversation_limit(limit: Option<usize>) -> Result<usize, ApiError> {
+    validated_limit(limit, "conversations")
+}
+
+fn validated_limit(limit: Option<usize>, unit: &str) -> Result<usize, ApiError> {
     let limit = limit.unwrap_or(DEFAULT_CONVERSATION_LIMIT);
     if limit == 0 || limit > MAX_CONVERSATION_LIMIT {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_limit",
-            format!("limit must be between 1 and {MAX_CONVERSATION_LIMIT} conversations"),
+            format!("limit must be between 1 and {MAX_CONVERSATION_LIMIT} {unit}"),
         ));
     }
     Ok(limit)
+}
+
+/// Resolve and validate the message page limit.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(super) fn message_limit(limit: Option<usize>) -> Result<usize, ApiError> {
+    validated_limit(limit, "messages")
 }
 
 /// Decode an opaque cursor string into a [`ConversationCursor`].
@@ -127,5 +138,73 @@ pub(super) fn conversation_page_response(page: ConversationPage) -> Conversation
     ConversationPageResponse {
         items: page.items,
         next_cursor: page.next_cursor.as_ref().map(encode_conversation_cursor),
+    }
+}
+
+/// Decode an opaque cursor string into a [`MessageCursor`].
+/// Format: `{sort_len}:{sort_value}:{source_len}:{source_id}:{message_id}`.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(super) fn parse_message_cursor(
+    cursor: Option<&str>,
+) -> Result<Option<MessageCursor>, ApiError> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    let (sort_value, remainder) =
+        parse_prefixed_value(cursor).ok_or_else(invalid_message_cursor)?;
+    let (source_id, message_id) =
+        parse_prefixed_value(remainder).ok_or_else(invalid_message_cursor)?;
+    if source_id.is_empty() || message_id.is_empty() {
+        return Err(invalid_message_cursor());
+    }
+    Ok(Some(MessageCursor {
+        sort_value: sort_value.to_string(),
+        source_id: AccountId::from(source_id),
+        message_id: MessageId::from(message_id),
+    }))
+}
+
+fn parse_prefixed_value(value: &str) -> Option<(&str, &str)> {
+    let (len_prefix, remainder) = value.split_once(':')?;
+    let value_len = len_prefix.parse::<usize>().ok()?;
+    if remainder.len() <= value_len {
+        return None;
+    }
+    let (prefixed_value, remainder) = remainder.split_at(value_len);
+    let remainder = remainder.strip_prefix(':')?;
+    Some((prefixed_value, remainder))
+}
+
+fn invalid_message_cursor() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "invalid_cursor",
+        "cursor must include source id and message id",
+    )
+}
+
+/// Encode a [`MessageCursor`] into its opaque string representation.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(super) fn encode_message_cursor(cursor: &MessageCursor) -> String {
+    format!(
+        "{}:{}:{}:{}:{}",
+        cursor.sort_value.len(),
+        cursor.sort_value,
+        cursor.source_id.as_str().len(),
+        cursor.source_id.as_str(),
+        cursor.message_id.as_str()
+    )
+}
+
+/// Convert a domain [`MessagePage`] into the API response, encoding the next
+/// cursor if more results exist.
+///
+/// @spec docs/L1-api#cursor-pagination
+pub(super) fn message_page_response(page: MessagePage) -> MessagePageResponse {
+    MessagePageResponse {
+        items: page.items,
+        next_cursor: page.next_cursor.as_ref().map(encode_message_cursor),
     }
 }
