@@ -16,14 +16,16 @@ use std::sync::Mutex;
 use hex::encode as hex_encode;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId, CommandResult,
-    ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
-    ConversationSummary, ConversationView, DomainEvent, EventFilter, FetchedBody, MailStore,
-    MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, RawMessageRef,
-    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxValue, SortDirection, StoreError, SyncBatch, SyncCursor,
-    SyncObject, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
+    ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
+    EventStore, FetchedBody, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
+    MessageDetail, MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore,
+    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore,
+    SmartMailboxValue, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
+    SyncBatch, SyncCursor, SyncObject, SyncStateStore, SyncWriteStore, ThreadId, ThreadView,
+    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -205,7 +207,7 @@ impl DatabaseStore {
     }
 }
 
-impl MailStore for DatabaseStore {
+impl SourceProjectionStore for DatabaseStore {
     /// Creates or updates the `source_projection` row that maps account IDs to
     /// display names for query joins.
     fn upsert_source_projection(
@@ -235,7 +237,9 @@ impl MailStore for DatabaseStore {
             Ok(())
         })
     }
+}
 
+impl MailboxReadStore for DatabaseStore {
     /// Lists mailboxes for an account, ordered by role then name.
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
         let connection = self.read_connection()?;
@@ -264,7 +268,9 @@ impl MailStore for DatabaseStore {
             .map_err(sql_to_store_error)?;
         Ok(mailboxes)
     }
+}
 
+impl ConversationReadStore for DatabaseStore {
     /// Returns a seek-paginated page of conversations, optionally filtered by
     /// account and/or mailbox.
     ///
@@ -345,7 +351,9 @@ impl MailStore for DatabaseStore {
             messages,
         }))
     }
+}
 
+impl MessageListStore for DatabaseStore {
     /// Lists messages for an account, optionally filtered by mailbox, ordered
     /// by `received_at DESC`.
     fn list_messages(
@@ -387,7 +395,9 @@ impl MailStore for DatabaseStore {
         };
         hydrate_message_summaries(&connection, summary_rows)
     }
+}
 
+impl SmartMailboxStore for DatabaseStore {
     /// Evaluates a smart mailbox rule against all sources and returns matching
     /// messages.
     ///
@@ -423,7 +433,9 @@ impl MailStore for DatabaseStore {
         let connection = self.read_connection()?;
         count_smart_mailbox_messages(&connection, rule)
     }
+}
 
+impl SourceDataStore for DatabaseStore {
     /// Removes all data for an account from every table, including orphaned
     /// conversations.
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError> {
@@ -482,7 +494,9 @@ impl MailStore for DatabaseStore {
             Ok(())
         })
     }
+}
 
+impl MessageDetailStore for DatabaseStore {
     /// Returns full message detail including body (if fetched) and raw message
     /// reference.
     ///
@@ -571,7 +585,9 @@ impl MailStore for DatabaseStore {
             messages,
         }))
     }
+}
 
+impl SyncStateStore for DatabaseStore {
     /// Returns all stored sync state tokens for an account.
     ///
     /// @spec docs/L1-sync#state-management
@@ -626,7 +642,9 @@ impl MailStore for DatabaseStore {
             .optional()
             .map_err(sql_to_store_error)
     }
+}
 
+impl MessageMailboxStore for DatabaseStore {
     /// Returns the mailbox IDs a message belongs to.
     fn get_message_mailboxes(
         &self,
@@ -636,7 +654,9 @@ impl MailStore for DatabaseStore {
         let connection = self.read_connection()?;
         fetch_mailbox_ids(&connection, account_id, message_id)
     }
+}
 
+impl SyncWriteStore for DatabaseStore {
     /// Applies a sync batch within a single SQLite transaction: stages raw
     /// bodies to disk first, then upserts/deletes mailboxes and messages,
     /// refreshes projections, and persists cursors atomically with data.
@@ -676,7 +696,9 @@ impl MailStore for DatabaseStore {
             apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref())
         })
     }
+}
 
+impl MessageCommandStore for DatabaseStore {
     /// Adds/removes keywords on a message and refreshes mailbox counters.
     /// Optionally persists a new sync cursor atomically.
     fn set_keywords(
@@ -713,7 +735,9 @@ impl MailStore for DatabaseStore {
     ) -> Result<CommandResult, StoreError> {
         self.write_transaction(|tx| destroy_message_tx(tx, account_id, message_id, cursor))
     }
+}
 
+impl EventStore for DatabaseStore {
     /// Queries the event log, supporting `afterSeq` cursor-based replay.
     ///
     /// @spec docs/L1-sync#event-propagation

@@ -4,13 +4,15 @@ use serde_json::json;
 
 use crate::{
     AccountId, AccountSettings, AddToMailboxCommand, AppSettings, CommandResult, ConfigDiff,
-    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
-    ConversationView, Identity, MailGateway, MailStore, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedConfigRepository, SharedStore, SidebarResponse,
-    SidebarSmartMailbox, SidebarSource, SmartMailbox, SmartMailboxId, SmartMailboxRule,
-    SmartMailboxSummary, SortDirection, SyncObject, SyncTrigger, ThreadId, ThreadView,
-    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
+    ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
+    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageDetailStore,
+    MessageId, MessageListStore, MessageMailboxStore, MessageSummary, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
+    SmartMailboxId, SmartMailboxRule, SmartMailboxStore, SmartMailboxSummary, SortDirection,
+    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
+    SyncWriteStore, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -30,14 +32,42 @@ enum MessageMutation<'a> {
 ///
 /// @spec docs/L0-api#rust-owns-everything
 pub struct MailService {
-    store: SharedStore,
     config: SharedConfigRepository,
+    mailbox_reader: Arc<dyn MailboxReadStore>,
+    message_lister: Arc<dyn MessageListStore>,
+    conversation_reader: Arc<dyn ConversationReadStore>,
+    message_detail_reader: Arc<dyn MessageDetailStore>,
+    smart_mailboxes: Arc<dyn SmartMailboxStore>,
+    sync_state: Arc<dyn SyncStateStore>,
+    message_mailboxes: Arc<dyn MessageMailboxStore>,
+    sync_writer: Arc<dyn SyncWriteStore>,
+    message_commands: Arc<dyn MessageCommandStore>,
+    events: Arc<dyn EventStore>,
+    source_projections: Arc<dyn SourceProjectionStore>,
+    source_data: Arc<dyn SourceDataStore>,
 }
 
 impl MailService {
     /// Create a new service with the given store and config repository.
-    pub fn new(store: Arc<dyn MailStore>, config: Arc<dyn ConfigRepository>) -> Self {
-        Self { store, config }
+    pub fn new<T>(store: Arc<T>, config: Arc<dyn ConfigRepository>) -> Self
+    where
+        T: MailStore + 'static,
+    {
+        Self {
+            config,
+            mailbox_reader: store.clone(),
+            message_lister: store.clone(),
+            conversation_reader: store.clone(),
+            message_detail_reader: store.clone(),
+            smart_mailboxes: store.clone(),
+            sync_state: store.clone(),
+            message_mailboxes: store.clone(),
+            sync_writer: store.clone(),
+            message_commands: store.clone(),
+            events: store.clone(),
+            source_projections: store.clone(),
+            source_data: store,
+        }
     }
 
     // -- Config delegates --
@@ -73,7 +103,7 @@ impl MailService {
     /// @spec docs/L1-api#account-crud-lifecycle
     pub fn save_source(&self, source: &AccountSettings) -> Result<(), ServiceError> {
         self.config.save_source(source)?;
-        self.store
+        self.source_projections
             .upsert_source_projection(&source.id, &source.name)?;
         Ok(())
     }
@@ -88,8 +118,8 @@ impl MailService {
             self.config.put_app_settings(&settings)?;
         }
         self.config.delete_source(id)?;
-        self.store.delete_source_projection(id)?;
-        self.store.delete_source_data(id)?;
+        self.source_projections.delete_source_projection(id)?;
+        self.source_data.delete_source_data(id)?;
         Ok(())
     }
 
@@ -142,8 +172,9 @@ impl MailService {
     pub fn reload_config(&self) -> Result<ConfigDiff, ServiceError> {
         let diff = self.config.reload()?;
         for source_id in &diff.removed_sources {
-            self.store.delete_source_projection(source_id)?;
-            self.store.delete_source_data(source_id)?;
+            self.source_projections
+                .delete_source_projection(source_id)?;
+            self.source_data.delete_source_data(source_id)?;
         }
         // Sync all source projections after reload
         self.sync_source_projections()?;
@@ -154,7 +185,7 @@ impl MailService {
     pub fn sync_source_projections(&self) -> Result<(), ServiceError> {
         let sources = self.config.list_sources()?;
         for source in &sources {
-            self.store
+            self.source_projections
                 .upsert_source_projection(&source.id, &source.name)?;
         }
         Ok(())
@@ -169,7 +200,9 @@ impl MailService {
         let mailboxes = self.config.list_smart_mailboxes()?;
         let mut summaries = Vec::with_capacity(mailboxes.len());
         for mailbox in mailboxes {
-            let (unread, total) = self.store.query_smart_mailbox_counts(&mailbox.rule)?;
+            let (unread, total) = self
+                .smart_mailboxes
+                .query_smart_mailbox_counts(&mailbox.rule)?;
             summaries.push(SmartMailboxSummary {
                 id: mailbox.id,
                 name: mailbox.name,
@@ -197,7 +230,7 @@ impl MailService {
             .config
             .get_smart_mailbox(smart_mailbox_id)?
             .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
-        self.store
+        self.smart_mailboxes
             .query_messages_by_rule(&mailbox.rule)
             .map_err(Into::into)
     }
@@ -217,7 +250,7 @@ impl MailService {
             .config
             .get_smart_mailbox(smart_mailbox_id)?
             .not_found("smart_mailbox", smart_mailbox_id.as_str())?;
-        self.store
+        self.smart_mailboxes
             .query_conversations_by_rule(&mailbox.rule, limit, cursor, sort_field, sort_direction)
             .map_err(Into::into)
     }
@@ -231,7 +264,7 @@ impl MailService {
         sort_field: ConversationSortField,
         sort_direction: SortDirection,
     ) -> Result<ConversationPage, ServiceError> {
-        self.store
+        self.smart_mailboxes
             .query_conversations_by_rule(rule, limit, cursor, sort_field, sort_direction)
             .map_err(Into::into)
     }
@@ -246,7 +279,9 @@ impl MailService {
         let sidebar_smart_mailboxes: Vec<SidebarSmartMailbox> = smart_mailboxes
             .into_iter()
             .map(|mailbox| -> Result<SidebarSmartMailbox, ServiceError> {
-                let (unread, total) = self.store.query_smart_mailbox_counts(&mailbox.rule)?;
+                let (unread, total) = self
+                    .smart_mailboxes
+                    .query_smart_mailbox_counts(&mailbox.rule)?;
                 Ok(SidebarSmartMailbox {
                     id: mailbox.id,
                     name: mailbox.name,
@@ -260,7 +295,7 @@ impl MailService {
             .into_iter()
             .filter(|source| source.enabled)
             .map(|source| -> Result<SidebarSource, ServiceError> {
-                let mailboxes = self.store.list_mailboxes(&source.id)?;
+                let mailboxes = self.mailbox_reader.list_mailboxes(&source.id)?;
                 Ok(SidebarSource {
                     id: source.id,
                     name: source.name,
@@ -282,7 +317,9 @@ impl MailService {
         &self,
         account_id: &AccountId,
     ) -> Result<Vec<MailboxSummary>, ServiceError> {
-        self.store.list_mailboxes(account_id).map_err(Into::into)
+        self.mailbox_reader
+            .list_mailboxes(account_id)
+            .map_err(Into::into)
     }
 
     /// List messages, optionally filtered by mailbox.
@@ -291,7 +328,7 @@ impl MailService {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, ServiceError> {
-        self.store
+        self.message_lister
             .list_messages(account_id, mailbox_id)
             .map_err(Into::into)
     }
@@ -308,7 +345,7 @@ impl MailService {
         sort_field: ConversationSortField,
         sort_direction: SortDirection,
     ) -> Result<ConversationPage, ServiceError> {
-        self.store
+        self.conversation_reader
             .list_conversations(
                 account_id,
                 mailbox_id,
@@ -325,7 +362,7 @@ impl MailService {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, ServiceError> {
-        self.store
+        self.conversation_reader
             .get_conversation(conversation_id)?
             .not_found("conversation", conversation_id.as_str())
     }
@@ -336,7 +373,7 @@ impl MailService {
         account_id: &AccountId,
         thread_id: &ThreadId,
     ) -> Result<ThreadView, ServiceError> {
-        self.store
+        self.message_detail_reader
             .get_thread(account_id, thread_id)?
             .not_found("thread", thread_id.as_str())
     }
@@ -351,7 +388,7 @@ impl MailService {
         gateway: Option<&dyn MailGateway>,
     ) -> Result<CommandResult, ServiceError> {
         let detail = self
-            .store
+            .message_detail_reader
             .get_message_detail(account_id, message_id)?
             .not_found("message", message_id.as_str())?;
 
@@ -372,7 +409,7 @@ impl MailService {
         };
 
         let fetched = gateway.fetch_message_body(account_id, message_id).await?;
-        self.store
+        self.sync_writer
             .apply_message_body(account_id, message_id, &fetched)
             .map_err(Into::into)
     }
@@ -399,10 +436,10 @@ impl MailService {
         trigger: SyncTrigger,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let cursors = self.store.get_sync_cursors(account_id)?;
+        let cursors = self.sync_state.get_sync_cursors(account_id)?;
         let batch = gateway.sync(account_id, &cursors).await?;
-        let mut events = self.store.apply_sync_batch(account_id, &batch)?;
-        let sync_event = self.store.append_event(
+        let mut events = self.sync_writer.apply_sync_batch(account_id, &batch)?;
+        let sync_event = self.events.append_event(
             account_id,
             EVENT_TOPIC_SYNC_COMPLETED,
             None,
@@ -429,7 +466,7 @@ impl MailService {
         trigger: SyncTrigger,
         stage: &str,
     ) -> Result<DomainEvent, ServiceError> {
-        self.store
+        self.events
             .append_event(
                 account_id,
                 EVENT_TOPIC_SYNC_FAILED,
@@ -456,7 +493,9 @@ impl MailService {
         mutation: MessageMutation<'_>,
         gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        let expected_state = self.store.get_cursor(account_id, SyncObject::Message)?;
+        let expected_state = self
+            .sync_state
+            .get_cursor(account_id, SyncObject::Message)?;
         let outcome = match mutation {
             MessageMutation::SetKeywords(command) => {
                 gateway
@@ -490,20 +529,23 @@ impl MailService {
         };
 
         match mutation {
-            MessageMutation::SetKeywords(command) => {
-                self.store
-                    .set_keywords(account_id, message_id, outcome.cursor.as_ref(), command)
-            }
-            MessageMutation::ReplaceMailboxes(command) => self.store.replace_mailboxes(
+            MessageMutation::SetKeywords(command) => self.message_commands.set_keywords(
                 account_id,
                 message_id,
                 outcome.cursor.as_ref(),
                 command,
             ),
-            MessageMutation::Destroy => {
-                self.store
-                    .destroy_message(account_id, message_id, outcome.cursor.as_ref())
-            }
+            MessageMutation::ReplaceMailboxes(command) => self.message_commands.replace_mailboxes(
+                account_id,
+                message_id,
+                outcome.cursor.as_ref(),
+                command,
+            ),
+            MessageMutation::Destroy => self.message_commands.destroy_message(
+                account_id,
+                message_id,
+                outcome.cursor.as_ref(),
+            ),
         }
         .map_err(Into::into)
     }
@@ -556,7 +598,9 @@ impl MailService {
         command: &AddToMailboxCommand,
         gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        let mut mailbox_ids = self.store.get_message_mailboxes(account_id, message_id)?;
+        let mut mailbox_ids = self
+            .message_mailboxes
+            .get_message_mailboxes(account_id, message_id)?;
         if !mailbox_ids
             .iter()
             .any(|mailbox_id| mailbox_id == &command.mailbox_id)
@@ -583,7 +627,7 @@ impl MailService {
         gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         let mailbox_ids = self
-            .store
+            .message_mailboxes
             .get_message_mailboxes(account_id, message_id)?
             .into_iter()
             .filter(|mailbox_id| mailbox_id != &command.mailbox_id)
@@ -617,7 +661,7 @@ impl MailService {
         &self,
         filter: &crate::EventFilter,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        self.store.list_events(filter).map_err(Into::into)
+        self.events.list_events(filter).map_err(Into::into)
     }
 
     /// Fetch the primary sender identity from the gateway.
@@ -668,11 +712,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        ConfigError, ConfigSnapshot, DomainEvent, EventFilter, FetchedBody, GatewayError,
-        MessageDetail, MutationOutcome, PushTransport, SmartMailboxCondition, SmartMailboxField,
-        SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator,
-        SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, StoreError, SyncBatch,
-        SyncCursor,
+        ConfigError, ConfigSnapshot, ConversationReadStore, DomainEvent, EventFilter, EventStore,
+        FetchedBody, GatewayError, MailboxReadStore, MessageCommandStore, MessageDetail,
+        MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome, PushTransport,
+        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+        SmartMailboxStore, SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError,
+        SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
     };
 
     struct TestConfig {
@@ -820,7 +866,7 @@ mod tests {
         }
     }
 
-    impl MailStore for TestStore {
+    impl MailboxReadStore for TestStore {
         fn list_mailboxes(
             &self,
             _account_id: &AccountId,
@@ -831,7 +877,9 @@ mod tests {
                     Err(StoreError::Failure(error.clone()))
                 })
         }
+    }
 
+    impl MessageListStore for TestStore {
         fn list_messages(
             &self,
             _account_id: &AccountId,
@@ -839,7 +887,9 @@ mod tests {
         ) -> Result<Vec<MessageSummary>, StoreError> {
             Ok(Vec::new())
         }
+    }
 
+    impl SmartMailboxStore for TestStore {
         fn query_messages_by_rule(
             &self,
             _rule: &SmartMailboxRule,
@@ -869,7 +919,9 @@ mod tests {
                 .as_ref()
                 .map_or(Ok((1, 2)), |error| Err(StoreError::Failure(error.clone())))
         }
+    }
 
+    impl ConversationReadStore for TestStore {
         fn list_conversations(
             &self,
             _account_id: Option<&AccountId>,
@@ -891,7 +943,9 @@ mod tests {
         ) -> Result<Option<ConversationView>, StoreError> {
             Ok(None)
         }
+    }
 
+    impl MessageDetailStore for TestStore {
         fn get_message_detail(
             &self,
             _account_id: &AccountId,
@@ -907,7 +961,9 @@ mod tests {
         ) -> Result<Option<ThreadView>, StoreError> {
             Ok(None)
         }
+    }
 
+    impl SyncStateStore for TestStore {
         fn get_sync_cursors(&self, _account_id: &AccountId) -> Result<Vec<SyncCursor>, StoreError> {
             Ok(Vec::new())
         }
@@ -927,7 +983,9 @@ mod tests {
             }
             Ok(None)
         }
+    }
 
+    impl MessageMailboxStore for TestStore {
         fn get_message_mailboxes(
             &self,
             _account_id: &AccountId,
@@ -940,7 +998,9 @@ mod tests {
                 .mailbox_ids
                 .clone())
         }
+    }
 
+    impl SyncWriteStore for TestStore {
         fn apply_sync_batch(
             &self,
             _account_id: &AccountId,
@@ -957,7 +1017,9 @@ mod tests {
         ) -> Result<CommandResult, StoreError> {
             Err(StoreError::Failure("unused".to_string()))
         }
+    }
 
+    impl MessageCommandStore for TestStore {
         fn set_keywords(
             &self,
             _account_id: &AccountId,
@@ -1017,7 +1079,9 @@ mod tests {
                 events: Vec::new(),
             })
         }
+    }
 
+    impl EventStore for TestStore {
         fn list_events(&self, _filter: &EventFilter) -> Result<Vec<DomainEvent>, StoreError> {
             Ok(Vec::new())
         }
@@ -1032,7 +1096,9 @@ mod tests {
         ) -> Result<DomainEvent, StoreError> {
             Err(StoreError::Failure("unused".to_string()))
         }
+    }
 
+    impl SourceProjectionStore for TestStore {
         fn upsert_source_projection(
             &self,
             source_id: &AccountId,
@@ -1052,7 +1118,9 @@ mod tests {
                 .push(source_id.to_string());
             Ok(())
         }
+    }
 
+    impl SourceDataStore for TestStore {
         fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError> {
             self.source_data_deletes
                 .lock()
