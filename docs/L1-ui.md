@@ -186,6 +186,8 @@ The command palette owns its own keyboard state while open. Palette results are
 not selected by default after opening or typing. Enter opens the selected row,
 while Enter with no selected row applies the current query as a message-list
 filter. Shift+Enter and Option/Alt+Enter always apply the query as a filter.
+If a typed query has previewed as the active filter, Esc rejects that preview
+and clears the filter instead of committing it.
 The panel closes on outside interaction unless pinned. List navigation shortcuts
 ignore modified key chords, so `Cmd/Ctrl+K` cannot also trigger `k` navigation.
 

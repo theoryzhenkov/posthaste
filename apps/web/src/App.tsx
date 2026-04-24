@@ -404,6 +404,10 @@ function MailClient() {
     setSearchQuery((current) => (current === query ? current : query))
   }, [])
 
+  const handleRejectSearchPreview = useCallback(() => {
+    setSearchQuery('')
+  }, [])
+
   function handleSelectMessage(message: MessageSummary) {
     setSelectedMessage({
       conversationId: message.conversationId,
@@ -589,6 +593,7 @@ function MailClient() {
           onOpenShortcuts={() => setShowShortcuts(true)}
           onPlaceholderAction={handlePlaceholderAction}
           onPreviewSearch={handlePreviewSearch}
+          onRejectSearchPreview={handleRejectSearchPreview}
           onReply={handleReply}
           onSelectMessage={handleSelectMessage}
           onSelectSmartMailbox={handleSelectSmartMailbox}

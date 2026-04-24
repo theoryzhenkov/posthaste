@@ -224,8 +224,9 @@ apply the current query as a filter.
 When a message result is selected, the client switches to one of that message's
 source mailboxes when the mailbox is known, then opens the message. Applied
 filters persist while navigating mailboxes until explicitly cleared. Pressing
-Esc with no open message clears the active filter; pressing Esc while the
-palette is open only closes the palette.
+Esc with no open message clears the active filter. If the palette has previewed
+a typed query as the active message-list filter and the user closes the palette
+with Esc before applying it, the preview filter is cleared.
 
 ### Clickable drill-down
 
