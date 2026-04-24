@@ -196,6 +196,7 @@ export function MessageList({
       fetchMessagesForView(selectedView!, searchQuery, sort, pageParam),
     enabled: selectedView !== null,
     initialPageParam: null as string | null,
+    placeholderData: (previousData) => previousData,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   })
 
