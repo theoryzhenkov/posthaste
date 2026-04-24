@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why JMAP, protocol scope, target server decisions"
-modified: 2026-03-29
-reviewed: 2026-04-23
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: README
 dependents:
@@ -27,6 +27,8 @@ Fastmail's JMAP implementation is the reference. The protocol was designed there
 
 The client uses only RFC-standard JMAP with no Fastmail-specific extensions. Other compliant servers (Stalwart, Cyrus) can be supported later without protocol-layer changes.
 
+Fastmail's current JMAP access model is OAuth for distributed clients and API tokens for personal/testing use. App-specific passwords are for non-JMAP protocols and must not be treated as the normal JMAP credential path.
+
 ## Borrowed component: stalwartlabs/jmap-client
 
 The `jmap-client` crate (Apache-2.0) implements JMAP Core, Mail, WebSocket, and Sieve in Rust. Full async support, EventSource streams. We wrap it rather than implementing JMAP from scratch.
@@ -36,6 +38,12 @@ The wrapper adds reconnection logic, credential refresh, and state synchronizati
 ## Protocol scope
 
 JMAP Mail only for MVP: Email, Mailbox, Thread, Identity, EmailSubmission, SearchSnippet. No JMAP Contacts, Calendars, or Sieve. Blob operations are in scope for attachments and body fetch.
+
+JMAP account IDs are server-assigned IDs from the Session object. They are distinct from PostHaste's local account IDs, even when there is only one configured account. All JMAP method calls use the server account ID; local storage, API routes, and UI state use the local account ID and store the mapping explicitly.
+
+JMAP `threadId` is authoritative for server-side mail threading. PostHaste may derive local conversation projections for UI pagination and multi-source presentation, but it must not reconstruct JMAP conversations from `Message-ID`, `References`, `In-Reply-To`, or normalized subject when a JMAP `threadId` is available.
+
+Core upload/download uses the Session `uploadUrl` and `downloadUrl` templates. RFC 9404 `Blob/upload` and related blob-management methods are optional extension methods, not part of the RFC 8620/8621 baseline.
 
 ## Risks
 

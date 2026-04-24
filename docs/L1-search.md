@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Query grammar, filter compilation, smart mailbox model, thread arcs, search UX"
-modified: 2026-03-31
-reviewed: 2026-03-31
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: docs/L0-search
   - path: docs/L1-sync
@@ -212,7 +212,7 @@ A button in the search results toolbar creates a new SmartMailbox from the curre
 
 ### Data model
 
-JMAP provides `threadId` on every Email and `Thread/get` returns ordered `emailIds`. The client builds a tree structure from `Message-ID`, `In-Reply-To`, and `References` headers (available when email body is fetched). For the flat conversation view (chronological list of messages in a thread), the JMAP-provided order is sufficient. The tree structure is needed only for Thread Arcs.
+JMAP provides `threadId` on every Email and `Thread/get` returns ordered `emailIds`. The client builds a tree structure from `Message-ID`, `In-Reply-To`, and `References` headers for Thread Arcs only. These headers never change JMAP thread membership. For the flat conversation view (chronological list of messages in a thread), the JMAP-provided order is sufficient.
 
 ### Conversation view
 

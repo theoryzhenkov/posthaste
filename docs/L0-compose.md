@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why Markdown composition, MIME strategy, borrowed components"
-modified: 2026-03-29
-reviewed: 2026-04-23
+modified: 2026-04-24
+reviewed: 2026-04-24
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -31,7 +31,7 @@ Preserving the Markdown source as the plain text part is a deliberate choice. Mo
 
 ## Draft lifecycle via JMAP
 
-Drafts are real JMAP Email objects with the `$draft` keyword, stored on the server via `Email/set`. This means drafts sync across devices automatically with no additional infrastructure. The compose session operates on local state and periodically saves to the server. Sending uses `EmailSubmission/set`, which atomically submits the email and can move the draft to the Sent mailbox in a single request.
+Drafts are real JMAP Email objects with the `$draft` keyword, stored on the server via `Email/set`. This means drafts sync across devices automatically with no additional infrastructure. The compose session operates on local state and periodically saves to the server. Sending uses `EmailSubmission/set`, whose `onSuccessUpdateEmail` argument can request the server-side update that clears or moves the draft after successful submission.
 
 ## What we don't build
 
