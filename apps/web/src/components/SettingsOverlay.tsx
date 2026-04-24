@@ -5,7 +5,9 @@ import { SettingsPanel } from './SettingsPanel'
 interface SettingsOverlayProps {
   accounts: AccountOverview[]
   activeAccountId: string | null
+  initialAccountId?: string | null
   initialCategory?: 'general' | 'appearance' | 'accounts' | 'mailboxes'
+  initialSmartMailboxId?: string | null
   onActiveAccountChange: (accountId: string | null) => void
   onClose: () => void
 }
@@ -13,7 +15,9 @@ interface SettingsOverlayProps {
 export function SettingsOverlay({
   accounts,
   activeAccountId,
+  initialAccountId,
   initialCategory,
+  initialSmartMailboxId,
   onActiveAccountChange,
   onClose,
 }: SettingsOverlayProps) {
@@ -33,7 +37,9 @@ export function SettingsOverlay({
       <SettingsPanel
         accounts={accounts}
         activeAccountId={activeAccountId}
+        initialAccountId={initialAccountId}
         initialCategory={initialCategory}
+        initialSmartMailboxId={initialSmartMailboxId}
         onActiveAccountChange={onActiveAccountChange}
         onClose={onClose}
         shell="overlay"

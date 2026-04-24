@@ -85,7 +85,9 @@ const SETTINGS_CATEGORIES = [
 interface SettingsPanelProps {
   accounts: AccountOverview[]
   activeAccountId: string | null
+  initialAccountId?: string | null
   initialCategory?: SettingsCategory
+  initialSmartMailboxId?: string | null
   onActiveAccountChange: (accountId: string | null) => void
   onClose?: () => void
   shell?: 'page' | 'overlay'
@@ -100,7 +102,9 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   accounts,
   activeAccountId,
+  initialAccountId,
   initialCategory,
+  initialSmartMailboxId,
   onActiveAccountChange,
   onClose,
   shell = 'page',
@@ -126,7 +130,19 @@ export function SettingsPanel({
     if (initialCategory !== undefined) {
       setActiveCategory(initialCategory)
     }
-  }, [initialCategory])
+    if (
+      initialCategory === 'accounts' &&
+      initialAccountId &&
+      accounts.some((account) => account.id === initialAccountId)
+    ) {
+      setEditorTarget(initialAccountId)
+      setSmartMailboxEditorTarget(null)
+    }
+    if (initialCategory === 'mailboxes' && initialSmartMailboxId) {
+      setSmartMailboxEditorTarget(initialSmartMailboxId)
+      setEditorTarget(null)
+    }
+  }, [accounts, initialAccountId, initialCategory, initialSmartMailboxId])
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,

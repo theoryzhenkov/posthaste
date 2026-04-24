@@ -16,6 +16,7 @@ import type {
   MessageSummary,
   SourceMessageRef,
 } from './api/types'
+import { queryKeys } from './queryKeys'
 
 /**
  * Selected message reference used by list and detail views.
@@ -249,6 +250,40 @@ function replaceMessageKeywords<T extends MessageSummary | MessageDetail>(
   }
 }
 
+function patchMessageListQueries(
+  queryClient: QueryClient,
+  target: SourceMessageRef,
+  keywordState: KeywordState,
+): QuerySnapshot[] {
+  const snapshots: QuerySnapshot[] = []
+  for (const [queryKey, messages] of queryClient.getQueriesData<
+    MessageSummary[]
+  >({
+    queryKey: queryKeys.messagesRoot,
+  })) {
+    if (
+      !messages?.some(
+        (message) =>
+          message.sourceId === target.sourceId &&
+          message.id === target.messageId,
+      )
+    ) {
+      continue
+    }
+
+    snapshots.push(snapshotQuery(queryClient, queryKey))
+    queryClient.setQueryData<MessageSummary[]>(
+      queryKey,
+      messages.map((message) =>
+        message.sourceId === target.sourceId && message.id === target.messageId
+          ? replaceMessageKeywords(message, keywordState)
+          : message,
+      ),
+    )
+  }
+  return snapshots
+}
+
 /**
  * Heuristically patch a conversation summary for a single-message keyword change
  * when the full conversation view is not cached.
@@ -378,6 +413,7 @@ export function applyKeywordPatch(
       mailKeys.conversationSummary(target.conversationId),
     ),
   ]
+  snapshots.push(...patchMessageListQueries(queryClient, target, patch.next))
 
   let incomplete = false
   let exactSummary: ConversationSummary | null = null
@@ -443,6 +479,11 @@ export function mergeMessageDetail(
   conversationId: string,
 ) {
   queryClient.setQueryData(mailKeys.message(detail.sourceId, detail.id), detail)
+  patchMessageListQueries(
+    queryClient,
+    { messageId: detail.id, sourceId: detail.sourceId },
+    deriveKeywordState(detail.keywords),
+  )
 
   const conversationKey = mailKeys.conversation(conversationId)
   const conversation =

@@ -412,10 +412,10 @@ async function replaceMailboxCommandByRole(
   role: KnownMailboxRole,
 ): Promise<MessageCommand> {
   const sidebar =
-    queryClient.getQueryData<SidebarResponse>(['sidebar']) ??
+    queryClient.getQueryData<SidebarResponse>(queryKeys.sidebar) ??
     (await queryClient.ensureQueryData({
       queryFn: fetchSidebar,
-      queryKey: ['sidebar'],
+      queryKey: queryKeys.sidebar,
     }))
   const mailbox = requiredMailboxByRole(sidebar, target.sourceId, role)
   return {
