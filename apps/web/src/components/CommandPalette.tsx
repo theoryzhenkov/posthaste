@@ -1,4 +1,4 @@
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import {
   Archive,
   Clock3,
@@ -16,12 +16,10 @@ import { useMemo, useState } from 'react'
 
 import { fetchSidebar, fetchSourceMessages } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
+import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
 import { queryKeys } from '@/queryKeys'
-import {
-  matchesMessageSearch,
-  normalizeAppliedSearchQuery,
-} from '@/searchQuery'
+import { normalizeAppliedSearchQuery } from '@/searchQuery'
 
 import { FloatingPanel } from './FloatingPanel'
 import {
@@ -238,19 +236,30 @@ export function CommandPalette({
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const queryClient = useQueryClient()
+  const serverQuery = normalizeAppliedSearchQuery(query)
+  const debouncedServerQuery = useDebouncedValue(serverQuery, 180)
   const { data: sidebar } = useQuery({
     queryKey: ['sidebar'],
     queryFn: fetchSidebar,
   })
   const sourceMessageQueries = useQueries({
     queries: (sidebar?.sources ?? []).map((source) => ({
-      queryKey: [...queryKeys.messagesRoot, 'source-all', source.id] as const,
-      queryFn: () => fetchSourceMessages(source.id, null),
+      queryKey: [
+        ...queryKeys.messagesRoot,
+        'source-search',
+        source.id,
+        debouncedServerQuery,
+      ] as const,
+      queryFn: () =>
+        fetchSourceMessages(source.id, null, {
+          q: debouncedServerQuery,
+          limit: 8,
+        }),
+      enabled: debouncedServerQuery.length > 0,
     })),
   })
   const fetchedSourceMessages = useMemo(
-    () => sourceMessageQueries.flatMap((source) => source.data ?? []),
+    () => sourceMessageQueries.flatMap((source) => source.data?.items ?? []),
     [sourceMessageQueries],
   )
 
@@ -259,17 +268,10 @@ export function CommandPalette({
     for (const message of fetchedSourceMessages) {
       deduped.set(`${message.sourceId}:${message.id}`, message)
     }
-    for (const [, messages] of queryClient.getQueriesData<MessageSummary[]>({
-      queryKey: queryKeys.messagesRoot,
-    })) {
-      for (const message of messages ?? []) {
-        deduped.set(`${message.sourceId}:${message.id}`, message)
-      }
-    }
     return [...deduped.values()].sort((left, right) =>
       right.receivedAt.localeCompare(left.receivedAt),
     )
-  }, [fetchedSourceMessages, queryClient])
+  }, [fetchedSourceMessages])
 
   const results = useMemo(() => {
     const normalized = normalizeQuery(query)
@@ -363,7 +365,6 @@ export function CommandPalette({
     )
 
     const messages = cachedMessages
-      .filter((message) => matchesMessageSearch(message, query))
       .slice(0, 8)
       .map<PaletteEntry>((message) => ({
         id: `${message.sourceId}:${message.id}`,

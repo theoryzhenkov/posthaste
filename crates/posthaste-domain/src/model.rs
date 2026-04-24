@@ -432,6 +432,42 @@ pub struct MessageSummary {
     pub keywords: Vec<String>,
 }
 
+/// Column by which message lists can be sorted.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageSortField {
+    #[default]
+    Date,
+    From,
+    Subject,
+    Source,
+    Flagged,
+    Attachment,
+}
+
+/// Opaque seek-pagination cursor for message lists.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCursor {
+    pub sort_value: String,
+    pub source_id: AccountId,
+    pub message_id: MessageId,
+}
+
+/// A single page of message summaries with an optional cursor for the next page.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    pub items: Vec<MessageSummary>,
+    pub next_cursor: Option<MessageCursor>,
+}
+
 /// Full message including sanitized body content, returned by message detail endpoint.
 ///
 /// @spec docs/L1-api#message-body-sanitization

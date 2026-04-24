@@ -19,13 +19,14 @@ use posthaste_domain::{
     ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
     ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
     EventStore, FetchedBody, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
-    MessageDetail, MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore,
-    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore,
-    SmartMailboxValue, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
-    SyncBatch, SyncCursor, SyncObject, SyncStateStore, SyncWriteStore, ThreadId, ThreadView,
-    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
+    MessageCursor, MessageDetail, MessageDetailStore, MessageId, MessageListStore,
+    MessageMailboxStore, MessagePage, MessageSortField, MessageSummary, RawMessageRef,
+    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
+    SyncWriteStore, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -46,11 +47,11 @@ use crate::mutations::{
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
 use crate::query::{
     fetch_mailbox_ids, fetch_message_attachments, hydrate_message_summaries,
-    load_message_summary_rows,
+    load_message_summary_rows, row_to_message_summary_row,
 };
 use crate::smart_mailboxes::{
     count_smart_mailbox_messages, query_conversations, query_conversations_by_rule,
-    query_messages_by_rule,
+    query_message_page, query_message_page_by_rule, query_messages_by_rule,
 };
 
 /// SQLite-backed store with a single serialized write connection and pooled
@@ -395,6 +396,45 @@ impl MessageListStore for DatabaseStore {
         };
         hydrate_message_summaries(&connection, summary_rows)
     }
+
+    /// Returns a seek-paginated page of messages for an account, optionally
+    /// filtered by mailbox.
+    ///
+    /// @spec docs/L1-api#cursor-pagination
+    fn list_message_page(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: Option<&MailboxId>,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, StoreError> {
+        let connection = self.read_connection()?;
+        query_message_page(
+            &connection,
+            "WHERE m.account_id = ?1
+               AND (
+                 ?2 IS NULL OR EXISTS (
+                     SELECT 1
+                     FROM message_mailbox mm
+                     WHERE mm.account_id = m.account_id
+                       AND mm.message_id = m.id
+                       AND mm.mailbox_id = ?2
+                 )
+               )",
+            vec![
+                SqlValue::Text(account_id.as_str().to_string()),
+                mailbox_id
+                    .map(|mailbox| SqlValue::Text(mailbox.as_str().to_string()))
+                    .unwrap_or(SqlValue::Null),
+            ],
+            limit,
+            cursor,
+            sort_field,
+            sort_direction,
+        )
+    }
 }
 
 impl SmartMailboxStore for DatabaseStore {
@@ -408,6 +448,21 @@ impl SmartMailboxStore for DatabaseStore {
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
         query_messages_by_rule(&connection, rule)
+    }
+
+    /// Evaluates a smart mailbox rule and returns a paginated message view.
+    ///
+    /// @spec docs/L1-api#cursor-pagination
+    fn query_message_page_by_rule(
+        &self,
+        rule: &SmartMailboxRule,
+        limit: usize,
+        cursor: Option<&MessageCursor>,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<MessagePage, StoreError> {
+        let connection = self.read_connection()?;
+        query_message_page_by_rule(&connection, rule, limit, cursor, sort_field, sort_direction)
     }
 
     /// Evaluates a smart mailbox rule and returns a paginated conversation view.
@@ -863,6 +918,228 @@ mod tests {
                 cursors: vec![message_cursor(cursor_state, "2026-03-31T10:00:00Z")],
             },
         )?;
+        Ok(())
+    }
+
+    fn rule_condition(
+        field: SmartMailboxField,
+        operator: SmartMailboxOperator,
+        value: impl Into<String>,
+    ) -> SmartMailboxRuleNode {
+        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+            field,
+            operator,
+            negated: false,
+            value: SmartMailboxValue::String(value.into()),
+        })
+    }
+
+    fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
+        SmartMailboxRule {
+            root: SmartMailboxGroup {
+                operator: SmartMailboxGroupOperator::All,
+                negated: false,
+                nodes,
+            },
+        }
+    }
+
+    #[test]
+    fn message_page_sorts_and_paginates() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![
+                MessageRecord {
+                    id: MessageId::from("message-c"),
+                    subject: Some("Charlie".to_string()),
+                    received_at: "2026-04-03T10:00:00Z".to_string(),
+                    ..sample_message("message-c", "inbox", Some("mime-c"))
+                },
+                MessageRecord {
+                    id: MessageId::from("message-a"),
+                    subject: Some("Alpha".to_string()),
+                    received_at: "2026-04-01T10:00:00Z".to_string(),
+                    ..sample_message("message-a", "inbox", Some("mime-a"))
+                },
+                MessageRecord {
+                    id: MessageId::from("message-b"),
+                    subject: Some("Bravo".to_string()),
+                    received_at: "2026-04-02T10:00:00Z".to_string(),
+                    ..sample_message("message-b", "inbox", Some("mime-b"))
+                },
+            ],
+            "state",
+        )?;
+
+        let first_page = store.list_message_page(
+            &account,
+            None,
+            2,
+            None,
+            MessageSortField::Subject,
+            SortDirection::Asc,
+        )?;
+        assert_eq!(
+            first_page
+                .items
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-a", "message-b"]
+        );
+        let cursor = first_page
+            .next_cursor
+            .as_ref()
+            .expect("first page should expose a next cursor");
+
+        let second_page = store.list_message_page(
+            &account,
+            None,
+            2,
+            Some(cursor),
+            MessageSortField::Subject,
+            SortDirection::Asc,
+        )?;
+        assert_eq!(
+            second_page
+                .items
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-c"]
+        );
+        assert!(second_page.next_cursor.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn message_page_paginates_empty_sort_values() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+        seed_messages(
+            &store,
+            &account,
+            vec![
+                MessageRecord {
+                    id: MessageId::from("blank-subject"),
+                    subject: None,
+                    ..sample_message("blank-subject", "inbox", Some("mime-blank"))
+                },
+                MessageRecord {
+                    id: MessageId::from("alpha-subject"),
+                    subject: Some("Alpha".to_string()),
+                    ..sample_message("alpha-subject", "inbox", Some("mime-alpha"))
+                },
+            ],
+            "state",
+        )?;
+
+        let first_page = store.list_message_page(
+            &account,
+            None,
+            1,
+            None,
+            MessageSortField::Subject,
+            SortDirection::Asc,
+        )?;
+        assert_eq!(first_page.items[0].id.as_str(), "blank-subject");
+        assert_eq!(
+            first_page
+                .next_cursor
+                .as_ref()
+                .expect("first page should expose a next cursor")
+                .sort_value,
+            ""
+        );
+
+        let second_page = store.list_message_page(
+            &account,
+            None,
+            1,
+            first_page.next_cursor.as_ref(),
+            MessageSortField::Subject,
+            SortDirection::Asc,
+        )?;
+        assert_eq!(second_page.items[0].id.as_str(), "alpha-subject");
+        assert!(second_page.next_cursor.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn message_page_rule_query_filters_source_mailbox_and_text() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let primary = AccountId::from("primary");
+        let secondary = AccountId::from("secondary");
+        setup_source(&store, &primary, "Primary")?;
+        setup_source(&store, &secondary, "Secondary")?;
+        seed_messages(
+            &store,
+            &primary,
+            vec![
+                MessageRecord {
+                    id: MessageId::from("match"),
+                    subject: Some("Posthaste account created".to_string()),
+                    mailbox_ids: vec![MailboxId::from("inbox")],
+                    ..sample_message("match", "inbox", Some("mime-match"))
+                },
+                MessageRecord {
+                    id: MessageId::from("wrong-mailbox"),
+                    subject: Some("Posthaste account created".to_string()),
+                    mailbox_ids: vec![MailboxId::from("archive")],
+                    ..sample_message("wrong-mailbox", "archive", Some("mime-archive"))
+                },
+            ],
+            "primary-state",
+        )?;
+        seed_messages(
+            &store,
+            &secondary,
+            vec![MessageRecord {
+                id: MessageId::from("wrong-source"),
+                subject: Some("Posthaste account created".to_string()),
+                mailbox_ids: vec![MailboxId::from("inbox")],
+                ..sample_message("wrong-source", "inbox", Some("mime-source"))
+            }],
+            "secondary-state",
+        )?;
+
+        let page = store.query_message_page_by_rule(
+            &all_rule(vec![
+                rule_condition(
+                    SmartMailboxField::SourceId,
+                    SmartMailboxOperator::Equals,
+                    "primary",
+                ),
+                rule_condition(
+                    SmartMailboxField::MailboxId,
+                    SmartMailboxOperator::Equals,
+                    "inbox",
+                ),
+                rule_condition(
+                    SmartMailboxField::Subject,
+                    SmartMailboxOperator::Contains,
+                    "Posthaste",
+                ),
+            ]),
+            10,
+            None,
+            MessageSortField::Date,
+            SortDirection::Desc,
+        )?;
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id.as_str(), "match");
+        assert_eq!(page.items[0].source_id, primary);
+        assert_eq!(page.items[0].mailbox_ids, vec![MailboxId::from("inbox")]);
+        assert!(page.next_cursor.is_none());
         Ok(())
     }
 

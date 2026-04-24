@@ -8,6 +8,11 @@ type MessageQuerySelection =
   | { kind: 'source-mailbox'; sourceId: string; mailboxId: string }
   | null
 
+interface MessageQuerySort {
+  columnId: string
+  direction: string
+}
+
 export const queryKeys = {
   settings: ['settings'] as const,
   accounts: ['accounts'] as const,
@@ -15,8 +20,17 @@ export const queryKeys = {
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
   sidebar: ['sidebar'] as const,
   messagesRoot: ['messages'] as const,
-  messages: (selection: MessageQuerySelection) =>
-    ['messages', selection] as const,
+  messages: (
+    selection: MessageQuerySelection,
+    query?: string,
+    sort?: MessageQuerySort,
+  ) =>
+    [
+      'messages',
+      selection,
+      query?.trim() || null,
+      sort ? { columnId: sort.columnId, direction: sort.direction } : null,
+    ] as const,
   smartMailboxes: ['smart-mailboxes'] as const,
   smartMailbox: (smartMailboxId: string | null) =>
     ['smart-mailbox', smartMailboxId] as const,

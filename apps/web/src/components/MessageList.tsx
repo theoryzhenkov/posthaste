@@ -8,7 +8,7 @@
  * @spec docs/L1-ui#messagelist
  * @spec docs/L1-ui#keyboard-shortcuts
  */
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import {
@@ -16,22 +16,23 @@ import {
   useAccountDirectory,
 } from '../accountDirectory'
 import { fetchSmartMailboxMessages, fetchSourceMessages } from '../api/client'
-import type { DomainEvent, MessageSummary } from '../api/types'
+import { ApiError } from '../api/errors'
+import type {
+  DomainEvent,
+  MessagePage,
+  MessageSortField,
+  MessageSummary,
+} from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { MAIL_DOMAIN_EVENT_NAME } from '../hooks/useDaemonEvents'
 import type { MailSelection } from '../mailState'
-import { AlertCircle, Inbox, MousePointerClick } from 'lucide-react'
+import { AlertCircle, Inbox, MousePointerClick, X } from 'lucide-react'
 import type { SidebarSelection } from './Sidebar'
 import { MessageRow } from './MessageRow'
-import {
-  type ColumnId,
-  type SortConfig,
-  buildThreadListLayout,
-} from './thread-list/columns'
+import { type SortConfig, buildThreadListLayout } from './thread-list/columns'
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
-import { matchesMessageSearch } from '../searchQuery'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -46,6 +47,7 @@ interface MessageListProps {
 /** @spec docs/L1-ui#messagelist */
 const ROW_HEIGHT = 30
 const OVERSCAN_ROWS = 6
+const MESSAGE_PAGE_SIZE = 100
 /** Per-view scroll offset cache to restore position on view switch. */
 const scrollOffsetByView = new Map<string, number>()
 
@@ -57,15 +59,20 @@ function selectionKey(selection: MailSelection | null): string | null {
   return selection ? `${selection.sourceId}:${selection.messageId}` : null
 }
 
-function viewKey(selectedView: SidebarSelection | null, searchQuery?: string) {
+function viewKey(
+  selectedView: SidebarSelection | null,
+  searchQuery: string | undefined,
+  sort: SortConfig,
+) {
   const query = searchQuery ? `?q=${searchQuery}` : ''
+  const sortKey = `#sort=${sort.columnId}:${sort.direction}`
   if (!selectedView) {
-    return `none${query}`
+    return `none${query}${sortKey}`
   }
   if (selectedView.kind === 'smart-mailbox') {
-    return `smart:${selectedView.id}${query}`
+    return `smart:${selectedView.id}${query}${sortKey}`
   }
-  return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}`
+  return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}${sortKey}`
 }
 
 function eventMayAffectView(
@@ -86,60 +93,49 @@ function eventMayAffectView(
   )
 }
 
-function compareNullableText(a: string | null, b: string | null): number {
-  return (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' })
-}
-
-function compareBoolean(a: boolean, b: boolean): number {
-  return Number(a) - Number(b)
-}
-
-function compareMessages(
-  a: MessageSummary,
-  b: MessageSummary,
-  columnId: ColumnId,
-): number {
-  switch (columnId) {
+function serverSortField(sort: SortConfig): MessageSortField {
+  switch (sort.columnId) {
     case 'date':
-      return Date.parse(a.receivedAt) - Date.parse(b.receivedAt)
     case 'from':
-      return compareNullableText(
-        a.fromName ?? a.fromEmail,
-        b.fromName ?? b.fromEmail,
-      )
     case 'subject':
-      return compareNullableText(a.subject, b.subject)
     case 'source':
-      return compareNullableText(a.sourceName, b.sourceName)
     case 'flagged':
-      return compareBoolean(a.isFlagged, b.isFlagged)
     case 'attachment':
-      return compareBoolean(a.hasAttachment, b.hasAttachment)
+      return sort.columnId
     case 'unread':
-      return compareBoolean(!a.isRead, !b.isRead)
     case 'preview':
-      return compareNullableText(a.preview, b.preview)
     case 'tags':
-      return compareNullableText(a.keywords.join(' '), b.keywords.join(' '))
+      return 'date'
   }
 }
 
-function sortMessages(messages: MessageSummary[], sort: SortConfig) {
-  const direction = sort.direction === 'asc' ? 1 : -1
-  return [...messages].sort((a, b) => {
-    const primary = compareMessages(a, b, sort.columnId) * direction
-    if (primary !== 0) {
-      return primary
-    }
-    return messageKey(a).localeCompare(messageKey(b))
-  })
+function normalizedServerQuery(
+  searchQuery: string | undefined,
+): string | undefined {
+  const query = searchQuery?.trim()
+  return query ? query : undefined
 }
 
-async function fetchMessagesForView(selectedView: SidebarSelection) {
+async function fetchMessagesForView(
+  selectedView: SidebarSelection,
+  searchQuery: string | undefined,
+  sort: SortConfig,
+  cursor: string | null,
+): Promise<MessagePage> {
+  const q = normalizedServerQuery(searchQuery)
+  const input = {
+    q,
+    cursor,
+    limit: MESSAGE_PAGE_SIZE,
+    sort: serverSortField(sort),
+    sortDir: sort.direction,
+  }
   if (selectedView.kind === 'smart-mailbox') {
-    return fetchSmartMailboxMessages(selectedView.id)
+    return fetchSmartMailboxMessages(selectedView.id, input)
   }
-  return fetchSourceMessages(selectedView.sourceId, selectedView.mailboxId)
+  return fetchSourceMessages(selectedView.sourceId, selectedView.mailboxId, {
+    ...input,
+  })
 }
 
 /**
@@ -174,42 +170,53 @@ export function MessageList({
     [columns, widths],
   )
   const currentViewKey = useMemo(
-    () => viewKey(selectedView, searchQuery),
-    [selectedView, searchQuery],
+    () => viewKey(selectedView, searchQuery, sort),
+    [selectedView, searchQuery, sort],
   )
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const restoredViewKeyRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
+  const [dismissedErrorKey, setDismissedErrorKey] = useState<string | null>(
+    null,
+  )
   const accountDirectory = useAccountDirectory()
 
   const {
-    data: rawMessages = [],
+    data,
     isLoading,
     refetch,
     error,
-  } = useQuery({
-    queryKey: queryKeys.messages(selectedView),
-    queryFn: () => fetchMessagesForView(selectedView!),
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: queryKeys.messages(selectedView, searchQuery, sort),
+    queryFn: ({ pageParam }) =>
+      fetchMessagesForView(selectedView!, searchQuery, sort, pageParam),
     enabled: selectedView !== null,
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   })
+
+  const rawMessages = useMemo(
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data],
+  )
 
   const displayMessages = useMemo(
     () => applyAccountNamesToMessages(rawMessages, accountDirectory),
     [accountDirectory, rawMessages],
   )
 
-  const messages = useMemo(
-    () =>
-      sortMessages(
-        displayMessages.filter((message) =>
-          matchesMessageSearch(message, searchQuery),
-        ),
-        sort,
-      ),
-    [displayMessages, searchQuery, sort],
-  )
+  const messages = displayMessages
   const selectedKey = selectionKey(selection)
+  const errorKey = error ? `${currentViewKey}:${error.message}` : null
+  const showError = Boolean(error && errorKey !== dismissedErrorKey)
+  const errorMessage =
+    error instanceof ApiError && error.code === 'invalid_query'
+      ? `Search query is not valid: ${error.message}`
+      : 'Failed to load messages'
 
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
@@ -342,7 +349,21 @@ export function MessageList({
     }
     setScrollTop(node.scrollTop)
     scrollOffsetByView.set(currentViewKey, node.scrollTop)
-  }, [currentViewKey])
+    const distanceToEnd = node.scrollHeight - node.scrollTop - node.clientHeight
+    if (distanceToEnd < ROW_HEIGHT * 20 && hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage()
+    }
+  }, [currentViewKey, fetchNextPage, hasNextPage, isFetchingNextPage])
+
+  useEffect(() => {
+    const node = scrollContainerRef.current
+    if (!node || !hasNextPage || isFetchingNextPage) {
+      return
+    }
+    if (node.scrollHeight <= node.clientHeight + ROW_HEIGHT * 4) {
+      void fetchNextPage()
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, messages.length])
 
   const handleBackgroundMouseDown = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -460,26 +481,30 @@ export function MessageList({
                 ))}
               </div>
             )}
-            {error && (
-              <div className="flex flex-col items-center gap-3 px-3 py-12">
-                <AlertCircle
-                  size={32}
-                  strokeWidth={1.5}
-                  className="text-destructive/50"
-                />
-                <p className="text-sm text-destructive">
-                  Failed to load messages
-                </p>
+            {showError && (
+              <div className="border-b border-destructive/20 bg-destructive/5 px-3 py-2">
+                <div className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertCircle size={16} strokeWidth={1.8} className="mt-0.5" />
+                  <p className="min-w-0 flex-1">{errorMessage}</p>
+                  <button
+                    type="button"
+                    className="grid size-6 shrink-0 place-items-center rounded text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    aria-label="Dismiss error"
+                    onClick={() => setDismissedErrorKey(errorKey)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
                 <button
                   type="button"
-                  className="rounded border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="mt-2 rounded border border-destructive/20 px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
                   onClick={() => void refetch()}
                 >
                   Try again
                 </button>
               </div>
             )}
-            {!isLoading && !error && messages.length === 0 && (
+            {!isLoading && !showError && messages.length === 0 && (
               <div
                 className="flex flex-col items-center gap-3 px-3 py-12"
                 data-message-list-empty="true"
@@ -528,6 +553,11 @@ export function MessageList({
                   data-message-list-empty="true"
                   style={{ height: bottomSpacerHeight }}
                 />
+                {isFetchingNextPage && (
+                  <div className="flex h-8 items-center justify-center">
+                    <div className="size-3 animate-spin rounded-full border border-muted-foreground/30 border-t-muted-foreground" />
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -308,7 +308,7 @@ pub(crate) fn query_message_detail_tx(
 }
 
 /// Maps a database row to a `MessageSummaryRow`.
-fn row_to_message_summary_row(
+pub(crate) fn row_to_message_summary_row(
     row: &rusqlite::Row<'_>,
 ) -> Result<MessageSummaryRow, rusqlite::Error> {
     Ok(MessageSummaryRow {
