@@ -181,6 +181,14 @@ floating panel. Selecting a suggestion or help row rewrites only the current
 query text and keeps the palette open, so users can complete a query without
 losing context.
 
+The palette validates query syntax before previewing or applying it. Incomplete
+fragments such as `is:` and `from:` are allowed while editing, but they are not
+sent to the backend as active filters. Generated value completions must validate
+as complete queries before they are shown as selectable query continuations.
+The backend parser remains authoritative and validates the same prefixes,
+required values, state values, relative dates, and exact dates before executing
+message queries.
+
 ### Execution pipeline
 
 1. Parse query text into AST
