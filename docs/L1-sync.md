@@ -111,6 +111,16 @@ This matters because the frontend keeps many pages cached while live updates kee
 
 These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. The frontend consumes that ordered stream and decides whether to invalidate or merge.
 
+## Mailbox actions
+
+After a sync batch is written, account mailbox action rules evaluate the synced message records from that batch. The initial supported action is:
+
+- if a message appears in mailbox `M` and its sender display name or email contains text `X`, apply user tag `Y`
+
+Actions mutate the remote server through the same JMAP `Email/set` keyword command path as manual tag edits, then persist the returned keyword mutation locally. Rules are idempotent: if the message already has the target keyword, the action is skipped. Action mutations happen after `apply_sync_batch`, so they do not weaken the atomicity of the incoming metadata write.
+
+The account runtime also performs automatic backfill for existing local messages. Backfill is intentionally low priority: it runs only while the account runtime has a live gateway, starts after a delay, processes a small bounded batch, publishes resulting keyword events, then waits before the next batch. Foreground sync, push handling, and manual commands remain the primary work of the runtime.
+
 ## Conflict model
 
 Mutations include optimistic concurrency checks when the gateway supports them. If the server returns `stateMismatch`, the engine re-syncs the affected type and presents the updated state to the UI. The original mutation is not retried blindly.

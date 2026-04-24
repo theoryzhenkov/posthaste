@@ -25,6 +25,20 @@ export type KnownMailboxRole =
   | 'junk'
   | 'trash'
 
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface MailboxActionRule {
+  id: string
+  mailboxId: string
+  condition: {
+    kind: 'fromContains'
+    value: string
+  }
+  action: {
+    kind: 'applyTag'
+    tag: string
+  }
+}
+
 /**
  * Summary of a configured account, including transport and sync status.
  * @spec docs/L1-api#account-crud-lifecycle
@@ -37,6 +51,7 @@ export interface AccountOverview {
   driver: AccountDriver
   enabled: boolean
   appearance: AccountAppearance
+  mailboxActionRules: MailboxActionRule[]
   transport: {
     baseUrl: string | null
     username: string | null
@@ -96,6 +111,7 @@ export interface CreateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
+  mailboxActionRules?: MailboxActionRule[]
   transport: AccountTransportInput
   secret: SecretInstructionInput
 }
@@ -111,6 +127,7 @@ export interface UpdateAccountInput {
   driver?: AccountDriver
   enabled?: boolean
   appearance?: AccountAppearance
+  mailboxActionRules?: MailboxActionRule[]
   transport?: Partial<AccountTransportInput>
   secret?: SecretInstructionInput
 }

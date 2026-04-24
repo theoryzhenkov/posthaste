@@ -1,8 +1,9 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppSettings, SecretKind, SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AppSettings, MailboxAction, MailboxActionCondition, MailboxActionRule, MailboxId, SecretKind,
+    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,8 @@ pub struct SourceToml {
     pub enabled: bool,
     pub appearance: Option<AccountAppearanceToml>,
     #[serde(default)]
+    pub mailbox_actions: Vec<MailboxActionToml>,
+    #[serde(default)]
     pub transport: TransportToml,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
@@ -121,6 +124,29 @@ pub enum AccountAppearanceToml {
         initials: String,
         color_hue: u16,
     },
+}
+
+/// TOML `[[mailbox_actions]]` item for account-scoped automation rules.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MailboxActionToml {
+    pub id: String,
+    pub mailbox_id: String,
+    pub condition: MailboxActionConditionToml,
+    pub action: MailboxActionEffectToml,
+}
+
+/// TOML action condition. Initially only sender substring matching is supported.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MailboxActionConditionToml {
+    FromContains { value: String },
+}
+
+/// TOML action effect. Initially only applying a user keyword/tag is supported.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MailboxActionEffectToml {
+    ApplyTag { tag: String },
 }
 
 /// Credential reference: OS keyring (`os`) or environment variable (`env`).
@@ -174,6 +200,26 @@ impl SourceToml {
                     color_hue: *color_hue,
                 },
             }),
+            mailbox_action_rules: self
+                .mailbox_actions
+                .iter()
+                .map(|rule| MailboxActionRule {
+                    id: rule.id.clone(),
+                    mailbox_id: MailboxId::from(rule.mailbox_id.as_str()),
+                    condition: match &rule.condition {
+                        MailboxActionConditionToml::FromContains { value } => {
+                            MailboxActionCondition::FromContains {
+                                value: value.clone(),
+                            }
+                        }
+                    },
+                    action: match &rule.action {
+                        MailboxActionEffectToml::ApplyTag { tag } => {
+                            MailboxAction::ApplyTag { tag: tag.clone() }
+                        }
+                    },
+                })
+                .collect(),
             transport: AccountTransportSettings {
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
@@ -231,6 +277,26 @@ impl SourceToml {
                         color_hue: *color_hue,
                     },
                 }),
+            mailbox_actions: settings
+                .mailbox_action_rules
+                .iter()
+                .map(|rule| MailboxActionToml {
+                    id: rule.id.clone(),
+                    mailbox_id: rule.mailbox_id.to_string(),
+                    condition: match &rule.condition {
+                        MailboxActionCondition::FromContains { value } => {
+                            MailboxActionConditionToml::FromContains {
+                                value: value.clone(),
+                            }
+                        }
+                    },
+                    action: match &rule.action {
+                        MailboxAction::ApplyTag { tag } => {
+                            MailboxActionEffectToml::ApplyTag { tag: tag.clone() }
+                        }
+                    },
+                })
+                .collect(),
             transport: TransportToml {
                 base_url: settings.transport.base_url.clone(),
                 username: settings.transport.username.clone(),
@@ -612,6 +678,16 @@ mod tests {
                 initials: "MF".to_string(),
                 color_hue: 245,
             }),
+            mailbox_action_rules: vec![MailboxActionRule {
+                id: "rule-newsletters".to_string(),
+                mailbox_id: MailboxId::from("inbox"),
+                condition: MailboxActionCondition::FromContains {
+                    value: "Posthaste".to_string(),
+                },
+                action: MailboxAction::ApplyTag {
+                    tag: "newsletter".to_string(),
+                },
+            }],
             transport: AccountTransportSettings {
                 base_url: Some("https://api.fastmail.com".to_string()),
                 username: Some("user@example.com".to_string()),

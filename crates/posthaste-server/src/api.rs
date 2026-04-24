@@ -13,14 +13,15 @@ use posthaste_domain::{
     AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
     CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
-    MailboxId, MailboxSummary, MessageAttachment, MessageCursor, MessageDetail, MessageId,
-    MessagePage, MessageSortField, MessageSummary, Recipient, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
-    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse,
-    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue, SortDirection,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    MailboxAction, MailboxActionCondition, MailboxActionRule, MailboxId, MailboxSummary,
+    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest, ServiceError,
+    SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition,
+    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId,
+    SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxSummary, SmartMailboxValue, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -36,8 +37,8 @@ use account_support::{
     account_overview, append_and_publish_account_event, apply_account_patch,
     apply_secret_instruction, default_account_appearance, delete_managed_secret,
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
-    normalize_account_appearance, normalize_email_patterns, normalize_optional, store_error_to_api,
-    validate_account_settings, validate_logo_image_id,
+    normalize_account_appearance, normalize_email_patterns, normalize_mailbox_action_rules,
+    normalize_optional, store_error_to_api, validate_account_settings, validate_logo_image_id,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -226,6 +227,8 @@ pub struct CreateAccountRequest {
     pub enabled: Option<bool>,
     pub appearance: Option<AccountAppearance>,
     #[serde(default)]
+    pub mailbox_action_rules: Vec<MailboxActionRule>,
+    #[serde(default)]
     pub transport: AccountTransportRequest,
     #[serde(default)]
     pub secret: SecretWriteRequest,
@@ -243,6 +246,7 @@ pub struct PatchAccountRequest {
     pub driver: Option<AccountDriver>,
     pub enabled: Option<bool>,
     pub appearance: Option<AccountAppearance>,
+    pub mailbox_action_rules: Option<Vec<MailboxActionRule>>,
     pub transport: Option<AccountTransportRequest>,
     pub secret: Option<SecretWriteRequest>,
 }
@@ -486,9 +490,11 @@ pub async fn create_account(
         driver,
         enabled,
         appearance,
+        mailbox_action_rules,
         transport,
         secret,
     } = request;
+    let mailbox_action_rules = normalize_mailbox_action_rules(&mailbox_action_rules);
     let email_patterns = normalize_email_patterns(&email_patterns);
     let account_id = match id {
         Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
@@ -530,6 +536,7 @@ pub async fn create_account(
         driver: driver.unwrap_or(AccountDriver::Jmap),
         enabled: enabled.unwrap_or(true),
         appearance: appearance.map(normalize_account_appearance),
+        mailbox_action_rules,
         transport: transport.into(),
         created_at: timestamp.clone(),
         updated_at: timestamp,
@@ -1939,6 +1946,7 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
+            mailbox_action_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -1964,6 +1972,7 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
+            mailbox_action_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: None,
@@ -2013,6 +2022,7 @@ mod tests {
             driver: AccountDriver::Jmap,
             enabled: true,
             appearance: None,
+            mailbox_action_rules: Vec::new(),
             transport: posthaste_domain::AccountTransportSettings {
                 base_url: Some("https://before.example/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
@@ -2031,6 +2041,7 @@ mod tests {
                 driver: None,
                 enabled: None,
                 appearance: None,
+                mailbox_action_rules: None,
                 transport: Some(AccountTransportRequest {
                     base_url: Some("https://after.example/jmap".to_string()),
                     username: None,

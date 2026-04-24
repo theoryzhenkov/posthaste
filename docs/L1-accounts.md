@@ -91,6 +91,18 @@ initials = "MF"
 color_hue = 245                 # 0-360 hue used for the account mark
 # image_id = "..."              # present for image-backed marks
 
+[[mailbox_actions]]
+id = "rule-newsletters"
+mailbox_id = "inbox"
+
+[mailbox_actions.condition]
+kind = "from_contains"
+value = "Posthaste"
+
+[mailbox_actions.action]
+kind = "apply_tag"
+tag = "newsletter"
+
 [transport]
 base_url = "https://api.fastmail.com/jmap/session"
 username = "user@example.com"  # optional; omit for bearer-token auth
@@ -105,6 +117,8 @@ key = "account:primary"
 `full_name` identifies the person behind the account. `email_patterns` lists owned sender addresses and may include catch-all patterns such as `*@example.net`.
 
 `appearance` is optional account UI metadata. When absent, the API derives a stable initials mark from account name/full name and source ID. Image-backed marks keep the image bytes outside TOML under `account-assets/logos/`, with `image_id` pointing at the stored asset.
+
+`mailbox_actions` are account-scoped action rules. The initial rule shape matches synced mail that appears in a configured source mailbox by sender display name or email substring, then applies a non-system JMAP keyword as a user-facing tag. Action rules run from the sync layer after incoming message metadata is stored.
 
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 
