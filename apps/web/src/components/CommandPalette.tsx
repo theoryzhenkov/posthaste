@@ -259,14 +259,25 @@ export function CommandPalette({
   const hasPreviewSearchError = sourceMessageQueries.some(
     (source) => source.isError,
   )
+  const canPreviewCurrentQuery =
+    serverQuery.length > 0 && debouncedServerQuery === serverQuery
 
   useEffect(() => {
-    if (!canPreviewSearch || hasPreviewSearchError) {
+    if (serverQuery.length > 0 || !hasPreviewedSearchRef.current) {
+      return
+    }
+    onRejectSearchPreview()
+    hasPreviewedSearchRef.current = false
+  }, [onRejectSearchPreview, serverQuery])
+
+  useEffect(() => {
+    if (!canPreviewCurrentQuery || !canPreviewSearch || hasPreviewSearchError) {
       return
     }
     hasPreviewedSearchRef.current = true
     onPreviewSearch(debouncedServerQuery)
   }, [
+    canPreviewCurrentQuery,
     canPreviewSearch,
     debouncedServerQuery,
     hasPreviewSearchError,

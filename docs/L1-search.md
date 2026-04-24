@@ -214,8 +214,9 @@ shown before commands. The same backend message-page query path also powers the
 main message list, so command search and mailbox filtering share query parsing,
 filter compilation, sorting, and cursor pagination. While the user types, a
 debounced query that the backend accepts may preview as the active message-list
-filter; invalid or incomplete query text does not replace the last valid active
-filter. No row is selected by default after opening or editing the query. Down
+filter. If the current input becomes invalid or incomplete, any provisional
+preview from the open palette is cleared instead of leaving an earlier typed
+substring as the active filter. No row is selected by default after opening or editing the query. Down
 selects the first result, Up from the first result clears selection, Enter opens
 the selected result, and Enter with no selected result applies the current query
 as a persistent message list filter. Shift+Enter and Option/Alt+Enter always

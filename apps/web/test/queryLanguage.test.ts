@@ -128,6 +128,12 @@ describe('query language completions', () => {
   it('does not treat incomplete prefixes as valid filters', () => {
     expect(validateSearchQuery('is:')).toMatchObject({ state: 'incomplete' })
     expect(validateSearchQuery('from:')).toMatchObject({ state: 'incomplete' })
+    expect(validateSearchQuery('from: is:unread')).toMatchObject({
+      state: 'incomplete',
+    })
+    expect(validateSearchQuery('from: -is:read')).toMatchObject({
+      state: 'incomplete',
+    })
   })
 
   it('accepts all static is: and has: values emitted by the UI', () => {
