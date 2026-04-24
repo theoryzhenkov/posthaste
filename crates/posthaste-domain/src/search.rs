@@ -115,6 +115,10 @@ fn scan_prefixed_value(chars: &[char], pos: &mut usize, prefix: &str) -> String 
     }
 
     let start = *pos;
+    if starts_prefix_token(chars, start) {
+        return String::new();
+    }
+
     while *pos < chars.len() {
         if starts_next_prefix(chars, *pos) {
             break;
@@ -127,6 +131,31 @@ fn scan_prefixed_value(chars: &[char], pos: &mut usize, prefix: &str) -> String 
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+fn starts_prefix_token(chars: &[char], pos: usize) -> bool {
+    if pos >= chars.len() {
+        return false;
+    }
+
+    let mut i = pos;
+    if chars[i] == '-' {
+        i += 1;
+    }
+
+    let start = i;
+    while i < chars.len() && !chars[i].is_whitespace() {
+        if chars[i] == ':' {
+            let prefix: String = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .to_ascii_lowercase();
+            return is_known_prefix(&prefix);
+        }
+        i += 1;
+    }
+
+    false
 }
 
 fn starts_next_prefix(chars: &[char], pos: usize) -> bool {
@@ -747,6 +776,12 @@ mod tests {
     #[test]
     fn test_rejects_empty_prefixed_value() {
         let error = parse_query("from:").unwrap_err();
+        assert!(error.contains("empty value"));
+
+        let error = parse_query("from: is:unread").unwrap_err();
+        assert!(error.contains("empty value"));
+
+        let error = parse_query("from: -is:read").unwrap_err();
         assert!(error.contains("empty value"));
     }
 
