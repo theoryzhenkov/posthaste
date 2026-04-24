@@ -16,6 +16,8 @@ import type {
   AutomationAction,
   AutomationTrigger,
   Mailbox,
+  MessageSummary,
+  SmartMailboxRule,
   SmartMailbox,
 } from '../../api/types'
 import type { AutomationRuleDraft } from '../../automationRules'
@@ -30,9 +32,14 @@ import {
   smartMailboxDraftToRule,
   smartMailboxRulePrefix,
 } from '../../automationRules'
-import { fetchMailboxes, patchSettings } from '../../api/client'
+import {
+  fetchMailboxes,
+  patchSettings,
+  previewAutomationRule,
+} from '../../api/client'
 import { cn } from '../../lib/utils'
 import { queryKeys } from '../../queryKeys'
+import { formatRelativeTime } from '../../utils/relativeTime'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
 import { Input } from '../ui/input'
@@ -297,6 +304,7 @@ export function AccountAutomationFields({
       }
       onChange={(nextDrafts) => setDrafts(nextDrafts)}
       onSave={() => saveMutation.mutate()}
+      previewConditionForDraft={(draft) => draftToRule(draft).condition}
     />
   )
 }
@@ -403,6 +411,9 @@ export function SmartMailboxAutomationFields({
       }}
       onChange={(nextDrafts) => setDrafts(nextDrafts)}
       onSave={() => saveMutation.mutate()}
+      previewConditionForDraft={(draft) =>
+        smartMailboxDraftToRule(draft, smartMailbox).condition
+      }
     />
   )
 }
@@ -425,6 +436,7 @@ function AutomationRuleList({
   onAdd,
   onChange,
   onSave,
+  previewConditionForDraft,
 }: {
   title: string
   description: string
@@ -443,6 +455,7 @@ function AutomationRuleList({
   onAdd: () => void
   onChange: (drafts: AutomationRuleDraft[]) => void
   onSave: () => void
+  previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
 }) {
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(
     () => drafts[0]?.id ?? null,
@@ -514,6 +527,7 @@ function AutomationRuleList({
           accounts={accounts}
           staticMailboxes={mailboxesByAccount[selectedDraft.accountId] ?? null}
           canEditAccount={canEditAccount}
+          previewCondition={previewConditionForDraft(selectedDraft)}
           onChange={(patch) => updateDraft(selectedDraft.id, patch)}
           onRemove={() => {
             const nextDrafts = drafts.filter(
@@ -606,6 +620,7 @@ function AutomationRuleEditor({
   accounts,
   staticMailboxes,
   canEditAccount,
+  previewCondition,
   onChange,
   onRemove,
 }: {
@@ -613,9 +628,39 @@ function AutomationRuleEditor({
   accounts: AccountOverview[]
   staticMailboxes: Mailbox[] | null
   canEditAccount: boolean
+  previewCondition: SmartMailboxRule
   onChange: (patch: Partial<AutomationRuleDraft>) => void
   onRemove: () => void
 }) {
+  const previewKey = JSON.stringify(previewCondition)
+  const previewMutation = useMutation({
+    mutationFn: async (input: {
+      key: string
+      condition: SmartMailboxRule
+    }) => ({
+      key: input.key,
+      preview: await previewAutomationRule({
+        condition: input.condition,
+        limit: 5,
+      }),
+    }),
+  })
+  const activePreview =
+    previewMutation.data?.key === previewKey
+      ? previewMutation.data.preview
+      : null
+  const activePreviewError =
+    previewMutation.variables?.key === previewKey
+      ? previewMutation.error?.message
+      : null
+
+  function runPreview() {
+    previewMutation.mutate({
+      key: previewKey,
+      condition: previewCondition,
+    })
+  }
+
   return (
     <div className="space-y-5 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -710,12 +755,98 @@ function AutomationRuleEditor({
         />
       </div>
 
+      <AutomationRulePreview
+        accountId={draft.accountId}
+        preview={activePreview}
+        error={activePreviewError ?? null}
+        isPending={
+          previewMutation.isPending &&
+          previewMutation.variables?.key === previewKey
+        }
+        onPreview={runPreview}
+      />
+
       <ActionListEditor
         accountId={draft.accountId}
         actions={draft.actions}
         staticMailboxes={staticMailboxes}
         onChange={(actions) => onChange({ actions })}
       />
+    </div>
+  )
+}
+
+function AutomationRulePreview({
+  accountId,
+  preview,
+  error,
+  isPending,
+  onPreview,
+}: {
+  accountId: string
+  preview: { total: number; items: MessageSummary[] } | null
+  error: string | null
+  isPending: boolean
+  onPreview: () => void
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[12px] font-medium text-muted-foreground">
+            Matching messages
+          </p>
+          {preview && (
+            <p className="text-[12px] text-muted-foreground">
+              {preview.total} {preview.total === 1 ? 'message' : 'messages'}{' '}
+              match this rule.
+            </p>
+          )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 rounded-md border-border bg-background px-2 text-[12px]"
+          disabled={isPending || accountId.trim().length === 0}
+          onClick={onPreview}
+        >
+          {isPending ? 'Checking' : 'Preview'}
+        </Button>
+      </div>
+
+      {error && <FeedbackBanner tone="error">{error}</FeedbackBanner>}
+
+      {preview && (
+        <div className="overflow-hidden rounded-lg border border-border-soft bg-bg-elev/25">
+          {preview.items.length === 0 ? (
+            <p className="px-3 py-2 text-[12px] text-muted-foreground">
+              No synced messages match this rule.
+            </p>
+          ) : (
+            preview.items.map((message) => (
+              <AutomationRulePreviewRow key={message.id} message={message} />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AutomationRulePreviewRow({ message }: { message: MessageSummary }) {
+  const sender = message.fromName ?? message.fromEmail ?? 'Unknown sender'
+  return (
+    <div className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border-soft px-3 py-2 last:border-b-0">
+      <div className="min-w-0">
+        <p className="truncate text-[12px] font-medium text-foreground">
+          {message.subject?.trim() || '(no subject)'}
+        </p>
+        <p className="truncate text-[12px] text-muted-foreground">{sender}</p>
+      </div>
+      <p className="shrink-0 text-[11px] text-muted-foreground">
+        {formatRelativeTime(message.receivedAt)}
+      </p>
     </div>
   )
 }

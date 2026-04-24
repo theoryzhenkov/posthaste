@@ -50,6 +50,18 @@ export interface AutomationRule {
   backfill: boolean
 }
 
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface AutomationRulePreviewInput {
+  condition: SmartMailboxRule
+  limit?: number
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface AutomationRulePreviewResponse {
+  total: number
+  items: MessageSummary[]
+}
+
 /**
  * Summary of a configured account, including transport and sync status.
  * @spec docs/L1-api#account-crud-lifecycle

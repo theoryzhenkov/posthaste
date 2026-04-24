@@ -11,6 +11,8 @@ import { ApiError } from './errors'
 import type {
   AccountOverview,
   AppSettings,
+  AutomationRulePreviewInput,
+  AutomationRulePreviewResponse,
   ConversationPage,
   ConversationView,
   CreateAccountInput,
@@ -129,6 +131,17 @@ export async function patchSettings(
   input: Partial<AppSettings>,
 ): Promise<AppSettings> {
   return jsonRequest<AppSettings>('/settings', 'PATCH', input)
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export async function previewAutomationRule(
+  input: AutomationRulePreviewInput,
+): Promise<AutomationRulePreviewResponse> {
+  return jsonRequest<AutomationRulePreviewResponse>(
+    '/automation-rules:preview',
+    'POST',
+    input,
+  )
 }
 
 /** @spec docs/L1-api#endpoint-table */
