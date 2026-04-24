@@ -6,28 +6,11 @@
 import type { UseMutationResult } from '@tanstack/react-query'
 import { ArrowLeft, Plus, UserPlus } from 'lucide-react'
 import type { AccountOverview } from '../../api/types'
-import { brandAccents } from '../../design/tokens'
+import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
 import { StatusDot } from './shared'
 import type { EditorTarget } from './types'
-
-const ACCOUNT_ACCENTS = [
-  brandAccents.blue,
-  brandAccents.coral,
-  brandAccents.sage,
-  brandAccents.violet,
-  brandAccents.amber,
-] as const
-
-function accountAccent(account: AccountOverview): string {
-  const seed = `${account.id}:${account.name}`
-  let hash = 0
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0
-  }
-  return ACCOUNT_ACCENTS[hash % ACCOUNT_ACCENTS.length]
-}
 
 export function AccountsPane({
   accounts,
@@ -140,7 +123,7 @@ export function AccountsPane({
             {accounts.map((account) => (
               <AccountListRow
                 key={account.id}
-                accent={accountAccent(account)}
+                account={account}
                 label={account.name}
                 sublabel={
                   account.emailPatterns?.[0] ??
@@ -149,7 +132,6 @@ export function AccountsPane({
                   undefined
                 }
                 isDefault={account.isDefault}
-                leading={<StatusDot status={account.status} />}
                 onClick={() => onSelectAccount(account.id)}
               />
             ))}
@@ -161,18 +143,16 @@ export function AccountsPane({
 }
 
 function AccountListRow({
-  accent,
+  account,
   label,
   sublabel,
   isDefault,
-  leading,
   onClick,
 }: {
-  accent: string
+  account: AccountOverview
   label: string
   sublabel?: string
   isDefault?: boolean
-  leading: React.ReactNode
   onClick: () => void
 }) {
   return (
@@ -181,21 +161,13 @@ function AccountListRow({
       onClick={onClick}
       className="group flex min-h-[56px] w-full items-center gap-3 border-b border-border-soft px-4 text-left transition-colors last:border-b-0 hover:bg-[var(--list-hover)]"
     >
-      <span
-        className="flex size-8 shrink-0 items-center justify-center rounded-[5px] border"
-        style={{
-          backgroundColor: `color-mix(in oklab, ${accent} 14%, transparent)`,
-          borderColor: `color-mix(in oklab, ${accent} 26%, transparent)`,
-          color: accent,
-        }}
-      >
-        {leading}
-      </span>
+      <AccountMark appearance={account.appearance} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-foreground">
             {label}
           </span>
+          <StatusDot status={account.status} className="size-1.5" />
           {isDefault && (
             <span
               className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground"

@@ -21,6 +21,7 @@ import {
 import { useAccountDirectory } from '../accountDirectory'
 import { fetchSidebar } from '../api/client'
 import type {
+  AccountAppearance,
   Mailbox,
   SidebarResponse,
   SidebarSmartMailbox,
@@ -39,6 +40,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
+import { AccountMark } from './AccountMark'
 
 /**
  * Discriminated union representing the current sidebar selection.
@@ -90,14 +92,6 @@ function mailboxRoleAccent(role: Mailbox['role']): string {
   }
 }
 
-const SOURCE_SWATCHES = [
-  '#2B7EC2',
-  '#D96A42',
-  '#3D8B6D',
-  '#8B5CF6',
-  '#C5A100',
-] as const
-
 const SIDEBAR_ACCENT = {
   blue: 'oklch(0.65 0.13 245)',
   coral: 'oklch(0.68 0.17 45)',
@@ -108,17 +102,20 @@ const SIDEBAR_ACCENT = {
   muted: 'oklch(0.60 0.008 70)',
 } as const
 
-function sourceStamp(sourceName: string): string {
-  return sourceName.trim().charAt(0).toUpperCase() || '?'
-}
-
-function sourceAccent(sourceId: string, sourceName: string): string {
+function fallbackAccountAppearance(
+  sourceId: string,
+  sourceName: string,
+): AccountAppearance {
   const seed = `${sourceId}:${sourceName}`
   let hash = 0
   for (let index = 0; index < seed.length; index += 1) {
     hash = (hash * 31 + seed.charCodeAt(index)) >>> 0
   }
-  return SOURCE_SWATCHES[hash % SOURCE_SWATCHES.length]
+  return {
+    kind: 'initials',
+    initials: sourceName.trim().charAt(0).toUpperCase() || '?',
+    colorHue: hash % 361,
+  }
 }
 
 /** Icon for smart mailboxes based on the name heuristic. */
@@ -366,12 +363,14 @@ function MailboxItem({
 /** Collapsible source section with its mailbox children. */
 function SourceSection({
   source,
+  appearance,
   selectedView,
   onOpenAccountSettings,
   onSelectSourceMailbox,
   onSyncSource,
 }: {
   source: SidebarResponse['sources'][number]
+  appearance: AccountAppearance
   selectedView: SidebarSelection | null
   onOpenAccountSettings: (sourceId: string) => void
   onSelectSourceMailbox: (
@@ -382,10 +381,6 @@ function SourceSection({
   onSyncSource: (sourceId: string) => void
 }) {
   const [collapsed, setCollapsed] = useState(false)
-  const accent = useMemo(
-    () => sourceAccent(source.id, source.name),
-    [source.id, source.name],
-  )
   const unreadTotal = useMemo(
     () =>
       source.mailboxes.reduce((sum, mailbox) => sum + mailbox.unreadEmails, 0),
@@ -411,12 +406,10 @@ function SourceSection({
           className="text-muted-foreground"
         />
       )}
-      <span
-        className="flex size-[18px] shrink-0 items-center justify-center rounded-[4px] font-mono text-[10px] font-bold text-white"
-        style={{ backgroundColor: accent }}
-      >
-        {sourceStamp(source.name)}
-      </span>
+      <AccountMark
+        appearance={appearance}
+        className="size-[18px] text-[10px]"
+      />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
         {source.name}
       </span>
@@ -662,6 +655,10 @@ export function Sidebar({
                   <SourceSection
                     key={source.id}
                     source={source}
+                    appearance={
+                      accountDirectory.byId.get(source.id)?.appearance ??
+                      fallbackAccountAppearance(source.id, source.name)
+                    }
                     selectedView={selectedView}
                     onOpenAccountSettings={onOpenAccountSettings}
                     onSelectSourceMailbox={onSelectSourceMailbox}

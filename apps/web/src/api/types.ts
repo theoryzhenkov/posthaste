@@ -36,6 +36,7 @@ export interface AccountOverview {
   emailPatterns: string[]
   driver: AccountDriver
   enabled: boolean
+  appearance: AccountAppearance
   transport: {
     baseUrl: string | null
     username: string | null
@@ -56,6 +57,20 @@ export interface AccountOverview {
   lastSyncError: string | null
   lastSyncErrorCode: string | null
 }
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export type AccountAppearance =
+  | {
+      kind: 'initials'
+      initials: string
+      colorHue: number
+    }
+  | {
+      kind: 'image'
+      imageId: string
+      initials: string
+      colorHue: number
+    }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountTransportInput {
@@ -80,6 +95,7 @@ export interface CreateAccountInput {
   emailPatterns: string[]
   driver?: AccountDriver
   enabled?: boolean
+  appearance?: AccountAppearance
   transport: AccountTransportInput
   secret: SecretInstructionInput
 }
@@ -94,6 +110,7 @@ export interface UpdateAccountInput {
   emailPatterns?: string[]
   driver?: AccountDriver
   enabled?: boolean
+  appearance?: AccountAppearance
   transport?: Partial<AccountTransportInput>
   secret?: SecretInstructionInput
 }

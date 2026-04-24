@@ -85,6 +85,12 @@ email_patterns = ["user@example.com", "*@example.net"]
 driver = "jmap"                 # internal; UI-created accounts use JMAP
 enabled = true                  # default: true
 
+[appearance]
+kind = "initials"               # "initials" or "image"
+initials = "MF"
+color_hue = 245                 # 0-360 hue used for the account mark
+# image_id = "..."              # present for image-backed marks
+
 [transport]
 base_url = "https://api.fastmail.com/jmap/session"
 username = "user@example.com"  # optional; omit for bearer-token auth
@@ -97,6 +103,8 @@ key = "account:primary"
 `id` is an internal stable identifier used for config filenames, local data scoping, and keyring references. UI-created accounts derive it from the account name or first configured email pattern rather than asking the user to supply it.
 
 `full_name` identifies the person behind the account. `email_patterns` lists owned sender addresses and may include catch-all patterns such as `*@example.net`.
+
+`appearance` is optional account UI metadata. When absent, the API derives a stable initials mark from account name/full name and source ID. Image-backed marks keep the image bytes outside TOML under `account-assets/logos/`, with `image_id` pointing at the stored asset.
 
 `base_url` is the configured JMAP Session URL or provider origin used for discovery. Fastmail accounts use the documented Session resource. Generic providers may use an origin that supports `/.well-known/jmap`.
 

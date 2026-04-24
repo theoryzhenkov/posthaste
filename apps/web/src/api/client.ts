@@ -63,6 +63,10 @@ export function buildMessageAttachmentUrl(
   return url.toString()
 }
 
+export function buildAccountLogoUrl(imageId: string): string {
+  return `${BASE_URL}/account-assets/logos/${encodeURIComponent(imageId)}`
+}
+
 /** Parse a non-OK response into a structured {@link ApiError}. */
 async function parseError(response: Response): Promise<never> {
   let message = response.statusText
@@ -144,6 +148,20 @@ export async function updateAccount(
   input: UpdateAccountInput,
 ): Promise<AccountOverview> {
   return jsonRequest<AccountOverview>(`/accounts/${accountId}`, 'PATCH', input)
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export async function uploadAccountLogo(
+  accountId: string,
+  file: File,
+): Promise<AccountOverview> {
+  return request<AccountOverview>(`/accounts/${accountId}/logo`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+    },
+    body: file,
+  })
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
