@@ -17,6 +17,10 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::push::resilient_push_stream;
 
+const MAILBOX_ACTION_BACKFILL_BATCH_SIZE: usize = 10;
+const MAILBOX_ACTION_BACKFILL_INITIAL_DELAY: Duration = Duration::from_secs(10);
+const MAILBOX_ACTION_BACKFILL_INTERVAL: Duration = Duration::from_secs(15);
+
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
 ///
@@ -210,6 +214,12 @@ async fn run_account_runtime(
     let account_id = account.id.clone();
     let mut connection: Option<AccountConnection> = None;
     let mut interval = tokio::time::interval(shared.poll_interval);
+    let mut backfill_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + MAILBOX_ACTION_BACKFILL_INITIAL_DELAY,
+        MAILBOX_ACTION_BACKFILL_INTERVAL,
+    );
+    backfill_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut backfill_remaining = !account.mailbox_action_rules.is_empty();
 
     shared
         .set_runtime_overview(
@@ -244,6 +254,13 @@ async fn run_account_runtime(
             _ = interval.tick() => {
                 let _ = process_sync_trigger(
                     &shared, &account, SyncTrigger::Poll, &mut connection, None,
+                ).await;
+            }
+            _ = backfill_interval.tick(), if backfill_remaining => {
+                backfill_remaining = process_mailbox_action_backfill_batch(
+                    &shared,
+                    &account_id,
+                    connection.as_ref().map(|connection| connection.gateway.clone()),
                 ).await;
             }
             Some(command) = command_rx.recv() => {
@@ -284,6 +301,47 @@ async fn run_account_runtime(
                     }
                 }
             }
+        }
+    }
+}
+
+async fn process_mailbox_action_backfill_batch(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    gateway: Option<SharedGateway>,
+) -> bool {
+    let Some(gateway) = gateway else {
+        return true;
+    };
+
+    match shared
+        .service
+        .backfill_mailbox_actions_batch(
+            account_id,
+            gateway.as_ref(),
+            MAILBOX_ACTION_BACKFILL_BATCH_SIZE,
+        )
+        .await
+    {
+        Ok((events, has_more)) => {
+            if !events.is_empty() {
+                info!(
+                    account_id = %account_id,
+                    event_count = events.len(),
+                    has_more,
+                    "mailbox action backfill batch completed"
+                );
+                shared.publish_events(&events);
+            }
+            has_more
+        }
+        Err(error) => {
+            warn!(
+                account_id = %account_id,
+                error = %error,
+                "mailbox action backfill batch failed"
+            );
+            true
         }
     }
 }

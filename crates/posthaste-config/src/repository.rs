@@ -511,6 +511,7 @@ mod tests {
             driver: posthaste_domain::AccountDriver::Mock,
             enabled: true,
             appearance: None,
+            mailbox_action_rules: Vec::new(),
             transport: Default::default(),
             created_at: "2026-03-31T00:00:00Z".to_string(),
             updated_at: "2026-03-31T00:00:00Z".to_string(),

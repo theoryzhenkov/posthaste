@@ -24,6 +24,7 @@ pub(super) async fn account_overview(
             .clone()
             .map(normalize_account_appearance)
             .unwrap_or_else(|| default_account_appearance(&account)),
+        mailbox_action_rules: account.mailbox_action_rules.clone(),
         transport: account_transport_overview(&account),
         created_at: account.created_at.clone(),
         updated_at: account.updated_at.clone(),
@@ -225,6 +226,55 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
     if let Some(appearance) = &account.appearance {
         validate_account_appearance(appearance)?;
     }
+    validate_mailbox_action_rules(&account.mailbox_action_rules)?;
+    Ok(())
+}
+
+fn validate_mailbox_action_rules(rules: &[MailboxActionRule]) -> Result<(), ApiError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for rule in rules {
+        if rule.id.trim().is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "mailbox action rule id is required",
+            ));
+        }
+        if !ids.insert(rule.id.trim().to_string()) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "mailbox action rule ids must be unique",
+            ));
+        }
+        if rule.mailbox_id.as_str().trim().is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "mailbox action mailbox id is required",
+            ));
+        }
+        match &rule.condition {
+            MailboxActionCondition::FromContains { value } if value.trim().is_empty() => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_account",
+                    "mailbox action sender match must not be blank",
+                ));
+            }
+            MailboxActionCondition::FromContains { .. } => {}
+        }
+        match &rule.action {
+            MailboxAction::ApplyTag { tag } if tag.trim().is_empty() || tag.starts_with('$') => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_account",
+                    "mailbox action tag must be a non-system keyword",
+                ));
+            }
+            MailboxAction::ApplyTag { .. } => {}
+        }
+    }
     Ok(())
 }
 
@@ -410,6 +460,9 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
     if let Some(appearance) = &request.appearance {
         account.appearance = Some(normalize_account_appearance(appearance.clone()));
     }
+    if let Some(rules) = &request.mailbox_action_rules {
+        account.mailbox_action_rules = normalize_mailbox_action_rules(rules);
+    }
     if let Some(transport) = &request.transport {
         if transport.base_url.is_some() {
             account.transport.base_url = normalize_optional(transport.base_url.clone());
@@ -418,6 +471,30 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
             account.transport.username = normalize_optional(transport.username.clone());
         }
     }
+}
+
+pub(super) fn normalize_mailbox_action_rules(
+    rules: &[MailboxActionRule],
+) -> Vec<MailboxActionRule> {
+    rules
+        .iter()
+        .map(|rule| MailboxActionRule {
+            id: rule.id.trim().to_string(),
+            mailbox_id: MailboxId::from(rule.mailbox_id.as_str().trim()),
+            condition: match &rule.condition {
+                MailboxActionCondition::FromContains { value } => {
+                    MailboxActionCondition::FromContains {
+                        value: value.trim().to_string(),
+                    }
+                }
+            },
+            action: match &rule.action {
+                MailboxAction::ApplyTag { tag } => MailboxAction::ApplyTag {
+                    tag: tag.trim().to_string(),
+                },
+            },
+        })
+        .collect()
 }
 
 /// Normalize user-owned email addresses/patterns by trimming whitespace and

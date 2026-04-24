@@ -143,6 +143,7 @@ pub fn import_bootstrap(
             driver: account.driver.clone(),
             enabled: account.enabled.unwrap_or(true),
             appearance: None,
+            mailbox_action_rules: Vec::new(),
             transport: AccountTransportSettings {
                 base_url: account.transport.base_url.clone(),
                 username: account.transport.username.clone(),
