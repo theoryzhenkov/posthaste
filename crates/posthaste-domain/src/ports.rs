@@ -108,18 +108,16 @@ pub trait MailGateway: Send + Sync {
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>>;
 }
 
-/// Local SQLite store for synced mail data, events, and projections.
-///
-/// The store is the single source of truth for the UI -- the frontend reads
-/// via the REST API, never directly from JMAP.
-///
-/// @spec docs/L1-sync#sqlite-schema
-pub trait MailStore: Send + Sync {
+/// Mailbox read projection for synced account navigation.
+pub trait MailboxReadStore: Send + Sync {
     /// List all mailboxes for an account.
     ///
     /// @spec docs/L1-sync#sqlite-schema
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError>;
+}
 
+/// Message list projection for UI queries.
+pub trait MessageListStore: Send + Sync {
     /// List messages, optionally filtered by mailbox.
     ///
     /// @spec docs/L1-sync#sqlite-schema
@@ -128,7 +126,55 @@ pub trait MailStore: Send + Sync {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError>;
+}
 
+/// Conversation list and detail projection for UI queries.
+pub trait ConversationReadStore: Send + Sync {
+    /// Paginated conversation list with seek-based cursors.
+    ///
+    /// @spec docs/L1-sync#conversation-pagination
+    fn list_conversations(
+        &self,
+        account_id: Option<&AccountId>,
+        mailbox_id: Option<&MailboxId>,
+        limit: usize,
+        cursor: Option<&ConversationCursor>,
+        sort_field: ConversationSortField,
+        sort_direction: SortDirection,
+    ) -> Result<ConversationPage, StoreError>;
+
+    /// Fetch a single conversation with all its messages.
+    ///
+    /// @spec docs/L1-sync#conversation-pagination
+    fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<ConversationView>, StoreError>;
+}
+
+/// Message detail read projection for message views and thread views.
+pub trait MessageDetailStore: Send + Sync {
+    /// Fetch full message detail including body content.
+    ///
+    /// @spec docs/L1-sync#body-lazy
+    fn get_message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, StoreError>;
+
+    /// Fetch all messages in a thread.
+    ///
+    /// @spec docs/L1-sync#sqlite-schema
+    fn get_thread(
+        &self,
+        account_id: &AccountId,
+        thread_id: &ThreadId,
+    ) -> Result<Option<ThreadView>, StoreError>;
+}
+
+/// Smart mailbox rule evaluation over synced mail projections.
+pub trait SmartMailboxStore: Send + Sync {
     /// Query messages matching a smart mailbox rule.
     ///
     /// @spec docs/L0-search#smart-mailboxes
@@ -154,46 +200,10 @@ pub trait MailStore: Send + Sync {
     /// @spec docs/L1-search#smart-mailbox-data-model
     fn query_smart_mailbox_counts(&self, rule: &SmartMailboxRule)
         -> Result<(i64, i64), StoreError>;
+}
 
-    /// Paginated conversation list with seek-based cursors.
-    ///
-    /// @spec docs/L1-sync#conversation-pagination
-    fn list_conversations(
-        &self,
-        account_id: Option<&AccountId>,
-        mailbox_id: Option<&MailboxId>,
-        limit: usize,
-        cursor: Option<&ConversationCursor>,
-        sort_field: ConversationSortField,
-        sort_direction: SortDirection,
-    ) -> Result<ConversationPage, StoreError>;
-
-    /// Fetch a single conversation with all its messages.
-    ///
-    /// @spec docs/L1-sync#conversation-pagination
-    fn get_conversation(
-        &self,
-        conversation_id: &ConversationId,
-    ) -> Result<Option<ConversationView>, StoreError>;
-
-    /// Fetch full message detail including body content.
-    ///
-    /// @spec docs/L1-sync#body-lazy
-    fn get_message_detail(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageDetail>, StoreError>;
-
-    /// Fetch all messages in a thread.
-    ///
-    /// @spec docs/L1-sync#sqlite-schema
-    fn get_thread(
-        &self,
-        account_id: &AccountId,
-        thread_id: &ThreadId,
-    ) -> Result<Option<ThreadView>, StoreError>;
-
+/// Sync cursor state boundary.
+pub trait SyncStateStore: Send + Sync {
     /// Load all stored sync cursors for an account.
     ///
     /// @spec docs/L1-sync#state-management
@@ -207,7 +217,10 @@ pub trait MailStore: Send + Sync {
         account_id: &AccountId,
         object_type: SyncObject,
     ) -> Result<Option<SyncCursor>, StoreError>;
+}
 
+/// Message mailbox membership read boundary.
+pub trait MessageMailboxStore: Send + Sync {
     /// Return current mailbox memberships for a message.
     ///
     /// @spec docs/L1-sync#sqlite-schema
@@ -216,7 +229,10 @@ pub trait MailStore: Send + Sync {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Vec<MailboxId>, StoreError>;
+}
 
+/// Sync batch and lazy body write boundary.
+pub trait SyncWriteStore: Send + Sync {
     /// Apply a sync batch atomically within a single SQLite transaction.
     ///
     /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
@@ -235,7 +251,10 @@ pub trait MailStore: Send + Sync {
         message_id: &MessageId,
         body: &FetchedBody,
     ) -> Result<CommandResult, StoreError>;
+}
 
+/// Local message mutation persistence boundary.
+pub trait MessageCommandStore: Send + Sync {
     /// Apply a keyword mutation locally, updating the sync cursor.
     ///
     /// @spec docs/L1-jmap#methods-used
@@ -267,7 +286,10 @@ pub trait MailStore: Send + Sync {
         message_id: &MessageId,
         cursor: Option<&SyncCursor>,
     ) -> Result<CommandResult, StoreError>;
+}
 
+/// Domain event log boundary.
+pub trait EventStore: Send + Sync {
     /// Query the event log with optional filters.
     ///
     /// @spec docs/L1-api#sse-event-stream
@@ -284,7 +306,10 @@ pub trait MailStore: Send + Sync {
         message_id: Option<&MessageId>,
         payload: serde_json::Value,
     ) -> Result<DomainEvent, StoreError>;
+}
 
+/// Account/source projection maintenance boundary.
+pub trait SourceProjectionStore: Send + Sync {
     /// Create or update the source projection row for sidebar display.
     ///
     /// @spec docs/L1-sync#sqlite-schema
@@ -295,11 +320,52 @@ pub trait MailStore: Send + Sync {
     ///
     /// @spec docs/L1-sync#sqlite-schema
     fn delete_source_projection(&self, source_id: &AccountId) -> Result<(), StoreError>;
+}
 
+/// Account-scoped synced data maintenance boundary.
+pub trait SourceDataStore: Send + Sync {
     /// Delete all synced data for an account (messages, mailboxes, events).
     ///
     /// @spec docs/L0-accounts#the-invariant
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError>;
+}
+
+/// Local store for synced mail data, events, and projections.
+///
+/// The store is the single source of truth for the UI -- the frontend reads
+/// via the REST API, never directly from JMAP.
+///
+/// @spec docs/L1-sync#sqlite-schema
+pub trait MailStore:
+    MailboxReadStore
+    + MessageListStore
+    + ConversationReadStore
+    + MessageDetailStore
+    + SmartMailboxStore
+    + SyncStateStore
+    + MessageMailboxStore
+    + SyncWriteStore
+    + MessageCommandStore
+    + EventStore
+    + SourceProjectionStore
+    + SourceDataStore
+{
+}
+
+impl<T> MailStore for T where
+    T: MailboxReadStore
+        + MessageListStore
+        + ConversationReadStore
+        + MessageDetailStore
+        + SmartMailboxStore
+        + SyncStateStore
+        + MessageMailboxStore
+        + SyncWriteStore
+        + MessageCommandStore
+        + EventStore
+        + SourceProjectionStore
+        + SourceDataStore
+{
 }
 
 /// Credential storage abstraction (OS keyring or environment variables).
@@ -317,8 +383,6 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError>;
 }
 
-/// Thread-safe handle to a [`MailStore`] implementation.
-pub type SharedStore = Arc<dyn MailStore>;
 /// Thread-safe handle to a [`MailGateway`] implementation.
 pub type SharedGateway = Arc<dyn MailGateway>;
 /// Thread-safe handle to a [`SecretStore`] implementation.
