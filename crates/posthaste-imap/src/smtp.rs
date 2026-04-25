@@ -1,12 +1,18 @@
+use std::num::NonZeroU32;
+
+use imap_client::imap_types::flag::Flag;
 use lettre::message::{header, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use posthaste_domain::{
-    AccountTransportSettings, ProviderAuthKind, Recipient, SendMessageRequest, TransportSecurity,
+    AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient, SendMessageRequest,
+    TransportSecurity,
 };
 use pulldown_cmark::{html, Options, Parser};
 
+use crate::discovery::connect_authenticated_client;
 use crate::ImapAdapterError;
+use crate::ImapConnectionConfig;
 
 /// Concrete connection details for one SMTP submission endpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,6 +23,7 @@ pub struct SmtpConnectionConfig {
     pub username: String,
     pub secret: String,
     pub auth: ProviderAuthKind,
+    pub provider: ProviderHint,
 }
 
 impl SmtpConnectionConfig {
@@ -45,7 +52,26 @@ impl SmtpConnectionConfig {
             username: username.to_string(),
             secret,
             auth: transport.auth.clone(),
+            provider: transport.provider.clone(),
         })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SmtpSentCopyStrategy {
+    ProviderManaged,
+    AppendToSentMailbox,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubmittedSmtpMessage {
+    pub raw_message: Vec<u8>,
+}
+
+pub fn smtp_sent_copy_strategy(provider: &ProviderHint) -> SmtpSentCopyStrategy {
+    match provider {
+        ProviderHint::Gmail | ProviderHint::Outlook => SmtpSentCopyStrategy::ProviderManaged,
+        ProviderHint::Generic | ProviderHint::Icloud => SmtpSentCopyStrategy::AppendToSentMailbox,
     }
 }
 
@@ -110,7 +136,44 @@ pub async fn send_smtp_message(
     config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
 ) -> Result<(), ImapAdapterError> {
+    submit_smtp_message(config, request).await?;
+    Ok(())
+}
+
+/// Submit one message and return the exact RFC 5322 bytes accepted by SMTP.
+pub async fn submit_smtp_message(
+    config: &SmtpConnectionConfig,
+    request: &SendMessageRequest,
+) -> Result<SubmittedSmtpMessage, ImapAdapterError> {
     let message = build_smtp_message(config, request)?;
+    let raw_message = message.formatted();
+    smtp_transport(config)?.send(message).await?;
+
+    Ok(SubmittedSmtpMessage { raw_message })
+}
+
+/// Append the accepted outbound message to an IMAP Sent mailbox.
+///
+/// This is only used when provider policy says SMTP submission does not create
+/// a server-side Sent copy. The message is appended with `\Seen`.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+pub async fn append_smtp_sent_copy(
+    config: &ImapConnectionConfig,
+    sent_mailbox_name: &str,
+    raw_message: &[u8],
+) -> Result<Option<NonZeroU32>, ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    client.refresh_capabilities().await?;
+    client
+        .appenduid_or_fallback(sent_mailbox_name, [Flag::Seen], raw_message)
+        .await
+        .map_err(ImapAdapterError::from)
+}
+
+fn smtp_transport(
+    config: &SmtpConnectionConfig,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, ImapAdapterError> {
     let credentials = Credentials::new(config.username.clone(), config.secret.clone());
     let builder = match config.security {
         TransportSecurity::Tls => AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)?,
@@ -127,14 +190,11 @@ pub async fn send_smtp_message(
         }
         ProviderAuthKind::OAuth2 => vec![Mechanism::Xoauth2],
     };
-    let transport = builder
+    Ok(builder
         .port(config.port)
         .credentials(credentials)
         .authentication(mechanisms)
-        .build();
-
-    transport.send(message).await?;
-    Ok(())
+        .build())
 }
 
 /// Render Markdown to the same minimal HTML document shape used by JMAP sends.
@@ -196,8 +256,12 @@ fn smtp_message_id_header_value(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+
     use posthaste_domain::{
-        AccountTransportSettings, ProviderAuthKind, Recipient, SmtpTransportSettings,
+        AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient, SmtpTransportSettings,
         TransportSecurity,
     };
 
@@ -263,6 +327,7 @@ mod tests {
     #[test]
     fn config_preserves_oauth2_auth_kind_for_xoauth2_sends() {
         let transport = AccountTransportSettings {
+            provider: ProviderHint::Outlook,
             username: Some("alice@example.test".to_string()),
             auth: ProviderAuthKind::OAuth2,
             smtp: Some(SmtpTransportSettings {
@@ -278,7 +343,73 @@ mod tests {
                 .expect("SMTP config");
 
         assert_eq!(config.auth, ProviderAuthKind::OAuth2);
+        assert_eq!(config.provider, ProviderHint::Outlook);
         assert_eq!(config.secret, "access-token");
+    }
+
+    #[test]
+    fn provider_sent_copy_policy_avoids_known_auto_saved_providers() {
+        assert_eq!(
+            smtp_sent_copy_strategy(&ProviderHint::Gmail),
+            SmtpSentCopyStrategy::ProviderManaged
+        );
+        assert_eq!(
+            smtp_sent_copy_strategy(&ProviderHint::Outlook),
+            SmtpSentCopyStrategy::ProviderManaged
+        );
+        assert_eq!(
+            smtp_sent_copy_strategy(&ProviderHint::Generic),
+            SmtpSentCopyStrategy::AppendToSentMailbox
+        );
+        assert_eq!(
+            smtp_sent_copy_strategy(&ProviderHint::Icloud),
+            SmtpSentCopyStrategy::AppendToSentMailbox
+        );
+    }
+
+    #[tokio::test]
+    async fn submits_message_to_smtp_server_and_returns_raw_copy() {
+        let (addr, captured) = spawn_fake_smtp_server().await;
+        let config = SmtpConnectionConfig {
+            host: "127.0.0.1".to_string(),
+            port: addr.port(),
+            security: TransportSecurity::Plain,
+            username: "alice@example.test".to_string(),
+            secret: "secret".to_string(),
+            auth: ProviderAuthKind::Password,
+            provider: ProviderHint::Generic,
+        };
+        let request = SendMessageRequest {
+            to: vec![recipient(Some("Bob"), "bob@example.test")],
+            cc: Vec::new(),
+            bcc: vec![recipient(Some("Dana"), "dana@example.test")],
+            subject: "Captured".to_string(),
+            body: "Hello from **SMTP**".to_string(),
+            in_reply_to: None,
+            references: None,
+        };
+
+        let submitted = submit_smtp_message(&config, &request)
+            .await
+            .expect("SMTP submission");
+        let captured = captured.await.expect("fake SMTP captured message");
+        let raw = String::from_utf8(submitted.raw_message).expect("raw message is UTF-8");
+
+        assert!(captured
+            .commands
+            .iter()
+            .any(|command| { command.eq_ignore_ascii_case("RCPT TO:<bob@example.test>") }));
+        assert!(captured
+            .commands
+            .iter()
+            .any(|command| { command.eq_ignore_ascii_case("RCPT TO:<dana@example.test>") }));
+        assert!(captured.data.contains("Subject: Captured"));
+        assert!(captured
+            .data
+            .contains("Content-Type: multipart/alternative;"));
+        assert!(!captured.data.contains("Bcc:"));
+        assert!(raw.contains("Subject: Captured"));
+        assert!(!raw.contains("Bcc:"));
     }
 
     fn test_config() -> SmtpConnectionConfig {
@@ -289,6 +420,7 @@ mod tests {
             username: "alice@example.test".to_string(),
             secret: "secret".to_string(),
             auth: ProviderAuthKind::Password,
+            provider: ProviderHint::Generic,
         }
     }
 
@@ -297,5 +429,76 @@ mod tests {
             name: name.map(str::to_string),
             email: email.to_string(),
         }
+    }
+
+    #[derive(Debug)]
+    struct CapturedSmtpMessage {
+        commands: Vec<String>,
+        data: String,
+    }
+
+    async fn spawn_fake_smtp_server(
+    ) -> (std::net::SocketAddr, oneshot::Receiver<CapturedSmtpMessage>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake SMTP server");
+        let addr = listener.local_addr().expect("fake SMTP local addr");
+        let (tx, rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept SMTP client");
+            let (reader, mut writer) = stream.into_split();
+            let mut reader = BufReader::new(reader);
+            let mut line = String::new();
+            let mut commands = Vec::new();
+            let mut data = String::new();
+
+            writer.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 {
+                    break;
+                }
+                let command = line.trim_end_matches(['\r', '\n']).to_string();
+                commands.push(command.clone());
+                let upper = command.to_ascii_uppercase();
+
+                if upper.starts_with("EHLO") || upper.starts_with("HELO") {
+                    writer
+                        .write_all(b"250-localhost\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n")
+                        .await
+                        .unwrap();
+                } else if upper.starts_with("AUTH") {
+                    writer.write_all(b"235 2.7.0 ok\r\n").await.unwrap();
+                } else if upper.starts_with("MAIL FROM") || upper.starts_with("RCPT TO") {
+                    writer.write_all(b"250 2.1.0 ok\r\n").await.unwrap();
+                } else if upper == "DATA" {
+                    writer
+                        .write_all(b"354 end with <CRLF>.<CRLF>\r\n")
+                        .await
+                        .unwrap();
+                    loop {
+                        line.clear();
+                        reader.read_line(&mut line).await.unwrap();
+                        let data_line = line.trim_end_matches(['\r', '\n']);
+                        if data_line == "." {
+                            break;
+                        }
+                        data.push_str(data_line);
+                        data.push('\n');
+                    }
+                    writer.write_all(b"250 2.0.0 queued\r\n").await.unwrap();
+                } else if upper == "QUIT" {
+                    writer.write_all(b"221 2.0.0 bye\r\n").await.unwrap();
+                    break;
+                } else {
+                    writer.write_all(b"250 ok\r\n").await.unwrap();
+                }
+            }
+
+            let _ = tx.send(CapturedSmtpMessage { commands, data });
+        });
+
+        (addr, rx)
     }
 }

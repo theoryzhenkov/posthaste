@@ -6,15 +6,18 @@ use posthaste_domain::{
     MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
     SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
 };
+use tracing::warn;
 
 use crate::{
-    apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
-    discover_imap_account, expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
+    append_smtp_sent_copy, apply_imap_keyword_delta_by_location,
+    copy_imap_message_to_mailbox_by_location, discover_imap_account,
+    expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
     fetch_mailbox_header_snapshot, fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_header_snapshot, mark_imap_message_deleted_by_location,
-    parse_imap_attachment_blob_id, send_smtp_message, DiscoveredImapAccount, ImapAdapterError,
-    ImapConnectionConfig, SmtpConnectionConfig,
+    parse_imap_attachment_blob_id, smtp_sent_copy_strategy, submit_smtp_message,
+    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig, SmtpConnectionConfig,
+    SmtpSentCopyStrategy,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -303,9 +306,35 @@ impl MailGateway for LiveImapSmtpGateway {
         _account_id: &AccountId,
         request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        send_smtp_message(&self.smtp_config, request)
+        let submitted = submit_smtp_message(&self.smtp_config, request)
             .await
-            .map_err(imap_error_to_gateway)
+            .map_err(imap_error_to_gateway)?;
+
+        if smtp_sent_copy_strategy(&self.smtp_config.provider)
+            == SmtpSentCopyStrategy::AppendToSentMailbox
+        {
+            if let Some(sent_mailbox) = self
+                .discovery
+                .mailboxes
+                .iter()
+                .find(|mailbox| mailbox.selectable && mailbox.role == Some("sent"))
+            {
+                if let Err(error) =
+                    append_smtp_sent_copy(&self.config, &sent_mailbox.name, &submitted.raw_message)
+                        .await
+                {
+                    warn!(
+                        mailbox = sent_mailbox.name,
+                        error = %error,
+                        "SMTP send accepted but IMAP Sent copy append failed"
+                    );
+                }
+            } else {
+                warn!("SMTP send accepted but no selectable IMAP Sent mailbox was discovered");
+            }
+        }
+
+        Ok(())
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
@@ -379,6 +408,7 @@ mod tests {
             username: "alice@example.test".to_string(),
             secret: "secret".to_string(),
             auth: posthaste_domain::ProviderAuthKind::Password,
+            provider: posthaste_domain::ProviderHint::Generic,
         }
     }
 }
