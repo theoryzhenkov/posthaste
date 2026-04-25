@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Public PostHaste product showcase site, visual direction, and container deployment"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: README
   - path: docs/L0-branding
@@ -14,11 +14,11 @@ dependents: []
 
 ## Purpose
 
-The public website showcases PostHaste as a product without replacing the mail client application. It lives in `apps/site/` as a static React/Vite site, separate from the production client in `apps/web/`.
+The public website showcases PostHaste as a product without replacing the mail client application. It lives in `apps/site/` as a static Astro site, separate from the production client in `apps/web/`.
 
 The site should show the interface rather than argue for it. Product mockups, mailbox color, search, smart mailbox flow, and theme surfaces are primary. Copy stays short and project-like.
 
-Until final copy is curated, visible website prose and mock email content should remain placeholder lorem ipsum. The deliberate exceptions are the title-page slogan, `Your Mail Delivered at PostHaste`, and the `Community extensions` mock email that previews the planned in-app extension store.
+Home page copy should be editable as Markdown under `apps/site/src/content/home/`. Placeholder lorem ipsum may remain until final copy is curated, but current deliberate non-placeholder copy includes the title-page slogan, the `Welcome` mock email, the `Community extensions` mock email, and the `Open Source` landscape strip.
 
 ## Visual Direction
 
@@ -42,7 +42,9 @@ The landscape should reflect the viewer's local browser time. Morning, day, even
 
 `apps/site/` is a static frontend:
 
-- React + TypeScript + Vite.
+- Astro + TypeScript.
+- React is used for the interactive home page island that contains the fixed install strip, selectable mail mock, timed landscape, reveal behavior, and theme preview.
+- Home page copy is loaded from Markdown files under `apps/site/src/content/home/` at build time and passed into the React island as typed content.
 - CSS is local to the site and does not import the mail client app CSS.
 - Assets live under `apps/site/public/`.
 - The production container builds static assets and serves them with Nginx.

@@ -21,6 +21,7 @@ result
 /apps/web/.vite/
 /apps/web/node_modules/
 /apps/site/dist/
+/apps/site/.astro/
 /apps/site/.vite/
 /apps/site/node_modules/
 
