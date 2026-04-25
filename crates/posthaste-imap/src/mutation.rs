@@ -1,6 +1,7 @@
 use std::num::NonZeroU32;
 
 use imap_client::imap_types::{
+    fetch::MessageDataItem,
     flag::{Flag, StoreType},
     sequence::{SeqOrUid, SequenceSet},
     IntoStatic,
@@ -36,16 +37,18 @@ pub async fn apply_imap_keyword_delta_by_location(
     let add_flags = imap_flags_for_keywords(&command.add)?;
     let remove_flags = imap_flags_for_keywords(&command.remove)?;
     if !add_flags.is_empty() {
-        client
-            .uid_silent_store(uid_set.clone(), StoreType::Add, add_flags)
+        let items = client
+            .uid_store(uid_set.clone(), StoreType::Add, add_flags)
             .await
             .map_err(ImapAdapterError::from)?;
+        verify_uid_store_response(location, items.into_values().flatten())?;
     }
     if !remove_flags.is_empty() {
-        client
-            .uid_silent_store(uid_set, StoreType::Remove, remove_flags)
+        let items = client
+            .uid_store(uid_set, StoreType::Remove, remove_flags)
             .await
             .map_err(ImapAdapterError::from)?;
+        verify_uid_store_response(location, items.into_values().flatten())?;
     }
 
     Ok(MutationOutcome { cursor: None })
@@ -84,9 +87,27 @@ fn uid_sequence_set(location: &ImapMessageLocation) -> Result<SequenceSet, ImapA
     Ok(SequenceSet::from(SeqOrUid::from(uid)))
 }
 
+fn verify_uid_store_response(
+    location: &ImapMessageLocation,
+    items: impl IntoIterator<Item = MessageDataItem<'static>>,
+) -> Result<(), ImapAdapterError> {
+    let found_matching_uid = items.into_iter().any(|item| match item {
+        MessageDataItem::Uid(uid) => uid.get() == location.uid.0,
+        _ => false,
+    });
+    if found_matching_uid {
+        Ok(())
+    } else {
+        Err(ImapAdapterError::MissingFetchData(
+            "matching UID STORE response",
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use imap_client::imap_types::flag::Flag;
+    use posthaste_domain::{ImapUid, ImapUidValidity, MailboxId, MessageId};
 
     use super::*;
 
@@ -136,5 +157,41 @@ mod tests {
                 ..
             } if keyword == "bad keyword"
         ));
+    }
+
+    #[test]
+    fn verifies_uid_store_response_contains_matching_uid() {
+        let location = location();
+
+        verify_uid_store_response(
+            &location,
+            [MessageDataItem::Uid(NonZeroU32::new(42).expect("uid"))],
+        )
+        .expect("matching UID");
+    }
+
+    #[test]
+    fn rejects_uid_store_response_without_matching_uid() {
+        let error = verify_uid_store_response(
+            &location(),
+            [MessageDataItem::Uid(NonZeroU32::new(99).expect("uid"))],
+        )
+        .expect_err("matching UID is required");
+
+        assert!(matches!(
+            error,
+            ImapAdapterError::MissingFetchData("matching UID STORE response")
+        ));
+    }
+
+    fn location() -> ImapMessageLocation {
+        ImapMessageLocation {
+            message_id: MessageId::from("message-1"),
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            uid_validity: ImapUidValidity(9),
+            uid: ImapUid(42),
+            modseq: None,
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        }
     }
 }
