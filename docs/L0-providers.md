@@ -77,6 +77,17 @@ periodic poll remains authoritative. If delta state cannot be trusted, the
 driver performs a full mailbox snapshot and lets the store prune stale local
 rows through the existing `replace_all_*` reconciliation contract.
 
+The IMAP sync planner chooses the strongest safe mailbox strategy from server
+capabilities and stored cursor state:
+
+- QRESYNC delta when `QRESYNC`, `ENABLE`, stored MODSEQ, and selected
+  `HIGHESTMODSEQ` are all present.
+- CONDSTORE flag delta when MODSEQ state exists but QRESYNC is unavailable.
+- UID range fetch inside the same `UIDVALIDITY` epoch when only UID state is
+  available.
+- Full authoritative snapshot on first sync, `UIDVALIDITY` changes, or missing
+  watermarks.
+
 SMTP sends do not return a synced message object. After a successful send, the
 runtime triggers sync and reconciles Sent mail from the provider.
 
@@ -134,5 +145,6 @@ with servers that expose both protocols.
 | ui-uses-replica | MUST | Provider drivers feed the local SQLite replica; the UI never reads remote providers directly |
 | imap-cursors-per-mailbox | MUST | IMAP sync state is tracked per mailbox, not only per account |
 | imap-delta-fallback | MUST | IMAP sync falls back to full authoritative snapshots when delta state is unavailable or invalid |
+| imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | jmapaccess-preferred | SHOULD | IMAP setup prefers JMAP when the server advertises JMAPACCESS for the same message store |
