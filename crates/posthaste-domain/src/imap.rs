@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{MailboxId, MessageId};
@@ -24,6 +26,56 @@ pub struct ImapUidValidity(pub u32);
 #[serde(transparent)]
 pub struct ImapModSeq(pub u64);
 
+/// Normalized IMAP server capabilities used by the sync planner.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ImapCapabilities {
+    tokens: BTreeSet<String>,
+}
+
+impl ImapCapabilities {
+    pub fn from_tokens(tokens: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        let tokens = tokens
+            .into_iter()
+            .map(|token| token.as_ref().to_ascii_uppercase())
+            .collect();
+        Self { tokens }
+    }
+
+    pub fn contains(&self, token: &str) -> bool {
+        self.tokens.contains(&token.to_ascii_uppercase())
+    }
+
+    pub fn supports_enable(&self) -> bool {
+        self.contains("ENABLE")
+    }
+
+    pub fn supports_idle(&self) -> bool {
+        self.contains("IDLE")
+    }
+
+    pub fn supports_special_use(&self) -> bool {
+        self.contains("SPECIAL-USE") || self.contains("IMAP4REV2")
+    }
+
+    pub fn supports_uidplus(&self) -> bool {
+        self.contains("UIDPLUS") || self.contains("IMAP4REV2")
+    }
+
+    pub fn supports_move(&self) -> bool {
+        self.contains("MOVE") || self.contains("IMAP4REV2")
+    }
+
+    pub fn supports_condstore(&self) -> bool {
+        self.contains("CONDSTORE") || self.supports_qresync()
+    }
+
+    pub fn supports_qresync(&self) -> bool {
+        self.contains("QRESYNC")
+    }
+}
+
 /// Per-mailbox IMAP sync state.
 ///
 /// @spec docs/L0-providers#imap-cursors-per-mailbox
@@ -36,6 +88,50 @@ pub struct ImapMailboxSyncState {
     pub highest_uid: Option<ImapUid>,
     pub highest_modseq: Option<ImapModSeq>,
     pub updated_at: String,
+}
+
+/// Server state observed after selecting or examining an IMAP mailbox.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImapSelectedMailbox {
+    pub mailbox_id: MailboxId,
+    pub mailbox_name: String,
+    pub uid_validity: ImapUidValidity,
+    pub uid_next: Option<ImapUid>,
+    pub highest_modseq: Option<ImapModSeq>,
+}
+
+/// Reason the IMAP driver must discard delta state and build an authoritative snapshot.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ImapFullSyncReason {
+    InitialSync,
+    UidValidityChanged,
+    MissingUidWatermark,
+}
+
+/// IMAP mailbox sync strategy selected from stored state and server capabilities.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ImapMailboxSyncPlan {
+    FullSnapshot {
+        reason: ImapFullSyncReason,
+    },
+    FetchNewByUid {
+        after_uid: ImapUid,
+    },
+    CondstoreDelta {
+        since_modseq: ImapModSeq,
+        after_uid: Option<ImapUid>,
+    },
+    QresyncDelta {
+        uid_validity: ImapUidValidity,
+        since_modseq: ImapModSeq,
+        after_uid: Option<ImapUid>,
+    },
 }
 
 impl ImapMailboxSyncState {
@@ -68,6 +164,90 @@ impl ImapMailboxSyncState {
             self.highest_modseq
                 .map_or(modseq, |current| current.max(modseq)),
         );
+    }
+}
+
+/// Select the strongest correctness-preserving sync mode available for one mailbox.
+///
+/// QRESYNC and CONDSTORE are only usable when both the server advertises support
+/// and the local store has a previous MODSEQ. UID scanning is the baseline delta
+/// path, but only inside the same UIDVALIDITY epoch.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+pub fn plan_imap_mailbox_sync(
+    capabilities: &ImapCapabilities,
+    stored: Option<&ImapMailboxSyncState>,
+    selected: &ImapSelectedMailbox,
+) -> ImapMailboxSyncPlan {
+    let Some(stored) = stored else {
+        return ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::InitialSync,
+        };
+    };
+
+    if !stored.is_valid_for(selected.uid_validity) {
+        return ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::UidValidityChanged,
+        };
+    }
+
+    if capabilities.supports_qresync()
+        && capabilities.supports_enable()
+        && stored.highest_modseq.is_some()
+        && selected.highest_modseq.is_some()
+    {
+        return ImapMailboxSyncPlan::QresyncDelta {
+            uid_validity: selected.uid_validity,
+            since_modseq: stored.highest_modseq.expect("checked above"),
+            after_uid: stored.highest_uid,
+        };
+    }
+
+    if capabilities.supports_condstore()
+        && stored.highest_modseq.is_some()
+        && selected.highest_modseq.is_some()
+    {
+        return ImapMailboxSyncPlan::CondstoreDelta {
+            since_modseq: stored.highest_modseq.expect("checked above"),
+            after_uid: stored.highest_uid,
+        };
+    }
+
+    if let Some(after_uid) = stored.highest_uid {
+        return ImapMailboxSyncPlan::FetchNewByUid { after_uid };
+    }
+
+    ImapMailboxSyncPlan::FullSnapshot {
+        reason: ImapFullSyncReason::MissingUidWatermark,
+    }
+}
+
+/// Map SPECIAL-USE attributes into Posthaste's mailbox role vocabulary.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+pub fn imap_special_use_role(
+    mailbox_name: &str,
+    attributes: impl IntoIterator<Item = impl AsRef<str>>,
+) -> Option<&'static str> {
+    let normalized = attributes
+        .into_iter()
+        .map(|attribute| attribute.as_ref().to_ascii_uppercase())
+        .collect::<BTreeSet<_>>();
+
+    if normalized.contains("\\INBOX") || mailbox_name.eq_ignore_ascii_case("INBOX") {
+        Some("inbox")
+    } else if normalized.contains("\\SENT") {
+        Some("sent")
+    } else if normalized.contains("\\DRAFTS") {
+        Some("drafts")
+    } else if normalized.contains("\\TRASH") {
+        Some("trash")
+    } else if normalized.contains("\\JUNK") {
+        Some("junk")
+    } else if normalized.contains("\\ARCHIVE") {
+        Some("archive")
+    } else {
+        None
     }
 }
 
@@ -141,5 +321,99 @@ mod tests {
         assert_eq!(state.highest_modseq, Some(ImapModSeq(300)));
         assert!(state.is_valid_for(ImapUidValidity(7)));
         assert!(!state.is_valid_for(ImapUidValidity(8)));
+    }
+
+    fn selected_mailbox(uid_validity: ImapUidValidity) -> ImapSelectedMailbox {
+        ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("Inbox"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity,
+            uid_next: Some(ImapUid(43)),
+            highest_modseq: Some(ImapModSeq(400)),
+        }
+    }
+
+    fn stored_state() -> ImapMailboxSyncState {
+        let mut state = ImapMailboxSyncState::new(
+            MailboxId::from("Inbox"),
+            "INBOX".to_string(),
+            ImapUidValidity(7),
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+        state.record_seen_uid(ImapUid(42));
+        state.record_highest_modseq(ImapModSeq(300));
+        state
+    }
+
+    #[test]
+    fn planner_uses_qresync_when_server_and_state_support_it() {
+        let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC"]);
+        let stored = stored_state();
+
+        let plan = plan_imap_mailbox_sync(
+            &capabilities,
+            Some(&stored),
+            &selected_mailbox(ImapUidValidity(7)),
+        );
+
+        assert_eq!(
+            plan,
+            ImapMailboxSyncPlan::QresyncDelta {
+                uid_validity: ImapUidValidity(7),
+                since_modseq: ImapModSeq(300),
+                after_uid: Some(ImapUid(42)),
+            }
+        );
+    }
+
+    #[test]
+    fn planner_falls_back_to_full_snapshot_after_uidvalidity_change() {
+        let capabilities = ImapCapabilities::from_tokens(["ENABLE", "QRESYNC"]);
+        let stored = stored_state();
+
+        let plan = plan_imap_mailbox_sync(
+            &capabilities,
+            Some(&stored),
+            &selected_mailbox(ImapUidValidity(8)),
+        );
+
+        assert_eq!(
+            plan,
+            ImapMailboxSyncPlan::FullSnapshot {
+                reason: ImapFullSyncReason::UidValidityChanged,
+            }
+        );
+    }
+
+    #[test]
+    fn planner_uses_uid_scan_when_modseq_is_unavailable() {
+        let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1"]);
+        let stored = stored_state();
+
+        let plan = plan_imap_mailbox_sync(
+            &capabilities,
+            Some(&stored),
+            &selected_mailbox(ImapUidValidity(7)),
+        );
+
+        assert_eq!(
+            plan,
+            ImapMailboxSyncPlan::FetchNewByUid {
+                after_uid: ImapUid(42),
+            }
+        );
+    }
+
+    #[test]
+    fn special_use_mapping_prefers_standard_attributes() {
+        assert_eq!(
+            imap_special_use_role("Sent Items", ["\\Sent"]),
+            Some("sent")
+        );
+        assert_eq!(
+            imap_special_use_role("INBOX", [] as [&str; 0]),
+            Some("inbox")
+        );
+        assert_eq!(imap_special_use_role("Projects", ["\\HasNoChildren"]), None);
     }
 }
