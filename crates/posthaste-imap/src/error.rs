@@ -6,6 +6,8 @@ use thiserror::Error;
 pub enum ImapAdapterError {
     #[error("missing IMAP transport settings")]
     MissingTransport,
+    #[error("missing SMTP transport settings")]
+    MissingSmtpTransport,
     #[error("missing IMAP username")]
     MissingUsername,
     #[error("missing IMAP secret")]
@@ -41,10 +43,28 @@ pub enum ImapAdapterError {
         message_id: String,
         attachment_index: usize,
     },
+    #[error("invalid SMTP email address {address}: {reason}")]
+    InvalidSmtpAddress { address: String, reason: String },
+    #[error("could not build SMTP message: {0}")]
+    BuildSmtpMessage(String),
+    #[error("SMTP transport error: {0}")]
+    Smtp(String),
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {
     fn from(error: imap_client::client::tokio::ClientError) -> Self {
         Self::Client(error.to_string())
+    }
+}
+
+impl From<lettre::error::Error> for ImapAdapterError {
+    fn from(error: lettre::error::Error) -> Self {
+        Self::BuildSmtpMessage(error.to_string())
+    }
+}
+
+impl From<lettre::transport::smtp::Error> for ImapAdapterError {
+    fn from(error: lettre::transport::smtp::Error) -> Self {
+        Self::Smtp(error.to_string())
     }
 }

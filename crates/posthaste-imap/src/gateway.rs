@@ -13,16 +13,18 @@ use crate::{
     fetch_mailbox_header_snapshot, fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_header_snapshot, mark_imap_message_deleted_by_location,
-    parse_imap_attachment_blob_id, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
+    parse_imap_attachment_blob_id, send_smtp_message, DiscoveredImapAccount, ImapAdapterError,
+    ImapConnectionConfig, SmtpConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
 ///
 /// The first implementation performs conservative full metadata snapshots.
-/// Mutations and sends still fail with typed gateway errors until their IMAP
-/// and SMTP command paths are implemented.
+/// Mutations use conservative IMAP commands where implemented and reject
+/// unsupported command surfaces with typed gateway errors.
 pub struct LiveImapSmtpGateway {
     config: ImapConnectionConfig,
+    smtp_config: SmtpConnectionConfig,
     username: String,
     discovery: DiscoveredImapAccount,
     store: Option<Arc<dyn MailStore>>,
@@ -31,12 +33,14 @@ pub struct LiveImapSmtpGateway {
 impl LiveImapSmtpGateway {
     pub async fn connect(
         config: ImapConnectionConfig,
+        smtp_config: SmtpConnectionConfig,
         store: Option<Arc<dyn MailStore>>,
     ) -> Result<Self, ImapAdapterError> {
         let username = config.username.clone();
         let discovery = discover_imap_account(&config).await?;
         Ok(Self {
             config,
+            smtp_config,
             username,
             discovery,
             store,
@@ -297,9 +301,11 @@ impl MailGateway for LiveImapSmtpGateway {
     async fn send_message(
         &self,
         _account_id: &AccountId,
-        _request: &SendMessageRequest,
+        request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        Err(unsupported("SMTP send"))
+        send_smtp_message(&self.smtp_config, request)
+            .await
+            .map_err(imap_error_to_gateway)
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
@@ -315,6 +321,7 @@ mod tests {
     async fn fetch_identity_uses_configured_username() {
         let gateway = LiveImapSmtpGateway {
             config: test_config(),
+            smtp_config: test_smtp_config(),
             username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
@@ -336,6 +343,7 @@ mod tests {
     async fn fetch_body_reports_clear_unsupported_error() {
         let gateway = LiveImapSmtpGateway {
             config: test_config(),
+            smtp_config: test_smtp_config(),
             username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
@@ -362,11 +370,23 @@ mod tests {
             auth: posthaste_domain::ProviderAuthKind::Password,
         }
     }
+
+    fn test_smtp_config() -> SmtpConnectionConfig {
+        SmtpConnectionConfig {
+            host: "smtp.example.test".to_string(),
+            port: 587,
+            security: posthaste_domain::TransportSecurity::StartTls,
+            username: "alice@example.test".to_string(),
+            secret: "secret".to_string(),
+            auth: posthaste_domain::ProviderAuthKind::Password,
+        }
+    }
 }
 
 fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
     match error {
         ImapAdapterError::MissingTransport
+        | ImapAdapterError::MissingSmtpTransport
         | ImapAdapterError::MissingUsername
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
@@ -379,8 +399,12 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
         | ImapAdapterError::ParseMessageBody
-        | ImapAdapterError::MissingAttachment { .. } => GatewayError::Rejected(error.to_string()),
-        ImapAdapterError::Client(message) => GatewayError::Network(message),
+        | ImapAdapterError::MissingAttachment { .. }
+        | ImapAdapterError::InvalidSmtpAddress { .. }
+        | ImapAdapterError::BuildSmtpMessage(_) => GatewayError::Rejected(error.to_string()),
+        ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
+            GatewayError::Network(message)
+        }
     }
 }
 
