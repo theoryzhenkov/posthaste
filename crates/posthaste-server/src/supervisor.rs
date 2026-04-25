@@ -537,6 +537,7 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)
+        | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
         | ImapAdapterError::ParseMessageHeaders
