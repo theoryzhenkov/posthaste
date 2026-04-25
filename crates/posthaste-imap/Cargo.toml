@@ -1,0 +1,14 @@
+[package]
+name = "posthaste-imap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hex = { workspace = true }
+imap-client = { workspace = true }
+mail-parser = { workspace = true }
+posthaste-domain = { path = "../posthaste-domain" }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+

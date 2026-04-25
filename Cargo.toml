@@ -11,8 +11,10 @@ dirs = "6"
 dotenvy = "0.15"
 futures-util = "0.3"
 hex = "0.4"
+imap-client = "0.3"
 jmap-client = { git = "https://github.com/theoryzhenkov/jmap-client.git", branch = "feat/ws-correlation" }
 keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native", "windows-native"] }
+mail-parser = "0.11"
 pulldown-cmark = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rusqlite = { version = "0.33", features = ["bundled"] }
