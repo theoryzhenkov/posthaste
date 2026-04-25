@@ -101,6 +101,7 @@ pub fn imap_flag_keywords(flags: &[String]) -> Vec<String> {
             "\\answered" => Some("$answered".to_string()),
             "\\draft" => Some("$draft".to_string()),
             "\\forwarded" => Some("$forwarded".to_string()),
+            _ if !flag.starts_with('\\') => Some(flag.to_string()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -197,5 +198,16 @@ mod tests {
         .expect_err("empty headers are invalid");
 
         assert!(matches!(error, ImapAdapterError::ParseMessageHeaders));
+    }
+
+    #[test]
+    fn maps_custom_imap_keywords_to_jmap_keywords() {
+        let keywords = imap_flag_keywords(&[
+            "\\Seen".to_string(),
+            "project-x".to_string(),
+            "\\UnknownExtension".to_string(),
+        ]);
+
+        assert_eq!(keywords, vec!["$seen", "project-x"]);
     }
 }
