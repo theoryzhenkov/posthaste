@@ -28,6 +28,8 @@ pub enum ImapAdapterError {
     InvalidUidSequence(String),
     #[error("invalid IMAP keyword flag {keyword}: {reason}")]
     InvalidKeywordFlag { keyword: String, reason: String },
+    #[error("missing IMAP message location for mailbox {0}")]
+    MissingMessageLocation(String),
     #[error("invalid IMAP blob id: {0}")]
     InvalidBlobId(String),
     #[error("could not parse RFC 5322 message headers")]
