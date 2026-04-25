@@ -8,12 +8,12 @@ use posthaste_domain::{
 };
 
 use crate::{
-    apply_imap_keyword_delta_by_location, discover_imap_account,
-    fetch_imap_reply_context_by_location, fetch_mailbox_header_snapshot,
+    apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
+    discover_imap_account, fetch_imap_reply_context_by_location, fetch_mailbox_header_snapshot,
     fetch_message_body_by_location, fetch_raw_message_by_location,
-    imap_attachment_bytes_from_raw_mime, imap_full_sync_batch,
-    imap_mailbox_state_from_header_snapshot, parse_imap_attachment_blob_id, DiscoveredImapAccount,
-    ImapAdapterError, ImapConnectionConfig,
+    imap_attachment_bytes_from_raw_mime, imap_full_sync_batch, imap_mailbox_replacement_delta,
+    imap_mailbox_state_from_header_snapshot, mark_imap_message_deleted_by_location,
+    parse_imap_attachment_blob_id, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -52,35 +52,41 @@ impl LiveImapSmtpGateway {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<(posthaste_domain::ImapMessageLocation, String), GatewayError> {
-        let store = self
-            .store
-            .as_ref()
-            .ok_or_else(|| unsupported("message location lookup"))?;
-        let locations = store
+        let locations = self
+            .store("message location lookup")?
             .list_imap_message_locations(account_id, message_id)
             .map_err(store_error_to_gateway)?;
         let location = locations.first().cloned().ok_or_else(|| {
             GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
         })?;
-        let mailbox_name = store
-            .get_imap_mailbox_state(account_id, &location.mailbox_id)
+        let mailbox_name = self.mailbox_name_for_id(account_id, &location.mailbox_id)?;
+
+        Ok((location, mailbox_name))
+    }
+
+    fn store(&self, operation: &str) -> Result<&Arc<dyn MailStore>, GatewayError> {
+        self.store.as_ref().ok_or_else(|| unsupported(operation))
+    }
+
+    fn mailbox_name_for_id(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<String, GatewayError> {
+        self.store("mailbox name lookup")?
+            .get_imap_mailbox_state(account_id, mailbox_id)
             .map_err(store_error_to_gateway)?
             .map(|state| state.mailbox_name)
             .or_else(|| {
                 self.discovery
                     .mailboxes
                     .iter()
-                    .find(|mailbox| mailbox.id == location.mailbox_id)
+                    .find(|mailbox| &mailbox.id == mailbox_id)
                     .map(|mailbox| mailbox.name.clone())
             })
             .ok_or_else(|| {
-                GatewayError::Rejected(format!(
-                    "missing IMAP mailbox name for location {}",
-                    location.mailbox_id
-                ))
-            })?;
-
-        Ok((location, mailbox_name))
+                GatewayError::Rejected(format!("missing IMAP mailbox name for {mailbox_id}"))
+            })
     }
 }
 
@@ -171,21 +177,79 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn replace_mailboxes(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
         _expected_state: Option<&str>,
-        _mailbox_ids: &[MailboxId],
+        mailbox_ids: &[MailboxId],
     ) -> Result<MutationOutcome, GatewayError> {
-        Err(unsupported("mailbox replacement"))
+        let store = self.store("mailbox replacement state lookup")?;
+        let current_mailbox_ids = store
+            .get_message_mailboxes(account_id, message_id)
+            .map_err(store_error_to_gateway)?;
+        let locations = store
+            .list_imap_message_locations(account_id, message_id)
+            .map_err(store_error_to_gateway)?;
+        let source_location = locations.first().cloned().ok_or_else(|| {
+            GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
+        })?;
+        let source_mailbox_name =
+            self.mailbox_name_for_id(account_id, &source_location.mailbox_id)?;
+        let delta = imap_mailbox_replacement_delta(&current_mailbox_ids, mailbox_ids);
+
+        for mailbox_id in &delta.add {
+            let target_mailbox_name = self.mailbox_name_for_id(account_id, mailbox_id)?;
+            copy_imap_message_to_mailbox_by_location(
+                &self.config,
+                &source_mailbox_name,
+                &source_location,
+                &target_mailbox_name,
+            )
+            .await
+            .map_err(imap_error_to_gateway)?;
+        }
+
+        for mailbox_id in &delta.remove {
+            let location = locations
+                .iter()
+                .find(|location| &location.mailbox_id == mailbox_id)
+                .ok_or_else(|| {
+                    imap_error_to_gateway(ImapAdapterError::MissingMessageLocation(
+                        mailbox_id.to_string(),
+                    ))
+                })?;
+            let mailbox_name = self.mailbox_name_for_id(account_id, mailbox_id)?;
+            mark_imap_message_deleted_by_location(&self.config, &mailbox_name, location)
+                .await
+                .map_err(imap_error_to_gateway)?;
+        }
+
+        Ok(MutationOutcome { cursor: None })
     }
 
     async fn destroy_message(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
         _expected_state: Option<&str>,
     ) -> Result<MutationOutcome, GatewayError> {
-        Err(unsupported("message deletion"))
+        let locations = self
+            .store("message deletion state lookup")?
+            .list_imap_message_locations(account_id, message_id)
+            .map_err(store_error_to_gateway)?;
+        if locations.is_empty() {
+            return Err(GatewayError::Rejected(format!(
+                "missing IMAP location for message {message_id}"
+            )));
+        }
+
+        for location in &locations {
+            let mailbox_name = self.mailbox_name_for_id(account_id, &location.mailbox_id)?;
+            mark_imap_message_deleted_by_location(&self.config, &mailbox_name, location)
+                .await
+                .map_err(imap_error_to_gateway)?;
+        }
+
+        Ok(MutationOutcome { cursor: None })
     }
 
     async fn set_mailbox_role(
@@ -305,6 +369,7 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
         | ImapAdapterError::InvalidKeywordFlag { .. }
+        | ImapAdapterError::MissingMessageLocation(_)
         | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
         | ImapAdapterError::ParseMessageBody
