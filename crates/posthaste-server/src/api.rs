@@ -2134,6 +2134,7 @@ mod tests {
                 transport: Some(AccountTransportRequest {
                     base_url: Some("https://after.example/jmap".to_string()),
                     username: None,
+                    ..Default::default()
                 }),
                 secret: None,
             },
