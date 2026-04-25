@@ -57,6 +57,9 @@ enum RuntimeCommand {
         trigger: SyncTrigger,
         reply: oneshot::Sender<Result<usize, ServiceError>>,
     },
+    TriggerOnly {
+        trigger: SyncTrigger,
+    },
 }
 
 /// Result of `POST /v1/accounts/{id}/verify` — JMAP session discovery outcome.
@@ -177,6 +180,24 @@ impl AccountSupervisor {
             .map_err(|_| ServiceError::from(GatewayError::Unavailable(account_id.to_string())))?
     }
 
+    /// Request a runtime sync without waiting for completion.
+    pub async fn trigger_account_sync(
+        &self,
+        account_id: &AccountId,
+        trigger: SyncTrigger,
+    ) -> Result<(), ServiceError> {
+        let runtimes = self.runtimes.read().await;
+        let runtime = runtimes
+            .get(account_id.as_str())
+            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
+        runtime
+            .command_tx
+            .send(RuntimeCommand::TriggerOnly { trigger })
+            .await
+            .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
+        Ok(())
+    }
+
     /// Get the current runtime status snapshot for an account.
     pub async fn runtime_overview(&self, account_id: &AccountId) -> AccountRuntimeOverview {
         self.shared.runtime_overview(account_id).await
@@ -269,6 +290,11 @@ async fn run_account_runtime(
                     RuntimeCommand::Trigger { trigger, reply } => {
                         let _ = process_sync_trigger(
                             &shared, &account, trigger, &mut connection, Some(reply),
+                        ).await;
+                    }
+                    RuntimeCommand::TriggerOnly { trigger } => {
+                        let _ = process_sync_trigger(
+                            &shared, &account, trigger, &mut connection, None,
                         ).await;
                     }
                 }

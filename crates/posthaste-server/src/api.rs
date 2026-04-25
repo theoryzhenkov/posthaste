@@ -21,13 +21,14 @@ use posthaste_domain::{
     SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue,
-    SmtpTransportSettings, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED,
+    SmtpTransportSettings, SortDirection, SyncTrigger, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tracing::warn;
 
 use crate::{sanitize, AppState};
 
@@ -1465,6 +1466,17 @@ pub async fn send_message(
         .send_message(&account_id, &request, gateway.as_ref())
         .await
         .map_err(ApiError::from_service_error)?;
+    if let Err(error) = state
+        .supervisor
+        .trigger_account_sync(&account_id, SyncTrigger::Manual)
+        .await
+    {
+        warn!(
+            source_id = %account_id,
+            error = %error,
+            "send accepted but follow-up sync trigger failed"
+        );
+    }
     Ok(Json(OkResponse { ok: true }))
 }
 
