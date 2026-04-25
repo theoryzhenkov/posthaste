@@ -48,6 +48,10 @@ import {
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
 } from './surfaces'
+import {
+  normalizeValidAppliedSearchQuery,
+  prepareServerSearchQuery,
+} from './searchQuery'
 
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
@@ -90,6 +94,10 @@ function MailClient() {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [activeSurface, setActiveSurface] = useState<SurfaceDescriptor | null>(
     null,
+  )
+  const preparedSearchQuery = useMemo(
+    () => prepareServerSearchQuery(searchQuery),
+    [searchQuery],
   )
   const theme = useDesignTheme()
 
@@ -404,9 +412,21 @@ function MailClient() {
     showShortcuts,
   ])
 
-  const handleSearch = useCallback((query: string, append?: boolean) => {
-    setSearchQuery((prev) => (append && prev ? `${prev} ${query}` : query))
+  const applySearchQuery = useCallback((query: string, append?: boolean) => {
+    setSearchQuery((previousQuery) => {
+      const candidate =
+        append && previousQuery ? `${previousQuery} ${query}` : query
+      const normalized = normalizeValidAppliedSearchQuery(candidate)
+      return normalized === null ? previousQuery : normalized
+    })
   }, [])
+
+  const handleSearch = useCallback(
+    (query: string, append?: boolean) => {
+      applySearchQuery(query, append)
+    },
+    [applySearchQuery],
+  )
 
   const handleOpenSettings = useCallback(
     (
@@ -425,12 +445,20 @@ function MailClient() {
     [],
   )
 
-  const handleApplySearch = useCallback((query: string) => {
-    setSearchQuery(query)
-  }, [])
+  const handleApplySearch = useCallback(
+    (query: string) => {
+      applySearchQuery(query)
+    },
+    [applySearchQuery],
+  )
 
   const handlePreviewSearch = useCallback((query: string) => {
-    setSearchQuery((current) => (current === query ? current : query))
+    setSearchQuery((current) => {
+      const normalized = normalizeValidAppliedSearchQuery(query)
+      return normalized === null || current === normalized
+        ? current
+        : normalized
+    })
   }, [])
 
   const handleRejectSearchPreview = useCallback(() => {
@@ -464,7 +492,11 @@ function MailClient() {
   }
 
   function handleSelectTag(tag: string) {
-    setSearchQuery(`tag:${tag}`)
+    const normalizedTag = tag.trim()
+    if (!normalizedTag || normalizedTag.startsWith('$')) {
+      return
+    }
+    applySearchQuery(`tag:${normalizedTag}`)
     setSelectedMessage(null)
   }
 
@@ -570,8 +602,10 @@ function MailClient() {
                 selection={selectedMessage}
                 onSelectMessage={handleSelectMessageRef}
                 onClearSelection={handleClearSelectedMessage}
+                onClearSearchQuery={handleRejectSearchPreview}
                 actions={actions}
                 searchQuery={searchQuery}
+                preparedSearchQuery={preparedSearchQuery}
               />
             </ResizablePanel>
             {isMessageDetailOpen && (
