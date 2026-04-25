@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-search
@@ -96,13 +96,28 @@ value = "Posthaste"
 kind = "apply_tag"
 tag = "newsletter"
 
+[[draft_automations]]
+id = "draft-newsletters"
+name = ""
+enabled = true
+triggers = ["message_arrived"]
+backfill = true
+
+[draft_automations.condition]
+operator = "all"
+negated = false
+
+[[draft_automations.actions]]
+kind = "apply_tag"
+tag = ""
+
 [daemon]
 bind = "127.0.0.1:2525"         # optional, daemon bind address
 cors_origin = "http://localhost:5173"  # optional, CORS origin
 poll_interval_seconds = 300     # optional, sync poll interval
 ```
 
-`AppToml` converts bidirectionally to `AppSettings`. `automations` are global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `daemon` section is only read at startup and not exposed through the API.
+`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `daemon` section is only read at startup and not exposed through the API.
 
 ### sources/{id}.toml
 

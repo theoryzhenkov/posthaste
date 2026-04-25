@@ -8,6 +8,7 @@ import type {
 } from './api/types'
 
 export const SMART_MAILBOX_RULE_PREFIX = 'smart-mailbox'
+export const SOURCE_MAILBOX_RULE_PREFIX = 'source-mailbox'
 
 export interface AutomationRuleDraft {
   id: string
@@ -43,6 +44,16 @@ export function sourceConditionNode(accountId: string) {
   }
 }
 
+export function mailboxConditionNode(mailboxId: string) {
+  return {
+    type: 'condition' as const,
+    field: 'mailboxId' as const,
+    operator: 'equals' as const,
+    negated: false,
+    value: mailboxId,
+  }
+}
+
 export function isSourceConditionForAccount(
   node: SmartMailboxGroup['nodes'][number] | undefined,
   accountId: string,
@@ -54,6 +65,20 @@ export function isSourceConditionForAccount(
     !node.negated &&
     typeof node.value === 'string' &&
     node.value === accountId
+  )
+}
+
+export function isMailboxConditionForMailbox(
+  node: SmartMailboxGroup['nodes'][number] | undefined,
+  mailboxId: string,
+): boolean {
+  return (
+    node?.type === 'condition' &&
+    node.field === 'mailboxId' &&
+    node.operator === 'equals' &&
+    !node.negated &&
+    typeof node.value === 'string' &&
+    node.value === mailboxId
   )
 }
 
@@ -160,8 +185,23 @@ export function accountRulePrefix(accountId: string): string {
   return `account:${accountId}:`
 }
 
+export function sourceMailboxRulePrefix(
+  accountId: string,
+  mailboxId: string,
+): string {
+  return `${SOURCE_MAILBOX_RULE_PREFIX}:${accountId}:${mailboxId}:`
+}
+
 export function smartMailboxRulePrefix(smartMailboxId: string): string {
   return `${SMART_MAILBOX_RULE_PREFIX}:${smartMailboxId}:`
+}
+
+export function isSourceMailboxLinkedRule(
+  rule: AutomationRule,
+  accountId: string,
+  mailboxId: string,
+): boolean {
+  return rule.id.startsWith(sourceMailboxRulePrefix(accountId, mailboxId))
 }
 
 export function isSmartMailboxLinkedRule(
@@ -169,6 +209,31 @@ export function isSmartMailboxLinkedRule(
   smartMailboxId: string,
 ): boolean {
   return rule.id.startsWith(smartMailboxRulePrefix(smartMailboxId))
+}
+
+export function actionConditionFromSourceMailboxRule(
+  rule: AutomationRule,
+  accountId: string,
+  mailboxId: string,
+): SmartMailboxRule {
+  const nodes = rule.condition.root.nodes
+  const actionNode = nodes[2]
+  if (
+    rule.condition.root.operator === 'all' &&
+    !rule.condition.root.negated &&
+    isSourceConditionForAccount(nodes[0], accountId) &&
+    isMailboxConditionForMailbox(nodes[1], mailboxId) &&
+    actionNode?.type === 'group'
+  ) {
+    return {
+      root: {
+        operator: actionNode.operator,
+        negated: actionNode.negated,
+        nodes: actionNode.nodes,
+      },
+    }
+  }
+  return cloneRule(rule.condition)
 }
 
 export function actionConditionFromSmartMailboxRule(
@@ -213,6 +278,26 @@ export function actionConditionFromSmartMailboxRule(
     }
   }
   return cloneRule(rule.condition)
+}
+
+export function sourceMailboxDraftToRule(
+  draft: AutomationRuleDraft,
+  mailboxId: string,
+): AutomationRule {
+  return {
+    ...draftToRule(draft),
+    condition: {
+      root: {
+        operator: 'all',
+        negated: false,
+        nodes: [
+          sourceConditionNode(draft.accountId),
+          mailboxConditionNode(mailboxId),
+          groupNode(cloneRule(draft.condition).root),
+        ],
+      },
+    },
+  }
 }
 
 export function smartMailboxDraftToRule(

@@ -61,6 +61,7 @@ impl TomlConfigRepository {
             schema_version: 1,
             default_source_id: None,
             automations: Vec::new(),
+            draft_automations: Vec::new(),
             daemon: Default::default(),
             logging: Default::default(),
         };

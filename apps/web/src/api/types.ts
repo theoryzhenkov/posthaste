@@ -5,6 +5,7 @@ export type AccountDriver = 'jmap' | 'mock'
 export interface AppSettings {
   defaultAccountId: string | null
   automationRules: AutomationRule[]
+  automationDrafts: AutomationRule[]
 }
 
 /**

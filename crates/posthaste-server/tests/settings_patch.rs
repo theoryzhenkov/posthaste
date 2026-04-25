@@ -168,6 +168,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
+            automation_drafts: Vec::new(),
         })
         .expect("settings should save");
 
@@ -177,6 +178,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
             Json(PatchSettingsRequest {
                 default_account_id: None,
                 automation_rules: Some(vec![source_rule("primary")]),
+                automation_drafts: None,
             }),
         )
         .await,
@@ -212,6 +214,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: vec![source_rule("primary")],
+            automation_drafts: Vec::new(),
         })
         .expect("settings should save");
 
@@ -221,6 +224,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
             Json(PatchSettingsRequest {
                 default_account_id: Some(None),
                 automation_rules: None,
+                automation_drafts: None,
             }),
         )
         .await,
@@ -237,6 +241,53 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
 }
 
 #[tokio::test]
+async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_backfill() {
+    let harness = SettingsHarness::new();
+    harness.save_account("primary", "Primary");
+    harness
+        .state
+        .service
+        .put_app_settings(&AppSettings {
+            default_account_id: Some(AccountId::from("primary")),
+            automation_rules: Vec::new(),
+            automation_drafts: Vec::new(),
+        })
+        .expect("settings should save");
+    let mut draft = source_rule("primary");
+    draft.id = "draft-newsletters".to_string();
+    draft.name = String::new();
+    draft.actions = vec![AutomationAction::ApplyTag { tag: String::new() }];
+
+    let Json(settings) = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                default_account_id: None,
+                automation_rules: None,
+                automation_drafts: Some(vec![draft]),
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(settings.automation_rules.len(), 0);
+    assert_eq!(settings.automation_drafts.len(), 1);
+    assert!(
+        harness
+            .state
+            .service
+            .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
+            .expect("backfill job should load")
+            .is_none()
+    );
+    let app_toml = harness.app_toml();
+    assert_eq!(
+        app_toml["draft_automations"][0]["id"].as_str(),
+        Some("draft-newsletters")
+    );
+}
+
+#[tokio::test]
 async fn patch_settings_rejects_default_account_that_does_not_exist() {
     let harness = SettingsHarness::new();
 
@@ -245,6 +296,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
         Json(PatchSettingsRequest {
             default_account_id: Some(Some("missing".to_string())),
             automation_rules: None,
+            automation_drafts: None,
         }),
     )
     .await
@@ -271,6 +323,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
+            automation_drafts: Vec::new(),
         })
         .expect("settings should save");
     let mut invalid_rule = source_rule("primary");
@@ -281,6 +334,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         Json(PatchSettingsRequest {
             default_account_id: None,
             automation_rules: Some(vec![invalid_rule]),
+            automation_drafts: None,
         }),
     )
     .await
@@ -296,6 +350,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         AppSettings {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
+            automation_drafts: Vec::new(),
         }
     );
     let app_toml = harness.app_toml();

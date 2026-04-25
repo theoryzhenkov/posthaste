@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -788,21 +788,21 @@ Switches:
 
 ## Mailbox Editor
 
-Mailbox editor uses the shared modal primitive.
+Mailbox editor is a focused settings page inside the Mailboxes & Rules category.
 
-Modal:
+Page:
 
-- Width: `860px`.
-- Height: `640px`.
-- Backdrop and sheet treatment from the shared modal primitive.
+- Uses the settings page max width and scroll behavior.
+- Back link returns to the mailbox index.
+- Source and smart mailbox editors share the same header and section rhythm.
 
 Header:
 
-- Padding: `16px 22px 12px`.
-- Bottom border: `1px solid borderSoft`.
 - Display: flex, align center, gap `12px`.
-- Includes icon picker, inline name input, type label, and close button.
-- Name input: Geist `17px`, weight `700`, letter spacing `-0.3px`, transparent background.
+- Includes mailbox icon, mailbox name, type/source metadata, and optional reorder controls.
+- Smart mailbox definition uses the recursive rule builder.
+- Source mailbox definition uses the server role selector.
+- Actions use the shared automation rule list/editor, separated from the definition section.
 - Type label: Geist Mono `11px`, `fgMuted`, `SMART MAILBOX` or `MAILBOX RULES`.
 - Close button: `30px` square, radius `8px`, icon `16px`.
 
