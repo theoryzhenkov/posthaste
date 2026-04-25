@@ -193,7 +193,7 @@ impl AccountSupervisor {
         &self,
         account: &AccountSettings,
     ) -> Result<AccountVerification, ServiceError> {
-        let conn = build_connection(account, self.shared.secret_store.as_ref()).await?;
+        let conn = build_connection(account, &self.shared).await?;
         let identity = conn.gateway.fetch_identity(&account.id).await.ok();
         Ok(AccountVerification {
             ok: true,
@@ -437,7 +437,7 @@ async fn ensure_connection(
         return Ok(());
     }
     debug!(account_id = %account.id, "establishing connection");
-    let conn = build_connection(account, shared.secret_store.as_ref()).await?;
+    let conn = build_connection(account, shared).await?;
     shared.set_gateway(&account.id, conn.gateway.clone()).await;
     *connection = Some(conn);
     info!(account_id = %account.id, "connection established");
@@ -450,8 +450,9 @@ async fn ensure_connection(
 /// @spec docs/L2-transport#transport-negotiation
 async fn build_connection(
     account: &AccountSettings,
-    secret_store: &dyn SecretStore,
+    shared: &Arc<SupervisorShared>,
 ) -> Result<AccountConnection, ServiceError> {
+    let secret_store = shared.secret_store.as_ref();
     match account.driver {
         AccountDriver::Mock => Ok(AccountConnection {
             gateway: Arc::new(MockJmapGateway::default()),
@@ -514,7 +515,7 @@ async fn build_connection(
             let secret = secret_store.resolve(secret_ref)?;
             let config = ImapConnectionConfig::from_account_transport(&account.transport, secret)
                 .map_err(imap_adapter_error)?;
-            let gateway = LiveImapSmtpGateway::connect(config)
+            let gateway = LiveImapSmtpGateway::connect(config, Some(shared.store.clone()))
                 .await
                 .map_err(imap_adapter_error)?;
             info!(
