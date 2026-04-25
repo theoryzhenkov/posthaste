@@ -61,7 +61,8 @@ pub fn build_smtp_message(
 ) -> Result<Message, ImapAdapterError> {
     let mut builder = Message::builder()
         .from(smtp_sender_mailbox(config)?)
-        .subject(request.subject.clone());
+        .subject(request.subject.clone())
+        .message_id(None);
 
     for recipient in &request.to {
         builder = builder.to(smtp_mailbox_for_recipient(recipient)?);
@@ -235,6 +236,8 @@ mod tests {
         assert!(formatted.contains("To: Bob <bob@example.test>"));
         assert!(formatted.contains("Cc: carol@example.test"));
         assert!(formatted.contains("Subject: Status"));
+        assert!(formatted.contains("Message-ID: <"));
+        assert!(formatted.contains("Date: "));
         assert!(formatted.contains("In-Reply-To: <original@example.test>"));
         assert!(formatted.contains("References: <root@example.test> <original@example.test>"));
         assert!(formatted.contains("Content-Type: multipart/alternative;"));
