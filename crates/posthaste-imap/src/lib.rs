@@ -31,7 +31,8 @@ pub use discovery::{
 };
 pub use error::ImapAdapterError;
 pub use fetch::{
-    fetch_mailbox_header_records, fetch_mailbox_header_snapshot, fetched_header_from_items,
+    fetch_mailbox_changed_since_snapshot, fetch_mailbox_header_records,
+    fetch_mailbox_header_snapshot, fetched_header_from_items, ImapChangedSinceSnapshot,
     ImapMailboxHeaderSnapshot,
 };
 pub use gateway::LiveImapSmtpGateway;

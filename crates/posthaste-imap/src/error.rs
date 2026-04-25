@@ -28,6 +28,8 @@ pub enum ImapAdapterError {
     MissingFetchData(&'static str),
     #[error("invalid IMAP UID sequence set: {0}")]
     InvalidUidSequence(String),
+    #[error("invalid IMAP MODSEQ: {0}")]
+    InvalidModSeq(u64),
     #[error("invalid IMAP keyword flag {keyword}: {reason}")]
     InvalidKeywordFlag { keyword: String, reason: String },
     #[error("missing IMAP message location for mailbox {0}")]

@@ -1,12 +1,20 @@
-use std::num::NonZeroU32;
+use std::{
+    collections::{HashMap, HashSet},
+    num::{NonZeroU32, NonZeroU64},
+};
 
 use imap_client::client::tokio::Client as ImapClient;
+use imap_client::imap_types::command::{CommandBody, FetchModifier};
+use imap_client::imap_types::extensions::enable::CapabilityEnable;
 use imap_client::imap_types::fetch::{
     MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName,
 };
 use imap_client::imap_types::flag::FlagFetch;
+use imap_client::imap_types::response::{Data, StatusBody, StatusKind};
 use imap_client::imap_types::search::SearchKey;
 use imap_client::imap_types::sequence::SequenceSet;
+use imap_client::tasks::tasks::TaskError;
+use imap_client::tasks::Task;
 use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid};
 
 use crate::discovery::connect_authenticated_client;
@@ -22,6 +30,18 @@ const UID_FETCH_CHUNK_SIZE: usize = 128;
 pub struct ImapMailboxHeaderSnapshot {
     pub selected: ImapSelectedMailbox,
     pub headers: Vec<ImapMappedHeader>,
+}
+
+/// Header-level records changed since a previously stored mailbox MODSEQ.
+///
+/// `headers` is intentionally partial: it contains only messages returned by
+/// `UID FETCH ... (CHANGEDSINCE ...)`. Deletions are carried separately through
+/// `vanished_uids` when the server supports QRESYNC.
+#[derive(Clone, Debug)]
+pub struct ImapChangedSinceSnapshot {
+    pub selected: ImapSelectedMailbox,
+    pub headers: Vec<ImapMappedHeader>,
+    pub vanished_uids: Vec<ImapUid>,
 }
 
 /// Fetch and map header-level records for every message in one IMAP mailbox.
@@ -79,6 +99,56 @@ pub async fn fetch_mailbox_header_snapshot(
     Ok(ImapMailboxHeaderSnapshot { selected, headers })
 }
 
+/// Fetch message headers and flags changed since a stored MODSEQ.
+///
+/// When `include_vanished` is set, this issues `ENABLE QRESYNC` before the
+/// `UID FETCH ... (CHANGEDSINCE ... VANISHED)` command, as required by RFC
+/// 7162. Callers must treat returned headers as a partial update set, not as an
+/// authoritative mailbox snapshot.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
+pub async fn fetch_mailbox_changed_since_snapshot(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    since_modseq: ImapModSeq,
+    include_vanished: bool,
+    updated_at: String,
+) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
+    let since_modseq =
+        NonZeroU64::new(since_modseq.0).ok_or(ImapAdapterError::InvalidModSeq(since_modseq.0))?;
+    let mut client = connect_authenticated_client(config).await?;
+    client.refresh_capabilities().await?;
+    let fetch_vanished = include_vanished && enable_qresync(&mut client).await?;
+    let select_data = client.examine(mailbox_name).await?;
+    let selected = selected_mailbox_from_examine(mailbox_name, select_data)?;
+    let sequence_set = SequenceSet::try_from("1:*")
+        .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
+    let snapshot = client
+        .resolve(ChangedSinceFetchTask::new(
+            sequence_set,
+            fetch_item_names(true),
+            since_modseq,
+            fetch_vanished,
+        ))
+        .await
+        .map_err(ImapAdapterError::from)?
+        .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
+
+    let mut headers = Vec::with_capacity(snapshot.headers.len());
+    for items in snapshot.headers.into_values() {
+        let fetched = fetched_header_from_items(&selected, items, updated_at.clone())?;
+        headers.push(imap_header_message_record(&selected, fetched)?);
+    }
+    headers.sort_by_key(|record| record.location.uid);
+
+    Ok(ImapChangedSinceSnapshot {
+        selected,
+        headers,
+        vanished_uids: snapshot.vanished_uids,
+    })
+}
+
 pub(crate) async fn fetch_selected_mailbox_headers(
     client: &mut ImapClient,
     selected: &ImapSelectedMailbox,
@@ -105,6 +175,20 @@ pub(crate) async fn fetch_selected_mailbox_headers(
     Ok(records)
 }
 
+async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterError> {
+    let capability = CapabilityEnable::try_from("QRESYNC")
+        .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
+    let enabled = client
+        .enable([capability])
+        .await
+        .map_err(ImapAdapterError::from)?;
+
+    Ok(enabled
+        .unwrap_or_default()
+        .iter()
+        .any(|capability| capability.to_string().eq_ignore_ascii_case("QRESYNC")))
+}
+
 fn fetch_item_names(fetch_modseq: bool) -> MacroOrMessageDataItemNames<'static> {
     let mut items = vec![
         MessageDataItemName::Flags,
@@ -117,6 +201,95 @@ fn fetch_item_names(fetch_modseq: bool) -> MacroOrMessageDataItemNames<'static> 
     }
 
     MacroOrMessageDataItemNames::MessageDataItemNames(items)
+}
+
+#[derive(Clone, Debug)]
+struct ChangedSinceFetchSnapshot {
+    headers: HashMap<NonZeroU32, Vec<MessageDataItem<'static>>>,
+    vanished_uids: Vec<ImapUid>,
+}
+
+#[derive(Clone, Debug)]
+struct ChangedSinceFetchTask {
+    sequence_set: SequenceSet,
+    macro_or_item_names: MacroOrMessageDataItemNames<'static>,
+    since_modseq: NonZeroU64,
+    include_vanished: bool,
+    output: HashMap<NonZeroU32, HashSet<MessageDataItem<'static>>>,
+    vanished_uids: Vec<ImapUid>,
+}
+
+impl ChangedSinceFetchTask {
+    fn new(
+        sequence_set: SequenceSet,
+        macro_or_item_names: MacroOrMessageDataItemNames<'static>,
+        since_modseq: NonZeroU64,
+        include_vanished: bool,
+    ) -> Self {
+        Self {
+            sequence_set,
+            macro_or_item_names,
+            since_modseq,
+            include_vanished,
+            output: HashMap::new(),
+            vanished_uids: Vec::new(),
+        }
+    }
+}
+
+impl Task for ChangedSinceFetchTask {
+    type Output = Result<ChangedSinceFetchSnapshot, TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        let mut modifiers = vec![FetchModifier::ChangedSince(self.since_modseq)];
+        if self.include_vanished {
+            modifiers.push(FetchModifier::Vanished);
+        }
+
+        CommandBody::Fetch {
+            sequence_set: self.sequence_set.clone(),
+            macro_or_item_names: self.macro_or_item_names.clone(),
+            uid: true,
+            modifiers,
+        }
+    }
+
+    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
+        match data {
+            Data::Fetch { items, seq } => {
+                if let Some(prev_items) = self.output.get_mut(&seq) {
+                    prev_items.extend(items.into_iter());
+                } else {
+                    self.output.insert(seq, items.into_iter().collect());
+                }
+                None
+            }
+            Data::Vanished { known_uids, .. } => {
+                self.vanished_uids.extend(
+                    known_uids
+                        .iter(NonZeroU32::MAX)
+                        .map(|uid| ImapUid(uid.get())),
+                );
+                None
+            }
+            other => Some(other),
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(ChangedSinceFetchSnapshot {
+                headers: self
+                    .output
+                    .into_iter()
+                    .map(|(seq, items)| (seq, items.into_iter().collect()))
+                    .collect(),
+                vanished_uids: self.vanished_uids,
+            }),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
 }
 
 /// Extract the IMAP data items needed by Posthaste from one FETCH response.
@@ -182,7 +355,7 @@ fn imap_flag_fetch_name(flag: FlagFetch<'static>) -> String {
 mod tests {
     use std::num::{NonZeroU32, NonZeroU64};
 
-    use imap_client::imap_types::core::NString;
+    use imap_client::imap_types::core::{NString, Text};
     use imap_client::imap_types::flag::{Flag, FlagFetch};
     use posthaste_domain::{ImapUidValidity, MailboxId};
 
@@ -274,6 +447,75 @@ mod tests {
                 MessageDataItemName::Uid,
                 MessageDataItemName::ModSeq,
             ])
+        );
+    }
+
+    #[test]
+    fn changed_since_fetch_task_uses_uid_fetch_modifiers() {
+        let task = ChangedSinceFetchTask::new(
+            SequenceSet::try_from("1:*").expect("sequence set"),
+            fetch_item_names(true),
+            NonZeroU64::new(777).expect("modseq"),
+            true,
+        );
+
+        let CommandBody::Fetch {
+            uid,
+            modifiers,
+            macro_or_item_names,
+            ..
+        } = task.command_body()
+        else {
+            panic!("expected FETCH");
+        };
+
+        assert!(uid);
+        assert_eq!(
+            modifiers,
+            vec![
+                FetchModifier::ChangedSince(NonZeroU64::new(777).expect("modseq")),
+                FetchModifier::Vanished,
+            ]
+        );
+        assert_eq!(macro_or_item_names, fetch_item_names(true));
+    }
+
+    #[test]
+    fn changed_since_fetch_task_collects_fetch_rows_and_vanished_uids() {
+        let mut task = ChangedSinceFetchTask::new(
+            SequenceSet::try_from("1:*").expect("sequence set"),
+            fetch_item_names(true),
+            NonZeroU64::new(777).expect("modseq"),
+            true,
+        );
+
+        assert!(task
+            .process_data(Data::Fetch {
+                seq: NonZeroU32::new(2).expect("seq"),
+                items: vec![MessageDataItem::Uid(NonZeroU32::new(42).expect("uid"))]
+                    .try_into()
+                    .expect("fetch items"),
+            })
+            .is_none());
+        assert!(task
+            .process_data(Data::Vanished {
+                earlier: true,
+                known_uids: SequenceSet::try_from("7:8,10").expect("vanished uids"),
+            })
+            .is_none());
+
+        let snapshot = task
+            .process_tagged(StatusBody {
+                kind: StatusKind::Ok,
+                code: None,
+                text: Text::unvalidated("FETCH completed"),
+            })
+            .expect("fetch snapshot");
+
+        assert_eq!(snapshot.headers.len(), 1);
+        assert_eq!(
+            snapshot.vanished_uids,
+            vec![ImapUid(7), ImapUid(8), ImapUid(10)]
         );
     }
 }
