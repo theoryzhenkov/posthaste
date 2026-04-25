@@ -40,8 +40,8 @@ pub use message::{
 };
 pub use mutation::{
     apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
-    imap_flags_for_keywords, imap_mailbox_replacement_delta, mark_imap_message_deleted_by_location,
-    ImapMailboxReplacementDelta,
+    expunge_imap_message_by_location, imap_flags_for_keywords, imap_mailbox_replacement_delta,
+    mark_imap_message_deleted_by_location, ImapMailboxReplacementDelta,
 };
 pub use sync::{
     imap_full_sync_batch, imap_mailbox_state_from_header_snapshot, imap_mailbox_sync_batch,
