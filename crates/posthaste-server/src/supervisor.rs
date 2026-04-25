@@ -575,6 +575,7 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
+        | ImapAdapterError::InvalidModSeq(_)
         | ImapAdapterError::InvalidKeywordFlag { .. }
         | ImapAdapterError::MissingMessageLocation(_)
         | ImapAdapterError::InvalidBlobId(_)
