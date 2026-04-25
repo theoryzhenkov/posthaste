@@ -1,6 +1,6 @@
 /**
  * Root application component: QueryClientProvider, toolbar, three-column layout,
- * and settings panel.
+ * and focused surfaces.
  *
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L0-ui#navigation-model
@@ -27,7 +27,6 @@ import { CommandPalette } from './components/CommandPalette'
 import { ComposeOverlay, type ComposeIntent } from './components/ComposeOverlay'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
-import { SettingsOverlay } from './components/SettingsOverlay'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
@@ -43,7 +42,12 @@ import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
 import { mailKeys, type MailSelection } from './mailState'
 import { queryKeys } from './queryKeys'
-import { messageSurfaceFromSelection, type SurfaceDescriptor } from './surfaces'
+import {
+  messageSurfaceFromSelection,
+  settingsSurface,
+  type SettingsSurfaceCategory,
+  type SurfaceDescriptor,
+} from './surfaces'
 
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
@@ -63,7 +67,7 @@ const DEFAULT_VIEW: SidebarSelection = {
 const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
 
 /**
- * Main mail client shell: toolbar, three-column layout, settings overlay.
+ * Main mail client shell: toolbar, three-column layout, and surface host.
  *
  * Manages view selection, message selection, SSE event subscription,
  * and keyboard-accessible email actions.
@@ -78,16 +82,6 @@ function MailClient() {
   const [selectedMessage, setSelectedMessage] = useState<MailSelection | null>(
     null,
   )
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [settingsCategory, setSettingsCategory] = useState<
-    'general' | 'appearance' | 'accounts' | 'mailboxes' | null
-  >(null)
-  const [settingsAccountId, setSettingsAccountId] = useState<string | null>(
-    null,
-  )
-  const [settingsSmartMailboxId, setSettingsSmartMailboxId] = useState<
-    string | null
-  >(null)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false)
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
@@ -127,7 +121,11 @@ function MailClient() {
   const focusedSourceId =
     effectiveView?.kind === 'source-mailbox' ? effectiveView.sourceId : null
   const shouldForceSettings = accounts.length === 0
-  const showSettings = isSettingsOpen || shouldForceSettings
+  const effectiveSurface =
+    shouldForceSettings && activeSurface?.kind !== 'settings'
+      ? settingsSurface({ category: 'accounts' })
+      : activeSurface
+  const isSettingsSurfaceOpen = effectiveSurface?.kind === 'settings'
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
@@ -264,10 +262,7 @@ function MailClient() {
   const handleCompose = useCallback(() => {
     const sourceId = resolveComposeSourceId()
     if (!sourceId) {
-      setSettingsCategory('accounts')
-      setSettingsAccountId(null)
-      setSettingsSmartMailboxId(null)
-      setIsSettingsOpen(true)
+      setActiveSurface(settingsSurface({ category: 'accounts' }))
       return
     }
     setComposeIntent({ kind: 'new', sourceId })
@@ -296,7 +291,7 @@ function MailClient() {
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
 
-      if (activeSurface !== null) {
+      if (effectiveSurface !== null) {
         return
       }
 
@@ -310,10 +305,7 @@ function MailClient() {
       }
       if ((event.metaKey || event.ctrlKey) && event.key === ',') {
         event.preventDefault()
-        setSettingsCategory(null)
-        setSettingsAccountId(null)
-        setSettingsSmartMailboxId(null)
-        setIsSettingsOpen(true)
+        setActiveSurface(settingsSurface())
         return
       }
       if (
@@ -346,11 +338,11 @@ function MailClient() {
       if (isTypingTarget) return
       if (
         event.key === 'Escape' &&
-        !showSettings &&
+        !isSettingsSurfaceOpen &&
         !isCommandPaletteOpen &&
         !showShortcuts &&
         composeIntent === null &&
-        activeSurface === null
+        effectiveSurface === null
       ) {
         if (selectedMessage) {
           event.preventDefault()
@@ -381,12 +373,12 @@ function MailClient() {
       if (
         event.key.toLowerCase() === 'o' &&
         selectedMessage &&
-        !showSettings &&
+        !isSettingsSurfaceOpen &&
         !isCommandPaletteOpen &&
         !showShortcuts &&
         composeIntent === null &&
         !isTagEditorOpen &&
-        activeSurface === null
+        effectiveSurface === null
       ) {
         event.preventDefault()
         handleOpenFocusedMessage()
@@ -397,7 +389,7 @@ function MailClient() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
     composeIntent,
-    activeSurface,
+    effectiveSurface,
     handleClearSelectedMessage,
     handleCompose,
     handleOpenFocusedMessage,
@@ -408,7 +400,7 @@ function MailClient() {
     isTagEditorOpen,
     searchQuery,
     selectedMessage,
-    showSettings,
+    isSettingsSurfaceOpen,
     showShortcuts,
   ])
 
@@ -418,13 +410,16 @@ function MailClient() {
 
   const handleOpenSettings = useCallback(
     (
-      category?: 'general' | 'appearance' | 'accounts' | 'mailboxes',
+      category?: SettingsSurfaceCategory,
       options?: { accountId?: string | null; smartMailboxId?: string | null },
     ) => {
-      setSettingsCategory(category ?? null)
-      setSettingsAccountId(options?.accountId ?? null)
-      setSettingsSmartMailboxId(options?.smartMailboxId ?? null)
-      setIsSettingsOpen(true)
+      setActiveSurface(
+        settingsSurface({
+          category,
+          accountId: options?.accountId,
+          smartMailboxId: options?.smartMailboxId,
+        }),
+      )
       setIsCommandPaletteOpen(false)
     },
     [],
@@ -488,7 +483,7 @@ function MailClient() {
         isDarkMode={theme.resolvedMode === 'dark'}
         isFlagged={selectedMessageQuery.data?.isFlagged ?? false}
         isMessageSelected={selectedMessage !== null}
-        isSettingsOpen={showSettings}
+        isSettingsOpen={isSettingsSurfaceOpen}
         searchQuery={searchQuery}
         onArchive={handleArchive}
         onClearSearch={() => {
@@ -503,10 +498,9 @@ function MailClient() {
         onTag={handleOpenTagEditor}
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
-          setSettingsCategory(null)
-          setSettingsAccountId(null)
-          setSettingsSmartMailboxId(null)
-          setIsSettingsOpen((open) => !open)
+          setActiveSurface((surface) =>
+            surface?.kind === 'settings' ? null : settingsSurface(),
+          )
         }}
         onToggleTheme={handleToggleTheme}
         onTrash={handleTrash}
@@ -596,27 +590,6 @@ function MailClient() {
         </ResizablePanel>
       </ResizablePanelGroup>
 
-      {showSettings && (
-        <SettingsOverlay
-          accounts={accounts}
-          activeAccountId={focusedSourceId}
-          initialAccountId={settingsAccountId}
-          initialCategory={
-            shouldForceSettings ? 'accounts' : (settingsCategory ?? undefined)
-          }
-          initialSmartMailboxId={settingsSmartMailboxId}
-          onActiveAccountChange={() => {
-            setSelectedView(DEFAULT_VIEW)
-            setSelectedMessage(null)
-          }}
-          onClose={() => {
-            if (!shouldForceSettings) {
-              setIsSettingsOpen(false)
-            }
-          }}
-        />
-      )}
-
       {isCommandPaletteOpen && (
         <CommandPalette
           hasSelectedMessage={selectedMessage !== null}
@@ -655,8 +628,15 @@ function MailClient() {
         />
       )}
       <SurfaceHost
-        surface={activeSurface}
+        surface={effectiveSurface}
+        accounts={accounts}
+        activeAccountId={focusedSourceId}
+        canClose={!shouldForceSettings}
         onClose={() => setActiveSurface(null)}
+        onSettingsActiveAccountChange={() => {
+          setSelectedView(DEFAULT_VIEW)
+          setSelectedMessage(null)
+        }}
         onSearch={handleSearch}
         onSelectMessage={handleSelectMessage}
       />
