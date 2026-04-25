@@ -5,6 +5,7 @@ modified: 2026-04-25
 reviewed: 2026-04-25
 dependents:
   - path: docs/L0-branding
+  - path: docs/L0-providers
   - path: docs/L0-jmap
   - path: docs/L0-api
   - path: docs/L0-sync
@@ -98,8 +99,8 @@ just mkdocs build  # build docs into site/
 
 | Layer | Choice | Why |
 |-------|--------|-----|
-| Protocol | JMAP (RFC 8620/8621) | Stateless HTTP, server-side threading, push, batch requests |
-| Target server | Fastmail (initially) | Reference JMAP implementation |
+| Provider drivers | JMAP first; IMAP/SMTP next | JMAP remains preferred, with traditional-provider support through backend adapters |
+| Target servers | Fastmail and Stalwart initially; Gmail/iCloud/Outlook through IMAP/SMTP | Covers modern JMAP servers without excluding mainstream providers |
 | Backend | Rust + Axum | Owns protocol, sync, storage, and API |
 | Storage | SQLite via rusqlite | Embedded, zero-config, portable |
 | Frontend | React + TypeScript | Component model, React Query caching, keyboard handling |
@@ -133,6 +134,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 ## Domains
 
 - **branding** -- Name, identity, palette, typography, logo. [L0](docs/L0-branding.md)
+- **providers** -- Provider driver strategy for JMAP, IMAP/SMTP, and future native APIs. [L0](docs/L0-providers.md)
 - **jmap** -- JMAP protocol types, session, method calls, push. [L0](docs/L0-jmap.md)
 - **sync** -- Bidirectional sync engine, local SQLite replica, state tokens
 - **search** -- Query language, smart mailboxes, search execution. [L0](docs/L0-search.md)
@@ -150,3 +152,6 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 4. Create and use smart mailboxes (saved queries with auto-grouping)
 5. Read email in a conversation-first view with paginated conversation list, anchored live updates, and on-demand message body fetch
 6. Compose in Markdown, send as multipart HTML+plain via JMAP
+
+Post-MVP publishing readiness adds generic IMAP/SMTP provider support without
+changing the local-replica or frontend API architecture.
