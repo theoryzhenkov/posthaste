@@ -67,8 +67,9 @@ for a mailbox is:
 
 The live implementation lives in the `posthaste-imap` adapter crate. Its first
 runtime boundary performs connection, authentication, capability discovery, and
-mailbox listing. Until mailbox snapshot sync is implemented, the gateway
-rejects sync and mutation commands explicitly after successful discovery.
+mailbox listing. Discovery results are synced as an authoritative mailbox
+snapshot. Until message snapshot sync is implemented, body fetches and
+mutations are rejected explicitly after successful discovery.
 
 The driver prefers IMAP extensions when advertised:
 
