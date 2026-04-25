@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use posthaste_domain::{
-    now_iso8601, AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailStore,
-    MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
+    now_iso8601, plan_imap_mailbox_sync, AccountId, BlobId, FetchedBody, GatewayError, Identity,
+    ImapMailboxSyncPlan, MailGateway, MailStore, MailboxId, MessageId, MutationOutcome,
+    PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch,
+    SyncCursor,
 };
 use tracing::warn;
 
@@ -13,11 +14,11 @@ use crate::{
     copy_imap_message_to_mailbox_by_location, discover_imap_account,
     expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
     fetch_mailbox_header_snapshot, fetch_message_body_by_location, fetch_raw_message_by_location,
-    imap_attachment_bytes_from_raw_mime, imap_full_sync_batch, imap_mailbox_replacement_delta,
-    imap_mailbox_state_from_header_snapshot, mark_imap_message_deleted_by_location,
-    parse_imap_attachment_blob_id, smtp_sent_copy_strategy, submit_smtp_message,
-    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig, SmtpConnectionConfig,
-    SmtpSentCopyStrategy,
+    imap_attachment_bytes_from_raw_mime, imap_delta_sync_batch, imap_full_sync_batch,
+    imap_mailbox_replacement_delta, imap_mailbox_state_from_header_snapshot,
+    mark_imap_message_deleted_by_location, parse_imap_attachment_blob_id, smtp_sent_copy_strategy,
+    submit_smtp_message, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
+    SmtpConnectionConfig, SmtpSentCopyStrategy,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -114,8 +115,11 @@ impl MailGateway for LiveImapSmtpGateway {
             .await
             .map_err(imap_error_to_gateway)?;
         let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
+        let store = self.store.as_ref();
         let mut headers = Vec::new();
+        let mut local_locations = Vec::new();
         let mut mailbox_states = Vec::new();
+        let mut requires_full_message_snapshot = store.is_none();
         for mailbox in discovery
             .mailboxes
             .iter()
@@ -129,16 +133,47 @@ impl MailGateway for LiveImapSmtpGateway {
                 &snapshot,
                 updated_at.clone(),
             ));
+            if let Some(store) = store {
+                let stored_state = store
+                    .get_imap_mailbox_state(account_id, &mailbox.id)
+                    .map_err(store_error_to_gateway)?;
+                if matches!(
+                    plan_imap_mailbox_sync(
+                        &discovery.capabilities,
+                        stored_state.as_ref(),
+                        &snapshot.selected
+                    ),
+                    ImapMailboxSyncPlan::FullSnapshot { .. }
+                ) {
+                    requires_full_message_snapshot = true;
+                }
+                local_locations.extend(
+                    store
+                        .list_imap_mailbox_message_locations(account_id, &mailbox.id)
+                        .map_err(store_error_to_gateway)?,
+                );
+            }
             headers.extend(snapshot.headers);
         }
 
-        Ok(imap_full_sync_batch(
-            account_id,
-            discovery,
-            headers,
-            mailbox_states,
-            updated_at,
-        ))
+        if requires_full_message_snapshot {
+            Ok(imap_full_sync_batch(
+                account_id,
+                discovery,
+                headers,
+                mailbox_states,
+                updated_at,
+            ))
+        } else {
+            Ok(imap_delta_sync_batch(
+                account_id,
+                discovery,
+                headers,
+                mailbox_states,
+                local_locations,
+                updated_at,
+            ))
+        }
     }
 
     async fn fetch_message_body(
