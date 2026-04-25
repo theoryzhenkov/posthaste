@@ -537,6 +537,8 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)
+        | ImapAdapterError::MissingFetchData(_)
+        | ImapAdapterError::InvalidUidSequence(_)
         | ImapAdapterError::ParseMessageHeaders => GatewayError::Rejected(error.to_string()).into(),
         ImapAdapterError::Client(message) => GatewayError::Network(message).into(),
     }

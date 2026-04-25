@@ -9,6 +9,7 @@
 
 mod discovery;
 mod error;
+mod fetch;
 mod gateway;
 mod mailbox;
 mod message;
@@ -19,6 +20,7 @@ pub use discovery::{
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
 };
 pub use error::ImapAdapterError;
+pub use fetch::{fetch_mailbox_header_records, fetched_header_from_items};
 pub use gateway::LiveImapSmtpGateway;
 pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
 pub use message::{
