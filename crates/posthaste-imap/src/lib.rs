@@ -16,7 +16,11 @@ mod mailbox;
 mod message;
 mod sync;
 
-pub use body::{fetch_message_body_by_location, fetched_body_from_items, imap_body_from_raw_mime};
+pub use body::{
+    fetch_message_body_by_location, fetch_raw_message_by_location, fetched_body_from_items,
+    imap_attachment_bytes_from_raw_mime, imap_body_from_raw_mime, parse_imap_attachment_blob_id,
+    raw_mime_from_items,
+};
 pub use discovery::{
     discover_imap_account, imap_mailbox_id, map_imap_mailbox, normalize_imap_capabilities,
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
