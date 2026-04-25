@@ -90,6 +90,30 @@ describe('query language completions', () => {
     expect(tag[0]?.replacement).toBe('tag: newsletter')
   })
 
+  it('does not suggest blank or system tag filters', () => {
+    const completions = getQueryCompletions('tag:', {
+      sidebar: {
+        ...sidebar,
+        tags: [
+          { name: '', unreadMessages: 1, totalMessages: 1 },
+          { name: '   ', unreadMessages: 1, totalMessages: 1 },
+          { name: '$seen', unreadMessages: 1, totalMessages: 1 },
+          { name: 'newsletter', unreadMessages: 1, totalMessages: 1 },
+        ],
+      },
+      messages: [
+        {
+          ...message,
+          keywords: ['', '   ', '$seen', 'newsletter'],
+        },
+      ],
+    })
+
+    expect(completions.map((completion) => completion.replacement)).toEqual([
+      'tag:newsletter',
+    ])
+  })
+
   it('shows query help entries from help-like input', () => {
     expect(getQueryHelpEntries('query help').length).toBeGreaterThan(0)
   })

@@ -248,6 +248,21 @@ function uniqueCandidates(candidates: ValueCandidate[]): ValueCandidate[] {
   return unique
 }
 
+function userTagCandidate(
+  value: string,
+  detail: string,
+): ValueCandidate | null {
+  const tag = value.trim()
+  if (!tag || tag.startsWith('$')) {
+    return null
+  }
+  return {
+    value: tag,
+    label: tag,
+    detail,
+  }
+}
+
 function filterCandidates(
   candidates: ValueCandidate[],
   valueFragment: string,
@@ -649,19 +664,16 @@ function candidatesForPrefix(
       ]
     case 'tag':
       return uniqueCandidates([
-        ...(context.sidebar?.tags.map((tag) => ({
-          value: tag.name,
-          label: tag.name,
-          detail: 'Tag',
-        })) ?? []),
+        ...(context.sidebar?.tags.flatMap((tag) => {
+          const candidate = userTagCandidate(tag.name, 'Tag')
+          return candidate ? [candidate] : []
+        }) ?? []),
         ...context.messages.flatMap((message) =>
           message.keywords
-            .filter((keyword) => !keyword.startsWith('$'))
-            .map((keyword) => ({
-              value: keyword,
-              label: keyword,
-              detail: 'Keyword',
-            })),
+            .map((keyword) => userTagCandidate(keyword, 'Keyword'))
+            .filter((candidate): candidate is ValueCandidate =>
+              Boolean(candidate),
+            ),
         ),
       ])
     case 'from':
