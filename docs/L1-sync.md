@@ -93,6 +93,10 @@ Important derived tables:
   mailbox ID/name, `UIDVALIDITY`, highest UID, and `HIGHESTMODSEQ` when
   available. This table is separate from JMAP-style `sync_cursor` because IMAP
   validity and delta state are mailbox-scoped.
+- `imap_message_location` stores the mailbox UID locations that make an IMAP
+  message addressable for fetch and mutation commands. This is separate from
+  message identity so provider-stable IDs such as Gmail `X-GM-MSGID` can
+  deduplicate messages across labels while retaining per-mailbox UIDs.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
@@ -158,6 +162,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | body-lazy | MUST | Email bodies are fetched on first view, not during metadata sync |
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
+| imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |

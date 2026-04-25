@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use crate::{
     AccountId, AutomationBackfillJob, BlobId, CommandResult, ConversationCursor, ConversationId,
     ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
-    ImapMailboxSyncState, MailboxId, MailboxSummary, MessageCursor, MessageDetail, MessageId,
-    MessagePage, MessageSortField, MessageSummary, MutationOutcome, PushTransport,
-    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
-    SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject,
-    TagSummary, ThreadId, ThreadView,
+    ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
+    MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
+    PushTransport, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
+    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor,
+    SyncObject, TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -295,6 +295,34 @@ pub trait ImapSyncStateWriteStore: Send + Sync {
         &self,
         account_id: &AccountId,
         mailbox_id: &MailboxId,
+    ) -> Result<(), StoreError>;
+}
+
+/// IMAP message location read boundary.
+///
+/// @spec docs/L0-providers#identity-and-threading
+pub trait ImapMessageLocationStore: Send + Sync {
+    fn list_imap_message_locations(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Vec<ImapMessageLocation>, StoreError>;
+}
+
+/// IMAP message location write boundary.
+///
+/// @spec docs/L0-providers#identity-and-threading
+pub trait ImapMessageLocationWriteStore: Send + Sync {
+    fn put_imap_message_location(
+        &self,
+        account_id: &AccountId,
+        location: &ImapMessageLocation,
+    ) -> Result<(), StoreError>;
+
+    fn delete_imap_message_locations(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
     ) -> Result<(), StoreError>;
 }
 
