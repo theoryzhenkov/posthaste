@@ -9,8 +9,8 @@ use posthaste_domain::{
 
 use crate::{
     apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
-    discover_imap_account, fetch_imap_reply_context_by_location, fetch_mailbox_header_snapshot,
-    fetch_message_body_by_location, fetch_raw_message_by_location,
+    discover_imap_account, expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
+    fetch_mailbox_header_snapshot, fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_header_snapshot, mark_imap_message_deleted_by_location,
     parse_imap_attachment_blob_id, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
@@ -244,9 +244,15 @@ impl MailGateway for LiveImapSmtpGateway {
 
         for location in &locations {
             let mailbox_name = self.mailbox_name_for_id(account_id, &location.mailbox_id)?;
-            mark_imap_message_deleted_by_location(&self.config, &mailbox_name, location)
-                .await
-                .map_err(imap_error_to_gateway)?;
+            if self.discovery.capabilities.supports_uidplus() {
+                expunge_imap_message_by_location(&self.config, &mailbox_name, location)
+                    .await
+                    .map_err(imap_error_to_gateway)?;
+            } else {
+                mark_imap_message_deleted_by_location(&self.config, &mailbox_name, location)
+                    .await
+                    .map_err(imap_error_to_gateway)?;
+            }
         }
 
         Ok(MutationOutcome { cursor: None })
