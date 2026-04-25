@@ -99,6 +99,13 @@ from RFC 5322 headers (`Message-ID`, `References`, `In-Reply-To`) and a stable
 fallback for malformed messages. Provider-specific stable IDs may improve
 deduplication when available, for example Gmail's `X-GM-MSGID`.
 
+When a server advertises Gmail's `X-GM-EXT-1` capability, the IMAP driver uses
+`X-GM-MSGID` as the message identity, `X-GM-THRID` as the provider thread
+identity, and `X-GM-LABELS` as the label source. This avoids duplicating the
+same Gmail message when it appears through multiple labels exposed as IMAP
+mailboxes. Generic IMAP accounts continue to use `(mailbox, UIDVALIDITY, UID)`
+for message identity and RFC 5322 headers for conversation projection.
+
 Message IDs stored in PostHaste remain opaque and driver-owned. IMAP IDs should
 be stable across sessions and include enough server state to avoid UID reuse
 bugs after `UIDVALIDITY` changes.
@@ -146,5 +153,6 @@ with servers that expose both protocols.
 | imap-cursors-per-mailbox | MUST | IMAP sync state is tracked per mailbox, not only per account |
 | imap-delta-fallback | MUST | IMAP sync falls back to full authoritative snapshots when delta state is unavailable or invalid |
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
+| gmail-extension-identity | SHOULD | Gmail IMAP accounts use X-GM-MSGID, X-GM-THRID, and X-GM-LABELS when X-GM-EXT-1 is advertised |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | jmapaccess-preferred | SHOULD | IMAP setup prefers JMAP when the server advertises JMAPACCESS for the same message store |

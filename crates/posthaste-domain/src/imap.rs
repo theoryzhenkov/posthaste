@@ -26,6 +26,20 @@ pub struct ImapUidValidity(pub u32);
 #[serde(transparent)]
 pub struct ImapModSeq(pub u64);
 
+/// Gmail's stable IMAP message identifier from `X-GM-MSGID`.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct GmailMessageId(pub u64);
+
+/// Gmail's stable IMAP thread identifier from `X-GM-THRID`.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct GmailThreadId(pub u64);
+
 /// Normalized IMAP server capabilities used by the sync planner.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
@@ -73,6 +87,65 @@ impl ImapCapabilities {
 
     pub fn supports_qresync(&self) -> bool {
         self.contains("QRESYNC")
+    }
+
+    pub fn supports_gmail_extensions(&self) -> bool {
+        self.contains("X-GM-EXT-1")
+    }
+}
+
+/// Remote identity source used to deduplicate IMAP messages.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImapMessageIdentitySource {
+    UidValidityUid,
+    GmailMessageId,
+}
+
+/// Remote thread source used when projecting conversations.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImapThreadIdentitySource {
+    Rfc5322Headers,
+    GmailThreadId,
+}
+
+/// Source for mailbox/tag membership on IMAP accounts.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImapLabelSource {
+    MailboxMembership,
+    GmailLabels,
+}
+
+/// Provider features inferred from IMAP capabilities.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImapProviderFeatures {
+    pub message_identity: ImapMessageIdentitySource,
+    pub thread_identity: ImapThreadIdentitySource,
+    pub label_source: ImapLabelSource,
+}
+
+impl ImapProviderFeatures {
+    pub fn from_capabilities(capabilities: &ImapCapabilities) -> Self {
+        if capabilities.supports_gmail_extensions() {
+            Self {
+                message_identity: ImapMessageIdentitySource::GmailMessageId,
+                thread_identity: ImapThreadIdentitySource::GmailThreadId,
+                label_source: ImapLabelSource::GmailLabels,
+            }
+        } else {
+            Self {
+                message_identity: ImapMessageIdentitySource::UidValidityUid,
+                thread_identity: ImapThreadIdentitySource::Rfc5322Headers,
+                label_source: ImapLabelSource::MailboxMembership,
+            }
+        }
     }
 }
 
@@ -270,6 +343,23 @@ pub fn imap_message_id(
     ))
 }
 
+/// Build a stable local message ID from Gmail's `X-GM-MSGID`.
+///
+/// Gmail exposes the same message through multiple labels/mailboxes, so UID is
+/// not the best deduplication key when the extension is available.
+///
+/// @spec docs/L0-providers#identity-and-threading
+pub fn gmail_message_id(gmail_id: GmailMessageId) -> MessageId {
+    MessageId(format!("imap:gmail:msgid:{}", gmail_id.0))
+}
+
+/// Build a stable local thread ID from Gmail's `X-GM-THRID`.
+///
+/// @spec docs/L0-providers#identity-and-threading
+pub fn gmail_thread_id(gmail_id: GmailThreadId) -> crate::ThreadId {
+    crate::ThreadId(format!("imap:gmail:thrid:{}", gmail_id.0))
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(bytes.len() * 2);
@@ -415,5 +505,29 @@ mod tests {
             Some("inbox")
         );
         assert_eq!(imap_special_use_role("Projects", ["\\HasNoChildren"]), None);
+    }
+
+    #[test]
+    fn provider_features_use_gmail_extension_for_deduplication_and_threads() {
+        let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "X-GM-EXT-1"]);
+
+        let features = ImapProviderFeatures::from_capabilities(&capabilities);
+
+        assert_eq!(
+            features,
+            ImapProviderFeatures {
+                message_identity: ImapMessageIdentitySource::GmailMessageId,
+                thread_identity: ImapThreadIdentitySource::GmailThreadId,
+                label_source: ImapLabelSource::GmailLabels,
+            }
+        );
+        assert_eq!(
+            gmail_message_id(GmailMessageId(1278455344230334865)).as_str(),
+            "imap:gmail:msgid:1278455344230334865"
+        );
+        assert_eq!(
+            gmail_thread_id(GmailThreadId(1266894439832287888)).as_str(),
+            "imap:gmail:thrid:1266894439832287888"
+        );
     }
 }
