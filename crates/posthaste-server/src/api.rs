@@ -475,6 +475,12 @@ pub async fn patch_settings(
         .service
         .put_app_settings(&settings)
         .map_err(ApiError::from_service_error)?;
+    if request.automation_rules.is_some() {
+        state
+            .service
+            .ensure_automation_backfills_for_current_rules()
+            .map_err(ApiError::from_service_error)?;
+    }
     Ok(Json(settings))
 }
 

@@ -10,10 +10,10 @@ use axum::Json;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationRule, AutomationTrigger, ConfigRepository, MailService, MailStore,
-    SecretRef, SecretStore, SecretStoreError, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
+    ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use posthaste_server::api::{patch_settings, PatchSettingsRequest};
 use posthaste_server::supervisor::AccountSupervisor;
@@ -187,6 +187,13 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
         Some(AccountId::from("primary"))
     );
     assert_eq!(settings.automation_rules.len(), 1);
+    let backfill_job = harness
+        .state
+        .service
+        .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
+        .expect("backfill job should load")
+        .expect("backfill job should be queued");
+    assert_eq!(backfill_job.status, AutomationBackfillJobStatus::Pending);
     let app_toml = harness.app_toml();
     assert_eq!(app_toml["default_source_id"].as_str(), Some("primary"));
     assert_eq!(

@@ -3,19 +3,21 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::{
-    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, AutomationAction, AutomationRule,
-    AutomationTrigger, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
-    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
-    ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
-    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
-    MessageListStore, MessageMailboxStore, MessagePage, MessageRecord, MessageSortField,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse, SidebarSmartMailbox,
-    SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection,
-    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
+    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, AutomationAction,
+    AutomationBackfillBatchOutcome, AutomationBackfillJob, AutomationBackfillJobStatus,
+    AutomationBackfillStore, AutomationRule, AutomationTrigger, CommandResult, ConfigDiff,
+    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
+    ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
+    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
+    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
+    MessageRecord, MessageSortField, MessageSummary, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, StoreError, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore,
+    TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
     EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
@@ -130,6 +132,21 @@ fn automation_action_precondition(action: &AutomationAction) -> Option<SmartMail
     }
 }
 
+fn automation_backfill_fingerprint(settings: &AppSettings) -> Result<Option<String>, ServiceError> {
+    let rules = settings
+        .automation_rules
+        .iter()
+        .filter(|rule| rule.enabled && rule.backfill)
+        .cloned()
+        .collect::<Vec<_>>();
+    if rules.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(&rules).map(Some).map_err(|err| {
+        StoreError::Failure(format!("failed to fingerprint automation rules: {err}")).into()
+    })
+}
+
 /// Orchestrates domain logic by composing gateway, store, and config ports.
 ///
 /// `MailService` is the primary entry point for all business operations.
@@ -152,6 +169,7 @@ pub struct MailService {
     events: Arc<dyn EventStore>,
     source_projections: Arc<dyn SourceProjectionStore>,
     source_data: Arc<dyn SourceDataStore>,
+    automation_backfills: Arc<dyn AutomationBackfillStore>,
 }
 
 impl MailService {
@@ -174,7 +192,8 @@ impl MailService {
             message_commands: store.clone(),
             events: store.clone(),
             source_projections: store.clone(),
-            source_data: store,
+            source_data: store.clone(),
+            automation_backfills: store,
         }
     }
 
@@ -192,6 +211,47 @@ impl MailService {
     /// @spec docs/L1-api#settings
     pub fn put_app_settings(&self, settings: &AppSettings) -> Result<(), ServiceError> {
         self.config.put_app_settings(settings).map_err(Into::into)
+    }
+
+    /// Ensure enabled accounts have a durable job for the current backfill rules.
+    ///
+    /// Completed jobs are preserved, so calling this on startup or after a
+    /// settings PATCH is cheap unless the rule fingerprint changed.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    pub fn ensure_automation_backfills_for_current_rules(
+        &self,
+    ) -> Result<Vec<AutomationBackfillJob>, ServiceError> {
+        let settings = self.config.get_app_settings()?;
+        let Some(rule_fingerprint) = automation_backfill_fingerprint(&settings)? else {
+            return Ok(Vec::new());
+        };
+        self.config
+            .list_sources()?
+            .into_iter()
+            .filter(|source| source.enabled)
+            .map(|source| {
+                self.automation_backfills
+                    .ensure_automation_backfill_job(&source.id, &rule_fingerprint)
+                    .map_err(Into::into)
+            })
+            .collect()
+    }
+
+    /// Return the current-rules backfill job for an account, if applicable.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    pub fn automation_backfill_job_for_current_rules(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Option<AutomationBackfillJob>, ServiceError> {
+        let settings = self.config.get_app_settings()?;
+        let Some(rule_fingerprint) = automation_backfill_fingerprint(&settings)? else {
+            return Ok(None);
+        };
+        self.automation_backfills
+            .get_automation_backfill_job(account_id, &rule_fingerprint)
+            .map_err(Into::into)
     }
 
     /// List all account configurations.
@@ -893,6 +953,89 @@ impl MailService {
         }
     }
 
+    /// Process one durable low-priority automation backfill batch for an account.
+    ///
+    /// The current rules are fingerprinted before work starts. A completed job
+    /// suppresses repeated scans for the same rules, while changed rules create
+    /// a new pending job.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    pub async fn process_automation_backfill_job_batch(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+        batch_size: usize,
+    ) -> Result<AutomationBackfillBatchOutcome, ServiceError> {
+        if batch_size == 0 {
+            return Ok(AutomationBackfillBatchOutcome {
+                ran: false,
+                events: Vec::new(),
+                has_more: false,
+            });
+        }
+        let Some(source) = self.config.get_source(account_id)? else {
+            return Ok(AutomationBackfillBatchOutcome {
+                ran: false,
+                events: Vec::new(),
+                has_more: false,
+            });
+        };
+        if !source.enabled {
+            return Ok(AutomationBackfillBatchOutcome {
+                ran: false,
+                events: Vec::new(),
+                has_more: false,
+            });
+        }
+        let settings = self.config.get_app_settings()?;
+        let Some(rule_fingerprint) = automation_backfill_fingerprint(&settings)? else {
+            return Ok(AutomationBackfillBatchOutcome {
+                ran: false,
+                events: Vec::new(),
+                has_more: false,
+            });
+        };
+
+        let job = self
+            .automation_backfills
+            .ensure_automation_backfill_job(account_id, &rule_fingerprint)?;
+        if job.status != AutomationBackfillJobStatus::Pending {
+            return Ok(AutomationBackfillBatchOutcome {
+                ran: false,
+                events: Vec::new(),
+                has_more: false,
+            });
+        }
+
+        match self
+            .backfill_automation_rules_batch_with_settings(
+                account_id, gateway, batch_size, &settings,
+            )
+            .await
+        {
+            Ok((events, has_more)) => {
+                if !has_more {
+                    self.automation_backfills
+                        .complete_automation_backfill_job(account_id, &rule_fingerprint)?;
+                }
+                Ok(AutomationBackfillBatchOutcome {
+                    ran: true,
+                    events,
+                    has_more,
+                })
+            }
+            Err(error) => {
+                self.automation_backfills
+                    .record_automation_backfill_failure(
+                        account_id,
+                        &rule_fingerprint,
+                        &error.to_string(),
+                    )?;
+                Err(error)
+            }
+        }
+    }
+
     /// Apply one bounded batch of global automation rules to existing local mail.
     ///
     /// This is intended for low-priority background backfill. It queries the
@@ -910,6 +1053,19 @@ impl MailService {
             return Ok((Vec::new(), false));
         }
         let settings = self.config.get_app_settings()?;
+        self.backfill_automation_rules_batch_with_settings(
+            account_id, gateway, batch_size, &settings,
+        )
+        .await
+    }
+
+    async fn backfill_automation_rules_batch_with_settings(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+        batch_size: usize,
+        settings: &AppSettings,
+    ) -> Result<(Vec<DomainEvent>, bool), ServiceError> {
         if settings.automation_rules.is_empty() || batch_size == 0 {
             return Ok((Vec::new(), false));
         }
@@ -1220,13 +1376,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        ConfigError, ConfigSnapshot, ConversationReadStore, DomainEvent, EventFilter, EventStore,
-        FetchedBody, GatewayError, MailboxReadStore, MessageCommandStore, MessageDetail,
-        MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome, PushTransport,
-        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-        SmartMailboxStore, SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError,
-        SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
+        AutomationBackfillStore, ConfigError, ConfigSnapshot, ConversationReadStore, DomainEvent,
+        EventFilter, EventStore, FetchedBody, GatewayError, MailboxReadStore, MessageCommandStore,
+        MessageDetail, MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome,
+        PushTransport, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+        SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule,
+        SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SourceDataStore,
+        SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
     };
 
     struct TestConfig {
@@ -1336,6 +1492,7 @@ mod tests {
         projection_calls: Mutex<Vec<String>>,
         projection_deletes: Mutex<Vec<String>>,
         source_data_deletes: Mutex<Vec<String>>,
+        automation_backfill_jobs: Mutex<Vec<AutomationBackfillJob>>,
         keyword_adds: Mutex<Vec<(MessageId, Vec<String>)>>,
         rule_page: Mutex<Vec<MessageSummary>>,
         mutation_state: Mutex<MutationStoreState>,
@@ -1349,6 +1506,7 @@ mod tests {
                 projection_calls: Mutex::new(Vec::new()),
                 projection_deletes: Mutex::new(Vec::new()),
                 source_data_deletes: Mutex::new(Vec::new()),
+                automation_backfill_jobs: Mutex::new(Vec::new()),
                 keyword_adds: Mutex::new(Vec::new()),
                 rule_page: Mutex::new(Vec::new()),
                 mutation_state: Mutex::new(MutationStoreState::default()),
@@ -1694,6 +1852,88 @@ mod tests {
                 .expect("source data deletes lock poisoned")
                 .push(account_id.to_string());
             Ok(())
+        }
+    }
+
+    impl AutomationBackfillStore for TestStore {
+        fn ensure_automation_backfill_job(
+            &self,
+            account_id: &AccountId,
+            rule_fingerprint: &str,
+        ) -> Result<AutomationBackfillJob, StoreError> {
+            let mut jobs = self
+                .automation_backfill_jobs
+                .lock()
+                .expect("automation backfill jobs lock poisoned");
+            if let Some(job) = jobs.iter().find(|job| {
+                &job.account_id == account_id && job.rule_fingerprint == rule_fingerprint
+            }) {
+                return Ok(job.clone());
+            }
+            let job = AutomationBackfillJob {
+                account_id: account_id.clone(),
+                rule_fingerprint: rule_fingerprint.to_string(),
+                status: AutomationBackfillJobStatus::Pending,
+                attempts: 0,
+                last_error: None,
+                updated_at: crate::RFC3339_EPOCH.to_string(),
+            };
+            jobs.push(job.clone());
+            Ok(job)
+        }
+
+        fn complete_automation_backfill_job(
+            &self,
+            account_id: &AccountId,
+            rule_fingerprint: &str,
+        ) -> Result<(), StoreError> {
+            let mut jobs = self
+                .automation_backfill_jobs
+                .lock()
+                .expect("automation backfill jobs lock poisoned");
+            if let Some(job) = jobs.iter_mut().find(|job| {
+                &job.account_id == account_id && job.rule_fingerprint == rule_fingerprint
+            }) {
+                job.status = AutomationBackfillJobStatus::Completed;
+                job.last_error = None;
+            }
+            Ok(())
+        }
+
+        fn record_automation_backfill_failure(
+            &self,
+            account_id: &AccountId,
+            rule_fingerprint: &str,
+            error: &str,
+        ) -> Result<(), StoreError> {
+            let mut jobs = self
+                .automation_backfill_jobs
+                .lock()
+                .expect("automation backfill jobs lock poisoned");
+            if let Some(job) = jobs.iter_mut().find(|job| {
+                &job.account_id == account_id && job.rule_fingerprint == rule_fingerprint
+            }) {
+                job.status = AutomationBackfillJobStatus::Pending;
+                job.attempts += 1;
+                job.last_error = Some(error.to_string());
+            }
+            Ok(())
+        }
+
+        fn get_automation_backfill_job(
+            &self,
+            account_id: &AccountId,
+            rule_fingerprint: &str,
+        ) -> Result<Option<AutomationBackfillJob>, StoreError> {
+            Ok(self
+                .automation_backfill_jobs
+                .lock()
+                .expect("automation backfill jobs lock poisoned")
+                .iter()
+                .find(|job| {
+                    &job.account_id == account_id && job.rule_fingerprint == rule_fingerprint
+                })
+                .cloned())
         }
     }
 
