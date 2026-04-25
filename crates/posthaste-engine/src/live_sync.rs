@@ -44,6 +44,7 @@ pub(crate) async fn sync_account(
     Ok(SyncBatch {
         mailboxes: mailbox_sync.mailboxes,
         messages: email_sync.messages,
+        imap_mailbox_states: Vec::new(),
         imap_message_locations: Vec::new(),
         deleted_mailbox_ids: mailbox_sync.deleted_mailbox_ids,
         deleted_message_ids: email_sync.deleted_message_ids,

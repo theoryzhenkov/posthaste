@@ -1,8 +1,9 @@
 use posthaste_domain::{
-    AccountId, ImapMessageLocation, MailboxRecord, MessageRecord, SyncBatch, SyncCursor, SyncObject,
+    AccountId, ImapMailboxSyncState, ImapMessageLocation, MailboxRecord, MessageRecord, SyncBatch,
+    SyncCursor, SyncObject,
 };
 
-use crate::{DiscoveredImapAccount, ImapMappedHeader};
+use crate::{DiscoveredImapAccount, ImapMailboxHeaderSnapshot, ImapMappedHeader};
 
 /// Convert an IMAP mailbox discovery result into an authoritative mailbox
 /// snapshot. Message sync is intentionally separate because it depends on
@@ -31,6 +32,7 @@ pub fn imap_mailbox_sync_batch(
     SyncBatch {
         mailboxes,
         messages: Vec::new(),
+        imap_mailbox_states: Vec::new(),
         imap_message_locations: Vec::new(),
         deleted_mailbox_ids: Vec::new(),
         deleted_message_ids: Vec::new(),
@@ -58,6 +60,7 @@ pub fn imap_full_sync_batch(
     account_id: &AccountId,
     discovery: DiscoveredImapAccount,
     headers: Vec<ImapMappedHeader>,
+    mailbox_states: Vec<ImapMailboxSyncState>,
     updated_at: String,
 ) -> SyncBatch {
     let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
@@ -69,6 +72,7 @@ pub fn imap_full_sync_batch(
         locations.push(header.location);
     }
 
+    batch.imap_mailbox_states = mailbox_states;
     batch.messages = messages;
     batch.imap_message_locations = locations;
     batch.replace_all_messages = true;
@@ -78,6 +82,28 @@ pub fn imap_full_sync_batch(
         updated_at,
     });
     batch
+}
+
+pub fn imap_mailbox_state_from_header_snapshot(
+    snapshot: &ImapMailboxHeaderSnapshot,
+    updated_at: String,
+) -> ImapMailboxSyncState {
+    ImapMailboxSyncState {
+        mailbox_id: snapshot.selected.mailbox_id.clone(),
+        mailbox_name: snapshot.selected.mailbox_name.clone(),
+        uid_validity: snapshot.selected.uid_validity,
+        highest_uid: snapshot
+            .headers
+            .iter()
+            .map(|header| header.location.uid)
+            .max(),
+        highest_modseq: snapshot
+            .headers
+            .iter()
+            .filter_map(|header| header.location.modseq)
+            .max(),
+        updated_at,
+    }
 }
 
 fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
@@ -189,11 +215,20 @@ mod tests {
                 mailboxes: vec![map_imap_mailbox("INBOX", ["\\Inbox"])],
             },
             vec![mapped],
+            vec![ImapMailboxSyncState {
+                mailbox_id: selected.mailbox_id.clone(),
+                mailbox_name: "INBOX".to_string(),
+                uid_validity: ImapUidValidity(9),
+                highest_uid: Some(ImapUid(42)),
+                highest_modseq: Some(ImapModSeq(777)),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            }],
             "2026-04-25T00:00:00Z".to_string(),
         );
 
         assert!(batch.replace_all_messages);
         assert_eq!(batch.messages.len(), 1);
+        assert_eq!(batch.imap_mailbox_states.len(), 1);
         assert_eq!(batch.imap_message_locations, vec![expected_location]);
         assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
         assert!(batch.cursors[1].state.starts_with("imap-messages:"));

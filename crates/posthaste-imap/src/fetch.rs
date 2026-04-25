@@ -17,6 +17,13 @@ use crate::{
 
 const UID_FETCH_CHUNK_SIZE: usize = 128;
 
+/// Header snapshot for one selected IMAP mailbox.
+#[derive(Clone, Debug)]
+pub struct ImapMailboxHeaderSnapshot {
+    pub selected: ImapSelectedMailbox,
+    pub headers: Vec<ImapMappedHeader>,
+}
+
 /// Fetch and map header-level records for every message in one IMAP mailbox.
 ///
 /// This performs a conservative full mailbox snapshot: `UID SEARCH ALL` obtains
@@ -30,6 +37,23 @@ pub async fn fetch_mailbox_header_records(
     mailbox_name: &str,
     updated_at: String,
 ) -> Result<Vec<ImapMappedHeader>, ImapAdapterError> {
+    Ok(
+        fetch_mailbox_header_snapshot(config, mailbox_name, updated_at)
+            .await?
+            .headers,
+    )
+}
+
+/// Fetch selected mailbox state plus header-level records for every message in
+/// one IMAP mailbox.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+/// @spec docs/L1-sync#body-lazy
+pub async fn fetch_mailbox_header_snapshot(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    updated_at: String,
+) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
     let fetch_modseq = normalize_imap_capabilities(
@@ -48,7 +72,11 @@ pub async fn fetch_mailbox_header_records(
     uids.sort_unstable();
     uids.dedup();
 
-    fetch_selected_mailbox_headers(&mut client, &selected, &uids, fetch_modseq, updated_at).await
+    let headers =
+        fetch_selected_mailbox_headers(&mut client, &selected, &uids, fetch_modseq, updated_at)
+            .await?;
+
+    Ok(ImapMailboxHeaderSnapshot { selected, headers })
 }
 
 pub(crate) async fn fetch_selected_mailbox_headers(
