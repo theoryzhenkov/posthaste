@@ -6,10 +6,13 @@ import type {
   SmartMailboxRule,
 } from '../src/api/types'
 import {
+  actionConditionFromSourceMailboxRule,
   actionConditionFromSmartMailboxRule,
   draftToRule,
   extractAccountIdFromRule,
   ruleToDraft,
+  sourceMailboxDraftToRule,
+  sourceMailboxRulePrefix,
   smartMailboxDraftToRule,
   smartMailboxRulePrefix,
 } from '../src/automationRules'
@@ -180,5 +183,64 @@ describe('automation rule projection', () => {
     expect(actionConditionFromSmartMailboxRule(saved, 'primary')).toEqual(
       actionRule,
     )
+  })
+
+  it('serializes source mailbox actions as source and mailbox constrained rules', () => {
+    const rule = sourceMailboxDraftToRule(
+      {
+        id: `${sourceMailboxRulePrefix('primary', 'archive')}rule-1`,
+        accountId: 'primary',
+        name: 'Archive action',
+        enabled: true,
+        triggers: ['messageArrived'],
+        condition: actionRule,
+        actions: [{ kind: 'markRead' }],
+        backfill: true,
+      },
+      'archive',
+    )
+
+    expect(rule.condition.root.nodes).toEqual([
+      {
+        type: 'condition',
+        field: 'sourceId',
+        operator: 'equals',
+        negated: false,
+        value: 'primary',
+      },
+      {
+        type: 'condition',
+        field: 'mailboxId',
+        operator: 'equals',
+        negated: false,
+        value: 'archive',
+      },
+      {
+        type: 'group',
+        operator: 'all',
+        negated: false,
+        nodes: actionRule.root.nodes,
+      },
+    ])
+  })
+
+  it('hydrates source mailbox action rules using the inner action condition', () => {
+    const saved = sourceMailboxDraftToRule(
+      {
+        id: `${sourceMailboxRulePrefix('primary', 'archive')}rule-1`,
+        accountId: 'primary',
+        name: 'Archive action',
+        enabled: true,
+        triggers: ['messageArrived'],
+        condition: actionRule,
+        actions: [{ kind: 'markRead' }],
+        backfill: true,
+      },
+      'archive',
+    )
+
+    expect(
+      actionConditionFromSourceMailboxRule(saved, 'primary', 'archive'),
+    ).toEqual(actionRule)
   })
 })

@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why the frontend owns interaction, the handoff-led UI direction, and shell model"
-modified: 2026-04-23
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: README
   - path: docs/L0-api
@@ -105,7 +105,7 @@ The conversation list remains paginated and virtualized. Live top-of-list insert
 
 When the handoff includes UI for missing backend capability, the production UI may show a disabled control, placeholder action, or omit the control. The visual structure should still anticipate the handoff target.
 
-Known gaps include schedule send, tracking toggles, AI compose actions, full automation settings, raw JMAP filter editing, and mailbox-attached rule actions.
+Known gaps include schedule send, tracking toggles, AI compose actions, full automation settings, and raw JMAP filter editing.
 
 ## What We Do Not Build Into The Shell
 

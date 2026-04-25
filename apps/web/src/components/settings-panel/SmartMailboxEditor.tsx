@@ -173,24 +173,7 @@ export function SmartMailboxEditor({
         />
       </SettingsSection>
 
-      <SettingsSection
-        title="Rules"
-        actions={
-          <Button
-            size="sm"
-            variant="outline"
-            type="button"
-            onClick={() =>
-              setForm((current) => ({
-                ...current,
-                rule: EMPTY_SMART_MAILBOX_FORM.rule,
-              }))
-            }
-          >
-            Reset rule
-          </Button>
-        }
-      >
+      <SettingsSection title="Rules">
         <RuleGroupEditor
           group={form.rule.root}
           onChange={(root) =>

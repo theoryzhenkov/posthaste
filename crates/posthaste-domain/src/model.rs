@@ -160,7 +160,10 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
+    #[serde(default)]
     pub automation_rules: Vec<AutomationRule>,
+    #[serde(default)]
+    pub automation_drafts: Vec<AutomationRule>,
 }
 
 /// Backend driver type for an account.
