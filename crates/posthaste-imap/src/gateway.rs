@@ -8,7 +8,8 @@ use posthaste_domain::{
 };
 
 use crate::{
-    apply_imap_keyword_delta_by_location, discover_imap_account, fetch_mailbox_header_snapshot,
+    apply_imap_keyword_delta_by_location, discover_imap_account,
+    fetch_imap_reply_context_by_location, fetch_mailbox_header_snapshot,
     fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_full_sync_batch,
     imap_mailbox_state_from_header_snapshot, parse_imap_attachment_blob_id, DiscoveredImapAccount,
@@ -213,10 +214,14 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn fetch_reply_context(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
     ) -> Result<ReplyContext, GatewayError> {
-        Err(unsupported("reply context fetch"))
+        let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
+
+        fetch_imap_reply_context_by_location(&self.config, &mailbox_name, &location)
+            .await
+            .map_err(imap_error_to_gateway)
     }
 
     async fn send_message(
