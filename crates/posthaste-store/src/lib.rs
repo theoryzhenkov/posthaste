@@ -1478,7 +1478,11 @@ mod tests {
 
         assert_eq!(
             store.list_imap_message_locations(&account, &message_id)?,
-            vec![all_mail, inbox]
+            vec![all_mail, inbox.clone()]
+        );
+        assert_eq!(
+            store.list_imap_mailbox_message_locations(&account, &MailboxId::from("imap:inbox"))?,
+            vec![inbox]
         );
         Ok(())
     }

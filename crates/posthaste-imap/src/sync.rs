@@ -84,6 +84,57 @@ pub fn imap_full_sync_batch(
     batch
 }
 
+pub fn imap_delta_sync_batch(
+    account_id: &AccountId,
+    discovery: DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+    mailbox_states: Vec<ImapMailboxSyncState>,
+    local_locations: Vec<ImapMessageLocation>,
+    updated_at: String,
+) -> SyncBatch {
+    let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
+    let mut messages = Vec::with_capacity(headers.len());
+    let mut locations = Vec::with_capacity(headers.len());
+    let remote_locations = headers
+        .iter()
+        .map(|header| {
+            (
+                header.location.mailbox_id.clone(),
+                header.location.uid_validity.0,
+                header.location.uid,
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let deleted_message_ids = local_locations
+        .into_iter()
+        .filter(|location| {
+            !remote_locations.contains(&(
+                location.mailbox_id.clone(),
+                location.uid_validity.0,
+                location.uid,
+            ))
+        })
+        .map(|location| location.message_id)
+        .collect::<Vec<_>>();
+
+    for header in headers {
+        messages.push(header.message);
+        locations.push(header.location);
+    }
+
+    batch.imap_mailbox_states = mailbox_states;
+    batch.messages = messages;
+    batch.imap_message_locations = locations;
+    batch.deleted_message_ids = deleted_message_ids;
+    batch.replace_all_messages = false;
+    batch.cursors.push(SyncCursor {
+        object_type: SyncObject::Message,
+        state: message_cursor_state(&batch.messages, &batch.imap_message_locations),
+        updated_at,
+    });
+    batch
+}
+
 pub fn imap_mailbox_state_from_header_snapshot(
     snapshot: &ImapMailboxHeaderSnapshot,
     updated_at: String,
@@ -142,7 +193,7 @@ fn message_cursor_state(messages: &[MessageRecord], locations: &[ImapMessageLoca
 mod tests {
     use posthaste_domain::{
         ImapCapabilities, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid,
-        ImapUidValidity, MailboxId,
+        ImapUidValidity, MailboxId, MessageId,
     };
 
     use crate::{imap_header_message_record, map_imap_mailbox, ImapFetchedHeader};
@@ -232,5 +283,61 @@ mod tests {
         assert_eq!(batch.imap_message_locations, vec![expected_location]);
         assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
         assert!(batch.cursors[1].state.starts_with("imap-messages:"));
+    }
+
+    #[test]
+    fn delta_sync_batch_deletes_local_locations_missing_from_remote_mailbox() {
+        let selected = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(9),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let mapped = imap_header_message_record(
+            &selected,
+            ImapFetchedHeader {
+                mailbox_id: selected.mailbox_id.clone(),
+                uid: ImapUid(42),
+                modseq: Some(ImapModSeq(777)),
+                flags: Vec::new(),
+                rfc822_size: 512,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("mapped header");
+        let missing_location = ImapMessageLocation {
+            message_id: MessageId::from("imap:9:41:696d61703a6d61696c626f783a34393465343234663538"),
+            mailbox_id: selected.mailbox_id.clone(),
+            uid_validity: selected.uid_validity,
+            uid: ImapUid(41),
+            modseq: Some(ImapModSeq(700)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        let batch = imap_delta_sync_batch(
+            &AccountId::from("primary"),
+            DiscoveredImapAccount {
+                capabilities: ImapCapabilities::default(),
+                mailboxes: vec![map_imap_mailbox("INBOX", ["\\Inbox"])],
+            },
+            vec![mapped],
+            vec![ImapMailboxSyncState {
+                mailbox_id: selected.mailbox_id.clone(),
+                mailbox_name: "INBOX".to_string(),
+                uid_validity: selected.uid_validity,
+                highest_uid: Some(ImapUid(42)),
+                highest_modseq: Some(ImapModSeq(777)),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            }],
+            vec![missing_location.clone()],
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert!(!batch.replace_all_messages);
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(batch.deleted_message_ids, vec![missing_location.message_id]);
+        assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
     }
 }
