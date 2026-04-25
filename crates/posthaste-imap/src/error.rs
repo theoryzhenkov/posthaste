@@ -26,6 +26,8 @@ pub enum ImapAdapterError {
     MissingFetchData(&'static str),
     #[error("invalid IMAP UID sequence set: {0}")]
     InvalidUidSequence(String),
+    #[error("invalid IMAP keyword flag {keyword}: {reason}")]
+    InvalidKeywordFlag { keyword: String, reason: String },
     #[error("invalid IMAP blob id: {0}")]
     InvalidBlobId(String),
     #[error("could not parse RFC 5322 message headers")]

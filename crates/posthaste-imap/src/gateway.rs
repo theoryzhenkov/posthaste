@@ -8,8 +8,9 @@ use posthaste_domain::{
 };
 
 use crate::{
-    discover_imap_account, fetch_mailbox_header_snapshot, fetch_message_body_by_location,
-    fetch_raw_message_by_location, imap_attachment_bytes_from_raw_mime, imap_full_sync_batch,
+    apply_imap_keyword_delta_by_location, discover_imap_account, fetch_mailbox_header_snapshot,
+    fetch_message_body_by_location, fetch_raw_message_by_location,
+    imap_attachment_bytes_from_raw_mime, imap_full_sync_batch,
     imap_mailbox_state_from_header_snapshot, parse_imap_attachment_blob_id, DiscoveredImapAccount,
     ImapAdapterError, ImapConnectionConfig,
 };
@@ -155,12 +156,16 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn set_keywords(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
         _expected_state: Option<&str>,
-        _command: &SetKeywordsCommand,
+        command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
-        Err(unsupported("keyword mutation"))
+        let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
+
+        apply_imap_keyword_delta_by_location(&self.config, &mailbox_name, &location, command)
+            .await
+            .map_err(imap_error_to_gateway)
     }
 
     async fn replace_mailboxes(
@@ -294,6 +299,7 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
+        | ImapAdapterError::InvalidKeywordFlag { .. }
         | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
         | ImapAdapterError::ParseMessageBody
