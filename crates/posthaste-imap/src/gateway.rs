@@ -1,11 +1,14 @@
 use async_trait::async_trait;
 use posthaste_domain::{
-    AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId,
-    MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncCursor,
+    now_iso8601, AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId,
+    MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SyncBatch, SyncCursor,
 };
 
-use crate::{discover_imap_account, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig};
+use crate::{
+    discover_imap_account, imap_mailbox_sync_batch, DiscoveredImapAccount, ImapAdapterError,
+    ImapConnectionConfig,
+};
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
 ///
@@ -13,6 +16,7 @@ use crate::{discover_imap_account, DiscoveredImapAccount, ImapAdapterError, Imap
 /// capabilities/mailboxes only. Sync and mutation methods fail with typed
 /// gateway errors until the full-snapshot sync path is implemented.
 pub struct LiveImapSmtpGateway {
+    config: ImapConnectionConfig,
     username: String,
     discovery: DiscoveredImapAccount,
 }
@@ -22,6 +26,7 @@ impl LiveImapSmtpGateway {
         let username = config.username.clone();
         let discovery = discover_imap_account(&config).await?;
         Ok(Self {
+            config,
             username,
             discovery,
         })
@@ -42,10 +47,14 @@ fn unsupported(operation: &str) -> GatewayError {
 impl MailGateway for LiveImapSmtpGateway {
     async fn sync(
         &self,
-        _account_id: &AccountId,
+        account_id: &AccountId,
         _cursors: &[SyncCursor],
     ) -> Result<SyncBatch, GatewayError> {
-        Err(unsupported("sync"))
+        let discovery = discover_imap_account(&self.config)
+            .await
+            .map_err(imap_error_to_gateway)?;
+        let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
+        Ok(imap_mailbox_sync_batch(account_id, discovery, updated_at))
     }
 
     async fn fetch_message_body(
@@ -145,6 +154,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_identity_uses_configured_username() {
         let gateway = LiveImapSmtpGateway {
+            config: test_config(),
             username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
@@ -162,8 +172,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_reports_clear_unsupported_error() {
+    async fn fetch_body_reports_clear_unsupported_error() {
         let gateway = LiveImapSmtpGateway {
+            config: test_config(),
             username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
@@ -172,10 +183,31 @@ mod tests {
         };
 
         let error = gateway
-            .sync(&AccountId::from("primary"), &[])
+            .fetch_message_body(&AccountId::from("primary"), &MessageId::from("message"))
             .await
-            .expect_err("sync is not implemented");
+            .expect_err("body fetch is not implemented");
 
         assert!(matches!(error, GatewayError::Rejected(message) if message.contains("discovery")));
+    }
+
+    fn test_config() -> ImapConnectionConfig {
+        ImapConnectionConfig {
+            host: "imap.example.test".to_string(),
+            port: 993,
+            security: posthaste_domain::TransportSecurity::Tls,
+            username: "alice@example.test".to_string(),
+            secret: "secret".to_string(),
+            auth: posthaste_domain::ProviderAuthKind::Password,
+        }
+    }
+}
+
+fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
+    match error {
+        ImapAdapterError::MissingTransport
+        | ImapAdapterError::MissingUsername
+        | ImapAdapterError::MissingSecret
+        | ImapAdapterError::InvalidMailboxName(_) => GatewayError::Rejected(error.to_string()),
+        ImapAdapterError::Client(message) => GatewayError::Network(message),
     }
 }
