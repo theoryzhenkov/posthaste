@@ -29,6 +29,7 @@ pub fn imap_mailbox_sync_batch(
     SyncBatch {
         mailboxes,
         messages: Vec::new(),
+        imap_message_locations: Vec::new(),
         deleted_mailbox_ids: Vec::new(),
         deleted_message_ids: Vec::new(),
         replace_all_mailboxes: true,

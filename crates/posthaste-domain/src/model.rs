@@ -8,7 +8,7 @@ use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::ConfigError;
+use crate::{imap::ImapMessageLocation, ConfigError};
 
 /// Generates a newtype wrapper around `String` for type-safe identifiers.
 macro_rules! string_id {
@@ -1027,6 +1027,7 @@ pub fn now_iso8601() -> Result<String, String> {
 pub struct SyncBatch {
     pub mailboxes: Vec<MailboxRecord>,
     pub messages: Vec<MessageRecord>,
+    pub imap_message_locations: Vec<ImapMessageLocation>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
     pub deleted_message_ids: Vec<MessageId>,
     /// When true, mailboxes are a full snapshot (from full resync fallback).

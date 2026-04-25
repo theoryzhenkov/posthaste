@@ -129,6 +129,7 @@ impl PreviewHarness {
                         total_emails: messages.len() as i64,
                     }],
                     messages,
+                    imap_message_locations: Vec::new(),
                     deleted_mailbox_ids: Vec::new(),
                     deleted_message_ids: Vec::new(),
                     replace_all_mailboxes: true,

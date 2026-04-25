@@ -2294,6 +2294,7 @@ mod tests {
                     in_reply_to: None,
                     references: Vec::new(),
                 }],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
