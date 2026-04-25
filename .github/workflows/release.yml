@@ -1,0 +1,213 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, for example v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            rpm \
+            wget
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build browser-localhost package
+        shell: bash
+        run: |
+          cd apps/web
+          bun run build
+          cd ../..
+          cargo build --release --bin posthaste
+          POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
+
+      - name: Build desktop bundles
+        shell: bash
+        working-directory: apps/desktop
+        run: cargo tauri build --ci --no-sign
+
+      - name: Collect desktop bundles
+        shell: bash
+        run: |
+          out="target/distribute/desktop-${{ matrix.platform }}"
+          mkdir -p "$out"
+          while IFS= read -r file; do
+            cp "$file" "$out/"
+          done < <(
+            find target/release/bundle apps/desktop/target/release/bundle \
+              -type f \( \
+                -name '*.AppImage' -o \
+                -name '*.deb' -o \
+                -name '*.dmg' -o \
+                -name '*.exe' -o \
+                -name '*.msi' -o \
+                -name '*.rpm' \
+              \) 2>/dev/null
+          )
+          test -n "$(find "$out" -type f -print -quit)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            target/distribute/posthaste-serve-*.tar.gz
+            target/distribute/desktop-${{ matrix.platform }}/*
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install SOPS
+        uses: nhedger/setup-sops@v2
+        with:
+          version: "3.12.1"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Add release public key
+        shell: bash
+        run: cp keys/release-gpg-public.asc release-assets/
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release-assets
+          checksums="$(mktemp)"
+          find . -maxdepth 1 -type f -printf '%f\0' \
+            | sort -z \
+            | xargs -0 sha256sum > "$checksums"
+          mv "$checksums" SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: release-assets/*
+
+      - uses: sigstore/cosign-installer@v4
+
+      - name: Sign release artifacts with cosign
+        shell: bash
+        run: |
+          find release-assets -maxdepth 1 -type f \
+            ! -name '*.asc' \
+            ! -name '*.sigstore.json' \
+            -print0 \
+            | while IFS= read -r -d '' file; do
+              cosign sign-blob --yes --bundle "${file}.sigstore.json" "$file"
+            done
+
+      - name: Sign release artifacts with GPG
+        shell: bash
+        env:
+          RELEASE_SOPS_AGE_KEY: ${{ secrets.RELEASE_SOPS_AGE_KEY }}
+        run: |
+          if [ -z "$RELEASE_SOPS_AGE_KEY" ]; then
+            echo "RELEASE_SOPS_AGE_KEY is not configured; skipping GPG signatures."
+            exit 0
+          fi
+
+          key_file="$RUNNER_TEMP/release-sops-age-key.txt"
+          printf '%s\n' "$RELEASE_SOPS_AGE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          cleanup() {
+            rm -f "$key_file"
+            if [ -n "${GNUPGHOME:-}" ]; then
+              rm -rf "$GNUPGHOME"
+            fi
+          }
+          trap cleanup EXIT
+
+          release_gpg_key_id="$(SOPS_AGE_KEY_FILE="$key_file" sops --decrypt --extract '["release_gpg_key_id"]' secrets/release-signing.yaml)"
+
+          export GNUPGHOME
+          GNUPGHOME="$(mktemp -d)"
+
+          SOPS_AGE_KEY_FILE="$key_file" sops --decrypt --extract '["release_gpg_private_key"]' secrets/release-signing.yaml \
+            | gpg --batch --import
+
+          gpg_args=(--batch --yes --pinentry-mode loopback --armor --detach-sign --local-user "$release_gpg_key_id")
+
+          find release-assets -maxdepth 1 -type f \
+            ! -name '*.asc' \
+            ! -name '*.sigstore.json' \
+            -print0 \
+            | while IFS= read -r -d '' file; do
+              gpg "${gpg_args[@]}" "$file"
+            done
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: release-assets/*

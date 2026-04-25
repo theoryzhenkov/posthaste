@@ -1,6 +1,6 @@
 # mail web UI
 
-React 19 + Vite frontend for the local mail daemon. The app talks only to the Rust API at `http://localhost:3001/v1` and receives live updates from the daemon's EventSource stream at `/v1/events`.
+React 19 + Vite frontend for the local PostHaste server. The app talks only to the Rust API at `http://localhost:3001/v1` and receives live updates from the server's EventSource stream at `/v1/events`.
 
 ## Commands
 
@@ -30,7 +30,7 @@ bun run check
 
 ## Live update model
 
-- The daemon exposes a single ordered domain event stream.
+- The server exposes a single ordered domain event stream.
 - The frontend reconnects with `afterSeq` so it can resume without replaying the entire backlog.
 - Sidebar, message detail, and selected message caches are invalidated in short batches.
 - The conversation list handles its own top-of-list refresh and merge path instead of broad invalidation, because it is paginated and virtualized.

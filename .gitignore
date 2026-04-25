@@ -11,6 +11,7 @@ site/
 .env
 .envrc
 .age-key
+.age-key.*
 
 # build output
 /target/

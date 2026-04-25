@@ -1,21 +1,15 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
 
-import type { AccountOverview, MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { Button } from './ui/button'
-import { MessageDetail } from './MessageDetail'
-import { SettingsPanel } from './SettingsPanel'
+import { FocusedSurface } from './FocusedSurface'
 
 interface SurfaceHostProps {
   surface: SurfaceDescriptor | null
-  accounts: AccountOverview[]
-  activeAccountId: string | null
   canClose?: boolean
   onClose: () => void
-  onSettingsActiveAccountChange: (accountId: string | null) => void
   onSearch: (query: string, append?: boolean) => void
-  onSelectMessage: (message: MessageSummary) => void
 }
 
 function surfaceTitle(surface: SurfaceDescriptor): string {
@@ -29,13 +23,9 @@ function surfaceTitle(surface: SurfaceDescriptor): string {
 
 export function SurfaceHost({
   surface,
-  accounts,
-  activeAccountId,
   canClose = true,
   onClose,
-  onSettingsActiveAccountChange,
   onSearch,
-  onSelectMessage,
 }: SurfaceHostProps) {
   useEffect(() => {
     if (!surface) {
@@ -60,15 +50,11 @@ export function SurfaceHost({
   if (surface.kind === 'settings') {
     return (
       <div className="fixed inset-0 z-[2100] bg-background text-foreground">
-        <SettingsPanel
-          accounts={accounts}
-          activeAccountId={activeAccountId}
-          initialAccountId={surface.params.accountId}
-          initialCategory={surface.params.category}
-          initialSmartMailboxId={surface.params.smartMailboxId}
-          onActiveAccountChange={onSettingsActiveAccountChange}
-          onClose={canClose ? onClose : undefined}
-          shell="overlay"
+        <FocusedSurface
+          surface={surface}
+          canClose={canClose}
+          onClose={onClose}
+          onSearch={onSearch}
         />
       </div>
     )
@@ -96,13 +82,12 @@ export function SurfaceHost({
       </header>
 
       <main className="min-h-0 flex-1">
-        {surface.kind === 'message' && (
-          <MessageDetail
-            selection={surface.params}
-            onSearch={onSearch}
-            onSelectMessage={onSelectMessage}
-          />
-        )}
+        <FocusedSurface
+          surface={surface}
+          canClose={canClose}
+          onClose={onClose}
+          onSearch={onSearch}
+        />
       </main>
     </div>
   )

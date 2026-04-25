@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-jmap
@@ -34,12 +34,40 @@ just setup       # phase 2: generates age key, initializes jj
 The full local dev stacks run through Overmind in the Nix dev shell:
 
 ```sh
-just dev-web       # Stalwart + seed + posthaste-daemon + Vite
+just dev-web       # Stalwart + seed + posthaste serve --api-only + Vite
 just dev-desktop   # Stalwart + seed + Tauri dev shell
-just dev-services  # Stalwart + seed + posthaste-daemon
+just dev-services  # Stalwart + seed + posthaste serve --api-only
 just dev-smoke     # Validate dev-stack path wiring without starting services
 just frontend dev  # Vite only, assumes the backend is already running
 just desktop dev   # Tauri only, assumes Stalwart is already running if needed
+just build-serve   # Build web assets plus the browser-localhost server binary
+just package-serve # Create target/distribute/posthaste-serve-*.tar.gz
+just serve         # Run `posthaste serve` against apps/web/dist
+```
+
+Tagged releases publish installable artifacts through GitHub Actions:
+
+```sh
+jj desc -m "chore(release): v0.1.0"
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow attaches unsigned Tauri desktop installers for Linux, macOS, and Windows plus `posthaste serve` browser-localhost archives. Release assets also include `SHA256SUMS`, GitHub build provenance attestations, cosign keyless signature bundles named `*.sigstore.json`, and the release GPG public key from `keys/release-gpg-public.asc`.
+
+GPG signing material is stored in `secrets/release-signing.yaml`, encrypted with SOPS to the local `.age-key` recipient and the GitHub CI recipient in `.age-key.github`. Add the full contents of `.age-key.github` to the repository secret `RELEASE_SOPS_AGE_KEY`; when that secret is present, CI decrypts the release key and publishes detached armored GPG signatures named `*.asc`.
+
+Verify a downloaded asset with:
+
+```sh
+sha256sum --check SHA256SUMS
+gh attestation verify posthaste-serve-0.1.0-linux-x86_64.tar.gz --repo theoryzhenkov/posthaste
+cosign verify-blob posthaste-serve-0.1.0-linux-x86_64.tar.gz \
+  --bundle posthaste-serve-0.1.0-linux-x86_64.tar.gz.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/theoryzhenkov/posthaste/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gpg --import release-gpg-public.asc
+gpg --verify posthaste-serve-0.1.0-linux-x86_64.tar.gz.asc posthaste-serve-0.1.0-linux-x86_64.tar.gz
 ```
 
 The stacks use utility scripts and fixtures from `tools/dev/`, with isolated generated config and state under `var/dev/`.

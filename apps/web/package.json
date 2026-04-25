@@ -10,6 +10,7 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint .",
+    "test": "bun test",
     "typecheck": "tsc -b",
     "preview": "vite preview",
     "tauri": "tauri"
