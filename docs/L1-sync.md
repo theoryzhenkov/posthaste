@@ -89,6 +89,10 @@ Important derived tables:
 - `conversation_message` links conversation IDs to concrete `(account_id, message_id)` pairs.
 - `event_log` stores ordered domain events with a monotonically increasing `seq`, which powers `/v1/events`.
 - `sync_cursor` stores per-account mailbox and message state strings.
+- `imap_mailbox_sync_state` stores IMAP cursor state per account and mailbox:
+  mailbox ID/name, `UIDVALIDITY`, highest UID, and `HIGHESTMODSEQ` when
+  available. This table is separate from JMAP-style `sync_cursor` because IMAP
+  validity and delta state are mailbox-scoped.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
@@ -153,6 +157,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | message-snapshot-authoritative | MUST | Full email snapshots prune stale local messages when they disappear remotely |
 | body-lazy | MUST | Email bodies are fetched on first view, not during metadata sync |
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
+| imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |
