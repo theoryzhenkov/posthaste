@@ -45,8 +45,9 @@ pub use mutation::{
     mark_imap_message_deleted_by_location, ImapMailboxReplacementDelta,
 };
 pub use smtp::{
-    build_smtp_message, render_smtp_markdown, send_smtp_message, smtp_mailbox_for_recipient,
-    SmtpConnectionConfig,
+    append_smtp_sent_copy, build_smtp_message, render_smtp_markdown, send_smtp_message,
+    smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message, SmtpConnectionConfig,
+    SmtpSentCopyStrategy, SubmittedSmtpMessage,
 };
 pub use sync::{
     imap_full_sync_batch, imap_mailbox_state_from_header_snapshot, imap_mailbox_sync_batch,
