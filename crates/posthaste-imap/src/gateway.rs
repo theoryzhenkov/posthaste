@@ -1,13 +1,15 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use posthaste_domain::{
-    now_iso8601, AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId,
-    MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor,
+    now_iso8601, AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailStore,
+    MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
 };
 
 use crate::{
-    discover_imap_account, fetch_mailbox_header_records, imap_full_sync_batch,
-    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
+    discover_imap_account, fetch_mailbox_header_records, fetch_message_body_by_location,
+    imap_full_sync_batch, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -19,16 +21,21 @@ pub struct LiveImapSmtpGateway {
     config: ImapConnectionConfig,
     username: String,
     discovery: DiscoveredImapAccount,
+    store: Option<Arc<dyn MailStore>>,
 }
 
 impl LiveImapSmtpGateway {
-    pub async fn connect(config: ImapConnectionConfig) -> Result<Self, ImapAdapterError> {
+    pub async fn connect(
+        config: ImapConnectionConfig,
+        store: Option<Arc<dyn MailStore>>,
+    ) -> Result<Self, ImapAdapterError> {
         let username = config.username.clone();
         let discovery = discover_imap_account(&config).await?;
         Ok(Self {
             config,
             username,
             discovery,
+            store,
         })
     }
 
@@ -74,10 +81,40 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn fetch_message_body(
         &self,
-        _account_id: &AccountId,
-        _message_id: &MessageId,
+        account_id: &AccountId,
+        message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
-        Err(unsupported("body fetch"))
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| unsupported("body fetch location lookup"))?;
+        let locations = store
+            .list_imap_message_locations(account_id, message_id)
+            .map_err(store_error_to_gateway)?;
+        let location = locations.first().ok_or_else(|| {
+            GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
+        })?;
+        let mailbox_name = store
+            .get_imap_mailbox_state(account_id, &location.mailbox_id)
+            .map_err(store_error_to_gateway)?
+            .map(|state| state.mailbox_name)
+            .or_else(|| {
+                self.discovery
+                    .mailboxes
+                    .iter()
+                    .find(|mailbox| mailbox.id == location.mailbox_id)
+                    .map(|mailbox| mailbox.name.clone())
+            })
+            .ok_or_else(|| {
+                GatewayError::Rejected(format!(
+                    "missing IMAP mailbox name for location {}",
+                    location.mailbox_id
+                ))
+            })?;
+
+        fetch_message_body_by_location(&self.config, &mailbox_name, location)
+            .await
+            .map_err(imap_error_to_gateway)
     }
 
     async fn download_blob(
@@ -175,6 +212,7 @@ mod tests {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
                 mailboxes: Vec::new(),
             },
+            store: None,
         };
 
         let identity = gateway
@@ -195,6 +233,7 @@ mod tests {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
                 mailboxes: Vec::new(),
             },
+            store: None,
         };
 
         let error = gateway
@@ -231,4 +270,8 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::ParseMessageBody => GatewayError::Rejected(error.to_string()),
         ImapAdapterError::Client(message) => GatewayError::Network(message),
     }
+}
+
+fn store_error_to_gateway(error: StoreError) -> GatewayError {
+    GatewayError::Rejected(format!("IMAP local state lookup failed: {error}"))
 }

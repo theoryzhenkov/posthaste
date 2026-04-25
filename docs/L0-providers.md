@@ -69,8 +69,9 @@ The live implementation lives in the `posthaste-imap` adapter crate. Its first
 runtime boundary performs connection, authentication, capability discovery, and
 mailbox listing. Discovery results are synced as an authoritative mailbox
 snapshot, and selectable mailboxes are fetched as an authoritative full message
-snapshot. Body fetches and mutations are rejected explicitly until their IMAP
-command paths are implemented.
+snapshot. Lazy body fetches use stored IMAP locations and `BODY.PEEK[]`.
+Mutations are rejected explicitly until their IMAP command paths are
+implemented.
 
 Mailbox message sync starts by examining the mailbox and mapping SELECT/EXAMINE
 state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
@@ -83,7 +84,7 @@ bodies. Full snapshot fetches use `UID SEARCH ALL` followed by chunked
 CONDSTORE/QRESYNC is advertised, `MODSEQ`. It converts header metadata and
 IMAP flags into `MessageRecord` and stores the UID command address separately
 as `ImapMessageLocation`. Body text, HTML, raw MIME, and attachment metadata
-remain lazy/future fetches.
+are fetched lazily when a message is opened.
 
 The driver prefers IMAP extensions when advertised:
 

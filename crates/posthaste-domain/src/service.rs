@@ -1377,12 +1377,14 @@ mod tests {
     use super::*;
     use crate::{
         AutomationBackfillStore, ConfigError, ConfigSnapshot, ConversationReadStore, DomainEvent,
-        EventFilter, EventStore, FetchedBody, GatewayError, MailboxReadStore, MessageCommandStore,
-        MessageDetail, MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome,
-        PushTransport, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-        SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule,
-        SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SourceDataStore,
-        SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
+        EventFilter, EventStore, FetchedBody, GatewayError, ImapMailboxSyncState,
+        ImapMessageLocation, ImapMessageLocationStore, ImapSyncStateStore, MailboxReadStore,
+        MessageCommandStore, MessageDetail, MessageDetailStore, MessageListStore,
+        MessageMailboxStore, MutationOutcome, PushTransport, SmartMailboxCondition,
+        SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind,
+        SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore,
+        SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError, SyncBatch,
+        SyncCursor, SyncStateStore, SyncWriteStore,
     };
 
     struct TestConfig {
@@ -1710,6 +1712,33 @@ mod tests {
                 .expect("mutation state lock poisoned")
                 .mailbox_ids
                 .clone())
+        }
+    }
+
+    impl ImapSyncStateStore for TestStore {
+        fn list_imap_mailbox_states(
+            &self,
+            _account_id: &AccountId,
+        ) -> Result<Vec<ImapMailboxSyncState>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn get_imap_mailbox_state(
+            &self,
+            _account_id: &AccountId,
+            _mailbox_id: &MailboxId,
+        ) -> Result<Option<ImapMailboxSyncState>, StoreError> {
+            Ok(None)
+        }
+    }
+
+    impl ImapMessageLocationStore for TestStore {
+        fn list_imap_message_locations(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+        ) -> Result<Vec<ImapMessageLocation>, StoreError> {
+            Ok(Vec::new())
         }
     }
 
