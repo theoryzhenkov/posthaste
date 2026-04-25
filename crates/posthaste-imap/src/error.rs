@@ -16,6 +16,10 @@ pub enum ImapAdapterError {
     InvalidMailboxName(String),
     #[error("IMAP SELECT/EXAMINE response missing {0}")]
     MissingSelectData(&'static str),
+    #[error("IMAP FETCH response missing {0}")]
+    MissingFetchData(&'static str),
+    #[error("invalid IMAP UID sequence set: {0}")]
+    InvalidUidSequence(String),
     #[error("could not parse RFC 5322 message headers")]
     ParseMessageHeaders,
 }

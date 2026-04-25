@@ -77,9 +77,12 @@ when present. `HIGHESTMODSEQ` remains optional until the protocol client
 exposes CONDSTORE/QRESYNC select metadata.
 
 The first message mapping path consumes RFC 822 headers, not full message
-bodies. It converts header metadata and IMAP flags into `MessageRecord` and
-stores the UID command address separately as `ImapMessageLocation`. Body text,
-HTML, raw MIME, and attachment metadata remain lazy/future fetches.
+bodies. Full snapshot fetches use `UID SEARCH ALL` followed by chunked
+`UID FETCH` for `FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`, and, when
+CONDSTORE/QRESYNC is advertised, `MODSEQ`. It converts header metadata and
+IMAP flags into `MessageRecord` and stores the UID command address separately
+as `ImapMessageLocation`. Body text, HTML, raw MIME, and attachment metadata
+remain lazy/future fetches.
 
 The driver prefers IMAP extensions when advertised:
 
@@ -129,7 +132,7 @@ source informs the implementation.
 | Message identity and UID reuse | `imap_message_id`, `ImapMessageLocation` | RFC 9051 UID and UIDVALIDITY semantics: <https://www.rfc-editor.org/rfc/rfc9051.html> |
 | Gmail identity/labels | `ImapProviderFeatures`, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
 | Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
-| FETCH item extraction | planned `UID FETCH` metadata path | RFC 9051 FETCH data items (`FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` FETCH task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` fetch item model: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs> |
+| FETCH item extraction | `fetch_mailbox_header_records`, `fetched_header_from_items` | RFC 9051 SEARCH/UID/FETCH data items (`FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 `MODSEQ` as a CONDSTORE FETCH item: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` UID SEARCH/UID FETCH wrappers and FETCH task sequence-number collection: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` fetch item and sequence-set models: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/sequence.rs> |
 | Move/copy mutation planning | `plan_imap_move` | RFC 6851 MOVE: <https://datatracker.ietf.org/doc/html/rfc6851>; RFC 4315 UIDPLUS `COPYUID`/`APPENDUID`: <https://datatracker.ietf.org/doc/html/rfc4315> |
 
 ## Identity and threading
