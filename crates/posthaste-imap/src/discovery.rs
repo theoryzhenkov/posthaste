@@ -75,8 +75,21 @@ pub struct DiscoveredImapMailbox {
 pub async fn discover_imap_account(
     config: &ImapConnectionConfig,
 ) -> Result<DiscoveredImapAccount, ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    discover_authenticated_client(&mut client).await
+}
+
+pub(crate) async fn connect_authenticated_client(
+    config: &ImapConnectionConfig,
+) -> Result<ImapClient, ImapAdapterError> {
     let mut client = connect(config).await?;
     authenticate(&mut client, config).await?;
+    Ok(client)
+}
+
+pub(crate) async fn discover_authenticated_client(
+    client: &mut ImapClient,
+) -> Result<DiscoveredImapAccount, ImapAdapterError> {
     client.refresh_capabilities().await?;
 
     let capabilities = normalize_imap_capabilities(
