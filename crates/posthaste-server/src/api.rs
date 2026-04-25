@@ -13,14 +13,15 @@ use posthaste_domain::{
     AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
     AutomationAction, AutomationRule, CommandResult, ConversationCursor, ConversationId,
     ConversationPage, ConversationSortField, ConversationSummary, ConversationView, DomainEvent,
-    EventFilter, GatewayError, Identity, MailboxId, MailboxSummary, MessageAttachment,
-    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind,
-    SecretRef, SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary,
-    SmartMailboxValue, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EventFilter, GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
+    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse,
+    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue,
+    SmtpTransportSettings, SortDirection, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
@@ -216,8 +217,12 @@ pub struct PreviewAutomationRuleRequest {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportRequest {
+    pub provider: Option<ProviderHint>,
+    pub auth: Option<ProviderAuthKind>,
     pub base_url: Option<String>,
     pub username: Option<String>,
+    pub imap: Option<ImapTransportSettings>,
+    pub smtp: Option<SmtpTransportSettings>,
 }
 
 /// Tri-state write mode controlling how a secret is mutated on account save.
@@ -2035,6 +2040,7 @@ mod tests {
                 base_url: Some("https://example.com/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
                 secret_ref: None,
+                ..Default::default()
             },
             created_at: "2026-03-31T10:00:00Z".to_string(),
             updated_at: "2026-03-31T10:00:00Z".to_string(),
@@ -2063,6 +2069,7 @@ mod tests {
                     kind: SecretKind::Env,
                     key: "POSTHASTE_JMAP_TOKEN".to_string(),
                 }),
+                ..Default::default()
             },
             created_at: "2026-03-31T10:00:00Z".to_string(),
             updated_at: "2026-03-31T10:00:00Z".to_string(),
@@ -2109,6 +2116,7 @@ mod tests {
                 base_url: Some("https://before.example/jmap".to_string()),
                 username: Some("alice@example.com".to_string()),
                 secret_ref: None,
+                ..Default::default()
             },
             created_at: "2026-03-31T10:00:00Z".to_string(),
             updated_at: "2026-03-31T10:00:00Z".to_string(),

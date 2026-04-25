@@ -5,6 +5,7 @@ modified: 2026-04-25
 reviewed: 2026-04-25
 depends:
   - path: docs/L0-api
+  - path: docs/L0-providers
   - path: docs/L1-sync
   - path: docs/L1-jmap
 dependents:
@@ -170,15 +171,17 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 ## Account CRUD lifecycle
 
-**Create**: `POST /accounts` accepts account name, optional full name, email address/pattern ownership, JMAP transport details, and a secret instruction. If `id` is omitted, the backend derives an internal unique ID from the first email pattern or account name. UI-created accounts always use JMAP. The endpoint applies the secret instruction, validates required fields (for JMAP: base URL and configured secret; username is optional for bearer-token auth), persists to config, starts the supervisor runtime, and emits an `account.created` event.
+**Create**: `POST /accounts` accepts account name, optional full name, email address/pattern ownership, provider driver, transport details, and a secret instruction. If `id` is omitted, the backend derives an internal unique ID from the first email pattern or account name. The endpoint applies the secret instruction, validates required fields, persists to config, starts the supervisor runtime, and emits an `account.created` event. JMAP accounts require a base URL and configured secret; username is optional for bearer-token auth. IMAP/SMTP accounts require username, configured secret, and explicit IMAP and SMTP endpoints.
 
 **Patch**: `PATCH /accounts/{id}` merges provided fields into the existing account. Omitted fields in the transport sub-object preserve their current values (sparse merge). Secret handling uses the backend `SecretWriteMode` tri-state: `keep` (preserve existing), `replace` (store new secret in keyring), `clear` (delete managed secret). The settings UI exposes this as an empty password field to keep the configured secret or a filled password field to replace it.
 
 **Delete**: `DELETE /accounts/{id}` removes the managed OS keyring secret (if any), treating an already-missing keyring entry as deleted, stops the supervisor runtime, deletes the config file, and emits an `account.deleted` event.
 
-**Verify**: `POST /accounts/{id}/verify` attempts a JMAP session discovery and returns whether the connection succeeded, the primary identity email, and whether push is supported.
+**Verify**: `POST /accounts/{id}/verify` attempts provider connection setup and returns whether the connection succeeded, the primary identity email when available, and whether push is supported.
 
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
+
+**Transport**: Account transport JSON uses camelCase. Common fields are `provider`, `auth`, `username`, `secret`, and optional JMAP `baseUrl`. IMAP/SMTP accounts also include `imap` and `smtp` endpoint objects with `host`, `port`, and `security` (`tls`, `startTls`, or `plain`). `PATCH /accounts/{id}` sparse-merges the transport object and preserves omitted sub-fields.
 
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 

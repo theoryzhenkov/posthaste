@@ -10,6 +10,7 @@ depends:
   - path: docs/L0-jmap
 dependents:
   - path: docs/L1-accounts
+  - path: docs/L1-api
   - path: docs/L1-sync
 ---
 

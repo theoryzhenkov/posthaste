@@ -506,6 +506,10 @@ async fn build_connection(
                 push_events,
             })
         }
+        AccountDriver::ImapSmtp => Err(GatewayError::Rejected(
+            "IMAP/SMTP runtime is not implemented yet".to_string(),
+        )
+        .into()),
     }
 }
 
