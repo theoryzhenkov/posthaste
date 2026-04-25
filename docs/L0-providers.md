@@ -65,6 +65,11 @@ for a mailbox is:
 - highest seen UID or equivalent scan watermark
 - `HIGHESTMODSEQ` when the server supports CONDSTORE/QRESYNC
 
+The live implementation lives in the `posthaste-imap` adapter crate. Its first
+runtime boundary performs connection, authentication, capability discovery, and
+mailbox listing. Until mailbox snapshot sync is implemented, the gateway
+rejects sync and mutation commands explicitly after successful discovery.
+
 The driver prefers IMAP extensions when advertised:
 
 - SPECIAL-USE for mailbox roles
@@ -162,6 +167,7 @@ with servers that expose both protocols.
 | driver-explicit | MUST | Each account declares an explicit provider driver |
 | ui-uses-replica | MUST | Provider drivers feed the local SQLite replica; the UI never reads remote providers directly |
 | imap-cursors-per-mailbox | MUST | IMAP sync state is tracked per mailbox, not only per account |
+| imap-discovery-runtime | MUST | IMAP runtime setup connects, authenticates, discovers capabilities, and lists mailboxes before sync |
 | imap-delta-fallback | MUST | IMAP sync falls back to full authoritative snapshots when delta state is unavailable or invalid |
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
 | imap-mutation-plan-explicit | MUST | IMAP mutation strategy is selected from explicit capabilities and schedules resync when response state is insufficient |

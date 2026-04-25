@@ -9,9 +9,11 @@
 
 mod discovery;
 mod error;
+mod gateway;
 
 pub use discovery::{
     discover_imap_account, imap_mailbox_id, map_imap_mailbox, normalize_imap_capabilities,
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
 };
 pub use error::ImapAdapterError;
+pub use gateway::LiveImapSmtpGateway;
