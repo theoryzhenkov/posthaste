@@ -1024,6 +1024,30 @@ impl ImapMessageLocationStore for DatabaseStore {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(sql_to_store_error)
     }
+
+    fn list_imap_mailbox_message_locations(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<Vec<ImapMessageLocation>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT message_id, mailbox_id, uid_validity, uid, modseq, updated_at
+                 FROM imap_message_location
+                 WHERE account_id = ?1 AND mailbox_id = ?2
+                 ORDER BY uid",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(
+                params![account_id.as_str(), mailbox_id.as_str()],
+                imap_message_location_from_row,
+            )
+            .map_err(sql_to_store_error)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)
+    }
 }
 
 impl ImapMessageLocationWriteStore for DatabaseStore {
