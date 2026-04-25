@@ -14,6 +14,8 @@ pub enum ImapAdapterError {
     Client(String),
     #[error("invalid IMAP mailbox name: {0}")]
     InvalidMailboxName(String),
+    #[error("IMAP SELECT/EXAMINE response missing {0}")]
+    MissingSelectData(&'static str),
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {
