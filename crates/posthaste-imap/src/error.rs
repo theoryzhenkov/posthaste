@@ -26,10 +26,17 @@ pub enum ImapAdapterError {
     MissingFetchData(&'static str),
     #[error("invalid IMAP UID sequence set: {0}")]
     InvalidUidSequence(String),
+    #[error("invalid IMAP blob id: {0}")]
+    InvalidBlobId(String),
     #[error("could not parse RFC 5322 message headers")]
     ParseMessageHeaders,
     #[error("could not parse RFC 5322 message body")]
     ParseMessageBody,
+    #[error("IMAP attachment {attachment_index} is missing from message {message_id}")]
+    MissingAttachment {
+        message_id: String,
+        attachment_index: usize,
+    },
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {
