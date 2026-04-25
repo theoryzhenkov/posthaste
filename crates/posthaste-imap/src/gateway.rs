@@ -6,15 +6,15 @@ use posthaste_domain::{
 };
 
 use crate::{
-    discover_imap_account, imap_mailbox_sync_batch, DiscoveredImapAccount, ImapAdapterError,
-    ImapConnectionConfig,
+    discover_imap_account, fetch_mailbox_header_records, imap_full_sync_batch,
+    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
 ///
-/// The first implementation slice intentionally connects and discovers
-/// capabilities/mailboxes only. Sync and mutation methods fail with typed
-/// gateway errors until the full-snapshot sync path is implemented.
+/// The first implementation performs conservative full metadata snapshots.
+/// Mutations and lazy body fetches still fail with typed gateway errors until
+/// their IMAP command paths are implemented.
 pub struct LiveImapSmtpGateway {
     config: ImapConnectionConfig,
     username: String,
@@ -54,7 +54,22 @@ impl MailGateway for LiveImapSmtpGateway {
             .await
             .map_err(imap_error_to_gateway)?;
         let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
-        Ok(imap_mailbox_sync_batch(account_id, discovery, updated_at))
+        let mut headers = Vec::new();
+        for mailbox in discovery
+            .mailboxes
+            .iter()
+            .filter(|mailbox| mailbox.selectable)
+        {
+            headers.extend(
+                fetch_mailbox_header_records(&self.config, &mailbox.name, updated_at.clone())
+                    .await
+                    .map_err(imap_error_to_gateway)?,
+            );
+        }
+
+        Ok(imap_full_sync_batch(
+            account_id, discovery, headers, updated_at,
+        ))
     }
 
     async fn fetch_message_body(

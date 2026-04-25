@@ -1,6 +1,8 @@
-use posthaste_domain::{AccountId, MailboxRecord, SyncBatch, SyncCursor, SyncObject};
+use posthaste_domain::{
+    AccountId, ImapMessageLocation, MailboxRecord, MessageRecord, SyncBatch, SyncCursor, SyncObject,
+};
 
-use crate::DiscoveredImapAccount;
+use crate::{DiscoveredImapAccount, ImapMappedHeader};
 
 /// Convert an IMAP mailbox discovery result into an authoritative mailbox
 /// snapshot. Message sync is intentionally separate because it depends on
@@ -42,6 +44,42 @@ pub fn imap_mailbox_sync_batch(
     }
 }
 
+/// Convert IMAP discovery plus fetched mailbox headers into a full local
+/// metadata snapshot.
+///
+/// The first IMAP sync path is intentionally full-snapshot based. UIDVALIDITY
+/// and expunge handling make delta correctness mailbox-scoped; until that state
+/// is wired through the runtime, the store's authoritative replacement contract
+/// is the safer boundary.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+/// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
+pub fn imap_full_sync_batch(
+    account_id: &AccountId,
+    discovery: DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+    updated_at: String,
+) -> SyncBatch {
+    let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
+    let mut messages = Vec::with_capacity(headers.len());
+    let mut locations = Vec::with_capacity(headers.len());
+
+    for header in headers {
+        messages.push(header.message);
+        locations.push(header.location);
+    }
+
+    batch.messages = messages;
+    batch.imap_message_locations = locations;
+    batch.replace_all_messages = true;
+    batch.cursors.push(SyncCursor {
+        object_type: SyncObject::Message,
+        state: message_cursor_state(&batch.messages, &batch.imap_message_locations),
+        updated_at,
+    });
+    batch
+}
+
 fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
     let mut fingerprint = String::new();
     for mailbox in mailboxes {
@@ -55,11 +93,33 @@ fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
     format!("imap-mailboxes:{}", hex::encode(fingerprint.as_bytes()))
 }
 
+fn message_cursor_state(messages: &[MessageRecord], locations: &[ImapMessageLocation]) -> String {
+    let mut fingerprint = String::new();
+    for message in messages {
+        fingerprint.push_str(message.id.as_str());
+        fingerprint.push('\0');
+    }
+    for location in locations {
+        fingerprint.push_str(location.message_id.as_str());
+        fingerprint.push('\0');
+        fingerprint.push_str(location.mailbox_id.as_str());
+        fingerprint.push('\0');
+        fingerprint.push_str(&location.uid_validity.0.to_string());
+        fingerprint.push('\0');
+        fingerprint.push_str(&location.uid.0.to_string());
+        fingerprint.push('\0');
+    }
+    format!("imap-messages:{}", hex::encode(fingerprint.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
-    use posthaste_domain::{ImapCapabilities, MailboxId};
+    use posthaste_domain::{
+        ImapCapabilities, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid,
+        ImapUidValidity, MailboxId,
+    };
 
-    use crate::{map_imap_mailbox, DiscoveredImapAccount};
+    use crate::{imap_header_message_record, map_imap_mailbox, ImapFetchedHeader};
 
     use super::*;
 
@@ -89,5 +149,53 @@ mod tests {
         assert_eq!(batch.mailboxes[1].role.as_deref(), Some("sent"));
         assert_eq!(batch.cursors[0].object_type, SyncObject::Mailbox);
         assert!(batch.cursors[0].state.starts_with("imap-mailboxes:"));
+    }
+
+    #[test]
+    fn full_sync_batch_carries_messages_and_imap_locations() {
+        let selected = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(9),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let mapped = imap_header_message_record(
+            &selected,
+            ImapFetchedHeader {
+                mailbox_id: selected.mailbox_id.clone(),
+                uid: ImapUid(42),
+                modseq: Some(ImapModSeq(777)),
+                flags: Vec::new(),
+                rfc822_size: 512,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("mapped header");
+        let expected_location = ImapMessageLocation {
+            message_id: mapped.message.id.clone(),
+            mailbox_id: selected.mailbox_id.clone(),
+            uid_validity: ImapUidValidity(9),
+            uid: ImapUid(42),
+            modseq: Some(ImapModSeq(777)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        let batch = imap_full_sync_batch(
+            &AccountId::from("primary"),
+            DiscoveredImapAccount {
+                capabilities: ImapCapabilities::default(),
+                mailboxes: vec![map_imap_mailbox("INBOX", ["\\Inbox"])],
+            },
+            vec![mapped],
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert!(batch.replace_all_messages);
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(batch.imap_message_locations, vec![expected_location]);
+        assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
+        assert!(batch.cursors[1].state.starts_with("imap-messages:"));
     }
 }
