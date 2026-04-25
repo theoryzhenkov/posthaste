@@ -443,17 +443,18 @@ impl TagReadStore for DatabaseStore {
         let connection = self.read_connection()?;
         let mut statement = connection
             .prepare(
-                "SELECT mk.keyword,
-                        SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) AS unread_messages,
-                        COUNT(*) AS total_messages
+                "SELECT TRIM(mk.keyword) AS keyword,
+                        COUNT(DISTINCT CASE WHEN m.is_read = 0 THEN m.id END) AS unread_messages,
+                        COUNT(DISTINCT m.id) AS total_messages
                  FROM message_keyword mk
                  JOIN message m
                    ON m.account_id = mk.account_id
                   AND m.id = mk.message_id
                  WHERE mk.account_id = ?1
-                   AND mk.keyword NOT LIKE '$%'
-                 GROUP BY mk.keyword
-                 ORDER BY LOWER(mk.keyword), mk.keyword",
+                   AND TRIM(mk.keyword) <> ''
+                   AND TRIM(mk.keyword) NOT LIKE '$%'
+                 GROUP BY TRIM(mk.keyword)
+                 ORDER BY LOWER(TRIM(mk.keyword)), TRIM(mk.keyword)",
             )
             .map_err(sql_to_store_error)?;
         let rows = statement
@@ -1413,7 +1414,13 @@ mod tests {
                 },
                 MessageRecord {
                     id: MessageId::from("unread-newsletter"),
-                    keywords: vec!["newsletter".to_string(), "work".to_string()],
+                    keywords: vec![
+                        "newsletter".to_string(),
+                        "work".to_string(),
+                        "".to_string(),
+                        "   ".to_string(),
+                        "$custom".to_string(),
+                    ],
                     ..sample_message("unread-newsletter", "inbox", Some("mime-unread-newsletter"))
                 },
             ],

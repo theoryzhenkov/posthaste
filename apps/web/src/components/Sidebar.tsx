@@ -75,6 +75,11 @@ function roleIcon(role: Mailbox['role'], size = 14): React.ReactNode {
   return renderMailboxRoleIcon(role, size)
 }
 
+function isUserTag(tag: TagSummary): boolean {
+  const name = tag.name.trim()
+  return Boolean(name) && !name.startsWith('$')
+}
+
 function mailboxRoleAccent(role: Mailbox['role']): string {
   switch (role) {
     case 'inbox':
@@ -540,7 +545,10 @@ export function Sidebar({
     () => partitionSmartMailboxes(sidebar?.smartMailboxes ?? []),
     [sidebar?.smartMailboxes],
   )
-  const tags = sidebar?.tags ?? []
+  const tags = useMemo(
+    () => (sidebar?.tags ?? []).filter(isUserTag),
+    [sidebar?.tags],
+  )
   const sources = useMemo(
     () =>
       (sidebar?.sources ?? []).map((source) => {

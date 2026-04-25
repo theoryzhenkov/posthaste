@@ -33,6 +33,7 @@ import { type SortConfig, buildThreadListLayout } from './thread-list/columns'
 import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
+import type { PreparedServerSearchQuery } from '../searchQuery'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -40,8 +41,10 @@ interface MessageListProps {
   selection: MailSelection | null
   onSelectMessage: (message: MailSelection) => void
   onClearSelection: () => void
+  onClearSearchQuery: () => void
   actions: EmailActions
   searchQuery?: string
+  preparedSearchQuery: PreparedServerSearchQuery
 }
 
 /** @spec docs/L1-ui#messagelist */
@@ -109,23 +112,15 @@ function serverSortField(sort: SortConfig): MessageSortField {
   }
 }
 
-function normalizedServerQuery(
-  searchQuery: string | undefined,
-): string | undefined {
-  const query = searchQuery?.trim()
-  return query ? query : undefined
-}
-
 async function fetchMessagesForView(
   selectedView: SidebarSelection,
-  searchQuery: string | undefined,
+  serverQuery: string | undefined,
   sort: SortConfig,
   cursor: string | null,
   signal: AbortSignal,
 ): Promise<MessagePage> {
-  const q = normalizedServerQuery(searchQuery)
   const input = {
-    q,
+    q: serverQuery,
     cursor,
     limit: MESSAGE_PAGE_SIZE,
     sort: serverSortField(sort),
@@ -154,8 +149,10 @@ export function MessageList({
   selection,
   onSelectMessage,
   onClearSelection,
+  onClearSearchQuery,
   actions,
   searchQuery,
+  preparedSearchQuery,
 }: MessageListProps) {
   const {
     columns,
@@ -197,16 +194,25 @@ export function MessageList({
   } = useInfiniteQuery({
     queryKey: queryKeys.messages(selectedView, searchQuery, sort),
     queryFn: ({ pageParam, signal }) =>
-      fetchMessagesForView(selectedView!, searchQuery, sort, pageParam, signal),
-    enabled: selectedView !== null,
+      fetchMessagesForView(
+        selectedView!,
+        preparedSearchQuery.query,
+        sort,
+        pageParam,
+        signal,
+      ),
+    enabled: selectedView !== null && !preparedSearchQuery.isBlocked,
     initialPageParam: null as string | null,
     placeholderData: (previousData) => previousData,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   })
 
   const rawMessages = useMemo(
-    () => data?.pages.flatMap((page) => page.items) ?? [],
-    [data],
+    () =>
+      preparedSearchQuery.isBlocked
+        ? []
+        : (data?.pages.flatMap((page) => page.items) ?? []),
+    [data, preparedSearchQuery.isBlocked],
   )
 
   const displayMessages = useMemo(
@@ -217,13 +223,25 @@ export function MessageList({
   const messages = displayMessages
   const selectedKey = selectionKey(selection)
   const errorKey = error ? `${currentViewKey}:${error.message}` : null
-  const showError = Boolean(error && errorKey !== dismissedErrorKey)
+  const showClientQueryError = preparedSearchQuery.isBlocked
+  const showServerError = Boolean(
+    !showClientQueryError && error && errorKey !== dismissedErrorKey,
+  )
+  const showError = showClientQueryError || showServerError
+  const isInvalidQueryError =
+    showClientQueryError ||
+    (error instanceof ApiError && error.code === 'invalid_query')
   const errorMessage =
-    error instanceof ApiError && error.code === 'invalid_query'
-      ? `Search query is not valid: ${error.message}`
-      : 'Failed to load messages'
+    preparedSearchQuery.validation.state !== 'valid'
+      ? `Search query is not valid: ${preparedSearchQuery.validation.message}`
+      : error instanceof ApiError && error.code === 'invalid_query'
+        ? `Search query is not valid: ${error.message}`
+        : 'Failed to load messages'
   const isRefreshingMessages =
-    !isLoading && !isFetchingNextPage && (isFetching || isPlaceholderData)
+    !preparedSearchQuery.isBlocked &&
+    !isLoading &&
+    !isFetchingNextPage &&
+    (isFetching || isPlaceholderData)
 
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
@@ -331,6 +349,9 @@ export function MessageList({
   // Listen for domain events and refresh messages.
   useEffect(() => {
     function handleDomainEvent(event: Event) {
+      if (preparedSearchQuery.isBlocked) {
+        return
+      }
       const payload = (event as CustomEvent<DomainEvent>).detail
       if (!eventMayAffectView(payload, selectedView)) {
         return
@@ -347,7 +368,7 @@ export function MessageList({
         MAIL_DOMAIN_EVENT_NAME,
         handleDomainEvent as EventListener,
       )
-  }, [refetch, selectedView])
+  }, [preparedSearchQuery.isBlocked, refetch, selectedView])
 
   const handleScroll = useCallback(() => {
     const node = scrollContainerRef.current
@@ -356,21 +377,39 @@ export function MessageList({
     }
     setScrollTop(node.scrollTop)
     scrollOffsetByView.set(currentViewKey, node.scrollTop)
+    if (preparedSearchQuery.isBlocked) {
+      return
+    }
     const distanceToEnd = node.scrollHeight - node.scrollTop - node.clientHeight
     if (distanceToEnd < ROW_HEIGHT * 20 && hasNextPage && !isFetchingNextPage) {
       void fetchNextPage()
     }
-  }, [currentViewKey, fetchNextPage, hasNextPage, isFetchingNextPage])
+  }, [
+    currentViewKey,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    preparedSearchQuery.isBlocked,
+  ])
 
   useEffect(() => {
     const node = scrollContainerRef.current
+    if (preparedSearchQuery.isBlocked) {
+      return
+    }
     if (!node || !hasNextPage || isFetchingNextPage) {
       return
     }
     if (node.scrollHeight <= node.clientHeight + ROW_HEIGHT * 4) {
       void fetchNextPage()
     }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, messages.length])
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    messages.length,
+    preparedSearchQuery.isBlocked,
+  ])
 
   const handleBackgroundMouseDown = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -502,18 +541,37 @@ export function MessageList({
                     type="button"
                     className="grid size-6 shrink-0 place-items-center rounded text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                     aria-label="Dismiss error"
-                    onClick={() => setDismissedErrorKey(errorKey)}
+                    onClick={() => {
+                      if (isInvalidQueryError) {
+                        onClearSearchQuery()
+                        return
+                      }
+                      setDismissedErrorKey(errorKey)
+                    }}
                   >
                     <X size={14} />
                   </button>
                 </div>
-                <button
-                  type="button"
-                  className="mt-2 rounded border border-destructive/20 px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
-                  onClick={() => void refetch()}
-                >
-                  Try again
-                </button>
+                <div className="mt-2 flex gap-2">
+                  {isInvalidQueryError && (
+                    <button
+                      type="button"
+                      className="rounded border border-destructive/20 px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                      onClick={onClearSearchQuery}
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                  {!showClientQueryError && (
+                    <button
+                      type="button"
+                      className="rounded border border-destructive/20 px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                      onClick={() => void refetch()}
+                    >
+                      Try again
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             {!isLoading && !showError && messages.length === 0 && (
