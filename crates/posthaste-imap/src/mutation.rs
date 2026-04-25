@@ -2,12 +2,16 @@ use std::num::NonZeroU32;
 
 use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::{
+    command::CommandBody,
     fetch::MessageDataItem,
     fetch::{MacroOrMessageDataItemNames, MessageDataItemName},
     flag::{Flag, StoreType},
+    response::{Data, StatusBody, StatusKind},
     sequence::{SeqOrUid, SequenceSet},
     IntoStatic,
 };
+use imap_client::tasks::tasks::TaskError;
+use imap_client::tasks::Task;
 use posthaste_domain::{ImapMessageLocation, MailboxId, MutationOutcome, SetKeywordsCommand};
 
 use crate::discovery::connect_authenticated_client;
@@ -94,6 +98,32 @@ pub async fn mark_imap_message_deleted_by_location(
         items.into_values().flatten(),
         "matching UID STORE response",
     )?;
+
+    Ok(MutationOutcome { cursor: None })
+}
+
+/// Mark and permanently expunge one IMAP message using UID EXPUNGE.
+///
+/// Only call this when the server advertises UIDPLUS or IMAP4rev2 support.
+///
+/// @spec docs/L1-api#message-commands
+pub async fn expunge_imap_message_by_location(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    location: &ImapMessageLocation,
+) -> Result<MutationOutcome, ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    select_validated_mailbox(&mut client, mailbox_name, location).await?;
+    let items = client
+        .uid_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
+        .await
+        .map_err(ImapAdapterError::from)?;
+    verify_message_data_contains_uid(
+        location,
+        items.into_values().flatten(),
+        "matching UID STORE response",
+    )?;
+    let _expunged = uid_expunge(&mut client, location).await?;
 
     Ok(MutationOutcome { cursor: None })
 }
@@ -215,6 +245,59 @@ fn verify_message_data_contains_uid(
     }
 }
 
+async fn uid_expunge(
+    client: &mut ImapClient,
+    location: &ImapMessageLocation,
+) -> Result<Vec<NonZeroU32>, ImapAdapterError> {
+    client
+        .resolve(UidExpungeTask::new(uid_sequence_set(location)?))
+        .await
+        .map_err(ImapAdapterError::from)?
+        .map_err(|error| ImapAdapterError::Client(error.to_string()))
+}
+
+#[derive(Clone, Debug)]
+struct UidExpungeTask {
+    sequence_set: SequenceSet,
+    output: Vec<NonZeroU32>,
+}
+
+impl UidExpungeTask {
+    fn new(sequence_set: SequenceSet) -> Self {
+        Self {
+            sequence_set,
+            output: Vec::new(),
+        }
+    }
+}
+
+impl Task for UidExpungeTask {
+    type Output = Result<Vec<NonZeroU32>, TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::ExpungeUid {
+            sequence_set: self.sequence_set.clone(),
+        }
+    }
+
+    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
+        if let Data::Expunge(seq) = data {
+            self.output.push(seq);
+            None
+        } else {
+            Some(data)
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(self.output),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use imap_client::imap_types::flag::Flag;
@@ -330,6 +413,15 @@ mod tests {
             error,
             ImapAdapterError::MissingFetchData("matching UID FETCH response")
         ));
+    }
+
+    #[test]
+    fn uid_expunge_task_uses_uid_expunge_command_body() {
+        let task = UidExpungeTask::new(uid_sequence_set(&location()).expect("uid set"));
+
+        let CommandBody::ExpungeUid { .. } = task.command_body() else {
+            panic!("UID EXPUNGE command body is required");
+        };
     }
 
     fn location() -> ImapMessageLocation {
