@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: docs/L0-sync
   - path: docs/L1-jmap
@@ -81,6 +81,7 @@ The runtime schema is centered around raw message state plus locally derived pro
 - `sync_cursor`
 - `event_log`
 - `source_projection`
+- `automation_backfill_job`
 
 Important derived tables:
 
@@ -88,6 +89,7 @@ Important derived tables:
 - `conversation_message` links conversation IDs to concrete `(account_id, message_id)` pairs.
 - `event_log` stores ordered domain events with a monotonically increasing `seq`, which powers `/v1/events`.
 - `sync_cursor` stores per-account mailbox and message state strings.
+- `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 
@@ -121,6 +123,8 @@ Actions mutate the remote server through the same JMAP command paths as manual m
 
 The account runtime also performs automatic backfill for existing local messages. Backfill is intentionally low priority: it runs only while the account runtime has a live gateway, starts after a delay, processes a small bounded batch, publishes resulting mutation events, then waits before the next batch. Foreground sync, push handling, and manual commands remain the primary work of the runtime.
 
+Backfill scheduling is backend-owned and durable. The domain service fingerprints the enabled `backfill = true` automation rules, creates a pending `automation_backfill_job` for each enabled account when rules change or when an account runtime first observes missing current work, and marks the job completed once a batch reports no more matching work. Worker failures increment the job attempt count and keep it pending for a later retry.
+
 ## Conflict model
 
 Mutations include optimistic concurrency checks when the gateway supports them. If the server returns `stateMismatch`, the engine re-syncs the affected type and presents the updated state to the UI. The original mutation is not retried blindly.
@@ -152,3 +156,4 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |
+| automation-backfill-durable | MUST | Automation backfill progress is stored in SQLite and completed jobs for the same rule fingerprint do not rerun after restart |

@@ -269,6 +269,40 @@ pub struct AutomationRule {
     pub backfill: bool,
 }
 
+/// Durable state for backend-owned automation backfill work.
+///
+/// @spec docs/L1-sync#automation-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationBackfillJob {
+    pub account_id: AccountId,
+    pub rule_fingerprint: String,
+    pub status: AutomationBackfillJobStatus,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub updated_at: String,
+}
+
+/// Lifecycle state for an automation backfill job.
+///
+/// @spec docs/L1-sync#automation-actions
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomationBackfillJobStatus {
+    Pending,
+    Completed,
+}
+
+/// Result of one durable automation backfill worker batch.
+///
+/// @spec docs/L1-sync#automation-actions
+#[derive(Clone, Debug)]
+pub struct AutomationBackfillBatchOutcome {
+    pub ran: bool,
+    pub events: Vec<DomainEvent>,
+    pub has_more: bool,
+}
+
 /// Event types that can cause an automation rule to run.
 ///
 /// @spec docs/L1-sync#automation-actions

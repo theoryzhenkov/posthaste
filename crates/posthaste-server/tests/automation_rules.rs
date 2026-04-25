@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationRule, AutomationTrigger, BlobId, FetchedBody, GatewayError,
-    Identity, MailGateway, MailboxId, MailboxRecord, MessageId, MessageRecord, MutationOutcome,
-    PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SyncBatch, SyncCursor, SyncObject,
-    SyncTrigger, ThreadId, RFC3339_EPOCH,
+    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, BlobId,
+    FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord, MessageId,
+    MessageRecord, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue, SyncBatch, SyncCursor, SyncObject, SyncTrigger, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_domain::{ConfigRepository, MailService};
 use posthaste_store::DatabaseStore;
@@ -210,6 +210,31 @@ impl RuleHarness {
             .await
             .expect("backfill should succeed");
         has_more
+    }
+
+    async fn process_backfill_job(
+        &self,
+        account_id: &str,
+        gateway: &ScriptedGateway,
+        batch_size: usize,
+    ) -> (bool, bool) {
+        let outcome = self
+            .service
+            .process_automation_backfill_job_batch(
+                &AccountId::from(account_id),
+                gateway,
+                batch_size,
+            )
+            .await
+            .expect("backfill job should process");
+        (outcome.ran, outcome.has_more)
+    }
+
+    fn current_backfill_status(&self, account_id: &str) -> Option<AutomationBackfillJobStatus> {
+        self.service
+            .automation_backfill_job_for_current_rules(&AccountId::from(account_id))
+            .expect("backfill job should load")
+            .map(|job| job.status)
     }
 
     fn message_keywords(&self, account_id: &str, message_id: &str) -> Vec<String> {
@@ -790,6 +815,68 @@ async fn backfill_processes_existing_matches_in_bounded_batches() {
             vec!["newsletter".to_string()],
             vec!["newsletter".to_string()]
         ]
+    );
+    assert_eq!(gateway.mutations().len(), 2);
+}
+
+#[tokio::test]
+async fn durable_backfill_job_completes_current_rules_and_reruns_changed_rules() {
+    let harness = RuleHarness::new();
+    harness.save_account("primary", "Primary");
+    let gateway = ScriptedGateway::new(
+        vec![mailbox("inbox", "Inbox", Some("inbox"))],
+        vec![message(
+            "message-1",
+            &["inbox"],
+            "Posthaste",
+            "one@posthaste.test",
+            &[],
+        )],
+    );
+    harness.sync("primary", &gateway).await;
+    harness.save_rules(vec![rule(
+        "tag-existing-posthaste",
+        vec![source_is("primary"), from_contains("Posthaste")],
+        vec![AutomationAction::ApplyTag {
+            tag: "newsletter".to_string(),
+        }],
+    )]);
+
+    let first_outcome = harness.process_backfill_job("primary", &gateway, 10).await;
+    let second_outcome = harness.process_backfill_job("primary", &gateway, 10).await;
+
+    assert_eq!(first_outcome, (true, false));
+    assert_eq!(second_outcome, (false, false));
+    assert_eq!(
+        harness.current_backfill_status("primary"),
+        Some(AutomationBackfillJobStatus::Completed)
+    );
+    assert_eq!(
+        harness.message_keywords("primary", "message-1"),
+        vec!["newsletter".to_string()]
+    );
+    assert_eq!(gateway.mutations().len(), 1);
+
+    harness.save_rules(vec![rule(
+        "tag-existing-posthaste-again",
+        vec![source_is("primary"), from_contains("Posthaste")],
+        vec![AutomationAction::ApplyTag {
+            tag: "followup".to_string(),
+        }],
+    )]);
+
+    let changed_rules_outcome = harness.process_backfill_job("primary", &gateway, 10).await;
+
+    assert_eq!(changed_rules_outcome, (true, false));
+    assert_eq!(
+        harness.current_backfill_status("primary"),
+        Some(AutomationBackfillJobStatus::Completed)
+    );
+    let mut keywords = harness.message_keywords("primary", "message-1");
+    keywords.sort();
+    assert_eq!(
+        keywords,
+        vec!["followup".to_string(), "newsletter".to_string()]
     );
     assert_eq!(gateway.mutations().len(), 2);
 }

@@ -3,12 +3,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, BlobId, CommandResult, ConversationCursor, ConversationId, ConversationPage,
-    ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity, MailboxId,
-    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand, ReplyContext,
-    SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand, SmartMailboxRule,
-    SortDirection, SyncBatch, SyncCursor, SyncObject, TagSummary, ThreadId, ThreadView,
+    AccountId, AutomationBackfillJob, BlobId, CommandResult, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
+    MailboxId, MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage,
+    MessageSortField, MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand,
+    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
+    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, TagSummary, ThreadId,
+    ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -375,6 +376,46 @@ pub trait SourceDataStore: Send + Sync {
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError>;
 }
 
+/// Durable automation backfill scheduling boundary.
+pub trait AutomationBackfillStore: Send + Sync {
+    /// Create the current account/rules job if it does not exist, returning the job.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    fn ensure_automation_backfill_job(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+    ) -> Result<AutomationBackfillJob, StoreError>;
+
+    /// Mark a job as completed after all current matches have been processed.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    fn complete_automation_backfill_job(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Record a worker failure while keeping the job pending for a later retry.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    fn record_automation_backfill_failure(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+        error: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Return the durable job for an account/rules fingerprint if one exists.
+    ///
+    /// @spec docs/L1-sync#automation-actions
+    fn get_automation_backfill_job(
+        &self,
+        account_id: &AccountId,
+        rule_fingerprint: &str,
+    ) -> Result<Option<AutomationBackfillJob>, StoreError>;
+}
+
 /// Local store for synced mail data, events, and projections.
 ///
 /// The store is the single source of truth for the UI -- the frontend reads
@@ -395,6 +436,7 @@ pub trait MailStore:
     + EventStore
     + SourceProjectionStore
     + SourceDataStore
+    + AutomationBackfillStore
 {
 }
 
@@ -412,6 +454,7 @@ impl<T> MailStore for T where
         + EventStore
         + SourceProjectionStore
         + SourceDataStore
+        + AutomationBackfillStore
 {
 }
 

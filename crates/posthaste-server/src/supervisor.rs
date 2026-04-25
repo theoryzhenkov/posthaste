@@ -314,14 +314,19 @@ async fn process_automation_backfill_batch(
 
     match shared
         .service
-        .backfill_automation_rules_batch(
+        .process_automation_backfill_job_batch(
             account_id,
             gateway.as_ref(),
             AUTOMATION_BACKFILL_BATCH_SIZE,
         )
         .await
     {
-        Ok((events, has_more)) => {
+        Ok(outcome) => {
+            if !outcome.ran {
+                return false;
+            }
+            let events = outcome.events;
+            let has_more = outcome.has_more;
             if !events.is_empty() {
                 info!(
                     account_id = %account_id,

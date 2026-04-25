@@ -132,6 +132,17 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 name TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS automation_backfill_job (
+                account_id TEXT NOT NULL,
+                rule_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                queued_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, rule_fingerprint)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
             CREATE INDEX IF NOT EXISTS idx_message_account_received
@@ -158,6 +169,8 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 ON event_log (account_id, topic, mailbox_id, seq);
             CREATE INDEX IF NOT EXISTS idx_conversation_message_lookup
                 ON conversation_message (account_id, message_id);
+            CREATE INDEX IF NOT EXISTS idx_automation_backfill_pending
+                ON automation_backfill_job (account_id, status, updated_at);
             ",
         )
         .map_err(sql_to_store_error)?;

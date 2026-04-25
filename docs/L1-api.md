@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: docs/L0-api
   - path: docs/L1-sync
@@ -180,7 +180,7 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 
-**Automation rules**: `AppSettings` and `PatchSettingsRequest` include `automationRules`. Each rule has `id`, `name`, `enabled`, `triggers`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. Account and mailbox restrictions are ordinary query conditions, not a separate rule scope. PATCH replaces the full rule list when `automationRules` is present and preserves it when omitted. Rule IDs must be unique, enabled rules need at least one trigger and one action, tag actions must target non-system keywords, and move actions must target a non-empty mailbox ID.
+**Automation rules**: `AppSettings` and `PatchSettingsRequest` include `automationRules`. Each rule has `id`, `name`, `enabled`, `triggers`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. Account and mailbox restrictions are ordinary query conditions, not a separate rule scope. PATCH replaces the full rule list when `automationRules` is present and preserves it when omitted. Rule IDs must be unique, enabled rules need at least one trigger and one action, tag actions must target non-system keywords, and move actions must target a non-empty mailbox ID. When `automationRules` is present, the backend saves the rules and enqueues durable low-priority backfill jobs for enabled accounts if the current enabled backfill-rule fingerprint has not already completed.
 
 `POST /automation-rules:preview` accepts a draft rule `condition` and optional `limit`, then returns `AutomationRulePreviewResponse { total, items }` using the same indexed rule evaluator as smart mailboxes. Results are newest-first. The default preview limit is 5 and the maximum is 50.
 
