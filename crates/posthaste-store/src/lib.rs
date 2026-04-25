@@ -19,16 +19,17 @@ use posthaste_domain::{
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
     ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
-    EventStore, FetchedBody, ImapMailboxSyncState, ImapModSeq, ImapSyncStateStore,
-    ImapSyncStateWriteStore, ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxSummary,
-    MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore, MessageId,
-    MessageListStore, MessageMailboxStore, MessagePage, MessageSortField, MessageSummary,
-    RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection,
-    SourceDataStore, SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject,
-    SyncStateStore, SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView,
-    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
+    EventStore, FetchedBody, ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
+    ImapMessageLocationWriteStore, ImapModSeq, ImapSyncStateStore, ImapSyncStateWriteStore,
+    ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
+    MessageCursor, MessageDetail, MessageDetailStore, MessageId, MessageListStore,
+    MessageMailboxStore, MessagePage, MessageSortField, MessageSummary, RawMessageRef,
+    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
@@ -999,6 +1000,81 @@ impl ImapSyncStateWriteStore for DatabaseStore {
     }
 }
 
+impl ImapMessageLocationStore for DatabaseStore {
+    fn list_imap_message_locations(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Vec<ImapMessageLocation>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT message_id, mailbox_id, uid_validity, uid, modseq, updated_at
+                 FROM imap_message_location
+                 WHERE account_id = ?1 AND message_id = ?2
+                 ORDER BY mailbox_id",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(
+                params![account_id.as_str(), message_id.as_str()],
+                imap_message_location_from_row,
+            )
+            .map_err(sql_to_store_error)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)
+    }
+}
+
+impl ImapMessageLocationWriteStore for DatabaseStore {
+    fn put_imap_message_location(
+        &self,
+        account_id: &AccountId,
+        location: &ImapMessageLocation,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO imap_message_location (
+                    account_id, message_id, mailbox_id, uid_validity, uid, modseq, updated_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(account_id, message_id, mailbox_id) DO UPDATE SET
+                    uid_validity = excluded.uid_validity,
+                    uid = excluded.uid,
+                    modseq = excluded.modseq,
+                    updated_at = excluded.updated_at",
+                params![
+                    account_id.as_str(),
+                    location.message_id.as_str(),
+                    location.mailbox_id.as_str(),
+                    location.uid_validity.0,
+                    location.uid.0,
+                    location.modseq.map(|modseq| modseq.0.to_string()),
+                    location.updated_at,
+                ],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn delete_imap_message_locations(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM imap_message_location
+                 WHERE account_id = ?1 AND message_id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+}
+
 fn imap_mailbox_state_from_row(row: &Row<'_>) -> rusqlite::Result<ImapMailboxSyncState> {
     let uid_validity = u32_from_row(row, 2, "uid_validity")?;
     let highest_uid = optional_u32_from_row(row, 3, "highest_uid")?.map(ImapUid);
@@ -1009,6 +1085,17 @@ fn imap_mailbox_state_from_row(row: &Row<'_>) -> rusqlite::Result<ImapMailboxSyn
         uid_validity: ImapUidValidity(uid_validity),
         highest_uid,
         highest_modseq,
+        updated_at: row.get(5)?,
+    })
+}
+
+fn imap_message_location_from_row(row: &Row<'_>) -> rusqlite::Result<ImapMessageLocation> {
+    Ok(ImapMessageLocation {
+        message_id: MessageId(row.get(0)?),
+        mailbox_id: MailboxId(row.get(1)?),
+        uid_validity: ImapUidValidity(u32_from_row(row, 2, "uid_validity")?),
+        uid: ImapUid(u32_from_row(row, 3, "uid")?),
+        modseq: optional_u64_text_from_row(row, 4, "modseq")?.map(ImapModSeq),
         updated_at: row.get(5)?,
     })
 }
@@ -1336,6 +1423,67 @@ mod tests {
         assert_eq!(
             store.get_imap_mailbox_state(&secondary, &MailboxId::from("imap:inbox"))?,
             Some(state)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn imap_message_locations_round_trip_multiple_mailboxes() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        let message_id = MessageId::from("imap:gmail:msgid:1278455344230334865");
+        let inbox = ImapMessageLocation {
+            message_id: message_id.clone(),
+            mailbox_id: MailboxId::from("imap:inbox"),
+            uid_validity: ImapUidValidity(10),
+            uid: ImapUid(101),
+            modseq: Some(ImapModSeq(u64::MAX)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+        let all_mail = ImapMessageLocation {
+            mailbox_id: MailboxId::from("imap:all"),
+            uid: ImapUid(202),
+            ..inbox.clone()
+        };
+
+        store.put_imap_message_location(&account, &all_mail)?;
+        store.put_imap_message_location(&account, &inbox)?;
+
+        assert_eq!(
+            store.list_imap_message_locations(&account, &message_id)?,
+            vec![all_mail, inbox]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn imap_message_location_delete_is_account_scoped() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let primary = AccountId::from("primary");
+        let secondary = AccountId::from("secondary");
+        let message_id = MessageId::from("message-1");
+        let location = ImapMessageLocation {
+            message_id: message_id.clone(),
+            mailbox_id: MailboxId::from("imap:inbox"),
+            uid_validity: ImapUidValidity(10),
+            uid: ImapUid(101),
+            modseq: None,
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        store.put_imap_message_location(&primary, &location)?;
+        store.put_imap_message_location(&secondary, &location)?;
+        store.delete_imap_message_locations(&primary, &message_id)?;
+
+        assert_eq!(
+            store.list_imap_message_locations(&primary, &message_id)?,
+            Vec::<ImapMessageLocation>::new()
+        );
+        assert_eq!(
+            store.list_imap_message_locations(&secondary, &message_id)?,
+            vec![location]
         );
         Ok(())
     }

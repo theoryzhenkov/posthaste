@@ -163,6 +163,24 @@ pub struct ImapMailboxSyncState {
     pub updated_at: String,
 }
 
+/// IMAP location for a locally projected message.
+///
+/// Message identity and command addressability are separate for IMAP. Gmail can
+/// use `X-GM-MSGID` as a stable message ID while still requiring a mailbox UID
+/// for ordinary IMAP commands.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImapMessageLocation {
+    pub message_id: MessageId,
+    pub mailbox_id: MailboxId,
+    pub uid_validity: ImapUidValidity,
+    pub uid: ImapUid,
+    pub modseq: Option<ImapModSeq>,
+    pub updated_at: String,
+}
+
 /// Server state observed after selecting or examining an IMAP mailbox.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
