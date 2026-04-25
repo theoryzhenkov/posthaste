@@ -10,7 +10,9 @@ use posthaste_domain::{
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
-use posthaste_imap::{ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway};
+use posthaste_imap::{
+    ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig,
+};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
@@ -513,11 +515,16 @@ async fn build_connection(
                 GatewayError::Rejected("missing IMAP/SMTP secret reference".to_string())
             })?;
             let secret = secret_store.resolve(secret_ref)?;
-            let config = ImapConnectionConfig::from_account_transport(&account.transport, secret)
-                .map_err(imap_adapter_error)?;
-            let gateway = LiveImapSmtpGateway::connect(config, Some(shared.store.clone()))
-                .await
-                .map_err(imap_adapter_error)?;
+            let imap_config =
+                ImapConnectionConfig::from_account_transport(&account.transport, secret.clone())
+                    .map_err(imap_adapter_error)?;
+            let smtp_config =
+                SmtpConnectionConfig::from_account_transport(&account.transport, secret)
+                    .map_err(imap_adapter_error)?;
+            let gateway =
+                LiveImapSmtpGateway::connect(imap_config, smtp_config, Some(shared.store.clone()))
+                    .await
+                    .map_err(imap_adapter_error)?;
             info!(
                 account_id = %account.id,
                 mailbox_count = gateway.discovery().mailboxes.len(),
@@ -534,6 +541,7 @@ async fn build_connection(
 fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
     match error {
         ImapAdapterError::MissingTransport
+        | ImapAdapterError::MissingSmtpTransport
         | ImapAdapterError::MissingUsername
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
@@ -546,10 +554,12 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
         | ImapAdapterError::ParseMessageBody
-        | ImapAdapterError::MissingAttachment { .. } => {
-            GatewayError::Rejected(error.to_string()).into()
+        | ImapAdapterError::MissingAttachment { .. }
+        | ImapAdapterError::InvalidSmtpAddress { .. }
+        | ImapAdapterError::BuildSmtpMessage(_) => GatewayError::Rejected(error.to_string()).into(),
+        ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
+            GatewayError::Network(message).into()
         }
-        ImapAdapterError::Client(message) => GatewayError::Network(message).into(),
     }
 }
 
