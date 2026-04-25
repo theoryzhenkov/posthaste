@@ -22,6 +22,8 @@ pub enum ImapAdapterError {
     InvalidUidSequence(String),
     #[error("could not parse RFC 5322 message headers")]
     ParseMessageHeaders,
+    #[error("could not parse RFC 5322 message body")]
+    ParseMessageBody,
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {

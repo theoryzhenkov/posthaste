@@ -7,6 +7,7 @@
 //! @spec docs/L0-providers
 //! @spec docs/L1-sync
 
+mod body;
 mod discovery;
 mod error;
 mod fetch;
@@ -15,6 +16,7 @@ mod mailbox;
 mod message;
 mod sync;
 
+pub use body::imap_body_from_raw_mime;
 pub use discovery::{
     discover_imap_account, imap_mailbox_id, map_imap_mailbox, normalize_imap_capabilities,
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
