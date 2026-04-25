@@ -1740,6 +1740,14 @@ mod tests {
         ) -> Result<Vec<ImapMessageLocation>, StoreError> {
             Ok(Vec::new())
         }
+
+        fn list_imap_mailbox_message_locations(
+            &self,
+            _account_id: &AccountId,
+            _mailbox_id: &MailboxId,
+        ) -> Result<Vec<ImapMessageLocation>, StoreError> {
+            Ok(Vec::new())
+        }
     }
 
     impl SyncWriteStore for TestStore {
