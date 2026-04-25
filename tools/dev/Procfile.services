@@ -1,3 +1,3 @@
 stalwart: stalwart -c tools/dev/stalwart/config.toml
 seed: bash tools/dev/stalwart/seed.sh
-daemon: bash tools/dev/overmind/run-daemon.sh
+server: bash tools/dev/overmind/run-server.sh

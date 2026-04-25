@@ -30,8 +30,15 @@ import { MessageList } from './components/MessageList'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
+import { FocusedSurfaceDocument } from './components/FocusedSurface'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
+import {
+  closeWebSurface,
+  isTauriRuntime,
+  openDesktopSurface,
+  openWebSurface,
+} from './desktop'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -45,6 +52,7 @@ import { queryKeys } from './queryKeys'
 import {
   messageSurfaceFromSelection,
   settingsSurface,
+  surfaceFromLocation,
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
 } from './surfaces'
@@ -70,6 +78,40 @@ const DEFAULT_VIEW: SidebarSelection = {
 }
 const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
 
+function useLocationSurface(): SurfaceDescriptor | null {
+  const [surface, setSurface] = useState<SurfaceDescriptor | null>(() =>
+    surfaceFromLocation(window.location),
+  )
+
+  useEffect(() => {
+    function syncSurface() {
+      setSurface(surfaceFromLocation(window.location))
+    }
+
+    window.addEventListener('hashchange', syncSurface)
+    window.addEventListener('popstate', syncSurface)
+    return () => {
+      window.removeEventListener('hashchange', syncSurface)
+      window.removeEventListener('popstate', syncSurface)
+    }
+  }, [])
+
+  return surface
+}
+
+function openFocusedSurface(surface: SurfaceDescriptor): void {
+  if (isTauriRuntime()) {
+    void openDesktopSurface(surface).catch((error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to open window',
+      )
+    })
+    return
+  }
+
+  openWebSurface(surface)
+}
+
 /**
  * Main mail client shell: toolbar, three-column layout, and surface host.
  *
@@ -79,7 +121,11 @@ const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L0-ui#navigation-model
  */
-function MailClient() {
+function MailClient({
+  routeSurface,
+}: {
+  routeSurface: SurfaceDescriptor | null
+}) {
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(
     DEFAULT_VIEW,
   )
@@ -92,9 +138,6 @@ function MailClient() {
   const [searchQuery, setSearchQuery] = useState('')
   const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const [activeSurface, setActiveSurface] = useState<SurfaceDescriptor | null>(
-    null,
-  )
   const preparedSearchQuery = useMemo(
     () => prepareServerSearchQuery(searchQuery),
     [searchQuery],
@@ -126,13 +169,12 @@ function MailClient() {
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
     : null
-  const focusedSourceId =
-    effectiveView?.kind === 'source-mailbox' ? effectiveView.sourceId : null
   const shouldForceSettings = accounts.length === 0
+  const shouldRenderForcedSettings = shouldForceSettings && !isTauriRuntime()
   const effectiveSurface =
-    shouldForceSettings && activeSurface?.kind !== 'settings'
+    shouldRenderForcedSettings && routeSurface?.kind !== 'settings'
       ? settingsSurface({ category: 'accounts' })
-      : activeSurface
+      : routeSurface
   const isSettingsSurfaceOpen = effectiveSurface?.kind === 'settings'
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
@@ -152,6 +194,12 @@ function MailClient() {
   )
 
   useDaemonEvents()
+
+  useEffect(() => {
+    if (shouldForceSettings && isTauriRuntime()) {
+      openFocusedSurface(settingsSurface({ category: 'accounts' }))
+    }
+  }, [shouldForceSettings])
 
   const {
     defaultLayout: shellDefaultLayout,
@@ -253,7 +301,7 @@ function MailClient() {
     if (!selectedMessage) {
       return
     }
-    setActiveSurface(messageSurfaceFromSelection(selectedMessage))
+    openFocusedSurface(messageSurfaceFromSelection(selectedMessage))
   }, [selectedMessage])
 
   const resolveComposeSourceId = useCallback(() => {
@@ -270,7 +318,7 @@ function MailClient() {
   const handleCompose = useCallback(() => {
     const sourceId = resolveComposeSourceId()
     if (!sourceId) {
-      setActiveSurface(settingsSurface({ category: 'accounts' }))
+      openFocusedSurface(settingsSurface({ category: 'accounts' }))
       return
     }
     setComposeIntent({ kind: 'new', sourceId })
@@ -313,7 +361,7 @@ function MailClient() {
       }
       if ((event.metaKey || event.ctrlKey) && event.key === ',') {
         event.preventDefault()
-        setActiveSurface(settingsSurface())
+        openFocusedSurface(settingsSurface())
         return
       }
       if (
@@ -433,7 +481,7 @@ function MailClient() {
       category?: SettingsSurfaceCategory,
       options?: { accountId?: string | null; smartMailboxId?: string | null },
     ) => {
-      setActiveSurface(
+      openFocusedSurface(
         settingsSurface({
           category,
           accountId: options?.accountId,
@@ -530,9 +578,14 @@ function MailClient() {
         onTag={handleOpenTagEditor}
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
-          setActiveSurface((surface) =>
-            surface?.kind === 'settings' ? null : settingsSurface(),
-          )
+          if (
+            effectiveSurface?.kind === 'settings' &&
+            !shouldRenderForcedSettings
+          ) {
+            closeWebSurface()
+          } else {
+            openFocusedSurface(settingsSurface())
+          }
         }}
         onToggleTheme={handleToggleTheme}
         onTrash={handleTrash}
@@ -663,16 +716,9 @@ function MailClient() {
       )}
       <SurfaceHost
         surface={effectiveSurface}
-        accounts={accounts}
-        activeAccountId={focusedSourceId}
-        canClose={!shouldForceSettings}
-        onClose={() => setActiveSurface(null)}
-        onSettingsActiveAccountChange={() => {
-          setSelectedView(DEFAULT_VIEW)
-          setSelectedMessage(null)
-        }}
+        canClose={!shouldRenderForcedSettings}
+        onClose={closeWebSurface}
         onSearch={handleSearch}
-        onSelectMessage={handleSelectMessage}
       />
     </div>
   )
@@ -683,10 +729,17 @@ function MailClient() {
  * @spec docs/L1-ui#component-hierarchy
  */
 export default function App() {
+  const routeSurface = useLocationSurface()
+  const isStandaloneSurface = isTauriRuntime() && routeSurface !== null
+
   return (
     <DesignThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <MailClient />
+        {isStandaloneSurface ? (
+          <FocusedSurfaceDocument surface={routeSurface} />
+        ) : (
+          <MailClient routeSurface={routeSurface} />
+        )}
         <Toaster
           position="bottom-center"
           toastOptions={{

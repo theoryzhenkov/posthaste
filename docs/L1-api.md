@@ -17,6 +17,8 @@ dependents:
 
 All endpoints are prefixed with `/v1`.
 
+In browser-localhost mode, `posthaste serve` serves the built React frontend on non-API paths and keeps all JSON/SSE endpoints under `/v1`. Unknown `/v1` paths return API 404s rather than the frontend shell.
+
 ### Settings
 
 | Method | Path | Handler | Request | Response |

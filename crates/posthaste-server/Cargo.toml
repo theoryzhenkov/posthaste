@@ -8,7 +8,7 @@ name = "posthaste_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "posthaste-daemon"
+name = "posthaste"
 path = "src/main.rs"
 
 [dependencies]

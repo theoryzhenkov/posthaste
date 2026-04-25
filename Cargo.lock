@@ -2822,6 +2822,7 @@ name = "posthaste-desktop"
 version = "0.1.0"
 dependencies = [
  "posthaste-server",
+ "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",

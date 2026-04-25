@@ -16,6 +16,10 @@ check:
 typecheck:
     bun run typecheck
 
+# Run frontend tests
+test:
+    bun run test
+
 # Format frontend sources
 fmt:
     bun run format

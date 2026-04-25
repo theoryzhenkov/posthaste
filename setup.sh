@@ -22,9 +22,15 @@ SOPS_UPDATED=0
 if [ ! -f .age-key ]; then
     age-keygen -o .age-key 2>&1
     PUBLIC_KEY=$(age-keygen -y .age-key)
-    sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|$PUBLIC_KEY|" .sops.yaml
-    SOPS_UPDATED=1
-    echo "Generated .age-key and updated .sops.yaml"
+    if grep -q "REPLACE_WITH_AGE_PUBLIC_KEY" .sops.yaml; then
+        sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|$PUBLIC_KEY|" .sops.yaml
+        SOPS_UPDATED=1
+        echo "Generated .age-key and updated .sops.yaml"
+    else
+        echo "Generated .age-key"
+        echo "Age public key: $PUBLIC_KEY"
+        echo "Add this recipient to .sops.yaml if this key should decrypt repository secrets."
+    fi
 else
     echo ".age-key already exists, skipping"
 fi

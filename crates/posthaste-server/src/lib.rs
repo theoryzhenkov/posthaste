@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::Router;
 #[cfg(debug_assertions)]
@@ -20,6 +21,7 @@ use posthaste_domain::{ConfigRepository, DomainEvent, MailService, MailStore, Se
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing::{info, info_span};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -65,9 +67,15 @@ pub struct ServerHandle {
 #[derive(Default)]
 pub struct ServerConfig {
     pub extra_cors_origins: Vec<String>,
-    /// Override the bind address from daemon settings (e.g. `"127.0.0.1:0"`
+    /// Override the configured bind address (e.g. `"127.0.0.1:0"`
     /// for OS-assigned ports in the Tauri shell).
     pub bind_address_override: Option<String>,
+    /// Static frontend distribution to serve for browser-localhost mode.
+    pub frontend_dist: Option<PathBuf>,
+}
+
+async fn api_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 /// Initialize the entire backend (config, store, supervisor, logging)
@@ -84,10 +92,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let config_repo =
         TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
 
-    let daemon =
-        config::read_daemon_settings(&config_repo).expect("failed to read daemon settings");
+    let runtime =
+        config::read_daemon_settings(&config_repo).expect("failed to read runtime settings");
 
-    let log_guard = logging::init(&roots.state_root, &daemon.log_level);
+    let log_guard = logging::init(&roots.state_root, &runtime.log_level);
 
     if config_repo.is_empty() {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
@@ -125,7 +133,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         store.clone(),
         secret_store.clone(),
         event_sender.clone(),
-        Duration::from_secs(daemon.poll_interval_seconds),
+        Duration::from_secs(runtime.poll_interval_seconds),
     ));
 
     for source in service
@@ -146,7 +154,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     // Build CORS layer: always include the configured origin, plus any extras.
     let mut origins: Vec<axum::http::HeaderValue> =
-        vec![daemon.cors_origin.parse().expect("invalid CORS origin")];
+        vec![runtime.cors_origin.parse().expect("invalid CORS origin")];
     for extra in &server_config.extra_cors_origins {
         origins.push(extra.parse().expect("invalid extra CORS origin"));
     }
@@ -164,150 +172,148 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             )
         });
 
-    let app = Router::new()
+    let api = Router::new()
         .route(
-            "/v1/settings",
+            "/settings",
             get(api::get_settings).patch(api::patch_settings),
         )
         .route(
-            "/v1/automation-rules:preview",
+            "/automation-rules:preview",
             post(api::preview_automation_rule),
         )
         .route(
-            "/v1/accounts",
+            "/accounts",
             get(api::list_accounts).post(api::create_account),
         )
         .route(
-            "/v1/accounts/{account_id}",
+            "/accounts/{account_id}",
             get(api::get_account)
                 .patch(api::patch_account)
                 .delete(api::delete_account),
         )
+        .route("/accounts/{account_id}/verify", post(api::verify_account))
+        .route("/accounts/{account_id}/enable", post(api::enable_account))
+        .route("/accounts/{account_id}/disable", post(api::disable_account))
         .route(
-            "/v1/accounts/{account_id}/verify",
-            post(api::verify_account),
-        )
-        .route(
-            "/v1/accounts/{account_id}/enable",
-            post(api::enable_account),
-        )
-        .route(
-            "/v1/accounts/{account_id}/disable",
-            post(api::disable_account),
-        )
-        .route(
-            "/v1/accounts/{account_id}/logo",
+            "/accounts/{account_id}/logo",
             post(api::upload_account_logo),
         )
         .route(
-            "/v1/account-assets/logos/{image_id}",
+            "/account-assets/logos/{image_id}",
             get(api::get_account_logo),
         )
-        .route("/v1/sidebar", get(api::get_sidebar))
+        .route("/sidebar", get(api::get_sidebar))
         .route(
-            "/v1/smart-mailboxes",
+            "/smart-mailboxes",
             get(api::list_smart_mailboxes).post(api::create_smart_mailbox),
         )
         .route(
-            "/v1/smart-mailboxes/{smart_mailbox_id}",
+            "/smart-mailboxes/{smart_mailbox_id}",
             get(api::get_smart_mailbox)
                 .patch(api::patch_smart_mailbox)
                 .delete(api::delete_smart_mailbox),
         )
         .route(
-            "/v1/smart-mailboxes:reset-defaults",
+            "/smart-mailboxes:reset-defaults",
             post(api::reset_default_smart_mailboxes),
         )
         .route(
-            "/v1/smart-mailboxes/{smart_mailbox_id}/messages",
+            "/smart-mailboxes/{smart_mailbox_id}/messages",
             get(api::list_smart_mailbox_messages),
         )
         .route(
-            "/v1/smart-mailboxes/{smart_mailbox_id}/conversations",
+            "/smart-mailboxes/{smart_mailbox_id}/conversations",
             get(api::list_smart_mailbox_conversations),
         )
-        .route("/v1/views/conversations", get(api::list_conversations))
+        .route("/views/conversations", get(api::list_conversations))
         .route(
-            "/v1/views/conversations/{conversation_id}",
+            "/views/conversations/{conversation_id}",
             get(api::get_conversation),
         )
+        .route("/sources/{source_id}/mailboxes", get(api::list_mailboxes))
         .route(
-            "/v1/sources/{source_id}/mailboxes",
-            get(api::list_mailboxes),
-        )
-        .route(
-            "/v1/sources/{source_id}/mailboxes/{mailbox_id}",
+            "/sources/{source_id}/mailboxes/{mailbox_id}",
             patch(api::patch_mailbox),
         )
         .route(
-            "/v1/sources/{source_id}/messages",
+            "/sources/{source_id}/messages",
             get(api::list_source_messages),
         )
         .route(
-            "/v1/sources/{source_id}/messages/{message_id}",
+            "/sources/{source_id}/messages/{message_id}",
             get(api::get_message),
         )
         .route(
-            "/v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
+            "/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
             get(api::get_message_attachment),
         )
-        .route("/v1/sources/{source_id}/identity", get(api::get_identity))
+        .route("/sources/{source_id}/identity", get(api::get_identity))
         .route(
-            "/v1/sources/{source_id}/messages/{message_id}/reply-context",
+            "/sources/{source_id}/messages/{message_id}/reply-context",
             get(api::get_reply_context),
         )
         .route(
-            "/v1/sources/{source_id}/commands/send",
+            "/sources/{source_id}/commands/send",
             post(api::send_message),
         )
         .route(
-            "/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords",
+            "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),
         )
         .route(
-            "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox",
+            "/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox",
             post(api::add_to_mailbox),
         )
         .route(
-            "/v1/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox",
+            "/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox",
             post(api::remove_from_mailbox),
         )
         .route(
-            "/v1/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes",
+            "/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes",
             post(api::replace_mailboxes),
         )
         .route(
-            "/v1/sources/{source_id}/commands/messages/{message_id}/destroy",
+            "/sources/{source_id}/commands/messages/{message_id}/destroy",
             post(api::destroy_message),
         )
         .route(
-            "/v1/sources/{source_id}/commands/sync",
+            "/sources/{source_id}/commands/sync",
             post(api::trigger_sync),
         )
-        .route("/v1/config:reload", post(api::reload_config))
-        .route("/v1/events", get(api::stream_events))
+        .route("/config:reload", post(api::reload_config))
+        .route("/events", get(api::stream_events))
+        .fallback(api_not_found)
         .layer(trace_layer)
         .layer(cors)
         .with_state(state);
 
+    let app = if let Some(frontend_dist) = server_config.frontend_dist.clone() {
+        Router::new().nest("/v1", api).fallback_service(
+            ServeDir::new(&frontend_dist)
+                .fallback(ServeFile::new(frontend_dist.join("index.html"))),
+        )
+    } else {
+        Router::new().nest("/v1", api)
+    };
+
     let bind_address = server_config
         .bind_address_override
         .as_deref()
-        .unwrap_or(&daemon.bind_address);
+        .unwrap_or(&runtime.bind_address);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
-        .expect("failed to bind daemon listener");
+        .expect("failed to bind server listener");
     let addr = listener.local_addr().expect("failed to get local address");
     info!(
         address = %addr,
         config_root = %roots.config_root.display(),
-        "posthaste-daemon listening"
+        "posthaste listening"
     );
 
     let join_handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
-            .expect("daemon server failed");
+            .expect("posthaste server failed");
     });
 
     ServerHandle {

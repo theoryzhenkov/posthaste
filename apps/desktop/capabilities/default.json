@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default permissions for PostHaste",
-  "windows": ["main"],
+  "windows": ["main", "settings", "message-*"],
   "permissions": [
     "core:default",
     "shell:allow-open"

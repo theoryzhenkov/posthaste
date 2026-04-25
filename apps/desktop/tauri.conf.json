@@ -4,8 +4,8 @@
   "identifier": "com.posthaste.mail",
   "build": {
     "frontendDist": "../web/dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd ../web && bun run dev",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "cd ../web && bun run dev -- --host 127.0.0.1 --port 5173 --strictPort",
     "beforeBuildCommand": "cd ../web && bun run build"
   },
   "app": {

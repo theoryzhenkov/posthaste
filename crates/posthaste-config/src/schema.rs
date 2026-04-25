@@ -839,9 +839,7 @@ mod tests {
                         nodes: Vec::new(),
                     },
                 },
-                actions: vec![AutomationAction::ApplyTag {
-                    tag: String::new(),
-                }],
+                actions: vec![AutomationAction::ApplyTag { tag: String::new() }],
                 backfill: true,
             }],
         };

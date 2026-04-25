@@ -7,7 +7,7 @@ seed_ready_marker="$state_root/.stalwart-seed-ready"
 
 for _ in $(seq 1 120); do
   if [[ -f "$seed_ready_marker" ]]; then
-    exec cargo run --bin posthaste-daemon
+    exec cargo run --bin posthaste -- serve --api-only
   fi
   sleep 0.5
 done

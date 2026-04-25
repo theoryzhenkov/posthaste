@@ -2,9 +2,9 @@
 
 set working-directory := '..'
 
-# Run the daemon
+# Run the local server
 run *args:
-    cargo run --bin posthaste-daemon {{args}}
+    cargo run --bin posthaste -- serve {{args}}
 
 # Build all crates
 build:

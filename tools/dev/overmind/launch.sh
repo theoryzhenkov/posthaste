@@ -3,7 +3,7 @@
 #
 # Usage: launch.sh <web|desktop|services>
 #
-# Defaults point the daemon at an isolated dev-only config/state root
+# Defaults point the server at an isolated dev-only config/state root
 # (var/dev/posthaste/) so the real ~/.config/posthaste is never touched.
 # Override any POSTHASTE_* env var before invoking to change behavior.
 set -euo pipefail
@@ -76,20 +76,28 @@ fi
 export POSTHASTE_STALWART_URL="${POSTHASTE_STALWART_URL:-http://127.0.0.1:$POSTHASTE_STALWART_PORT}"
 
 if [[ -z "${POSTHASTE_BIND:-}" ]]; then
-  POSTHASTE_DAEMON_PORT="$(find_available_port 3001)"
-  export POSTHASTE_BIND="127.0.0.1:$POSTHASTE_DAEMON_PORT"
+  POSTHASTE_SERVER_PORT="$(find_available_port 3001)"
+  export POSTHASTE_BIND="127.0.0.1:$POSTHASTE_SERVER_PORT"
 else
-  POSTHASTE_DAEMON_PORT="$(port_from_bind "$POSTHASTE_BIND")"
+  POSTHASTE_SERVER_PORT="$(port_from_bind "$POSTHASTE_BIND")"
 fi
 
 export POSTHASTE_VITE_HOST="${POSTHASTE_VITE_HOST:-127.0.0.1}"
-export POSTHASTE_VITE_PORT="${POSTHASTE_VITE_PORT:-$(find_available_port 5173)}"
-export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:$POSTHASTE_DAEMON_PORT/v1}"
+if [[ "$layout" == "desktop" ]]; then
+  if [[ -n "${POSTHASTE_VITE_PORT:-}" && "$POSTHASTE_VITE_PORT" != "5173" ]]; then
+    echo "desktop dev uses Tauri devUrl http://127.0.0.1:5173; unset POSTHASTE_VITE_PORT or set it to 5173" >&2
+    exit 2
+  fi
+  export POSTHASTE_VITE_PORT="5173"
+elif [[ -z "${POSTHASTE_VITE_PORT:-}" ]]; then
+  export POSTHASTE_VITE_PORT="$(find_available_port 5173)"
+fi
+export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:$POSTHASTE_SERVER_PORT/v1}"
 export POSTHASTE_CORS_ORIGIN="${POSTHASTE_CORS_ORIGIN:-http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT}"
 
-instance_id="mail${POSTHASTE_STALWART_PORT}-api${POSTHASTE_DAEMON_PORT}-web${POSTHASTE_VITE_PORT}"
+instance_id="mail${POSTHASTE_STALWART_PORT}-api${POSTHASTE_SERVER_PORT}-web${POSTHASTE_VITE_PORT}"
 use_instance_roots=false
-if [[ "$POSTHASTE_STALWART_PORT" != "8080" || "$POSTHASTE_DAEMON_PORT" != "3001" || "$POSTHASTE_VITE_PORT" != "5173" ]]; then
+if [[ "$POSTHASTE_STALWART_PORT" != "8080" || "$POSTHASTE_SERVER_PORT" != "3001" || "$POSTHASTE_VITE_PORT" != "5173" ]]; then
   use_instance_roots=true
 fi
 
@@ -138,9 +146,9 @@ mkdir -p \
   "$POSTHASTE_CONFIG_ROOT" "$POSTHASTE_STATE_ROOT"
 rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 
-log_path="$("$root/tools/dev/overmind/daemon-log-path.sh")"
-echo "Persisted daemon log: $log_path (tail with 'just daemon-log-tail')"
-echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, API http://127.0.0.1:$POSTHASTE_DAEMON_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
+log_path="$("$root/tools/dev/overmind/server-log-path.sh")"
+echo "Persisted server log: $log_path (tail with 'just server-log-tail')"
+echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
 
 if [[ "${POSTHASTE_DEV_STACK_SMOKE:-}" == "1" ]]; then
   require_var_dev_path() {

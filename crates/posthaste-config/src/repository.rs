@@ -314,7 +314,7 @@ impl ConfigRepository for TomlConfigRepository {
 fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapshot, ConfigError> {
     let app_settings = read_app_toml(config_root)?
         .to_app_settings()
-        .map_err(|err| ConfigError::Parse(err))?;
+        .map_err(ConfigError::Parse)?;
 
     let sources = load_sources(config_root)?;
     let smart_mailboxes = load_smart_mailboxes(config_root)?;

@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "REST API + SSE boundary between Rust backend and web frontend"
-modified: 2026-04-01
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -22,7 +22,7 @@ The Rust backend exposes an HTTP API that any frontend can consume: a React SPA 
 
 ## Axum
 
-Axum handles routing, JSON serialization, CORS, and serving the static frontend in production builds. In development, the frontend runs on Vite's dev server and the backend enables CORS for that origin.
+Axum handles routing, JSON serialization, CORS, and serving the static frontend in `posthaste serve` browser-localhost builds. In Vite development, `posthaste serve --api-only` exposes the API and enables CORS for the Vite origin.
 
 ## API design
 

@@ -35,11 +35,27 @@ check:
 # Run all tests
 test *args:
     just backend test {{ args }}
+    just frontend test
 
 # Build everything
 build:
     just backend build
     just frontend build
+    just desktop build
+
+# Build the browser-localhost distributable assets and server binary.
+build-serve:
+    just frontend build
+    just backend build-release
+
+# Create a local browser-localhost tarball under target/distribute/.
+package-serve:
+    just build-serve
+    bash tools/package/serve.sh
+
+# Run browser-localhost mode from the built frontend.
+serve *args:
+    cargo run --bin posthaste -- serve --frontend-dist apps/web/dist {{ args }}
 
 # Print the browser automation environment exposed by the dev shell.
 browser-env:
@@ -55,7 +71,7 @@ browser-playwright *args:
 browser-screenshot url file *args:
     node "${POSTHASTE_PLAYWRIGHT_CLI}" screenshot {{ args }} {{ url }} {{ file }}
 
-# Start Stalwart + seed + daemon + Vite with Overmind.
+# Start Stalwart + seed + server + Vite with Overmind.
 dev-web:
     bash tools/dev/overmind/launch.sh web
 
@@ -63,7 +79,7 @@ dev-web:
 dev-desktop:
     bash tools/dev/overmind/launch.sh desktop
 
-# Start Stalwart + seed + daemon with Overmind.
+# Start Stalwart + seed + server with Overmind.
 dev-services:
     bash tools/dev/overmind/launch.sh services
 
@@ -85,7 +101,7 @@ STALWART_ADMIN_PASSWORD := env_var_or_default("POSTHASTE_STALWART_ADMIN_PASSWORD
 STALWART_USER_PASSWORD := env_var_or_default("POSTHASTE_STALWART_USER_PASSWORD", "devpass")
 STALWART_DATA := justfile_directory() / "var/dev/stalwart/data"
 STALWART_LOGS := justfile_directory() / "var/dev/stalwart/logs"
-DAEMON_LOG_PATH_SCRIPT := justfile_directory() / "tools/dev/overmind/daemon-log-path.sh"
+SERVER_LOG_PATH_SCRIPT := justfile_directory() / "tools/dev/overmind/server-log-path.sh"
 
 # Start Stalwart in the foreground. Ctrl-C to stop.
 stalwart-up:
@@ -104,16 +120,16 @@ stalwart-seed:
 stalwart-reset:
     rm -rf {{ STALWART_DATA }} {{ STALWART_LOGS }}
 
-# Print export lines that point posthaste-daemon at the local Stalwart.
+# Print export lines that point posthaste at the local Stalwart.
 # Usage: eval $(just stalwart-dev)
 stalwart-dev:
     @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/tools/dev/bootstrap.stalwart.toml'
     @echo 'export POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }}'
 
-# Print the current or expected persisted daemon log path for dev.
-daemon-log-path:
-    @{{ DAEMON_LOG_PATH_SCRIPT }}
+# Print the current or expected persisted server log path for dev.
+server-log-path:
+    @{{ SERVER_LOG_PATH_SCRIPT }}
 
-# Follow the persisted daemon log file used by the dev stack.
-daemon-log-tail:
-    @tail -F "$({{ DAEMON_LOG_PATH_SCRIPT }})"
+# Follow the persisted server log file used by the dev stack.
+server-log-tail:
+    @tail -F "$({{ SERVER_LOG_PATH_SCRIPT }})"

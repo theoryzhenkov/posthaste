@@ -35,13 +35,17 @@ run_layout_smoke() {
   local layout="${1:?layout required}"
   local offset="${2:?offset required}"
   local layout_root="$smoke_root/$layout"
+  local vite_port="$((15173 + offset))"
+  if [[ "$layout" == "desktop" ]]; then
+    vite_port="5173"
+  fi
 
   POSTHASTE_DEV_STACK_SMOKE=1 \
   POSTHASTE_STALWART_BIND="127.0.0.1:$((18080 + offset))" \
   POSTHASTE_STALWART_URL= \
   POSTHASTE_BIND="127.0.0.1:$((13001 + offset))" \
   POSTHASTE_VITE_HOST="127.0.0.1" \
-  POSTHASTE_VITE_PORT="$((15173 + offset))" \
+  POSTHASTE_VITE_PORT="$vite_port" \
   VITE_API_BASE_URL= \
   POSTHASTE_CORS_ORIGIN= \
   POSTHASTE_BOOTSTRAP_PATH= \

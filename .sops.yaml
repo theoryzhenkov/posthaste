@@ -1,4 +1,8 @@
 creation_rules:
+  - path_regex: ^secrets/.*\.ya?ml$
+    age: >-
+      age1rkqzaq38fzg4neg0y7g2yxp97etacnvqgxkph43mfsuz8v5v5guq7mqr6c,
+      age1smnhsyrfegv5ts82eqhm3us5xx0yzlrqycz5357cfl2l5lzvw33s24ju5x
   - path_regex: \.env$
     age: >-
-      REPLACE_WITH_AGE_PUBLIC_KEY
+      age1rkqzaq38fzg4neg0y7g2yxp97etacnvqgxkph43mfsuz8v5v5guq7mqr6c
