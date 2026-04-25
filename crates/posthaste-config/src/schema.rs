@@ -1,9 +1,10 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, MailboxId, SecretKind,
-    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, ImapTransportSettings,
+    MailboxId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue, SmtpTransportSettings, TransportSecurity, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -117,16 +118,71 @@ pub struct SourceToml {
 #[serde(rename_all = "snake_case")]
 pub enum DriverToml {
     Jmap,
+    ImapSmtp,
     Mock,
 }
 
-/// TOML `[transport]` section: JMAP endpoint URL, username, and credential
+/// TOML `[transport]` section: provider transport settings and credential
 /// reference.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TransportToml {
+    #[serde(default)]
+    pub provider: ProviderHintToml,
+    #[serde(default)]
+    pub auth: ProviderAuthKindToml,
     pub base_url: Option<String>,
     pub username: Option<String>,
     pub secret_ref: Option<SecretRefToml>,
+    pub imap: Option<ImapTransportToml>,
+    pub smtp: Option<SmtpTransportToml>,
+}
+
+/// TOML provider hint used for setup presets.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderHintToml {
+    #[default]
+    Generic,
+    Gmail,
+    Outlook,
+    Icloud,
+}
+
+/// TOML provider authentication kind.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuthKindToml {
+    #[default]
+    Password,
+    AppPassword,
+    #[serde(rename = "oauth2")]
+    OAuth2,
+}
+
+/// TOML TLS behavior for IMAP and SMTP endpoints.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportSecurityToml {
+    #[default]
+    Tls,
+    StartTls,
+    Plain,
+}
+
+/// TOML `[transport.imap]` section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ImapTransportToml {
+    pub host: String,
+    pub port: u16,
+    pub security: TransportSecurityToml,
+}
+
+/// TOML `[transport.smtp]` section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SmtpTransportToml {
+    pub host: String,
+    pub port: u16,
+    pub security: TransportSecurityToml,
 }
 
 /// TOML `[appearance]` section for user-customizable account marks.
@@ -216,6 +272,7 @@ impl SourceToml {
             email_patterns: self.email_patterns.clone(),
             driver: match self.driver {
                 DriverToml::Jmap => AccountDriver::Jmap,
+                DriverToml::ImapSmtp => AccountDriver::ImapSmtp,
                 DriverToml::Mock => AccountDriver::Mock,
             },
             enabled: self.enabled,
@@ -238,6 +295,8 @@ impl SourceToml {
                 },
             }),
             transport: AccountTransportSettings {
+                provider: convert_provider_hint(&self.transport.provider),
+                auth: convert_auth_kind(&self.transport.auth),
                 base_url: self.transport.base_url.clone(),
                 username: self.transport.username.clone(),
                 secret_ref: self.transport.secret_ref.as_ref().map(|sr| SecretRef {
@@ -247,6 +306,24 @@ impl SourceToml {
                     },
                     key: sr.key.clone(),
                 }),
+                imap: self
+                    .transport
+                    .imap
+                    .as_ref()
+                    .map(|imap| ImapTransportSettings {
+                        host: imap.host.clone(),
+                        port: imap.port,
+                        security: convert_transport_security(&imap.security),
+                    }),
+                smtp: self
+                    .transport
+                    .smtp
+                    .as_ref()
+                    .map(|smtp| SmtpTransportSettings {
+                        host: smtp.host.clone(),
+                        port: smtp.port,
+                        security: convert_transport_security(&smtp.security),
+                    }),
             },
             created_at: self
                 .created_at
@@ -270,6 +347,7 @@ impl SourceToml {
             email_patterns: settings.email_patterns.clone(),
             driver: match settings.driver {
                 AccountDriver::Jmap => DriverToml::Jmap,
+                AccountDriver::ImapSmtp => DriverToml::ImapSmtp,
                 AccountDriver::Mock => DriverToml::Mock,
             },
             enabled: settings.enabled,
@@ -295,6 +373,8 @@ impl SourceToml {
                     },
                 }),
             transport: TransportToml {
+                provider: convert_provider_hint_to_toml(&settings.transport.provider),
+                auth: convert_auth_kind_to_toml(&settings.transport.auth),
                 base_url: settings.transport.base_url.clone(),
                 username: settings.transport.username.clone(),
                 secret_ref: settings
@@ -308,10 +388,78 @@ impl SourceToml {
                         },
                         key: sr.key.clone(),
                     }),
+                imap: settings
+                    .transport
+                    .imap
+                    .as_ref()
+                    .map(|imap| ImapTransportToml {
+                        host: imap.host.clone(),
+                        port: imap.port,
+                        security: convert_transport_security_to_toml(&imap.security),
+                    }),
+                smtp: settings
+                    .transport
+                    .smtp
+                    .as_ref()
+                    .map(|smtp| SmtpTransportToml {
+                        host: smtp.host.clone(),
+                        port: smtp.port,
+                        security: convert_transport_security_to_toml(&smtp.security),
+                    }),
             },
             created_at: Some(settings.created_at.clone()),
             updated_at: Some(settings.updated_at.clone()),
         }
+    }
+}
+
+fn convert_provider_hint(provider: &ProviderHintToml) -> ProviderHint {
+    match provider {
+        ProviderHintToml::Generic => ProviderHint::Generic,
+        ProviderHintToml::Gmail => ProviderHint::Gmail,
+        ProviderHintToml::Outlook => ProviderHint::Outlook,
+        ProviderHintToml::Icloud => ProviderHint::Icloud,
+    }
+}
+
+fn convert_provider_hint_to_toml(provider: &ProviderHint) -> ProviderHintToml {
+    match provider {
+        ProviderHint::Generic => ProviderHintToml::Generic,
+        ProviderHint::Gmail => ProviderHintToml::Gmail,
+        ProviderHint::Outlook => ProviderHintToml::Outlook,
+        ProviderHint::Icloud => ProviderHintToml::Icloud,
+    }
+}
+
+fn convert_auth_kind(auth: &ProviderAuthKindToml) -> ProviderAuthKind {
+    match auth {
+        ProviderAuthKindToml::Password => ProviderAuthKind::Password,
+        ProviderAuthKindToml::AppPassword => ProviderAuthKind::AppPassword,
+        ProviderAuthKindToml::OAuth2 => ProviderAuthKind::OAuth2,
+    }
+}
+
+fn convert_auth_kind_to_toml(auth: &ProviderAuthKind) -> ProviderAuthKindToml {
+    match auth {
+        ProviderAuthKind::Password => ProviderAuthKindToml::Password,
+        ProviderAuthKind::AppPassword => ProviderAuthKindToml::AppPassword,
+        ProviderAuthKind::OAuth2 => ProviderAuthKindToml::OAuth2,
+    }
+}
+
+fn convert_transport_security(security: &TransportSecurityToml) -> TransportSecurity {
+    match security {
+        TransportSecurityToml::Tls => TransportSecurity::Tls,
+        TransportSecurityToml::StartTls => TransportSecurity::StartTls,
+        TransportSecurityToml::Plain => TransportSecurity::Plain,
+    }
+}
+
+fn convert_transport_security_to_toml(security: &TransportSecurity) -> TransportSecurityToml {
+    match security {
+        TransportSecurity::Tls => TransportSecurityToml::Tls,
+        TransportSecurity::StartTls => TransportSecurityToml::StartTls,
+        TransportSecurity::Plain => TransportSecurityToml::Plain,
     }
 }
 
@@ -764,6 +912,7 @@ mod tests {
                     kind: SecretKind::Os,
                     key: "account:primary".to_string(),
                 }),
+                ..Default::default()
             },
             created_at: "2026-03-31T00:00:00Z".to_string(),
             updated_at: "2026-03-31T00:00:00Z".to_string(),
@@ -771,6 +920,51 @@ mod tests {
 
         let toml_struct = SourceToml::from_account_settings(&settings);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+        let parsed: SourceToml = toml::from_str(&toml_string).unwrap();
+        let round_tripped = parsed.to_account_settings().unwrap();
+
+        assert_eq!(round_tripped, settings);
+    }
+
+    #[test]
+    fn imap_smtp_source_toml_round_trips_provider_transport() {
+        let settings = AccountSettings {
+            id: AccountId::from("icloud"),
+            name: "iCloud".to_string(),
+            full_name: None,
+            email_patterns: vec!["user@icloud.com".to_string()],
+            driver: AccountDriver::ImapSmtp,
+            enabled: true,
+            appearance: None,
+            transport: AccountTransportSettings {
+                provider: ProviderHint::Icloud,
+                auth: ProviderAuthKind::AppPassword,
+                username: Some("user@icloud.com".to_string()),
+                secret_ref: Some(SecretRef {
+                    kind: SecretKind::Os,
+                    key: "account:icloud".to_string(),
+                }),
+                imap: Some(ImapTransportSettings {
+                    host: "imap.mail.me.com".to_string(),
+                    port: 993,
+                    security: TransportSecurity::Tls,
+                }),
+                smtp: Some(SmtpTransportSettings {
+                    host: "smtp.mail.me.com".to_string(),
+                    port: 587,
+                    security: TransportSecurity::StartTls,
+                }),
+                ..Default::default()
+            },
+            created_at: "2026-04-25T00:00:00Z".to_string(),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        let toml_struct = SourceToml::from_account_settings(&settings);
+        let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+        assert!(toml_string.contains("driver = \"imap_smtp\""));
+        assert!(toml_string.contains("provider = \"icloud\""));
+
         let parsed: SourceToml = toml::from_str(&toml_string).unwrap();
         let round_tripped = parsed.to_account_settings().unwrap();
 

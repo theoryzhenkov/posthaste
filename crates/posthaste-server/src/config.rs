@@ -146,9 +146,13 @@ pub fn import_bootstrap(
             enabled: account.enabled.unwrap_or(true),
             appearance: None,
             transport: AccountTransportSettings {
+                provider: account.transport.provider.clone(),
+                auth: account.transport.auth.clone(),
                 base_url: account.transport.base_url.clone(),
                 username: account.transport.username.clone(),
                 secret_ref: account.transport.secret_ref.clone(),
+                imap: account.transport.imap.clone(),
+                smtp: account.transport.smtp.clone(),
             },
             created_at: now.clone(),
             updated_at: now,
@@ -206,9 +210,15 @@ struct BootstrapAccountConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapAccountTransportConfig {
+    #[serde(default)]
+    provider: posthaste_domain::ProviderHint,
+    #[serde(default)]
+    auth: posthaste_domain::ProviderAuthKind,
     base_url: Option<String>,
     username: Option<String>,
     secret_ref: Option<SecretRef>,
+    imap: Option<posthaste_domain::ImapTransportSettings>,
+    smtp: Option<posthaste_domain::SmtpTransportSettings>,
 }
 
 // -- Helpers --

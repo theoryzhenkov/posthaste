@@ -35,8 +35,12 @@ pub(super) async fn account_overview(
 /// Build the transport portion of an account overview with redacted secret status.
 fn account_transport_overview(account: &AccountSettings) -> AccountTransportOverview {
     AccountTransportOverview {
+        provider: account.transport.provider.clone(),
+        auth: account.transport.auth.clone(),
         base_url: account.transport.base_url.clone(),
         username: account.transport.username.clone(),
+        imap: account.transport.imap.clone(),
+        smtp: account.transport.smtp.clone(),
         secret: secret_status(account.transport.secret_ref.as_ref()),
     }
 }
@@ -68,9 +72,13 @@ pub(super) fn secret_status(secret_ref: Option<&SecretRef>) -> SecretStatus {
 impl From<AccountTransportRequest> for posthaste_domain::AccountTransportSettings {
     fn from(value: AccountTransportRequest) -> Self {
         Self {
+            provider: value.provider.unwrap_or_default(),
+            auth: value.auth.unwrap_or_default(),
             base_url: normalize_optional(value.base_url),
             username: normalize_optional(value.username),
             secret_ref: None,
+            imap: value.imap,
+            smtp: value.smtp,
         }
     }
 }
@@ -222,10 +230,88 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
             ));
         }
     }
+    if matches!(account.driver, AccountDriver::ImapSmtp) {
+        if account
+            .transport
+            .username
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "IMAP/SMTP username is required",
+            ));
+        }
+        if account.transport.secret_ref.is_none() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "IMAP/SMTP secret must be configured before saving the account",
+            ));
+        }
+        validate_endpoint("IMAP", account.transport.imap.as_ref())?;
+        validate_endpoint("SMTP", account.transport.smtp.as_ref())?;
+    }
     if let Some(appearance) = &account.appearance {
         validate_account_appearance(appearance)?;
     }
     Ok(())
+}
+
+fn validate_endpoint<T>(label: &str, endpoint: Option<&T>) -> Result<(), ApiError>
+where
+    T: EndpointLike,
+{
+    let endpoint = endpoint.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            format!("{label} endpoint is required"),
+        )
+    })?;
+    if endpoint.host().trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            format!("{label} host is required"),
+        ));
+    }
+    if endpoint.port() == 0 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            format!("{label} port must be greater than zero"),
+        ));
+    }
+    Ok(())
+}
+
+trait EndpointLike {
+    fn host(&self) -> &str;
+    fn port(&self) -> u16;
+}
+
+impl EndpointLike for ImapTransportSettings {
+    fn host(&self) -> &str {
+        &self.host
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl EndpointLike for SmtpTransportSettings {
+    fn host(&self) -> &str {
+        &self.host
+    }
+
+    fn port(&self) -> u16 {
+        self.port
+    }
 }
 
 pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {
@@ -476,11 +562,23 @@ pub(super) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
         account.appearance = Some(normalize_account_appearance(appearance.clone()));
     }
     if let Some(transport) = &request.transport {
+        if let Some(provider) = &transport.provider {
+            account.transport.provider = provider.clone();
+        }
+        if let Some(auth) = &transport.auth {
+            account.transport.auth = auth.clone();
+        }
         if transport.base_url.is_some() {
             account.transport.base_url = normalize_optional(transport.base_url.clone());
         }
         if transport.username.is_some() {
             account.transport.username = normalize_optional(transport.username.clone());
+        }
+        if transport.imap.is_some() {
+            account.transport.imap = transport.imap.clone();
+        }
+        if transport.smtp.is_some() {
+            account.transport.smtp = transport.smtp.clone();
         }
     }
 }
