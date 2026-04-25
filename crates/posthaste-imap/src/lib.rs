@@ -22,10 +22,15 @@ pub use discovery::{
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
 };
 pub use error::ImapAdapterError;
-pub use fetch::{fetch_mailbox_header_records, fetched_header_from_items};
+pub use fetch::{
+    fetch_mailbox_header_records, fetch_mailbox_header_snapshot, fetched_header_from_items,
+    ImapMailboxHeaderSnapshot,
+};
 pub use gateway::LiveImapSmtpGateway;
 pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
 pub use message::{
     imap_flag_keywords, imap_header_message_record, ImapFetchedHeader, ImapMappedHeader,
 };
-pub use sync::{imap_full_sync_batch, imap_mailbox_sync_batch};
+pub use sync::{
+    imap_full_sync_batch, imap_mailbox_state_from_header_snapshot, imap_mailbox_sync_batch,
+};

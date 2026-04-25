@@ -8,8 +8,9 @@ use posthaste_domain::{
 };
 
 use crate::{
-    discover_imap_account, fetch_mailbox_header_records, fetch_message_body_by_location,
-    imap_full_sync_batch, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
+    discover_imap_account, fetch_mailbox_header_snapshot, fetch_message_body_by_location,
+    imap_full_sync_batch, imap_mailbox_state_from_header_snapshot, DiscoveredImapAccount,
+    ImapAdapterError, ImapConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -62,20 +63,29 @@ impl MailGateway for LiveImapSmtpGateway {
             .map_err(imap_error_to_gateway)?;
         let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
         let mut headers = Vec::new();
+        let mut mailbox_states = Vec::new();
         for mailbox in discovery
             .mailboxes
             .iter()
             .filter(|mailbox| mailbox.selectable)
         {
-            headers.extend(
-                fetch_mailbox_header_records(&self.config, &mailbox.name, updated_at.clone())
+            let snapshot =
+                fetch_mailbox_header_snapshot(&self.config, &mailbox.name, updated_at.clone())
                     .await
-                    .map_err(imap_error_to_gateway)?,
-            );
+                    .map_err(imap_error_to_gateway)?;
+            mailbox_states.push(imap_mailbox_state_from_header_snapshot(
+                &snapshot,
+                updated_at.clone(),
+            ));
+            headers.extend(snapshot.headers);
         }
 
         Ok(imap_full_sync_batch(
-            account_id, discovery, headers, updated_at,
+            account_id,
+            discovery,
+            headers,
+            mailbox_states,
+            updated_at,
         ))
     }
 
