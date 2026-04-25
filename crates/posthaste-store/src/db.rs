@@ -128,6 +128,17 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 PRIMARY KEY (account_id, mailbox_id)
             );
 
+            CREATE TABLE IF NOT EXISTS imap_message_location (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                uid_validity INTEGER NOT NULL,
+                uid INTEGER NOT NULL,
+                modseq TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id, mailbox_id)
+            );
+
             CREATE TABLE IF NOT EXISTS event_log (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id TEXT NOT NULL,

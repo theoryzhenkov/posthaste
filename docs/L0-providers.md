@@ -110,6 +110,11 @@ Message IDs stored in PostHaste remain opaque and driver-owned. IMAP IDs should
 be stable across sessions and include enough server state to avoid UID reuse
 bugs after `UIDVALIDITY` changes.
 
+IMAP command locations are persisted separately from message identity. A local
+message may have one stable identity and multiple mailbox UID locations, which
+is required for Gmail label deduplication and for generic IMAP commands such as
+`UID STORE`, `UID MOVE`, and lazy body fetches.
+
 ## Authentication
 
 The account model must distinguish protocol settings from secret material.
@@ -154,5 +159,6 @@ with servers that expose both protocols.
 | imap-delta-fallback | MUST | IMAP sync falls back to full authoritative snapshots when delta state is unavailable or invalid |
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
 | gmail-extension-identity | SHOULD | Gmail IMAP accounts use X-GM-MSGID, X-GM-THRID, and X-GM-LABELS when X-GM-EXT-1 is advertised |
+| imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | jmapaccess-preferred | SHOULD | IMAP setup prefers JMAP when the server advertises JMAPACCESS for the same message store |
