@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use crate::{
     AccountId, AutomationBackfillJob, BlobId, CommandResult, ConversationCursor, ConversationId,
     ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
-    MailboxId, MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage,
-    MessageSortField, MessageSummary, MutationOutcome, PushTransport, ReplaceMailboxesCommand,
-    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, TagSummary, ThreadId,
-    ThreadView,
+    ImapMailboxSyncState, MailboxId, MailboxSummary, MessageCursor, MessageDetail, MessageId,
+    MessagePage, MessageSortField, MessageSummary, MutationOutcome, PushTransport,
+    ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError, SendMessageRequest,
+    SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject,
+    TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -263,6 +263,39 @@ pub trait SyncStateStore: Send + Sync {
         account_id: &AccountId,
         object_type: SyncObject,
     ) -> Result<Option<SyncCursor>, StoreError>;
+}
+
+/// IMAP per-mailbox sync cursor read boundary.
+///
+/// @spec docs/L0-providers#imap-cursors-per-mailbox
+pub trait ImapSyncStateStore: Send + Sync {
+    fn list_imap_mailbox_states(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<ImapMailboxSyncState>, StoreError>;
+
+    fn get_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<Option<ImapMailboxSyncState>, StoreError>;
+}
+
+/// IMAP per-mailbox sync cursor write boundary.
+///
+/// @spec docs/L0-providers#imap-cursors-per-mailbox
+pub trait ImapSyncStateWriteStore: Send + Sync {
+    fn put_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        state: &ImapMailboxSyncState,
+    ) -> Result<(), StoreError>;
+
+    fn delete_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<(), StoreError>;
 }
 
 /// Message mailbox membership read boundary.

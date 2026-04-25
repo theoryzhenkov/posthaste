@@ -117,6 +117,17 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 PRIMARY KEY (account_id, object_type)
             );
 
+            CREATE TABLE IF NOT EXISTS imap_mailbox_sync_state (
+                account_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                mailbox_name TEXT NOT NULL,
+                uid_validity INTEGER NOT NULL,
+                highest_uid INTEGER,
+                highest_modseq TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, mailbox_id)
+            );
+
             CREATE TABLE IF NOT EXISTS event_log (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id TEXT NOT NULL,

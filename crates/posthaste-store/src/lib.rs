@@ -19,18 +19,20 @@ use posthaste_domain::{
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
     ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
-    EventStore, FetchedBody, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
-    MessageCursor, MessageDetail, MessageDetailStore, MessageId, MessageListStore,
-    MessageMailboxStore, MessagePage, MessageSortField, MessageSummary, RawMessageRef,
-    ReplaceMailboxesCommand, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
-    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
-    EVENT_TOPIC_MESSAGE_ARRIVED, EVENT_TOPIC_MESSAGE_UPDATED,
+    EventStore, FetchedBody, ImapMailboxSyncState, ImapModSeq, ImapSyncStateStore,
+    ImapSyncStateWriteStore, ImapUid, ImapUidValidity, MailboxId, MailboxReadStore,
+    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore,
+    MessageId, MessageListStore, MessageMailboxStore, MessagePage, MessageSortField,
+    MessageSummary, RawMessageRef, ReplaceMailboxesCommand, SetKeywordsCommand,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore,
+    SmartMailboxValue, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
+    SyncBatch, SyncCursor, SyncObject, SyncStateStore, SyncWriteStore, TagReadStore, TagSummary,
+    ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -905,6 +907,167 @@ impl SyncStateStore for DatabaseStore {
     }
 }
 
+impl ImapSyncStateStore for DatabaseStore {
+    fn list_imap_mailbox_states(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<ImapMailboxSyncState>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT mailbox_id, mailbox_name, uid_validity, highest_uid,
+                        highest_modseq, updated_at
+                 FROM imap_mailbox_sync_state
+                 WHERE account_id = ?1
+                 ORDER BY mailbox_name, mailbox_id",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(params![account_id.as_str()], imap_mailbox_state_from_row)
+            .map_err(sql_to_store_error)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)
+    }
+
+    fn get_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<Option<ImapMailboxSyncState>, StoreError> {
+        let connection = self.read_connection()?;
+        connection
+            .query_row(
+                "SELECT mailbox_id, mailbox_name, uid_validity, highest_uid,
+                        highest_modseq, updated_at
+                 FROM imap_mailbox_sync_state
+                 WHERE account_id = ?1 AND mailbox_id = ?2",
+                params![account_id.as_str(), mailbox_id.as_str()],
+                imap_mailbox_state_from_row,
+            )
+            .optional()
+            .map_err(sql_to_store_error)
+    }
+}
+
+impl ImapSyncStateWriteStore for DatabaseStore {
+    fn put_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        state: &ImapMailboxSyncState,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO imap_mailbox_sync_state (
+                    account_id, mailbox_id, mailbox_name, uid_validity,
+                    highest_uid, highest_modseq, updated_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
+                    mailbox_name = excluded.mailbox_name,
+                    uid_validity = excluded.uid_validity,
+                    highest_uid = excluded.highest_uid,
+                    highest_modseq = excluded.highest_modseq,
+                    updated_at = excluded.updated_at",
+                params![
+                    account_id.as_str(),
+                    state.mailbox_id.as_str(),
+                    state.mailbox_name,
+                    state.uid_validity.0,
+                    state.highest_uid.map(|uid| uid.0),
+                    state.highest_modseq.map(|modseq| modseq.0.to_string()),
+                    state.updated_at,
+                ],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn delete_imap_mailbox_state(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM imap_mailbox_sync_state
+                 WHERE account_id = ?1 AND mailbox_id = ?2",
+                params![account_id.as_str(), mailbox_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+}
+
+fn imap_mailbox_state_from_row(row: &Row<'_>) -> rusqlite::Result<ImapMailboxSyncState> {
+    let uid_validity = u32_from_row(row, 2, "uid_validity")?;
+    let highest_uid = optional_u32_from_row(row, 3, "highest_uid")?.map(ImapUid);
+    let highest_modseq = optional_u64_text_from_row(row, 4, "highest_modseq")?.map(ImapModSeq);
+    Ok(ImapMailboxSyncState {
+        mailbox_id: MailboxId(row.get(0)?),
+        mailbox_name: row.get(1)?,
+        uid_validity: ImapUidValidity(uid_validity),
+        highest_uid,
+        highest_modseq,
+        updated_at: row.get(5)?,
+    })
+}
+
+fn optional_u32_from_row(
+    row: &Row<'_>,
+    index: usize,
+    name: &'static str,
+) -> rusqlite::Result<Option<u32>> {
+    let Some(value) = row.get::<_, Option<i64>>(index)? else {
+        return Ok(None);
+    };
+    u32::try_from(value).map(Some).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} out of range: {err}"),
+            )),
+        )
+    })
+}
+
+fn optional_u64_text_from_row(
+    row: &Row<'_>,
+    index: usize,
+    name: &'static str,
+) -> rusqlite::Result<Option<u64>> {
+    let Some(value) = row.get::<_, Option<String>>(index)? else {
+        return Ok(None);
+    };
+    value.parse::<u64>().map(Some).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} out of range: {err}"),
+            )),
+        )
+    })
+}
+
+fn u32_from_row(row: &Row<'_>, index: usize, name: &'static str) -> rusqlite::Result<u32> {
+    let value = row.get::<_, i64>(index)?;
+    u32::try_from(value).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} out of range: {err}"),
+            )),
+        )
+    })
+}
+
 impl MessageMailboxStore for DatabaseStore {
     /// Returns the mailbox IDs a message belongs to.
     fn get_message_mailboxes(
@@ -1124,6 +1287,57 @@ mod tests {
                 cursors: vec![message_cursor(cursor_state, "2026-03-31T10:00:00Z")],
             },
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn imap_mailbox_state_round_trips_provider_cursors() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        let mut state = ImapMailboxSyncState::new(
+            MailboxId::from("imap:inbox"),
+            "INBOX".to_string(),
+            ImapUidValidity(u32::MAX),
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+        state.record_seen_uid(ImapUid(u32::MAX));
+        state.record_highest_modseq(ImapModSeq(u64::MAX));
+
+        store.put_imap_mailbox_state(&account, &state)?;
+
+        let loaded = store
+            .get_imap_mailbox_state(&account, &MailboxId::from("imap:inbox"))?
+            .expect("stored state");
+        assert_eq!(loaded, state);
+        assert_eq!(store.list_imap_mailbox_states(&account)?, vec![state]);
+        Ok(())
+    }
+
+    #[test]
+    fn imap_mailbox_state_delete_is_account_scoped() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let primary = AccountId::from("primary");
+        let secondary = AccountId::from("secondary");
+        let state = ImapMailboxSyncState::new(
+            MailboxId::from("imap:inbox"),
+            "INBOX".to_string(),
+            ImapUidValidity(1),
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        store.put_imap_mailbox_state(&primary, &state)?;
+        store.put_imap_mailbox_state(&secondary, &state)?;
+        store.delete_imap_mailbox_state(&primary, &MailboxId::from("imap:inbox"))?;
+
+        assert!(store
+            .get_imap_mailbox_state(&primary, &MailboxId::from("imap:inbox"))?
+            .is_none());
+        assert_eq!(
+            store.get_imap_mailbox_state(&secondary, &MailboxId::from("imap:inbox"))?,
+            Some(state)
+        );
         Ok(())
     }
 
