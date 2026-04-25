@@ -61,6 +61,7 @@ impl MailGateway for MockJmapGateway {
         Ok(SyncBatch {
             mailboxes: state.mailboxes.clone(),
             messages: state.messages.clone(),
+            imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,

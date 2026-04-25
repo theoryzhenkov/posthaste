@@ -281,7 +281,7 @@ pub(crate) fn replace_attachments_tx(
 }
 
 /// Deletes a message and all its junction rows (keywords, mailboxes, body,
-/// conversation link).
+/// conversation link, IMAP command locations).
 pub(crate) fn delete_message_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -304,6 +304,11 @@ pub(crate) fn delete_message_tx(
     .map_err(sql_to_store_error)?;
     tx.execute(
         "DELETE FROM message_attachment WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id.as_str(), message_id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+    tx.execute(
+        "DELETE FROM imap_message_location WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
