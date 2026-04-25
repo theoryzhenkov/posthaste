@@ -76,6 +76,11 @@ state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
 when present. `HIGHESTMODSEQ` remains optional until the protocol client
 exposes CONDSTORE/QRESYNC select metadata.
 
+The first message mapping path consumes RFC 822 headers, not full message
+bodies. It converts header metadata and IMAP flags into `MessageRecord` and
+stores the UID command address separately as `ImapMessageLocation`. Body text,
+HTML, raw MIME, and attachment metadata remain lazy/future fetches.
+
 The driver prefers IMAP extensions when advertised:
 
 - SPECIAL-USE for mailbox roles
