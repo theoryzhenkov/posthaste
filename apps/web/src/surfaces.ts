@@ -1,6 +1,11 @@
 import type { MailSelection } from './mailState'
 
 export type SurfaceDisposition = 'focused'
+export type SettingsSurfaceCategory =
+  | 'general'
+  | 'appearance'
+  | 'accounts'
+  | 'mailboxes'
 
 export interface MessageSurfaceDescriptor {
   kind: 'message'
@@ -12,7 +17,19 @@ export interface MessageSurfaceDescriptor {
   }
 }
 
-export type SurfaceDescriptor = MessageSurfaceDescriptor
+export interface SettingsSurfaceDescriptor {
+  kind: 'settings'
+  disposition: SurfaceDisposition
+  params: {
+    category?: SettingsSurfaceCategory
+    accountId?: string | null
+    smartMailboxId?: string | null
+  }
+}
+
+export type SurfaceDescriptor =
+  | MessageSurfaceDescriptor
+  | SettingsSurfaceDescriptor
 
 export function messageSurfaceFromSelection(
   selection: MailSelection,
@@ -28,7 +45,29 @@ export function messageSurfaceFromSelection(
   }
 }
 
+export function settingsSurface(input?: {
+  category?: SettingsSurfaceCategory
+  accountId?: string | null
+  smartMailboxId?: string | null
+}): SettingsSurfaceDescriptor {
+  return {
+    kind: 'settings',
+    disposition: 'focused',
+    params: {
+      category: input?.category,
+      accountId: input?.accountId ?? null,
+      smartMailboxId: input?.smartMailboxId ?? null,
+    },
+  }
+}
+
 export function surfaceRoute(surface: SurfaceDescriptor): string {
-  const params = new URLSearchParams(surface.params)
-  return `/surface/${surface.kind}?${params.toString()}`
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(surface.params)) {
+    if (value !== undefined && value !== null) {
+      params.set(key, value)
+    }
+  }
+  const query = params.toString()
+  return `/surface/${surface.kind}${query ? `?${query}` : ''}`
 }
