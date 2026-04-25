@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: docs/L0-ui
   - path: docs/L0-branding
@@ -53,6 +53,7 @@ App
     │   ├── ShortcutReference
     │   └── Compose
     ├── SettingsOverlay
+    ├── SurfaceHost
 ```
 
 The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L2-ui-visual-reference.md). L1 owns interaction and data rules; L2 owns dimensions, colors, typography, and visual states.
@@ -162,6 +163,8 @@ Account editing follows that shared property-page pattern. Identity, server deta
 
 Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved or pinned so the user can keep reading and interacting with the underlying mail UI.
 
+Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }`. The web host renders focused message surfaces as full-window overlays using the same `MessageDetail` component as the inline reader. Desktop hosts may map the same descriptor to a native window; surface content must fetch by IDs through React Query and must not depend on parent-only React props.
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -170,6 +173,7 @@ Settings, mailbox editor, shortcuts, onboarding, and compose share the modal pri
 | `Cmd/Ctrl+,` | Open settings |
 | `Cmd/Ctrl+N` | Compose new message |
 | `?` | Open keyboard shortcuts |
+| `o` | Open the selected message in a focused surface |
 | `Esc` | Deselect the open message, or clear the active filter when no message is open |
 | `j` / `k` or Down / Up | Next / previous conversation |
 | `e` or `y` | Archive |
@@ -206,6 +210,7 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 - The default UI visual target is the standalone handoff's dark neutral theme
 - Coral, blue, and slate-blue remain separate brand/flag, unread, and selection signals
 - Main-shell visual details are governed by `docs/L2-ui-visual-reference`
+- Focused surfaces are opened through serializable descriptors so web overlays and desktop windows can share the same content components
 
 ## Assertions
 
@@ -219,3 +224,4 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 | anchored-prepend | MUST | Live top-of-list inserts preserve the visible viewport when the user is scrolled down |
 | keyboard-input-suppressed | MUST | Keyboard shortcuts suppressed when an input or textarea has focus |
 | visual-reference | MUST | Main shell and overlay styling conform to `docs/L2-ui-visual-reference` unless a documented backend gap blocks exact parity |
+| surface-descriptors-serializable | MUST | Focused surfaces are described by serializable data, not React component instances or closures |
