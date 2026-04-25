@@ -459,6 +459,7 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
+        | ImapAdapterError::InvalidModSeq(_)
         | ImapAdapterError::InvalidKeywordFlag { .. }
         | ImapAdapterError::MissingMessageLocation(_)
         | ImapAdapterError::InvalidBlobId(_)
