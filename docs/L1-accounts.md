@@ -5,6 +5,7 @@ modified: 2026-04-25
 reviewed: 2026-04-25
 depends:
   - path: docs/L0-accounts
+  - path: docs/L0-providers
   - path: docs/L0-search
 dependents: []
 ---
@@ -126,7 +127,7 @@ id = "primary"
 name = "My Fastmail"
 full_name = "Example User"      # optional, sender/display name
 email_patterns = ["user@example.com", "*@example.net"]
-driver = "jmap"                 # internal; UI-created accounts use JMAP
+driver = "jmap"                 # "jmap", "imap_smtp", or "mock"
 enabled = true                  # default: true
 
 [appearance]
@@ -136,6 +137,8 @@ color_hue = 245                 # 0-360 hue used for the account mark
 # image_id = "..."              # present for image-backed marks
 
 [transport]
+provider = "generic"            # "generic", "gmail", "outlook", or "icloud"
+auth = "password"               # "password", "app_password", or "oauth2"
 base_url = "https://api.fastmail.com/jmap/session"
 username = "user@example.com"  # optional; omit for bearer-token auth
 
@@ -155,6 +158,35 @@ key = "account:primary"
 The referenced secret is an opaque JMAP auth secret. For Fastmail this is an OAuth token set for distributed clients or an API token for personal/testing use, not a Fastmail app-specific password.
 
 When `username` is absent or blank, the runtime sends the secret as a bearer token. When `username` is present, the runtime uses the provider's basic-auth path with the secret as the password/token component.
+
+For traditional providers, `driver = "imap_smtp"` uses nested endpoint
+settings:
+
+```toml
+[transport]
+provider = "icloud"
+auth = "app_password"
+username = "user@icloud.com"
+
+[transport.secret_ref]
+kind = "os"
+key = "account:icloud"
+
+[transport.imap]
+host = "imap.mail.me.com"
+port = 993
+security = "tls"                # "tls", "start_tls", or "plain"
+
+[transport.smtp]
+host = "smtp.mail.me.com"
+port = 587
+security = "start_tls"
+```
+
+`provider` is a setup hint for presets and provider-specific behavior; it does
+not replace the explicit `driver`. IMAP/SMTP accounts require `username`,
+`secret_ref`, `[transport.imap]`, and `[transport.smtp]`. The secret may be a
+password, app-specific password, or OAuth token depending on `auth`.
 
 `SourceToml` converts bidirectionally to `AccountSettings`. Missing `created_at`/`updated_at` default to `RFC3339_EPOCH`.
 

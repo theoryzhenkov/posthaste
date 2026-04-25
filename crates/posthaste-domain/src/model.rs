@@ -173,6 +173,7 @@ pub struct AppSettings {
 #[serde(rename_all = "camelCase")]
 pub enum AccountDriver {
     Jmap,
+    ImapSmtp,
     Mock,
 }
 
@@ -180,6 +181,7 @@ impl AccountDriver {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Jmap => "jmap",
+            Self::ImapSmtp => "imap_smtp",
             Self::Mock => "mock",
         }
     }
@@ -223,15 +225,81 @@ pub struct SecretStatus {
     pub label: Option<String>,
 }
 
-/// Transport-layer settings for connecting to a JMAP server.
+/// User-selected provider hint for traditional mail account setup.
+///
+/// @spec docs/L0-providers#driver-model
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderHint {
+    #[default]
+    Generic,
+    Gmail,
+    Outlook,
+    Icloud,
+}
+
+/// Authentication mode used by the selected provider transport.
+///
+/// @spec docs/L0-providers#authentication
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderAuthKind {
+    #[default]
+    Password,
+    AppPassword,
+    #[serde(rename = "oauth2")]
+    OAuth2,
+}
+
+/// TLS behavior for IMAP and SMTP endpoints.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransportSecurity {
+    #[default]
+    Tls,
+    StartTls,
+    Plain,
+}
+
+/// IMAP endpoint settings for traditional provider sync.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImapTransportSettings {
+    pub host: String,
+    pub port: u16,
+    pub security: TransportSecurity,
+}
+
+/// SMTP endpoint settings for traditional provider submission.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmtpTransportSettings {
+    pub host: String,
+    pub port: u16,
+    pub security: TransportSecurity,
+}
+
+/// Transport-layer settings for connecting to a provider.
 ///
 /// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportSettings {
+    #[serde(default)]
+    pub provider: ProviderHint,
+    #[serde(default)]
+    pub auth: ProviderAuthKind,
     pub base_url: Option<String>,
     pub username: Option<String>,
     pub secret_ref: Option<SecretRef>,
+    pub imap: Option<ImapTransportSettings>,
+    pub smtp: Option<SmtpTransportSettings>,
 }
 
 /// User-facing visual identity for an account.
@@ -364,8 +432,12 @@ pub struct AccountSettings {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportOverview {
+    pub provider: ProviderHint,
+    pub auth: ProviderAuthKind,
     pub base_url: Option<String>,
     pub username: Option<String>,
+    pub imap: Option<ImapTransportSettings>,
+    pub smtp: Option<SmtpTransportSettings>,
     pub secret: SecretStatus,
 }
 

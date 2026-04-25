@@ -1,5 +1,21 @@
 /** @spec docs/L1-api#endpoint-table */
-export type AccountDriver = 'jmap' | 'mock'
+export type AccountDriver = 'jmap' | 'imapSmtp' | 'mock'
+
+/** @spec docs/L0-providers#driver-model */
+export type ProviderHint = 'generic' | 'gmail' | 'outlook' | 'icloud'
+
+/** @spec docs/L0-providers#authentication */
+export type ProviderAuthKind = 'password' | 'appPassword' | 'oauth2'
+
+/** @spec docs/L0-providers#imap-smtp-sync-strategy */
+export type TransportSecurity = 'tls' | 'startTls' | 'plain'
+
+/** @spec docs/L0-providers#imap-smtp-sync-strategy */
+export interface MailEndpointSettings {
+  host: string
+  port: number
+  security: TransportSecurity
+}
 
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
@@ -76,8 +92,12 @@ export interface AccountOverview {
   enabled: boolean
   appearance: AccountAppearance
   transport: {
+    provider: ProviderHint
+    auth: ProviderAuthKind
     baseUrl: string | null
     username: string | null
+    imap: MailEndpointSettings | null
+    smtp: MailEndpointSettings | null
     secret: SecretStatus
   }
   createdAt: string
@@ -112,8 +132,12 @@ export type AccountAppearance =
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export interface AccountTransportInput {
+  provider?: ProviderHint
+  auth?: ProviderAuthKind
   baseUrl: string
   username: string
+  imap?: MailEndpointSettings
+  smtp?: MailEndpointSettings
 }
 
 /**
