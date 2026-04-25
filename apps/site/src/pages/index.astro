@@ -1,0 +1,26 @@
+---
+import '@fontsource-variable/geist/index.css'
+import '@fontsource-variable/geist-mono/index.css'
+import { App } from '../App'
+import { getHomeContent } from '../content/homeContent'
+import '../styles.css'
+
+const content = await getHomeContent()
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="PostHaste is a modern JMAP mail client."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>PostHaste</title>
+  </head>
+  <body>
+    <App content={content} client:load />
+  </body>
+</html>

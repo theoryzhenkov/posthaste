@@ -123,10 +123,11 @@ a {
 }
 
 .install-header-button {
-  min-height: 34px;
+  min-height: 30px;
   display: inline-flex;
   align-items: center;
   gap: 9px;
+  margin-left: 14px;
   border: 1px solid rgb(255 255 255 / 0.14);
   border-radius: 9px;
   padding: 0 14px;
@@ -210,31 +211,9 @@ a {
   background: #28c940;
 }
 
-.brand-mark,
 .nav-links {
   display: flex;
   align-items: center;
-}
-
-.brand-mark {
-  gap: 8px;
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.brand-mark img {
-  width: 25px;
-  height: 25px;
-  display: block;
-  object-fit: contain;
-}
-
-.toolbar-separator {
-  width: 1px;
-  height: 18px;
-  margin: 0 8px;
-  background: var(--border-soft);
 }
 
 .toolbar-chip,
@@ -365,7 +344,7 @@ kbd {
   margin: 1px 0;
   padding: 0 8px;
   border-radius: 5px;
-  color: var(--muted);
+  color: rgb(244 241 234 / 0.58);
   font-size: 13px;
 }
 
@@ -469,7 +448,7 @@ kbd {
   border: 0;
   border-bottom: 1px solid var(--border-soft);
   background: transparent;
-  color: var(--muted);
+  color: rgb(244 241 234 / 0.58);
   text-align: left;
   cursor: pointer;
 }
@@ -484,7 +463,7 @@ kbd {
 }
 
 .message-row.unread {
-  color: var(--fg);
+  color: rgb(244 241 234 / 0.78);
 }
 
 .message-subject {
@@ -505,7 +484,7 @@ kbd {
 }
 
 .message-subject span {
-  color: var(--subtle);
+  color: rgb(244 241 234 / 0.46);
   font-size: 12px;
 }
 
@@ -614,35 +593,26 @@ h1 {
 }
 
 .reader-message {
-  max-width: 620px;
+  max-width: 66ch;
   margin-top: clamp(28px, 6vw, 70px);
   border-top: 1px solid var(--border-soft);
   padding-top: 20px;
 }
 
-.reader-message-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 14px;
-  color: var(--subtle);
-  font-family: 'Geist Mono Variable', monospace;
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
 .reader-message h2 {
   margin-bottom: 14px;
+  color: rgb(255 252 244 / 0.96);
   font-size: clamp(20px, 2.6vw, 32px);
   line-height: 1.08;
   letter-spacing: 0;
 }
 
 .reader-message p {
-  margin-bottom: 12px;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1.55;
+  margin-bottom: 14px;
+  color: rgb(255 250 238 / 0.9);
+  font-size: 16px;
+  line-height: 1.68;
+  text-wrap: pretty;
 }
 
 .landscape-section {
@@ -683,6 +653,13 @@ h1 {
   color: oklch(0.39 0.028 58);
   font-size: 16px;
   line-height: 1.55;
+  hyphens: auto;
+  text-align: justify;
+  text-wrap: pretty;
+}
+
+.landscape-copy p:not(.eyebrow) + p:not(.eyebrow) {
+  margin-top: 16px;
 }
 
 .landscape-canvas {
@@ -952,7 +929,7 @@ h1 {
 .theme-copy p {
   margin-bottom: 0;
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.55;
 }
 
@@ -1033,6 +1010,10 @@ h1 {
   text-transform: uppercase;
 }
 
+.footer-section p {
+  margin-bottom: 0;
+}
+
 [data-reveal] {
   opacity: 0;
   transform: translateY(14px);
@@ -1087,6 +1068,7 @@ h1 {
   }
 
   .install-header-button {
+    margin-left: 9px;
     padding: 0 10px;
   }
 
@@ -1113,15 +1095,10 @@ h1 {
   }
 
   .traffic-lights,
-  .toolbar-separator,
   .toolbar-chip,
   .icon-chip,
   .nav-links {
     display: none;
-  }
-
-  .brand-mark span {
-    font-size: 13px;
   }
 
   .mock-search {
