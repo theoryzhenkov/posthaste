@@ -272,14 +272,12 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
 
     assert_eq!(settings.automation_rules.len(), 0);
     assert_eq!(settings.automation_drafts.len(), 1);
-    assert!(
-        harness
-            .state
-            .service
-            .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
-            .expect("backfill job should load")
-            .is_none()
-    );
+    assert!(harness
+        .state
+        .service
+        .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
+        .expect("backfill job should load")
+        .is_none());
     let app_toml = harness.app_toml();
     assert_eq!(
         app_toml["draft_automations"][0]["id"].as_str(),

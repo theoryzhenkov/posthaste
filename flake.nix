@@ -54,6 +54,7 @@
             pkgs.just
             pkgs.sops
             pkgs.age
+            pkgs.gnupg
 
             # Rust
             rustToolchain
