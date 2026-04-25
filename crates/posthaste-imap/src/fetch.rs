@@ -18,9 +18,10 @@ use imap_client::tasks::Task;
 use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid};
 
 use crate::discovery::connect_authenticated_client;
+use crate::mailbox::examine_selected_mailbox;
 use crate::{
-    imap_header_message_record, normalize_imap_capabilities, selected_mailbox_from_examine,
-    ImapAdapterError, ImapConnectionConfig, ImapFetchedHeader, ImapMappedHeader,
+    imap_header_message_record, normalize_imap_capabilities, ImapAdapterError,
+    ImapConnectionConfig, ImapFetchedHeader, ImapMappedHeader,
 };
 
 const UID_FETCH_CHUNK_SIZE: usize = 128;
@@ -42,6 +43,7 @@ pub struct ImapChangedSinceSnapshot {
     pub selected: ImapSelectedMailbox,
     pub headers: Vec<ImapMappedHeader>,
     pub vanished_uids: Vec<ImapUid>,
+    pub is_full_snapshot: bool,
 }
 
 /// Fetch and map header-level records for every message in one IMAP mailbox.
@@ -83,8 +85,7 @@ pub async fn fetch_mailbox_header_snapshot(
             .map(std::string::ToString::to_string),
     )
     .supports_condstore();
-    let select_data = client.examine(mailbox_name).await?;
-    let selected = selected_mailbox_from_examine(mailbox_name, select_data)?;
+    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
     let mut uids = client.uid_search([SearchKey::All]).await?;
 
     // Normalize search output before chunking so later sync reconciliation does
@@ -120,8 +121,21 @@ pub async fn fetch_mailbox_changed_since_snapshot(
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
     let fetch_vanished = include_vanished && enable_qresync(&mut client).await?;
-    let select_data = client.examine(mailbox_name).await?;
-    let selected = selected_mailbox_from_examine(mailbox_name, select_data)?;
+    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
+    if include_vanished && !fetch_vanished {
+        let mut uids = client.uid_search([SearchKey::All]).await?;
+        uids.sort_unstable();
+        uids.dedup();
+        let headers =
+            fetch_selected_mailbox_headers(&mut client, &selected, &uids, true, updated_at).await?;
+
+        return Ok(ImapChangedSinceSnapshot {
+            selected,
+            headers,
+            vanished_uids: Vec::new(),
+            is_full_snapshot: true,
+        });
+    }
     let sequence_set = SequenceSet::try_from("1:*")
         .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
     let snapshot = client
@@ -146,6 +160,7 @@ pub async fn fetch_mailbox_changed_since_snapshot(
         selected,
         headers,
         vanished_uids: snapshot.vanished_uids,
+        is_full_snapshot: false,
     })
 }
 

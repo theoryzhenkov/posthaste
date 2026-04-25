@@ -51,6 +51,7 @@ pub use smtp::{
     SmtpSentCopyStrategy, SubmittedSmtpMessage,
 };
 pub use sync::{
-    imap_delta_sync_batch, imap_full_sync_batch, imap_mailbox_state_from_header_snapshot,
+    imap_condstore_delta_sync_batch, imap_delta_sync_batch, imap_full_sync_batch,
+    imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
     imap_mailbox_sync_batch,
 };
