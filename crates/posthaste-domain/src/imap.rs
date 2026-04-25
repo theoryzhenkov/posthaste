@@ -225,6 +225,16 @@ pub enum ImapMailboxSyncPlan {
     },
 }
 
+/// IMAP move implementation strategy selected from server capabilities.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImapMoveStrategy {
+    UidMoveWithCopyUid,
+    UidMoveThenResync,
+    CopyDeleteThenResync,
+}
+
 impl ImapMailboxSyncState {
     pub fn new(
         mailbox_id: MailboxId,
@@ -310,6 +320,23 @@ pub fn plan_imap_mailbox_sync(
 
     ImapMailboxSyncPlan::FullSnapshot {
         reason: ImapFullSyncReason::MissingUidWatermark,
+    }
+}
+
+/// Select the safest available IMAP move strategy.
+///
+/// UIDPLUS lets the server report the destination UID after move/copy. Without
+/// it, the command can still succeed, but local location state must be repaired
+/// by a mailbox resync.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+pub fn plan_imap_move(capabilities: &ImapCapabilities) -> ImapMoveStrategy {
+    if capabilities.supports_move() && capabilities.supports_uidplus() {
+        ImapMoveStrategy::UidMoveWithCopyUid
+    } else if capabilities.supports_move() {
+        ImapMoveStrategy::UidMoveThenResync
+    } else {
+        ImapMoveStrategy::CopyDeleteThenResync
     }
 }
 
@@ -523,6 +550,26 @@ mod tests {
             Some("inbox")
         );
         assert_eq!(imap_special_use_role("Projects", ["\\HasNoChildren"]), None);
+    }
+
+    #[test]
+    fn move_planner_uses_uidplus_when_available() {
+        assert_eq!(
+            plan_imap_move(&ImapCapabilities::from_tokens(["MOVE", "UIDPLUS"])),
+            ImapMoveStrategy::UidMoveWithCopyUid
+        );
+        assert_eq!(
+            plan_imap_move(&ImapCapabilities::from_tokens(["MOVE"])),
+            ImapMoveStrategy::UidMoveThenResync
+        );
+        assert_eq!(
+            plan_imap_move(&ImapCapabilities::from_tokens(["IMAP4rev1"])),
+            ImapMoveStrategy::CopyDeleteThenResync
+        );
+        assert_eq!(
+            plan_imap_move(&ImapCapabilities::from_tokens(["IMAP4rev2"])),
+            ImapMoveStrategy::UidMoveWithCopyUid
+        );
     }
 
     #[test]
