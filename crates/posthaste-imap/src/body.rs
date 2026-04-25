@@ -16,6 +16,22 @@ pub async fn fetch_message_body_by_location(
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<FetchedBody, ImapAdapterError> {
+    let raw_mime = fetch_raw_message_by_location(config, mailbox_name, location).await?;
+    imap_body_from_raw_mime(&location.message_id, raw_mime)
+}
+
+/// Fetch a full raw IMAP message without marking it read.
+///
+/// The raw fetch is shared by lazy body projection and attachment download so
+/// both paths validate the same `(mailbox, UIDVALIDITY, UID)` identity before
+/// trusting `BODY.PEEK[]` bytes.
+///
+/// @spec docs/L1-sync#body-lazy
+pub async fn fetch_raw_message_by_location(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    location: &ImapMessageLocation,
+) -> Result<Vec<u8>, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     let selected =
         selected_mailbox_from_examine(mailbox_name, client.examine(mailbox_name).await?)?;
@@ -34,7 +50,7 @@ pub async fn fetch_message_body_by_location(
         .await
         .map_err(ImapAdapterError::from)?;
 
-    fetched_body_from_items(&location.message_id, location, items)
+    raw_mime_from_items(location, items)
 }
 
 /// Parse a fetched raw IMAP message into Posthaste's lazy body projection.
@@ -85,6 +101,14 @@ pub fn fetched_body_from_items(
     location: &ImapMessageLocation,
     items: impl IntoIterator<Item = MessageDataItem<'static>>,
 ) -> Result<FetchedBody, ImapAdapterError> {
+    let raw_mime = raw_mime_from_items(location, items)?;
+    imap_body_from_raw_mime(message_id, raw_mime)
+}
+
+pub fn raw_mime_from_items(
+    location: &ImapMessageLocation,
+    items: impl IntoIterator<Item = MessageDataItem<'static>>,
+) -> Result<Vec<u8>, ImapAdapterError> {
     let mut uid = None;
     let mut raw_mime = None;
 
@@ -108,8 +132,59 @@ pub fn fetched_body_from_items(
     if uid != location.uid.0 {
         return Err(ImapAdapterError::MissingFetchData("matching UID"));
     }
-    let raw_mime = raw_mime.ok_or(ImapAdapterError::MissingFetchData("BODY.PEEK[]"))?;
-    imap_body_from_raw_mime(message_id, raw_mime)
+    raw_mime.ok_or(ImapAdapterError::MissingFetchData("BODY.PEEK[]"))
+}
+
+pub fn parse_imap_attachment_blob_id(
+    blob_id: &BlobId,
+) -> Result<(MessageId, usize), ImapAdapterError> {
+    let mut parts = blob_id.as_str().split(':');
+    let Some("imap") = parts.next() else {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    };
+    let Some("blob") = parts.next() else {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    };
+    let Some(message_id_hex) = parts.next() else {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    };
+    let Some(attachment_index) = parts.next() else {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    };
+    if parts.next().is_some() {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    }
+
+    let message_id_bytes = hex::decode(message_id_hex)
+        .map_err(|_| ImapAdapterError::InvalidBlobId(blob_id.to_string()))?;
+    let message_id = String::from_utf8(message_id_bytes)
+        .map_err(|_| ImapAdapterError::InvalidBlobId(blob_id.to_string()))?;
+    let attachment_index = attachment_index
+        .parse::<usize>()
+        .map_err(|_| ImapAdapterError::InvalidBlobId(blob_id.to_string()))?;
+    if attachment_index == 0 {
+        return Err(ImapAdapterError::InvalidBlobId(blob_id.to_string()));
+    }
+
+    Ok((MessageId::from(message_id), attachment_index))
+}
+
+pub fn imap_attachment_bytes_from_raw_mime(
+    blob_id: &BlobId,
+    raw_mime: Vec<u8>,
+) -> Result<Vec<u8>, ImapAdapterError> {
+    let (message_id, attachment_index) = parse_imap_attachment_blob_id(blob_id)?;
+    let parsed = MessageParser::default()
+        .parse(&raw_mime)
+        .ok_or(ImapAdapterError::ParseMessageBody)?;
+    let attachment = parsed
+        .attachment((attachment_index - 1) as u32)
+        .ok_or_else(|| ImapAdapterError::MissingAttachment {
+            message_id: message_id.to_string(),
+            attachment_index,
+        })?;
+
+    Ok(attachment.contents().to_vec())
 }
 
 fn imap_attachment_from_part(
@@ -259,6 +334,71 @@ mod tests {
         assert!(matches!(
             error,
             ImapAdapterError::MissingFetchData("BODY.PEEK[]")
+        ));
+    }
+
+    #[test]
+    fn attachment_blob_id_round_trips_to_decoded_attachment_bytes() {
+        let message_id = MessageId::from("message-1");
+        let raw = concat!(
+            "From: Alice <alice@example.test>\r\n",
+            "Subject: Attachment\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: multipart/mixed; boundary=\"outer\"\r\n",
+            "\r\n",
+            "--outer\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "Plain body\r\n",
+            "--outer\r\n",
+            "Content-Type: application/octet-stream; name=\"notes.bin\"\r\n",
+            "Content-Disposition: attachment; filename=\"notes.bin\"\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "aGVsbG8gYXR0YWNobWVudA==\r\n",
+            "--outer--\r\n",
+        )
+        .as_bytes()
+        .to_vec();
+        let body = imap_body_from_raw_mime(&message_id, raw.clone()).expect("body");
+
+        let (parsed_message_id, parsed_attachment_index) =
+            parse_imap_attachment_blob_id(&body.attachments[0].blob_id).expect("blob id");
+        let attachment_bytes =
+            imap_attachment_bytes_from_raw_mime(&body.attachments[0].blob_id, raw)
+                .expect("attachment");
+
+        assert_eq!(parsed_message_id, message_id);
+        assert_eq!(parsed_attachment_index, 1);
+        assert_eq!(attachment_bytes, b"hello attachment");
+    }
+
+    #[test]
+    fn attachment_blob_id_rejects_unknown_format() {
+        let error = parse_imap_attachment_blob_id(&BlobId::from("jmap-blob-1"))
+            .expect_err("JMAP blob id is not an IMAP blob id");
+
+        assert!(matches!(error, ImapAdapterError::InvalidBlobId(_)));
+    }
+
+    #[test]
+    fn attachment_download_reports_missing_attachment_index() {
+        let message_id = MessageId::from("message-1");
+        let raw = b"From: Alice <alice@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlain body\r\n".to_vec();
+        let blob_id = BlobId::from(format!(
+            "imap:blob:{}:2",
+            hex::encode(message_id.as_str().as_bytes())
+        ));
+
+        let error = imap_attachment_bytes_from_raw_mime(&blob_id, raw)
+            .expect_err("attachment index should not exist");
+
+        assert!(matches!(
+            error,
+            ImapAdapterError::MissingAttachment {
+                message_id: ref actual_message_id,
+                attachment_index: 2,
+            } if actual_message_id == "message-1"
         ));
     }
 }

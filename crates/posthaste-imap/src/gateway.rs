@@ -9,15 +9,16 @@ use posthaste_domain::{
 
 use crate::{
     discover_imap_account, fetch_mailbox_header_snapshot, fetch_message_body_by_location,
-    imap_full_sync_batch, imap_mailbox_state_from_header_snapshot, DiscoveredImapAccount,
+    fetch_raw_message_by_location, imap_attachment_bytes_from_raw_mime, imap_full_sync_batch,
+    imap_mailbox_state_from_header_snapshot, parse_imap_attachment_blob_id, DiscoveredImapAccount,
     ImapAdapterError, ImapConnectionConfig,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
 ///
 /// The first implementation performs conservative full metadata snapshots.
-/// Mutations and lazy body fetches still fail with typed gateway errors until
-/// their IMAP command paths are implemented.
+/// Mutations and sends still fail with typed gateway errors until their IMAP
+/// and SMTP command paths are implemented.
 pub struct LiveImapSmtpGateway {
     config: ImapConnectionConfig,
     username: String,
@@ -42,6 +43,42 @@ impl LiveImapSmtpGateway {
 
     pub fn discovery(&self) -> &DiscoveredImapAccount {
         &self.discovery
+    }
+
+    fn location_and_mailbox_name(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(posthaste_domain::ImapMessageLocation, String), GatewayError> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| unsupported("message location lookup"))?;
+        let locations = store
+            .list_imap_message_locations(account_id, message_id)
+            .map_err(store_error_to_gateway)?;
+        let location = locations.first().cloned().ok_or_else(|| {
+            GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
+        })?;
+        let mailbox_name = store
+            .get_imap_mailbox_state(account_id, &location.mailbox_id)
+            .map_err(store_error_to_gateway)?
+            .map(|state| state.mailbox_name)
+            .or_else(|| {
+                self.discovery
+                    .mailboxes
+                    .iter()
+                    .find(|mailbox| mailbox.id == location.mailbox_id)
+                    .map(|mailbox| mailbox.name.clone())
+            })
+            .ok_or_else(|| {
+                GatewayError::Rejected(format!(
+                    "missing IMAP mailbox name for location {}",
+                    location.mailbox_id
+                ))
+            })?;
+
+        Ok((location, mailbox_name))
     }
 }
 
@@ -94,45 +131,26 @@ impl MailGateway for LiveImapSmtpGateway {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
-        let store = self
-            .store
-            .as_ref()
-            .ok_or_else(|| unsupported("body fetch location lookup"))?;
-        let locations = store
-            .list_imap_message_locations(account_id, message_id)
-            .map_err(store_error_to_gateway)?;
-        let location = locations.first().ok_or_else(|| {
-            GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
-        })?;
-        let mailbox_name = store
-            .get_imap_mailbox_state(account_id, &location.mailbox_id)
-            .map_err(store_error_to_gateway)?
-            .map(|state| state.mailbox_name)
-            .or_else(|| {
-                self.discovery
-                    .mailboxes
-                    .iter()
-                    .find(|mailbox| mailbox.id == location.mailbox_id)
-                    .map(|mailbox| mailbox.name.clone())
-            })
-            .ok_or_else(|| {
-                GatewayError::Rejected(format!(
-                    "missing IMAP mailbox name for location {}",
-                    location.mailbox_id
-                ))
-            })?;
+        let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
 
-        fetch_message_body_by_location(&self.config, &mailbox_name, location)
+        fetch_message_body_by_location(&self.config, &mailbox_name, &location)
             .await
             .map_err(imap_error_to_gateway)
     }
 
     async fn download_blob(
         &self,
-        _account_id: &AccountId,
-        _blob_id: &BlobId,
+        account_id: &AccountId,
+        blob_id: &BlobId,
     ) -> Result<Vec<u8>, GatewayError> {
-        Err(unsupported("blob download"))
+        let (message_id, _attachment_index) =
+            parse_imap_attachment_blob_id(blob_id).map_err(imap_error_to_gateway)?;
+        let (location, mailbox_name) = self.location_and_mailbox_name(account_id, &message_id)?;
+        let raw_mime = fetch_raw_message_by_location(&self.config, &mailbox_name, &location)
+            .await
+            .map_err(imap_error_to_gateway)?;
+
+        imap_attachment_bytes_from_raw_mime(blob_id, raw_mime).map_err(imap_error_to_gateway)
     }
 
     async fn set_keywords(
@@ -276,8 +294,10 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
+        | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
-        | ImapAdapterError::ParseMessageBody => GatewayError::Rejected(error.to_string()),
+        | ImapAdapterError::ParseMessageBody
+        | ImapAdapterError::MissingAttachment { .. } => GatewayError::Rejected(error.to_string()),
         ImapAdapterError::Client(message) => GatewayError::Network(message),
     }
 }

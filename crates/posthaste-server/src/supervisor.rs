@@ -541,8 +541,12 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
+        | ImapAdapterError::InvalidBlobId(_)
         | ImapAdapterError::ParseMessageHeaders
-        | ImapAdapterError::ParseMessageBody => GatewayError::Rejected(error.to_string()).into(),
+        | ImapAdapterError::ParseMessageBody
+        | ImapAdapterError::MissingAttachment { .. } => {
+            GatewayError::Rejected(error.to_string()).into()
+        }
         ImapAdapterError::Client(message) => GatewayError::Network(message).into(),
     }
 }

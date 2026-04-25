@@ -75,13 +75,15 @@ impl Harness {
 struct StaticGateway {
     batch: Arc<Mutex<Option<SyncBatch>>>,
     body: FetchedBody,
+    blob: Vec<u8>,
 }
 
 impl StaticGateway {
-    fn new(batch: SyncBatch, body: FetchedBody) -> Self {
+    fn new(batch: SyncBatch, body: FetchedBody, blob: Vec<u8>) -> Self {
         Self {
             batch: Arc::new(Mutex::new(Some(batch))),
             body,
+            blob,
         }
     }
 }
@@ -114,7 +116,7 @@ impl MailGateway for StaticGateway {
         _account_id: &AccountId,
         _blob_id: &BlobId,
     ) -> Result<Vec<u8>, GatewayError> {
-        Err(GatewayError::Rejected("unused".to_string()))
+        Ok(self.blob.clone())
     }
 
     async fn set_keywords(
@@ -194,10 +196,10 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
     let jmap_body = parity_body();
     let imap_body = imap_body_from_raw_mime(&MessageId::from("unused"), parity_raw_mime())
         .expect("IMAP body should parse");
-    let jmap_gateway = StaticGateway::new(jmap_sync_batch(), jmap_body);
+    let jmap_gateway = StaticGateway::new(jmap_sync_batch(), jmap_body, parity_attachment_blob());
     let imap_batch = imap_sync_batch();
     let imap_message_id = imap_batch.messages[0].id.clone();
-    let imap_gateway = StaticGateway::new(imap_batch, imap_body);
+    let imap_gateway = StaticGateway::new(imap_batch, imap_body, parity_attachment_blob());
 
     harness
         .service
@@ -254,6 +256,26 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
         jmap_detail.attachments[0].mime_type,
         imap_detail.attachments[0].mime_type
     );
+
+    let jmap_blob = harness
+        .service
+        .download_blob(
+            &AccountId::from("jmap"),
+            &jmap_detail.attachments[0].blob_id,
+            &jmap_gateway,
+        )
+        .await
+        .expect("JMAP blob should download");
+    let imap_blob = harness
+        .service
+        .download_blob(
+            &AccountId::from("imap"),
+            &imap_detail.attachments[0].blob_id,
+            &imap_gateway,
+        )
+        .await
+        .expect("IMAP blob should download");
+    assert_eq!(jmap_blob, imap_blob);
 }
 
 fn jmap_sync_batch() -> SyncBatch {
@@ -402,4 +424,8 @@ fn parity_raw_mime() -> Vec<u8> {
     )
     .as_bytes()
     .to_vec()
+}
+
+fn parity_attachment_blob() -> Vec<u8> {
+    b"attached text".to_vec()
 }
