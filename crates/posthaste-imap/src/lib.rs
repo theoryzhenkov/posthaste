@@ -8,6 +8,7 @@
 //! @spec docs/L1-sync
 
 mod body;
+mod compose;
 mod discovery;
 mod error;
 mod fetch;
@@ -22,6 +23,7 @@ pub use body::{
     imap_attachment_bytes_from_raw_mime, imap_body_from_raw_mime, parse_imap_attachment_blob_id,
     raw_mime_from_items,
 };
+pub use compose::{fetch_imap_reply_context_by_location, imap_reply_context_from_raw_mime};
 pub use discovery::{
     discover_imap_account, imap_mailbox_id, map_imap_mailbox, normalize_imap_capabilities,
     DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
