@@ -16,6 +16,8 @@ pub enum ImapAdapterError {
     InvalidMailboxName(String),
     #[error("IMAP SELECT/EXAMINE response missing {0}")]
     MissingSelectData(&'static str),
+    #[error("could not parse RFC 5322 message headers")]
+    ParseMessageHeaders,
 }
 
 impl From<imap_client::client::tokio::ClientError> for ImapAdapterError {
