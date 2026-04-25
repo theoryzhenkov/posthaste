@@ -68,8 +68,9 @@ for a mailbox is:
 The live implementation lives in the `posthaste-imap` adapter crate. Its first
 runtime boundary performs connection, authentication, capability discovery, and
 mailbox listing. Discovery results are synced as an authoritative mailbox
-snapshot. Until message snapshot sync is implemented, body fetches and
-mutations are rejected explicitly after successful discovery.
+snapshot, and selectable mailboxes are fetched as an authoritative full message
+snapshot. Body fetches and mutations are rejected explicitly until their IMAP
+command paths are implemented.
 
 Mailbox message sync starts by examining the mailbox and mapping SELECT/EXAMINE
 state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
@@ -133,6 +134,7 @@ source informs the implementation.
 | Gmail identity/labels | `ImapProviderFeatures`, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
 | Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | FETCH item extraction | `fetch_mailbox_header_records`, `fetched_header_from_items` | RFC 9051 SEARCH/UID/FETCH data items (`FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 `MODSEQ` as a CONDSTORE FETCH item: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` UID SEARCH/UID FETCH wrappers and FETCH task sequence-number collection: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` fetch item and sequence-set models: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/sequence.rs> |
+| Full IMAP metadata snapshot | `LiveImapSmtpGateway::sync`, `imap_full_sync_batch` | RFC 9051 UID/sequence-number and EXPUNGE behavior: <https://www.rfc-editor.org/rfc/rfc9051.html>; local store snapshot replacement contract: `docs/L1-sync` |
 | Move/copy mutation planning | `plan_imap_move` | RFC 6851 MOVE: <https://datatracker.ietf.org/doc/html/rfc6851>; RFC 4315 UIDPLUS `COPYUID`/`APPENDUID`: <https://datatracker.ietf.org/doc/html/rfc4315> |
 
 ## Identity and threading
