@@ -1,9 +1,11 @@
 use posthaste_domain::{
-    AccountId, ImapMailboxSyncState, ImapMessageLocation, MailboxRecord, MessageRecord, SyncBatch,
-    SyncCursor, SyncObject,
+    AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId,
+    MailboxRecord, MessageRecord, SyncBatch, SyncCursor, SyncObject,
 };
 
-use crate::{DiscoveredImapAccount, ImapMailboxHeaderSnapshot, ImapMappedHeader};
+use crate::{
+    DiscoveredImapAccount, ImapChangedSinceSnapshot, ImapMailboxHeaderSnapshot, ImapMappedHeader,
+};
 
 /// Convert an IMAP mailbox discovery result into an authoritative mailbox
 /// snapshot. Message sync is intentionally separate because it depends on
@@ -135,6 +137,52 @@ pub fn imap_delta_sync_batch(
     batch
 }
 
+pub fn imap_condstore_delta_sync_batch(
+    account_id: &AccountId,
+    discovery: DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+    mailbox_states: Vec<ImapMailboxSyncState>,
+    local_locations: Vec<ImapMessageLocation>,
+    vanished_uids: Vec<(MailboxId, ImapUidValidity, ImapUid)>,
+    updated_at: String,
+) -> SyncBatch {
+    let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
+    let mut messages = Vec::with_capacity(headers.len());
+    let mut locations = Vec::with_capacity(headers.len());
+    let vanished_locations = vanished_uids
+        .into_iter()
+        .map(|(mailbox_id, uid_validity, uid)| (mailbox_id, uid_validity.0, uid))
+        .collect::<std::collections::BTreeSet<_>>();
+    let deleted_message_ids = local_locations
+        .into_iter()
+        .filter(|location| {
+            vanished_locations.contains(&(
+                location.mailbox_id.clone(),
+                location.uid_validity.0,
+                location.uid,
+            ))
+        })
+        .map(|location| location.message_id)
+        .collect::<Vec<_>>();
+
+    for header in headers {
+        messages.push(header.message);
+        locations.push(header.location);
+    }
+
+    batch.imap_mailbox_states = mailbox_states;
+    batch.messages = messages;
+    batch.imap_message_locations = locations;
+    batch.deleted_message_ids = deleted_message_ids;
+    batch.replace_all_messages = false;
+    batch.cursors.push(SyncCursor {
+        object_type: SyncObject::Message,
+        state: message_cursor_state(&batch.messages, &batch.imap_message_locations),
+        updated_at,
+    });
+    batch
+}
+
 pub fn imap_mailbox_state_from_header_snapshot(
     snapshot: &ImapMailboxHeaderSnapshot,
     updated_at: String,
@@ -155,6 +203,33 @@ pub fn imap_mailbox_state_from_header_snapshot(
             .max(),
         updated_at,
     }
+}
+
+pub fn imap_mailbox_state_from_changed_since_snapshot(
+    stored: &ImapMailboxSyncState,
+    snapshot: &ImapChangedSinceSnapshot,
+    updated_at: String,
+) -> ImapMailboxSyncState {
+    let mut state = ImapMailboxSyncState {
+        mailbox_id: snapshot.selected.mailbox_id.clone(),
+        mailbox_name: snapshot.selected.mailbox_name.clone(),
+        uid_validity: snapshot.selected.uid_validity,
+        highest_uid: stored.highest_uid,
+        highest_modseq: stored.highest_modseq,
+        updated_at,
+    };
+
+    for header in &snapshot.headers {
+        state.record_seen_uid(header.location.uid);
+        if let Some(modseq) = header.location.modseq {
+            state.record_highest_modseq(modseq);
+        }
+    }
+    if let Some(highest_modseq) = snapshot.selected.highest_modseq {
+        state.record_highest_modseq(highest_modseq);
+    }
+
+    state
 }
 
 fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
@@ -196,7 +271,9 @@ mod tests {
         ImapUidValidity, MailboxId, MessageId,
     };
 
-    use crate::{imap_header_message_record, map_imap_mailbox, ImapFetchedHeader};
+    use crate::{
+        imap_header_message_record, map_imap_mailbox, ImapChangedSinceSnapshot, ImapFetchedHeader,
+    };
 
     use super::*;
 
@@ -339,5 +416,113 @@ mod tests {
         assert_eq!(batch.messages.len(), 1);
         assert_eq!(batch.deleted_message_ids, vec![missing_location.message_id]);
         assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
+    }
+
+    #[test]
+    fn condstore_delta_sync_batch_only_deletes_vanished_local_locations() {
+        let selected = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(9),
+            uid_next: None,
+            highest_modseq: Some(ImapModSeq(900)),
+        };
+        let changed = imap_header_message_record(
+            &selected,
+            ImapFetchedHeader {
+                mailbox_id: selected.mailbox_id.clone(),
+                uid: ImapUid(42),
+                modseq: Some(ImapModSeq(900)),
+                flags: vec!["\\Seen".to_string()],
+                rfc822_size: 512,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("mapped header");
+        let unchanged_location = ImapMessageLocation {
+            message_id: MessageId::from("imap:9:41:696d61703a6d61696c626f783a34393465343234663538"),
+            mailbox_id: selected.mailbox_id.clone(),
+            uid_validity: selected.uid_validity,
+            uid: ImapUid(41),
+            modseq: Some(ImapModSeq(700)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+        let vanished_location = ImapMessageLocation {
+            message_id: MessageId::from("imap:9:40:696d61703a6d61696c626f783a34393465343234663538"),
+            mailbox_id: selected.mailbox_id.clone(),
+            uid_validity: selected.uid_validity,
+            uid: ImapUid(40),
+            modseq: Some(ImapModSeq(600)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        let batch = imap_condstore_delta_sync_batch(
+            &AccountId::from("primary"),
+            DiscoveredImapAccount {
+                capabilities: ImapCapabilities::default(),
+                mailboxes: vec![map_imap_mailbox("INBOX", ["\\Inbox"])],
+            },
+            vec![changed],
+            vec![ImapMailboxSyncState {
+                mailbox_id: selected.mailbox_id.clone(),
+                mailbox_name: "INBOX".to_string(),
+                uid_validity: selected.uid_validity,
+                highest_uid: Some(ImapUid(42)),
+                highest_modseq: Some(ImapModSeq(900)),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            }],
+            vec![unchanged_location.clone(), vanished_location.clone()],
+            vec![(
+                selected.mailbox_id.clone(),
+                selected.uid_validity,
+                vanished_location.uid,
+            )],
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert!(!batch.replace_all_messages);
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(
+            batch.deleted_message_ids,
+            vec![vanished_location.message_id]
+        );
+        assert!(!batch
+            .deleted_message_ids
+            .contains(&unchanged_location.message_id));
+    }
+
+    #[test]
+    fn changed_since_snapshot_state_preserves_stored_uid_and_advances_modseq() {
+        let selected = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(9),
+            uid_next: None,
+            highest_modseq: Some(ImapModSeq(900)),
+        };
+        let stored = ImapMailboxSyncState {
+            mailbox_id: selected.mailbox_id.clone(),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: selected.uid_validity,
+            highest_uid: Some(ImapUid(100)),
+            highest_modseq: Some(ImapModSeq(700)),
+            updated_at: "2026-04-24T00:00:00Z".to_string(),
+        };
+        let snapshot = ImapChangedSinceSnapshot {
+            selected: selected.clone(),
+            headers: Vec::new(),
+            vanished_uids: Vec::new(),
+            is_full_snapshot: false,
+        };
+
+        let state = imap_mailbox_state_from_changed_since_snapshot(
+            &stored,
+            &snapshot,
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert_eq!(state.highest_uid, Some(ImapUid(100)));
+        assert_eq!(state.highest_modseq, Some(ImapModSeq(900)));
     }
 }
