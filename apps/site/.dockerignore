@@ -1,6 +1,7 @@
 dist
 node_modules
 .vite
+.astro
 *.tsbuildinfo
 Dockerfile
 .dockerignore

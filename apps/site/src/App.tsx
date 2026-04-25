@@ -10,29 +10,13 @@ import {
   Settings,
 } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
+import type { HomeContent, SiteMessage } from './content/types'
 
 interface Mailbox {
   label: string
   count: string
   color: string
   active?: boolean
-}
-
-interface Message {
-  id: string
-  from: string
-  subject: string
-  tag: string
-  time: string
-  color: string
-  body: string[]
-  unread?: boolean
-}
-
-interface Note {
-  label: string
-  title: string
-  body: string
 }
 
 type LandscapePhase = 'night' | 'morning' | 'day' | 'evening'
@@ -43,83 +27,18 @@ interface LandscapeTimeState {
   celestialY: number
 }
 
+const initialLandscapeTimeState: LandscapeTimeState = {
+  phase: 'day',
+  celestialX: 41,
+  celestialY: 22,
+}
+
 const mailboxes: Mailbox[] = [
   { label: 'All Inboxes', count: '42', color: 'coral', active: true },
   { label: 'VIP', count: '8', color: 'blue' },
   { label: 'Bills', count: '5', color: 'violet' },
   { label: 'Read Later', count: '16', color: 'amber' },
   { label: 'Newsletters', count: '31', color: 'sage' },
-]
-
-const messages: Message[] = [
-  {
-    id: 'lorem',
-    from: 'Lorem Ipsum',
-    subject: 'Lorem ipsum dolor sit amet',
-    tag: 'lorem',
-    time: '09:18',
-    color: 'blue',
-    body: [
-      'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer vitae sem nec tortor luctus aliquet.',
-      'Suspendisse potenti. Praesent commodo, erat at facilisis luctus, sapien lorem cursus massa, sed aliquet ipsum mi vitae neque.',
-    ],
-    unread: true,
-  },
-  {
-    id: 'community-extensions',
-    from: 'Posthaste',
-    subject: 'Community extensions',
-    tag: 'wip',
-    time: 'Soon',
-    color: 'violet',
-    body: [
-      "Posthaste's community extension store is coming soon!",
-      'Posthaste already supports local extensions and themes, and allows you to distribute them on your own. We are working on providing users with a convenient in-app plugin store.',
-    ],
-  },
-  {
-    id: 'dolor',
-    from: 'Amet Consectetur',
-    subject: 'Ut enim ad minim veniam',
-    tag: 'dolor',
-    time: 'Yesterday',
-    color: 'violet',
-    body: [
-      'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.',
-      'Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
-    ],
-    unread: true,
-  },
-  {
-    id: 'amet',
-    from: 'Adipiscing Elit',
-    subject: 'Excepteur sint occaecat cupidatat',
-    tag: 'amet',
-    time: 'Tue',
-    color: 'amber',
-    body: [
-      'Nunc sed augue lacus viverra vitae congue eu consequat ac. Vitae purus faucibus ornare suspendisse sed.',
-      'Velit ut tortor pretium viverra suspendisse potenti nullam ac tortor vitae purus faucibus.',
-    ],
-  },
-]
-
-const notes: Note[] = [
-  {
-    label: 'Lorem',
-    title: 'Lorem ipsum dolor sit amet.',
-    body: 'Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-  },
-  {
-    label: 'Ipsum',
-    title: 'Ut enim ad minim veniam.',
-    body: 'Quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
-  },
-  {
-    label: 'Dolor',
-    title: 'Duis aute irure dolor.',
-    body: 'In reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.',
-  },
 ]
 
 const palette = ['blue', 'coral', 'sage', 'amber', 'violet']
@@ -170,14 +89,20 @@ function getLandscapeTimeState(date = new Date()): LandscapeTimeState {
 }
 
 function useLandscapeTime() {
-  const [timeState, setTimeState] = useState(() => getLandscapeTimeState())
+  const [timeState, setTimeState] = useState(initialLandscapeTimeState)
 
   useEffect(() => {
+    const initial = window.setTimeout(() => {
+      setTimeState(getLandscapeTimeState())
+    }, 0)
     const interval = window.setInterval(() => {
       setTimeState(getLandscapeTimeState())
     }, 60_000)
 
-    return () => window.clearInterval(interval)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(interval)
+    }
   }, [])
 
   return timeState
@@ -215,17 +140,17 @@ function useReveal() {
   }, [])
 }
 
-export function App() {
+export function App({ content }: { content: HomeContent }) {
   useReveal()
 
   return (
     <main className="site-shell">
       <InstallHeader />
-      <Hero />
-      <LandscapeValuesSection />
-      <NotesSection />
-      <ThemeSection />
-      <FooterSection />
+      <Hero messages={content.messages} />
+      <LandscapeValuesSection content={content.openSource} />
+      <NotesSection content={content} />
+      <ThemeSection content={content.theme} />
+      <FooterSection content={content.footer} />
     </main>
   )
 }
@@ -257,7 +182,7 @@ function InstallHeader() {
   )
 }
 
-function Hero() {
+function Hero({ messages }: { messages: SiteMessage[] }) {
   const [selectedMessageId, setSelectedMessageId] = useState(messages[0].id)
   const selectedMessage =
     messages.find((message) => message.id === selectedMessageId) ?? messages[0]
@@ -269,6 +194,7 @@ function Hero() {
         <div className="client-body">
           <SidebarPreview />
           <MessageListPreview
+            messages={messages}
             selectedMessageId={selectedMessage.id}
             onSelectMessage={setSelectedMessageId}
           />
@@ -287,14 +213,8 @@ function ClientToolbar() {
         <span />
         <span />
       </div>
-      <a className="brand-mark" href="#top" aria-label="PostHaste home">
-        <img src="/favicon.svg" alt="" aria-hidden="true" />
-        <span>PostHaste</span>
-      </a>
-      <div className="toolbar-separator" />
-      <button type="button" className="toolbar-chip">
+      <button type="button" className="toolbar-chip" aria-label="Compose">
         <Mail aria-hidden="true" />
-        Compose
       </button>
       <button type="button" className="icon-chip" aria-label="Archive">
         <Archive aria-hidden="true" />
@@ -347,9 +267,11 @@ function SidebarPreview() {
 }
 
 function MessageListPreview({
+  messages,
   selectedMessageId,
   onSelectMessage,
 }: {
+  messages: SiteMessage[]
   selectedMessageId: string
   onSelectMessage: (messageId: string) => void
 }) {
@@ -390,19 +312,16 @@ function MessageListPreview({
   )
 }
 
-function ReaderPreview({ message }: { message: Message }) {
+function ReaderPreview({ message }: { message: SiteMessage }) {
   return (
     <section className="mock-reader" aria-labelledby="hero-title">
       <SloganTitle id="hero-title" />
       <div className="reader-message" aria-live="polite">
-        <div className="reader-message-meta">
-          <span>{message.from}</span>
-          <time>{message.time}</time>
-        </div>
         <h2>{message.subject}</h2>
-        {message.body.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
+        <div
+          className="reader-message-body"
+          dangerouslySetInnerHTML={{ __html: message.html }}
+        />
       </div>
     </section>
   )
@@ -424,7 +343,11 @@ function SloganTitle({ id }: { id?: string }) {
   )
 }
 
-function LandscapeValuesSection() {
+function LandscapeValuesSection({
+  content,
+}: {
+  content: HomeContent['openSource']
+}) {
   const landscapeTime = useLandscapeTime()
   const landscapeStyle = {
     '--celestial-x': `${landscapeTime.celestialX}%`,
@@ -438,12 +361,8 @@ function LandscapeValuesSection() {
       data-reveal
     >
       <div className="landscape-copy">
-        <p className="eyebrow">Priorities</p>
-        <h2 id="values-title">Lorem ipsum dolor sit amet.</h2>
-        <p>
-          Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut
-          labore et dolore magna aliqua.
-        </p>
+        <h2 id="values-title">{content.title}</h2>
+        <div dangerouslySetInnerHTML={{ __html: content.html }} />
       </div>
       <div
         className={`landscape-canvas ${landscapeTime.phase}`}
@@ -486,19 +405,19 @@ function LandscapeSegment() {
   )
 }
 
-function NotesSection() {
+function NotesSection({ content }: { content: HomeContent }) {
   return (
     <section className="notes-section" id="notes" aria-labelledby="notes-title">
       <div className="section-header" data-reveal>
         <p className="eyebrow">Notes</p>
-        <h2 id="notes-title">Lorem ipsum dolor sit amet.</h2>
+        <h2 id="notes-title">{content.notesHeading.title}</h2>
       </div>
       <div className="note-list">
-        {notes.map((note) => (
+        {content.notes.map((note) => (
           <article className="note-row" data-reveal key={note.label}>
             <span>{note.label}</span>
             <h3>{note.title}</h3>
-            <p>{note.body}</p>
+            <div dangerouslySetInnerHTML={{ __html: note.html }} />
           </article>
         ))}
       </div>
@@ -506,7 +425,7 @@ function NotesSection() {
   )
 }
 
-function ThemeSection() {
+function ThemeSection({ content }: { content: HomeContent['theme'] }) {
   return (
     <section
       className="theme-section"
@@ -516,10 +435,10 @@ function ThemeSection() {
       <div className="theme-copy" data-reveal>
         <p className="eyebrow">
           <Palette aria-hidden="true" />
-          Themes
+          {content.eyebrow}
         </p>
-        <h2 id="themes-title">Sed do eiusmod tempor.</h2>
-        <p>Incididunt ut labore et dolore magna aliqua.</p>
+        <h2 id="themes-title">{content.title}</h2>
+        <div dangerouslySetInnerHTML={{ __html: content.html }} />
       </div>
       <div className="glass-panel" data-reveal>
         <div className="glass-title">Theme preview</div>
@@ -538,11 +457,11 @@ function ThemeSection() {
   )
 }
 
-function FooterSection() {
+function FooterSection({ content }: { content: HomeContent['footer'] }) {
   return (
     <footer className="footer-section">
-      <span>PostHaste</span>
-      <span>Lorem ipsum dolor.</span>
+      <span>{content.brand}</span>
+      <div dangerouslySetInnerHTML={{ __html: content.html }} />
     </footer>
   )
 }
