@@ -47,6 +47,7 @@ Required `SyncBatch` shape:
 pub struct SyncBatch {
     pub mailboxes: Vec<MailboxRecord>,
     pub messages: Vec<MessageRecord>,
+    pub imap_message_locations: Vec<ImapMessageLocation>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
     pub deleted_message_ids: Vec<MessageId>,
     pub replace_all_mailboxes: bool,
@@ -65,6 +66,11 @@ The important details are `replace_all_mailboxes` and `replace_all_messages`:
 When `replace_all_mailboxes` is true, the store compares the current local mailbox IDs for the account to the mailbox IDs present in the incoming snapshot and deletes any stale local rows before applying upserts. This is what prevents removed server mailboxes from persisting forever in the sidebar after a full resync.
 
 When `replace_all_messages` is true, the store performs the same reconciliation for messages. This prevents deleted or expunged remote email from surviving locally after an `Email/changes` cursor gets too old for the server to calculate.
+
+IMAP sync batches also carry `imap_message_locations`. These rows are applied
+in the same transaction as their `MessageRecord`s so later lazy body fetches and
+mutations can address the remote message by mailbox UID without deriving command
+state from presentation fields.
 
 ## SQLite schema
 

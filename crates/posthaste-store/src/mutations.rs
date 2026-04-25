@@ -378,6 +378,30 @@ pub(crate) fn apply_sync_batch_tx(
         }
     }
 
+    for location in &batch.imap_message_locations {
+        tx.execute(
+            "INSERT INTO imap_message_location (
+                account_id, message_id, mailbox_id, uid_validity, uid, modseq, updated_at
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(account_id, message_id, mailbox_id) DO UPDATE SET
+                uid_validity = excluded.uid_validity,
+                uid = excluded.uid,
+                modseq = excluded.modseq,
+                updated_at = excluded.updated_at",
+            params![
+                account_id.as_str(),
+                location.message_id.as_str(),
+                location.mailbox_id.as_str(),
+                location.uid_validity.0,
+                location.uid.0,
+                location.modseq.map(|modseq| modseq.0.to_string()),
+                location.updated_at,
+            ],
+        )
+        .map_err(sql_to_store_error)?;
+    }
+
     for thread_id in affected_threads {
         refresh_thread_projection_tx(tx, account_id, &thread_id)?;
     }

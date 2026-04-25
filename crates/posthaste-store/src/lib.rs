@@ -1366,6 +1366,7 @@ mod tests {
                     },
                 ],
                 messages,
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -1809,6 +1810,68 @@ mod tests {
     }
 
     #[test]
+    fn sync_batch_persists_and_deletes_imap_message_locations() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        setup_source(&store, &account, "Primary")?;
+        let message_id = MessageId::from("message-1");
+        let location = ImapMessageLocation {
+            message_id: message_id.clone(),
+            mailbox_id: MailboxId::from("imap:inbox"),
+            uid_validity: ImapUidValidity(10),
+            uid: ImapUid(101),
+            modseq: Some(ImapModSeq(999)),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        };
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: vec![posthaste_domain::MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 0,
+                }],
+                messages: vec![sample_message("message-1", "inbox", Some("mime"))],
+                imap_message_locations: vec![location.clone()],
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: Vec::new(),
+            },
+        )?;
+
+        assert_eq!(
+            store.list_imap_message_locations(&account, &message_id)?,
+            vec![location]
+        );
+
+        store.apply_sync_batch(
+            &account,
+            &SyncBatch {
+                mailboxes: Vec::new(),
+                messages: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: vec![message_id.clone()],
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: Vec::new(),
+            },
+        )?;
+
+        assert_eq!(
+            store.list_imap_message_locations(&account, &message_id)?,
+            Vec::<ImapMessageLocation>::new()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn account_scoped_reads_do_not_leak() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
@@ -1828,6 +1891,7 @@ mod tests {
                     total_emails: 0,
                 }],
                 messages: vec![sample_message("shared-id", "inbox", Some("mime-a"))],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -1850,6 +1914,7 @@ mod tests {
                     total_emails: 0,
                 }],
                 messages: vec![sample_message("shared-id", "inbox", Some("mime-b"))],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -1895,6 +1960,7 @@ mod tests {
                     mailbox_ids: vec![MailboxId::from("inbox"), MailboxId::from("inbox")],
                     ..sample_message("message-1", "inbox", Some("mime"))
                 }],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -2006,6 +2072,7 @@ mod tests {
                         "inbox",
                         Some("mime"),
                     )],
+                    imap_message_locations: Vec::new(),
                     deleted_mailbox_ids: Vec::new(),
                     deleted_message_ids: Vec::new(),
                     replace_all_mailboxes: false,
@@ -2087,6 +2154,7 @@ mod tests {
                         ..sample_message("shared-id", "inbox", Some("mime-a"))
                     },
                 ],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -2114,6 +2182,7 @@ mod tests {
                     keywords: vec!["beta".to_string()],
                     ..sample_message("shared-id", "trash", Some("mime-b"))
                 }],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -2185,6 +2254,7 @@ mod tests {
                     total_emails: 0,
                 }],
                 messages: vec![sample_message("message-1", "inbox", Some("mime"))],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
@@ -2240,6 +2310,7 @@ mod tests {
                     total_emails: 0,
                 }],
                 messages: vec![first, second],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
@@ -2285,6 +2356,7 @@ mod tests {
                 },
             ],
             messages: vec![sample_message("message-1", "inbox", Some("mime"))],
+            imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
@@ -2301,6 +2373,7 @@ mod tests {
                 mailbox_ids: vec![MailboxId::from("archive"), MailboxId::from("inbox")],
                 ..sample_message("message-1", "inbox", Some("mime"))
             }],
+            imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
@@ -2516,6 +2589,7 @@ mod tests {
                     },
                 ],
                 messages: Vec::new(),
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
@@ -2539,6 +2613,7 @@ mod tests {
                     total_emails: 0,
                 }],
                 messages: Vec::new(),
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
@@ -2579,6 +2654,7 @@ mod tests {
                     sample_message("message-1", "inbox", Some("mime-1")),
                     sample_message("message-2", "inbox", Some("mime-2")),
                 ],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: true,
@@ -2592,6 +2668,7 @@ mod tests {
             &SyncBatch {
                 mailboxes: vec![mailbox],
                 messages: vec![sample_message("message-2", "inbox", Some("mime-2"))],
+                imap_message_locations: Vec::new(),
                 deleted_mailbox_ids: Vec::new(),
                 deleted_message_ids: Vec::new(),
                 replace_all_mailboxes: false,
