@@ -2265,6 +2265,7 @@ mod tests {
             app_settings: Mutex::new(AppSettings {
                 default_account_id: None,
                 automation_rules: vec![sample_automation_rule()],
+                automation_drafts: Vec::new(),
             }),
             ..Default::default()
         });
@@ -2329,6 +2330,7 @@ mod tests {
             app_settings: Mutex::new(AppSettings {
                 default_account_id: None,
                 automation_rules: vec![sample_automation_rule()],
+                automation_drafts: Vec::new(),
             }),
             ..Default::default()
         });
@@ -2438,6 +2440,7 @@ mod tests {
             app_settings: Mutex::new(AppSettings {
                 default_account_id: Some(account.id.clone()),
                 automation_rules: Vec::new(),
+                automation_drafts: Vec::new(),
             }),
             ..Default::default()
         });

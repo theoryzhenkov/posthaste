@@ -5,7 +5,7 @@
  */
 import type { UseMutationResult } from '@tanstack/react-query'
 import { Plus, UserPlus } from 'lucide-react'
-import type { AccountOverview, AppSettings } from '../../api/types'
+import type { AccountOverview } from '../../api/types'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
@@ -23,14 +23,12 @@ export function AccountsPane({
   accounts,
   selectedAccountId,
   editingAccount,
-  settings,
   editorKey,
   onSelectAccount,
   onBackToAccounts,
   onCreateAccount,
   onCommand,
   onSaved,
-  onAutomationSettingsSaved,
   onVerified,
   commandMutation,
   commandError,
@@ -38,7 +36,6 @@ export function AccountsPane({
   accounts: AccountOverview[]
   selectedAccountId: EditorTarget | null
   editingAccount: AccountOverview | null
-  settings: AppSettings | null
   editorKey: string
   onSelectAccount: (accountId: string) => void
   onBackToAccounts: () => void
@@ -48,7 +45,6 @@ export function AccountsPane({
     account: AccountOverview,
   ) => void
   onSaved: (account: AccountOverview) => Promise<void>
-  onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
   onVerified: () => Promise<void>
   commandMutation: UseMutationResult<
     unknown,
@@ -77,9 +73,7 @@ export function AccountsPane({
               key={editorKey}
               editorTarget={selectedAccountId}
               editingAccount={editingAccount}
-              settings={settings}
               onSaved={onSaved}
-              onAutomationSettingsSaved={onAutomationSettingsSaved}
               onVerified={onVerified}
               onCommand={onCommand}
               isCommandPending={commandMutation.isPending}

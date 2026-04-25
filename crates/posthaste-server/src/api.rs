@@ -38,8 +38,8 @@ use account_support::{
     apply_secret_instruction, default_account_appearance, delete_managed_secret,
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
     normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
-    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_rules,
-    validate_logo_image_id,
+    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
+    validate_automation_rules, validate_logo_image_id,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -197,6 +197,7 @@ pub struct PatchSettingsRequest {
     #[serde(default)]
     pub default_account_id: Option<Option<String>>,
     pub automation_rules: Option<Vec<AutomationRule>>,
+    pub automation_drafts: Option<Vec<AutomationRule>>,
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -470,7 +471,11 @@ pub async fn patch_settings(
     if let Some(automation_rules) = &request.automation_rules {
         settings.automation_rules = normalize_automation_rules(automation_rules);
     }
+    if let Some(automation_drafts) = &request.automation_drafts {
+        settings.automation_drafts = normalize_automation_rules(automation_drafts);
+    }
     validate_automation_rules(&settings.automation_rules)?;
+    validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
     state
         .service
         .put_app_settings(&settings)

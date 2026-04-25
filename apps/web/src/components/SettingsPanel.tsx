@@ -33,7 +33,10 @@ import type { AccountOverview, SmartMailboxSummary } from '../api/types'
 import { AccountsPane } from './settings-panel/AccountsPane'
 import { AppearancePane } from './settings-panel/AppearancePane'
 import { GeneralPane } from './settings-panel/GeneralPane'
-import { SmartMailboxesPane } from './settings-panel/SmartMailboxesPane'
+import {
+  SmartMailboxesPane,
+  type MailboxEditorTarget,
+} from './settings-panel/SmartMailboxesPane'
 import { brandAccents } from '../design/tokens'
 import {
   applyAccountMutationResult,
@@ -43,10 +46,7 @@ import {
 import { cn } from '../lib/utils'
 import { queryKeys } from '../queryKeys'
 import { Button } from './ui/button'
-import type {
-  EditorTarget,
-  SmartMailboxEditorTarget,
-} from './settings-panel/types'
+import type { EditorTarget } from './settings-panel/types'
 
 type SettingsCategory = 'general' | 'appearance' | 'accounts' | 'mailboxes'
 
@@ -115,8 +115,8 @@ export function SettingsPanel({
     initialCategory ?? 'general',
   )
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null)
-  const [smartMailboxEditorTarget, setSmartMailboxEditorTarget] =
-    useState<SmartMailboxEditorTarget | null>(null)
+  const [mailboxEditorTarget, setMailboxEditorTarget] =
+    useState<MailboxEditorTarget | null>(null)
   const [smartMailboxActionPendingKey, setSmartMailboxActionPendingKey] =
     useState<string | null>(null)
   const [smartMailboxActionError, setSmartMailboxActionError] = useState<
@@ -136,10 +136,10 @@ export function SettingsPanel({
       accounts.some((account) => account.id === initialAccountId)
     ) {
       setEditorTarget(initialAccountId)
-      setSmartMailboxEditorTarget(null)
+      setMailboxEditorTarget(null)
     }
     if (initialCategory === 'mailboxes' && initialSmartMailboxId) {
-      setSmartMailboxEditorTarget(initialSmartMailboxId)
+      setMailboxEditorTarget({ kind: 'smart', id: initialSmartMailboxId })
       setEditorTarget(null)
     }
   }, [accounts, initialAccountId, initialCategory, initialSmartMailboxId])
@@ -174,6 +174,8 @@ export function SettingsPanel({
     null
 
   const smartMailboxSummaries = smartMailboxListQuery.data ?? []
+  const smartMailboxEditorTarget =
+    mailboxEditorTarget?.kind === 'smart' ? mailboxEditorTarget.id : null
   const effectiveSmartMailboxTarget =
     smartMailboxEditorTarget !== null &&
     smartMailboxEditorTarget !== 'new' &&
@@ -236,7 +238,7 @@ export function SettingsPanel({
     void runSmartMailboxAction('reset-defaults', async () => {
       await resetDefaultSmartMailboxes()
       await invalidateSmartMailboxQueries()
-      setSmartMailboxEditorTarget(null)
+      setMailboxEditorTarget(null)
     })
   }
 
@@ -327,7 +329,7 @@ export function SettingsPanel({
   function handleSelectCategory(category: SettingsCategory) {
     setActiveCategory(category)
     setEditorTarget(null)
-    setSmartMailboxEditorTarget(null)
+    setMailboxEditorTarget(null)
   }
 
   return (
@@ -369,7 +371,6 @@ export function SettingsPanel({
           {activeCategory === 'accounts' && (
             <AccountsPane
               accounts={accounts}
-              settings={settingsQuery.data ?? null}
               selectedAccountId={effectiveEditorTarget}
               editingAccount={editingAccount}
               editorKey={editorKey}
@@ -382,10 +383,6 @@ export function SettingsPanel({
               onSaved={async (account) => {
                 applyAccountMutationResult(queryClient, account)
                 setEditorTarget(account.id)
-              }}
-              onAutomationSettingsSaved={async (settings) => {
-                queryClient.setQueryData(queryKeys.settings, settings)
-                invalidateAccountReadModels(queryClient)
               }}
               onVerified={async () => {
                 invalidateAccountReadModels(
@@ -403,21 +400,32 @@ export function SettingsPanel({
               smartMailboxes={smartMailboxSummaries}
               accounts={accounts}
               settings={settingsQuery.data ?? null}
-              selectedMailboxId={effectiveSmartMailboxTarget}
+              selectedMailboxTarget={
+                mailboxEditorTarget?.kind === 'smart'
+                  ? effectiveSmartMailboxTarget
+                    ? { kind: 'smart', id: effectiveSmartMailboxTarget }
+                    : null
+                  : mailboxEditorTarget
+              }
               editingSmartMailbox={editingSmartMailbox}
               editorKey={smartMailboxEditorKey}
               actionPendingKey={smartMailboxActionPendingKey}
               actionError={smartMailboxActionError}
-              onSelectMailbox={(mailboxId) =>
-                setSmartMailboxEditorTarget(mailboxId)
+              onSelectSmartMailbox={(mailboxId) =>
+                setMailboxEditorTarget({ kind: 'smart', id: mailboxId })
               }
-              onBackToMailboxes={() => setSmartMailboxEditorTarget(null)}
-              onCreateMailbox={() => setSmartMailboxEditorTarget('new')}
+              onSelectSourceMailbox={(accountId, mailboxId) =>
+                setMailboxEditorTarget({ kind: 'source', accountId, mailboxId })
+              }
+              onBackToMailboxes={() => setMailboxEditorTarget(null)}
+              onCreateMailbox={() =>
+                setMailboxEditorTarget({ kind: 'smart', id: 'new' })
+              }
               onResetDefaults={handleResetSmartMailboxes}
               onReorderMailbox={handleReorderSmartMailbox}
               onSaved={async (mailbox) => {
                 await invalidateSmartMailboxQueries(mailbox.id)
-                setSmartMailboxEditorTarget(mailbox.id)
+                setMailboxEditorTarget({ kind: 'smart', id: mailbox.id })
               }}
               onAutomationSettingsSaved={async (settings) => {
                 queryClient.setQueryData(queryKeys.settings, settings)
@@ -426,7 +434,7 @@ export function SettingsPanel({
               onDeleted={async (mailboxId) => {
                 await deleteSmartMailbox(mailboxId)
                 await invalidateSmartMailboxQueries()
-                setSmartMailboxEditorTarget(null)
+                setMailboxEditorTarget(null)
               }}
             />
           )}

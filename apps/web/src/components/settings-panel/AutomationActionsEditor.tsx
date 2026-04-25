@@ -10,10 +10,12 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import type React from 'react'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   AccountOverview,
   AppSettings,
   AutomationAction,
+  AutomationRule,
   AutomationTrigger,
   Mailbox,
   MessageSummary,
@@ -22,13 +24,14 @@ import type {
 } from '../../api/types'
 import type { AutomationRuleDraft } from '../../automationRules'
 import {
-  accountRulePrefix,
+  actionConditionFromSourceMailboxRule,
   actionConditionFromSmartMailboxRule,
-  draftToRule,
   extractAccountIdFromRule,
+  isSourceMailboxLinkedRule,
   isSmartMailboxLinkedRule,
-  normalizeAction,
   ruleToDraft,
+  sourceMailboxDraftToRule,
+  sourceMailboxRulePrefix,
   smartMailboxDraftToRule,
   smartMailboxRulePrefix,
 } from '../../automationRules'
@@ -52,7 +55,7 @@ import {
 } from '../ui/select'
 import { RuleGroupEditor } from './RuleGroupEditor'
 import { defaultEmptyRule } from './helpers'
-import { FeedbackBanner, Field } from './shared'
+import { FeedbackBanner, Field, SettingsBackButton } from './shared'
 
 const TRIGGER_OPTIONS: Array<{
   value: AutomationTrigger
@@ -76,23 +79,18 @@ const ACTION_KIND_OPTIONS: Array<{
   { value: 'moveToMailbox', label: 'Move to mailbox' },
 ]
 
+type AutomationRuleState = 'active' | 'draft'
+
+interface AutomationRuleItem {
+  state: AutomationRuleState
+  draft: AutomationRuleDraft
+}
+
 function createRuleId(prefix = 'automation'): string {
   if (globalThis.crypto && 'randomUUID' in globalThis.crypto) {
     return `${prefix}:${globalThis.crypto.randomUUID()}`
   }
   return `${prefix}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-function automationRuleSignature(rules: AutomationRuleDraft[]): string {
-  return JSON.stringify(
-    rules.map((rule) => ({
-      ...rule,
-      id: rule.id.trim(),
-      accountId: rule.accountId.trim(),
-      name: rule.name.trim(),
-      actions: rule.actions.map(normalizeAction),
-    })),
-  )
 }
 
 function defaultAction(): AutomationAction {
@@ -163,17 +161,21 @@ function defaultDraft({
   }
 }
 
-function actionListDescription(drafts: AutomationRuleDraft[]): string {
-  if (drafts.length === 0) {
+function actionListDescription(items: AutomationRuleItem[]): string {
+  if (items.length === 0) {
     return 'No actions configured.'
   }
-  const actionCount = drafts.reduce(
-    (count, rule) => count + rule.actions.length,
+  const actionCount = items.reduce(
+    (count, item) => count + item.draft.actions.length,
     0,
   )
-  return `${actionCount} ${actionCount === 1 ? 'action' : 'actions'} in ${drafts.length} ${
-    drafts.length === 1 ? 'rule' : 'rules'
+  const draftCount = items.filter((item) => item.state === 'draft').length
+  const base = `${actionCount} ${actionCount === 1 ? 'action' : 'actions'} in ${items.length} ${
+    items.length === 1 ? 'rule' : 'rules'
   }.`
+  return draftCount > 0
+    ? `${base} ${draftCount} ${draftCount === 1 ? 'draft' : 'drafts'}.`
+    : base
 }
 
 function triggerLabel(trigger: AutomationTrigger): string {
@@ -223,90 +225,12 @@ function accountName(accounts: AccountOverview[], accountId: string): string {
   )
 }
 
-export function AccountAutomationFields({
-  account,
-  settings,
-  onSaved,
-}: {
-  account: AccountOverview
-  settings: AppSettings
-  onSaved: (settings: AppSettings) => Promise<void>
-}) {
-  const rulePrefix = accountRulePrefix(account.id)
-  const [drafts, setDrafts] = useState<AutomationRuleDraft[]>(() =>
-    (settings.automationRules ?? [])
-      .filter((rule) => rule.id.startsWith(rulePrefix))
-      .map((rule) => ruleToDraft(account.id, rule)),
-  )
-  const [savedSignature, setSavedSignature] = useState(() =>
-    automationRuleSignature(drafts),
-  )
-  const mailboxesQuery = useQuery({
-    queryKey: queryKeys.mailboxes(account.id),
-    queryFn: () => fetchMailboxes(account.id),
-  })
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      const nextRules = [
-        ...(settings.automationRules ?? []).filter(
-          (rule) => !rule.id.startsWith(rulePrefix),
-        ),
-        ...drafts.map(draftToRule),
-      ]
-      return patchSettings({ automationRules: nextRules })
-    },
-    onSuccess: async (savedSettings) => {
-      const nextDrafts = (savedSettings.automationRules ?? [])
-        .filter((rule) => rule.id.startsWith(rulePrefix))
-        .map((rule) => ruleToDraft(account.id, rule))
-      setDrafts(nextDrafts)
-      setSavedSignature(automationRuleSignature(nextDrafts))
-      await onSaved(savedSettings)
-    },
-  })
+function upsertRule(rules: AutomationRule[], rule: AutomationRule) {
+  return [...rules.filter((candidate) => candidate.id !== rule.id), rule]
+}
 
-  const hasInvalidRule = drafts.some((draft) => !isDraftComplete(draft))
-  const hasUnsavedChanges = automationRuleSignature(drafts) !== savedSignature
-
-  return (
-    <AutomationRuleList
-      title="Actions"
-      description="Run backend actions when matching mail arrives or changes."
-      drafts={drafts}
-      accounts={[account]}
-      mailboxesByAccount={{ [account.id]: mailboxesQuery.data ?? [] }}
-      canEditAccount={false}
-      addLabel="Add action rule"
-      emptyText="No account actions configured."
-      saveLabel="Apply actions"
-      statusText={
-        hasInvalidRule
-          ? 'Complete all actions before applying'
-          : hasUnsavedChanges
-            ? 'Unsaved action changes'
-            : 'Actions saved'
-      }
-      savePending={saveMutation.isPending}
-      saveDisabled={!hasUnsavedChanges || hasInvalidRule}
-      errors={[
-        mailboxesQuery.error?.message ?? null,
-        saveMutation.error?.message ?? null,
-      ]}
-      onAdd={() =>
-        setDrafts((current) => [
-          ...current,
-          defaultDraft({
-            accountId: account.id,
-            name: 'New action rule',
-            idPrefix: `account:${account.id}`,
-          }),
-        ])
-      }
-      onChange={(nextDrafts) => setDrafts(nextDrafts)}
-      onSave={() => saveMutation.mutate()}
-      previewConditionForDraft={(draft) => draftToRule(draft).condition}
-    />
-  )
+function removeRule(rules: AutomationRule[], ruleId: string) {
+  return rules.filter((rule) => rule.id !== ruleId)
 }
 
 export function SmartMailboxAutomationFields({
@@ -323,94 +247,107 @@ export function SmartMailboxAutomationFields({
   onSaved: (settings: AppSettings) => Promise<void>
 }) {
   const fallbackAccountId = accounts[0]?.id ?? ''
-  const linkedDrafts = () =>
-    (settings.automationRules ?? [])
+  const linkedItems = (sourceSettings: AppSettings): AutomationRuleItem[] => [
+    ...(sourceSettings.automationRules ?? [])
       .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-      .map((rule) => {
+      .map((rule): AutomationRuleItem => {
         const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
         return {
-          ...ruleToDraft(accountId, rule),
-          condition: actionConditionFromSmartMailboxRule(rule, accountId),
-        }
-      })
-  const [drafts, setDrafts] = useState<AutomationRuleDraft[]>(linkedDrafts)
-  const [savedSignature, setSavedSignature] = useState(() =>
-    automationRuleSignature(drafts),
-  )
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      const linkedPrefix = smartMailboxRulePrefix(smartMailbox.id)
-      const nextRules = [
-        ...(settings.automationRules ?? []).filter(
-          (rule) => !rule.id.startsWith(linkedPrefix),
-        ),
-        ...drafts.map((draft) => smartMailboxDraftToRule(draft, smartMailbox)),
-      ]
-      return patchSettings({ automationRules: nextRules })
-    },
-    onSuccess: async (savedSettings) => {
-      const nextDrafts = (savedSettings.automationRules ?? [])
-        .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-        .map((rule) => {
-          const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
-          return {
+          state: 'active',
+          draft: {
             ...ruleToDraft(accountId, rule),
             condition: actionConditionFromSmartMailboxRule(rule, accountId),
-          }
-        })
-      setDrafts(nextDrafts)
-      setSavedSignature(automationRuleSignature(nextDrafts))
+          },
+        }
+      }),
+    ...(sourceSettings.automationDrafts ?? [])
+      .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
+      .map((rule): AutomationRuleItem => {
+        const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
+        return {
+          state: 'draft',
+          draft: {
+            ...ruleToDraft(accountId, rule),
+            condition: actionConditionFromSmartMailboxRule(rule, accountId),
+          },
+        }
+      }),
+  ]
+  const [items, setItems] = useState<AutomationRuleItem[]>(() =>
+    linkedItems(settings),
+  )
+  const persistMutation = useMutation({
+    mutationFn: (input: Partial<AppSettings>) => patchSettings(input),
+    onSuccess: async (savedSettings) => {
+      setItems(linkedItems(savedSettings))
       await onSaved(savedSettings)
     },
   })
 
-  const hasInvalidRule = drafts.some((draft) => !isDraftComplete(draft))
-  const hasUnsavedChanges = automationRuleSignature(drafts) !== savedSignature
+  function persistItem(draft: AutomationRuleDraft) {
+    const rule = smartMailboxDraftToRule(draft, smartMailbox)
+    const complete = isDraftComplete(draft)
+    persistMutation.mutate({
+      automationRules: complete
+        ? upsertRule(settings.automationRules ?? [], rule)
+        : removeRule(settings.automationRules ?? [], rule.id),
+      automationDrafts: complete
+        ? removeRule(settings.automationDrafts ?? [], rule.id)
+        : upsertRule(settings.automationDrafts ?? [], rule),
+    })
+  }
+
+  function removeItem(draft: AutomationRuleDraft) {
+    const ruleId = draft.id.trim()
+    setItems((current) =>
+      current.filter((item) => item.draft.id.trim() !== ruleId),
+    )
+    persistMutation.mutate({
+      automationRules: removeRule(settings.automationRules ?? [], ruleId),
+      automationDrafts: removeRule(settings.automationDrafts ?? [], ruleId),
+    })
+  }
 
   return (
     <AutomationRuleList
       title="Actions"
-      description="Run backend actions for messages that match this smart mailbox, with optional per-action filters."
-      drafts={drafts}
+      items={items}
       accounts={accounts}
       canEditAccount
       addLabel="Add action rule"
       emptyText="No smart mailbox actions configured."
-      saveLabel="Apply actions"
-      statusText={
-        disabledReason
-          ? disabledReason
-          : hasInvalidRule
-            ? 'Complete all actions before applying'
-            : hasUnsavedChanges
-              ? 'Unsaved action changes'
-              : 'Actions saved'
-      }
-      savePending={saveMutation.isPending}
-      saveDisabled={
-        Boolean(disabledReason) ||
-        !hasUnsavedChanges ||
-        hasInvalidRule ||
-        accounts.length === 0
-      }
+      savePending={persistMutation.isPending}
       addDisabled={Boolean(disabledReason)}
-      errors={[saveMutation.error?.message ?? null]}
+      disabledReason={disabledReason}
+      errors={[persistMutation.error?.message ?? null]}
       onAdd={() => {
         const account = accounts[0]
         if (!account) {
-          return
+          return null
         }
-        setDrafts((current) => [
-          ...current,
-          defaultDraft({
-            accountId: account.id,
-            name: `${smartMailbox.name} action`,
-            idPrefix: smartMailboxRulePrefix(smartMailbox.id),
-          }),
-        ])
+        const draft = defaultDraft({
+          accountId: account.id,
+          name: `${smartMailbox.name} action`,
+          idPrefix: smartMailboxRulePrefix(smartMailbox.id),
+        })
+        const rule = smartMailboxDraftToRule(draft, smartMailbox)
+        setItems((current) => [...current, { state: 'draft', draft }])
+        persistMutation.mutate({
+          automationDrafts: upsertRule(settings.automationDrafts ?? [], rule),
+        })
+        return draft.id
       }}
-      onChange={(nextDrafts) => setDrafts(nextDrafts)}
-      onSave={() => saveMutation.mutate()}
+      onChange={(ruleId, patch) =>
+        setItems((current) =>
+          current.map((item) =>
+            item.draft.id === ruleId
+              ? { ...item, draft: { ...item.draft, ...patch } }
+              : item,
+          ),
+        )
+      }
+      onSaveItem={persistItem}
+      onRemoveItem={removeItem}
       previewConditionForDraft={(draft) =>
         smartMailboxDraftToRule(draft, smartMailbox).condition
       }
@@ -418,78 +355,180 @@ export function SmartMailboxAutomationFields({
   )
 }
 
+export function SourceMailboxAutomationFields({
+  account,
+  mailbox,
+  mailboxes,
+  settings,
+  onSaved,
+}: {
+  account: AccountOverview
+  mailbox: Mailbox
+  mailboxes: Mailbox[]
+  settings: AppSettings
+  onSaved: (settings: AppSettings) => Promise<void>
+}) {
+  const linkedPrefix = sourceMailboxRulePrefix(account.id, mailbox.id)
+  const linkedItems = (sourceSettings: AppSettings): AutomationRuleItem[] => [
+    ...(sourceSettings.automationRules ?? [])
+      .filter((rule) => isSourceMailboxLinkedRule(rule, account.id, mailbox.id))
+      .map(
+        (rule): AutomationRuleItem => ({
+          state: 'active',
+          draft: {
+            ...ruleToDraft(account.id, rule),
+            condition: actionConditionFromSourceMailboxRule(
+              rule,
+              account.id,
+              mailbox.id,
+            ),
+          },
+        }),
+      ),
+    ...(sourceSettings.automationDrafts ?? [])
+      .filter((rule) => isSourceMailboxLinkedRule(rule, account.id, mailbox.id))
+      .map(
+        (rule): AutomationRuleItem => ({
+          state: 'draft',
+          draft: {
+            ...ruleToDraft(account.id, rule),
+            condition: actionConditionFromSourceMailboxRule(
+              rule,
+              account.id,
+              mailbox.id,
+            ),
+          },
+        }),
+      ),
+  ]
+  const [items, setItems] = useState<AutomationRuleItem[]>(() =>
+    linkedItems(settings),
+  )
+  const persistMutation = useMutation({
+    mutationFn: (input: Partial<AppSettings>) => patchSettings(input),
+    onSuccess: async (savedSettings) => {
+      setItems(linkedItems(savedSettings))
+      await onSaved(savedSettings)
+    },
+  })
+
+  function persistItem(draft: AutomationRuleDraft) {
+    const rule = sourceMailboxDraftToRule(draft, mailbox.id)
+    const complete = isDraftComplete(draft)
+    persistMutation.mutate({
+      automationRules: complete
+        ? upsertRule(settings.automationRules ?? [], rule)
+        : removeRule(settings.automationRules ?? [], rule.id),
+      automationDrafts: complete
+        ? removeRule(settings.automationDrafts ?? [], rule.id)
+        : upsertRule(settings.automationDrafts ?? [], rule),
+    })
+  }
+
+  function removeItem(draft: AutomationRuleDraft) {
+    const ruleId = draft.id.trim()
+    setItems((current) =>
+      current.filter((item) => item.draft.id.trim() !== ruleId),
+    )
+    persistMutation.mutate({
+      automationRules: removeRule(settings.automationRules ?? [], ruleId),
+      automationDrafts: removeRule(settings.automationDrafts ?? [], ruleId),
+    })
+  }
+
+  return (
+    <AutomationRuleList
+      title="Actions"
+      items={items}
+      accounts={[account]}
+      mailboxesByAccount={{ [account.id]: mailboxes }}
+      canEditAccount={false}
+      addLabel="Add action rule"
+      emptyText="No mailbox actions configured."
+      savePending={persistMutation.isPending}
+      errors={[persistMutation.error?.message ?? null]}
+      onAdd={() => {
+        const draft = defaultDraft({
+          accountId: account.id,
+          name: `${mailbox.name} action`,
+          idPrefix: linkedPrefix,
+        })
+        const rule = sourceMailboxDraftToRule(draft, mailbox.id)
+        setItems((current) => [...current, { state: 'draft', draft }])
+        persistMutation.mutate({
+          automationDrafts: upsertRule(settings.automationDrafts ?? [], rule),
+        })
+        return draft.id
+      }}
+      onChange={(ruleId, patch) =>
+        setItems((current) =>
+          current.map((item) =>
+            item.draft.id === ruleId
+              ? { ...item, draft: { ...item.draft, ...patch } }
+              : item,
+          ),
+        )
+      }
+      onSaveItem={persistItem}
+      onRemoveItem={removeItem}
+      previewConditionForDraft={(draft) =>
+        sourceMailboxDraftToRule(draft, mailbox.id).condition
+      }
+    />
+  )
+}
+
 function AutomationRuleList({
   title,
-  description,
-  drafts,
+  items,
   accounts,
   mailboxesByAccount = {},
   canEditAccount,
   addLabel,
   emptyText,
-  saveLabel,
-  statusText,
   savePending,
-  saveDisabled,
   addDisabled = false,
+  disabledReason = null,
   errors,
   onAdd,
   onChange,
-  onSave,
+  onSaveItem,
+  onRemoveItem,
   previewConditionForDraft,
 }: {
   title: string
-  description: string
-  drafts: AutomationRuleDraft[]
+  items: AutomationRuleItem[]
   accounts: AccountOverview[]
   mailboxesByAccount?: Record<string, Mailbox[]>
   canEditAccount: boolean
   addLabel: string
   emptyText: string
-  saveLabel: string
-  statusText: string
   savePending: boolean
-  saveDisabled: boolean
   addDisabled?: boolean
+  disabledReason?: string | null
   errors: Array<string | null>
-  onAdd: () => void
-  onChange: (drafts: AutomationRuleDraft[]) => void
-  onSave: () => void
+  onAdd: () => string | null
+  onChange: (ruleId: string, patch: Partial<AutomationRuleDraft>) => void
+  onSaveItem: (draft: AutomationRuleDraft) => void
+  onRemoveItem: (draft: AutomationRuleDraft) => void
   previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
 }) {
-  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(
-    () => drafts[0]?.id ?? null,
-  )
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
 
   function updateDraft(ruleId: string, patch: Partial<AutomationRuleDraft>) {
-    onChange(
-      drafts.map((draft) =>
-        draft.id === ruleId
-          ? {
-              ...draft,
-              ...patch,
-            }
-          : draft,
-      ),
-    )
+    onChange(ruleId, patch)
   }
 
-  const effectiveSelectedRuleId = drafts.some(
-    (draft) => draft.id === selectedRuleId,
-  )
-    ? selectedRuleId
-    : (drafts[0]?.id ?? null)
-  const selectedDraft =
-    drafts.find((draft) => draft.id === effectiveSelectedRuleId) ?? null
+  const editingItem =
+    items.find((item) => item.draft.id === editingRuleId) ?? null
 
   return (
-    <div className="mt-8 space-y-4">
+    <div className="mt-8 space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-[13px] font-medium text-foreground">{title}</p>
-          <p className="text-[12px] text-muted-foreground">{description}</p>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            {actionListDescription(drafts)}
+            {disabledReason ?? actionListDescription(items)}
           </p>
         </div>
         <Button
@@ -498,45 +537,31 @@ function AutomationRuleList({
           variant="outline"
           className="rounded-md border-border bg-background"
           disabled={accounts.length === 0 || addDisabled}
-          onClick={onAdd}
+          onClick={() => {
+            const newRuleId = onAdd()
+            if (newRuleId) {
+              setEditingRuleId(newRuleId)
+            }
+          }}
         >
           {addLabel}
         </Button>
       </div>
 
-      {drafts.length === 0 ? (
+      {items.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">{emptyText}</p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border-soft bg-bg-elev/35">
-          {drafts.map((draft) => (
+          {items.map((item) => (
             <AutomationRuleListRow
-              key={draft.id}
-              draft={draft}
+              key={item.draft.id}
+              item={item}
               accounts={accounts}
-              isSelected={draft.id === effectiveSelectedRuleId}
-              isComplete={isDraftComplete(draft)}
-              onSelect={() => setSelectedRuleId(draft.id)}
+              isComplete={isDraftComplete(item.draft)}
+              onSelect={() => setEditingRuleId(item.draft.id)}
             />
           ))}
         </div>
-      )}
-
-      {selectedDraft && (
-        <AutomationRuleEditor
-          draft={selectedDraft}
-          accounts={accounts}
-          staticMailboxes={mailboxesByAccount[selectedDraft.accountId] ?? null}
-          canEditAccount={canEditAccount}
-          previewCondition={previewConditionForDraft(selectedDraft)}
-          onChange={(patch) => updateDraft(selectedDraft.id, patch)}
-          onRemove={() => {
-            const nextDrafts = drafts.filter(
-              (candidate) => candidate.id !== selectedDraft.id,
-            )
-            onChange(nextDrafts)
-            setSelectedRuleId(nextDrafts[0]?.id ?? null)
-          }}
-        />
       )}
 
       {errors.filter(Boolean).map((message) => (
@@ -545,50 +570,77 @@ function AutomationRuleList({
         </FeedbackBanner>
       ))}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          onClick={onSave}
-          disabled={savePending || saveDisabled}
-          className="bg-brand-coral text-white hover:bg-brand-coral/90"
-        >
-          {saveLabel}
-        </Button>
-        <span className="text-[12px] text-muted-foreground">{statusText}</span>
-      </div>
+      {editingItem && (
+        <AutomationRuleEditorPortal>
+          <AutomationRuleEditor
+            draft={editingItem.draft}
+            state={editingItem.state}
+            accounts={accounts}
+            staticMailboxes={
+              mailboxesByAccount[editingItem.draft.accountId] ?? null
+            }
+            canEditAccount={canEditAccount}
+            previewCondition={previewConditionForDraft(editingItem.draft)}
+            savePending={savePending}
+            onBack={() => setEditingRuleId(null)}
+            onSave={() => onSaveItem(editingItem.draft)}
+            onChange={(patch) => updateDraft(editingItem.draft.id, patch)}
+            onRemove={() => {
+              onRemoveItem(editingItem.draft)
+              setEditingRuleId(null)
+            }}
+          />
+        </AutomationRuleEditorPortal>
+      )}
     </div>
   )
 }
 
+function AutomationRuleEditorPortal({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[2150] bg-background text-card-foreground">
+      <div className="ph-scroll h-full min-h-0 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mx-auto flex max-w-[1040px] flex-col">{children}</div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function AutomationRuleListRow({
-  draft,
+  item,
   accounts,
-  isSelected,
   isComplete,
   onSelect,
 }: {
-  draft: AutomationRuleDraft
+  item: AutomationRuleItem
   accounts: AccountOverview[]
-  isSelected: boolean
   isComplete: boolean
   onSelect: () => void
 }) {
+  const { draft, state } = item
   return (
     <button
       type="button"
       onClick={onSelect}
-      className={cn(
-        'group flex min-h-[58px] w-full items-center gap-3 border-b border-border-soft px-4 text-left transition-colors last:border-b-0 hover:bg-[var(--list-hover)]',
-        isSelected && 'bg-[var(--list-hover)]',
-      )}
+      className="group flex min-h-[58px] w-full items-center gap-3 border-b border-border-soft px-4 text-left transition-colors last:border-b-0 hover:bg-[var(--list-hover)]"
     >
       <span
         aria-hidden
         className={cn(
           'size-2 shrink-0 rounded-full',
-          draft.enabled ? 'bg-emerald-500' : 'bg-zinc-400',
-          !isComplete && 'bg-amber-500',
+          state === 'active' && draft.enabled
+            ? 'bg-emerald-500'
+            : 'bg-zinc-400',
+          (state === 'draft' || !isComplete) && 'bg-amber-500',
         )}
       />
       <span className="min-w-0 flex-1">
@@ -596,11 +648,16 @@ function AutomationRuleListRow({
           <span className="truncate text-[13px] font-medium text-foreground">
             {draft.name.trim() || 'Untitled rule'}
           </span>
-          {!isComplete && (
-            <span className="shrink-0 rounded-sm bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-              incomplete
-            </span>
-          )}
+          <span
+            className={cn(
+              'shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-medium',
+              state === 'active' && isComplete
+                ? 'bg-emerald-500/10 text-emerald-700'
+                : 'bg-amber-500/10 text-amber-700',
+            )}
+          >
+            {state === 'active' && isComplete ? 'active' : 'draft'}
+          </span>
         </span>
         <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
           {accountName(accounts, draft.accountId)} ·{' '}
@@ -609,7 +666,7 @@ function AutomationRuleListRow({
         </span>
       </span>
       <span className="shrink-0 text-[12px] text-muted-foreground/70">
-        {draft.backfill ? 'Backfill' : 'New mail'}
+        Edit
       </span>
     </button>
   )
@@ -617,18 +674,26 @@ function AutomationRuleListRow({
 
 function AutomationRuleEditor({
   draft,
+  state,
   accounts,
   staticMailboxes,
   canEditAccount,
   previewCondition,
+  savePending,
+  onBack,
+  onSave,
   onChange,
   onRemove,
 }: {
   draft: AutomationRuleDraft
+  state: AutomationRuleState
   accounts: AccountOverview[]
   staticMailboxes: Mailbox[] | null
   canEditAccount: boolean
   previewCondition: SmartMailboxRule
+  savePending: boolean
+  onBack: () => void
+  onSave: () => void
   onChange: (patch: Partial<AutomationRuleDraft>) => void
   onRemove: () => void
 }) {
@@ -661,118 +726,160 @@ function AutomationRuleEditor({
     })
   }
 
+  const isComplete = isDraftComplete(draft)
+  const saveStatus = isComplete
+    ? state === 'active'
+      ? 'Saves as active'
+      : 'Moves to active'
+    : 'Saves as draft'
+
   return (
-    <div className="space-y-5 pt-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-[12px] font-medium text-foreground">
-            Edit selected rule
+    <div className="space-y-12 pt-1">
+      <SettingsBackButton ariaLabel="Back to actions" onClick={onBack}>
+        Actions
+      </SettingsBackButton>
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-semibold text-foreground">
+            {draft.name.trim() || 'Untitled rule'}
           </p>
-          <p className="text-[12px] text-muted-foreground">
-            Account and trigger decide when the conditions below are evaluated.
-          </p>
+          <p className="mt-1 text-[12px] text-muted-foreground">{saveStatus}</p>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-muted-foreground hover:text-destructive"
-          onClick={onRemove}
-        >
-          Remove
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={onSave}
+            disabled={savePending}
+            className="bg-brand-coral text-white hover:bg-brand-coral/90"
+          >
+            {savePending ? 'Saving' : 'Save action'}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2 text-muted-foreground hover:text-destructive"
+            onClick={onRemove}
+          >
+            Remove
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] lg:items-end">
-        <Field
-          label="Rule name"
-          value={draft.name}
-          placeholder="Newsletter tags"
-          onChange={(name) => onChange({ name })}
-        />
+      <RuleEditorSection title="Basics">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] lg:items-end">
+          <Field
+            label="Rule name"
+            value={draft.name}
+            placeholder="Newsletter tags"
+            onChange={(name) => onChange({ name })}
+          />
 
-        {canEditAccount && (
+          {canEditAccount && (
+            <LabeledSelect
+              label="Account"
+              value={draft.accountId}
+              onValueChange={(accountId) => onChange({ accountId })}
+            >
+              {accounts.map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.name}
+                </SelectItem>
+              ))}
+            </LabeledSelect>
+          )}
+
           <LabeledSelect
-            label="Account"
-            value={draft.accountId}
-            onValueChange={(accountId) => onChange({ accountId })}
+            label="Trigger"
+            value={draft.triggers[0] ?? 'messageArrived'}
+            onValueChange={(value) =>
+              onChange({
+                triggers: [
+                  parseTrigger(value, draft.triggers[0] ?? 'messageArrived'),
+                ],
+              })
+            }
           >
-            {accounts.map((account) => (
-              <SelectItem key={account.id} value={account.id}>
-                {account.name}
+            {TRIGGER_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
               </SelectItem>
             ))}
           </LabeledSelect>
-        )}
+        </div>
 
-        <LabeledSelect
-          label="Trigger"
-          value={draft.triggers[0] ?? 'messageArrived'}
-          onValueChange={(value) =>
-            onChange({
-              triggers: [
-                parseTrigger(value, draft.triggers[0] ?? 'messageArrived'),
-              ],
-            })
-          }
-        >
-          {TRIGGER_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </LabeledSelect>
-      </div>
+        <div className="flex flex-wrap items-center gap-4 pt-1 text-[13px] text-muted-foreground">
+          <label className="flex items-center gap-2">
+            <Checkbox
+              checked={draft.enabled}
+              onCheckedChange={(checked) =>
+                onChange({ enabled: checked === true })
+              }
+            />
+            Enabled
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox
+              checked={draft.backfill}
+              onCheckedChange={(checked) =>
+                onChange({ backfill: checked === true })
+              }
+            />
+            Backfill existing messages
+          </label>
+        </div>
+      </RuleEditorSection>
 
-      <div className="flex flex-wrap items-center gap-4 text-[13px] text-muted-foreground">
-        <label className="flex items-center gap-2">
-          <Checkbox
-            checked={draft.enabled}
-            onCheckedChange={(checked) =>
-              onChange({ enabled: checked === true })
-            }
-          />
-          Enabled
-        </label>
-        <label className="flex items-center gap-2">
-          <Checkbox
-            checked={draft.backfill}
-            onCheckedChange={(checked) =>
-              onChange({ backfill: checked === true })
-            }
-          />
-          Backfill existing messages
-        </label>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-[12px] font-medium text-muted-foreground">
-          Conditions
-        </p>
+      <RuleEditorSection title="Conditions">
         <RuleGroupEditor
           group={draft.condition.root}
           onChange={(root) => onChange({ condition: { root } })}
         />
-      </div>
+      </RuleEditorSection>
 
-      <AutomationRulePreview
-        accountId={draft.accountId}
-        preview={activePreview}
-        error={activePreviewError ?? null}
-        isPending={
-          previewMutation.isPending &&
-          previewMutation.variables?.key === previewKey
-        }
-        onPreview={runPreview}
-      />
+      <RuleEditorSection title="Preview">
+        <AutomationRulePreview
+          accountId={draft.accountId}
+          preview={activePreview}
+          error={activePreviewError ?? null}
+          isPending={
+            previewMutation.isPending &&
+            previewMutation.variables?.key === previewKey
+          }
+          onPreview={runPreview}
+        />
+      </RuleEditorSection>
 
-      <ActionListEditor
-        accountId={draft.accountId}
-        actions={draft.actions}
-        staticMailboxes={staticMailboxes}
-        onChange={(actions) => onChange({ actions })}
-      />
+      <RuleEditorSection title="Actions">
+        <ActionListEditor
+          accountId={draft.accountId}
+          actions={draft.actions}
+          staticMailboxes={staticMailboxes}
+          onChange={(actions) => onChange({ actions })}
+        />
+      </RuleEditorSection>
     </div>
+  )
+}
+
+function RuleEditorSection({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="grid gap-5 md:grid-cols-[104px_1fr]">
+      <div>
+        <h4 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          {title}
+        </h4>
+      </div>
+      <div className="min-w-0 space-y-4">{children}</div>
+    </section>
   )
 }
 
@@ -889,9 +996,8 @@ function ActionListEditor({
   onChange: (actions: AutomationAction[]) => void
 }) {
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[12px] font-medium text-muted-foreground">Actions</p>
+    <div className="space-y-3">
+      <div className="flex justify-end">
         <Button
           type="button"
           size="sm"
@@ -902,26 +1008,28 @@ function ActionListEditor({
           Add action
         </Button>
       </div>
-      {actions.map((action, index) => (
-        <ActionRow
-          key={index}
-          accountId={accountId}
-          action={action}
-          staticMailboxes={staticMailboxes}
-          onChange={(nextAction) =>
-            onChange(
-              actions.map((candidate, candidateIndex) =>
-                candidateIndex === index ? nextAction : candidate,
-              ),
-            )
-          }
-          onRemove={() =>
-            onChange(
-              actions.filter((_, candidateIndex) => candidateIndex !== index),
-            )
-          }
-        />
-      ))}
+      <div className="space-y-2">
+        {actions.map((action, index) => (
+          <ActionRow
+            key={index}
+            accountId={accountId}
+            action={action}
+            staticMailboxes={staticMailboxes}
+            onChange={(nextAction) =>
+              onChange(
+                actions.map((candidate, candidateIndex) =>
+                  candidateIndex === index ? nextAction : candidate,
+                ),
+              )
+            }
+            onRemove={() =>
+              onChange(
+                actions.filter((_, candidateIndex) => candidateIndex !== index),
+              )
+            }
+          />
+        ))}
+      </div>
     </div>
   )
 }

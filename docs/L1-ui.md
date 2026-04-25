@@ -104,9 +104,11 @@ Sidebar objects expose object-scoped right-click menus. Smart mailboxes can be o
 
 ## Account Settings
 
-Account settings are edited in a sparse, section-first layout. Existing accounts expose a mailbox metadata section that lists synced server mailboxes and lets the user assign or clear known JMAP roles. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper. The same section uses the shared automation action editor to edit global backend automations whose conditions include the selected account. Action conditions use the same recursive rule builder as smart mailbox rules.
+Account settings are edited in a sparse, section-first layout for account identity, appearance, server credentials, verification, sync, and deletion. Mailbox metadata and mailbox actions do not live in the account editor.
 
-Smart mailbox settings use the same rule builder for the mailbox definition and the same automation action editor for backend actions. Smart-mailbox actions are saved as global automations: the selected account condition and smart mailbox rule form the fixed base filter, and each action rule adds its own condition before executing its selected actions.
+The Mailboxes & Rules settings category is a mailbox index for both smart mailboxes and synced source mailboxes. Selecting a mailbox opens a focused mailbox editor page. Smart mailbox editors expose the saved-query definition and backend actions. Source mailbox editors expose server metadata, starting with JMAP role assignment, and backend actions. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper.
+
+Mailbox actions use the shared automation action editor. Each action has its own Save action button; valid actions become active backend automations, while incomplete actions are persisted as drafts and never executed. Smart-mailbox actions are saved as global automations: the selected account condition and smart mailbox rule form the fixed base filter, and each action rule adds its own condition before executing its selected actions. Source mailbox actions are saved as global automations whose fixed base filter is the selected account plus the selected mailbox ID, with each action rule adding its own condition.
 
 ## Column configuration
 

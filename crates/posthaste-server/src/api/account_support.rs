@@ -522,6 +522,33 @@ fn normalize_automation_action(action: &AutomationAction) -> AutomationAction {
     }
 }
 
+pub(super) fn validate_automation_drafts(
+    active_rules: &[AutomationRule],
+    draft_rules: &[AutomationRule],
+) -> Result<(), ApiError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for rule in active_rules {
+        ids.insert(rule.id.trim().to_string());
+    }
+    for rule in draft_rules {
+        if rule.id.trim().is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "automation draft id is required",
+            ));
+        }
+        if !ids.insert(rule.id.trim().to_string()) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "automation rule and draft ids must be unique",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Normalize user-owned email addresses/patterns by trimming whitespace and
 /// dropping empty entries. Patterns such as `*@example.com` are preserved.
 pub(super) fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {

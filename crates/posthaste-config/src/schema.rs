@@ -20,6 +20,8 @@ pub struct AppToml {
     #[serde(default)]
     pub automations: Vec<AutomationRuleToml>,
     #[serde(default)]
+    pub draft_automations: Vec<AutomationRuleToml>,
+    #[serde(default)]
     pub daemon: DaemonToml,
     #[serde(default)]
     pub logging: LoggingToml,
@@ -53,6 +55,11 @@ impl AppToml {
                 .iter()
                 .map(convert_automation_rule)
                 .collect::<Result<Vec<_>, _>>()?,
+            automation_drafts: self
+                .draft_automations
+                .iter()
+                .map(convert_automation_rule)
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 
@@ -69,6 +76,11 @@ impl AppToml {
                 .map(|id| id.to_string()),
             automations: settings
                 .automation_rules
+                .iter()
+                .map(convert_automation_rule_to_toml)
+                .collect(),
+            draft_automations: settings
+                .automation_drafts
                 .iter()
                 .map(convert_automation_rule_to_toml)
                 .collect(),
@@ -815,11 +827,29 @@ mod tests {
                 }],
                 backfill: true,
             }],
+            automation_drafts: vec![AutomationRule {
+                id: "draft-newsletters".to_string(),
+                name: "Draft newsletters".to_string(),
+                enabled: true,
+                triggers: vec![AutomationTrigger::MessageArrived],
+                condition: SmartMailboxRule {
+                    root: SmartMailboxGroup {
+                        operator: SmartMailboxGroupOperator::Any,
+                        negated: false,
+                        nodes: Vec::new(),
+                    },
+                },
+                actions: vec![AutomationAction::ApplyTag {
+                    tag: String::new(),
+                }],
+                backfill: true,
+            }],
         };
         let existing = AppToml {
             schema_version: 1,
             default_source_id: None,
             automations: Vec::new(),
+            draft_automations: Vec::new(),
             daemon: DaemonToml::default(),
             logging: LoggingToml::default(),
         };
