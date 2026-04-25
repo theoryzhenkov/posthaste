@@ -88,6 +88,12 @@ capabilities and stored cursor state:
 - Full authoritative snapshot on first sync, `UIDVALIDITY` changes, or missing
   watermarks.
 
+Mutation planning follows the same rule: use the strongest server extension
+when available, but resync after commands whose result cannot be mapped
+authoritatively. Moves prefer `UID MOVE` plus UIDPLUS `COPYUID`; fall back to
+`UID MOVE` plus destination resync; and finally fall back to `UID COPY`,
+`\Deleted`, and resync when MOVE is not available.
+
 SMTP sends do not return a synced message object. After a successful send, the
 runtime triggers sync and reconciles Sent mail from the provider.
 
@@ -158,6 +164,7 @@ with servers that expose both protocols.
 | imap-cursors-per-mailbox | MUST | IMAP sync state is tracked per mailbox, not only per account |
 | imap-delta-fallback | MUST | IMAP sync falls back to full authoritative snapshots when delta state is unavailable or invalid |
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
+| imap-mutation-plan-explicit | MUST | IMAP mutation strategy is selected from explicit capabilities and schedules resync when response state is insufficient |
 | gmail-extension-identity | SHOULD | Gmail IMAP accounts use X-GM-MSGID, X-GM-THRID, and X-GM-LABELS when X-GM-EXT-1 is advertised |
 | imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
