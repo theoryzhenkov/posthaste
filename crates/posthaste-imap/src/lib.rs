@@ -10,6 +10,7 @@
 mod discovery;
 mod error;
 mod gateway;
+mod mailbox;
 mod sync;
 
 pub use discovery::{
@@ -18,4 +19,5 @@ pub use discovery::{
 };
 pub use error::ImapAdapterError;
 pub use gateway::LiveImapSmtpGateway;
+pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
 pub use sync::imap_mailbox_sync_batch;

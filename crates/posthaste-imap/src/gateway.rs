@@ -207,7 +207,8 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         ImapAdapterError::MissingTransport
         | ImapAdapterError::MissingUsername
         | ImapAdapterError::MissingSecret
-        | ImapAdapterError::InvalidMailboxName(_) => GatewayError::Rejected(error.to_string()),
+        | ImapAdapterError::InvalidMailboxName(_)
+        | ImapAdapterError::MissingSelectData(_) => GatewayError::Rejected(error.to_string()),
         ImapAdapterError::Client(message) => GatewayError::Network(message),
     }
 }

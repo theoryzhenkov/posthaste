@@ -71,6 +71,11 @@ mailbox listing. Discovery results are synced as an authoritative mailbox
 snapshot. Until message snapshot sync is implemented, body fetches and
 mutations are rejected explicitly after successful discovery.
 
+Mailbox message sync starts by examining the mailbox and mapping SELECT/EXAMINE
+state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
+when present. `HIGHESTMODSEQ` remains optional until the protocol client
+exposes CONDSTORE/QRESYNC select metadata.
+
 The driver prefers IMAP extensions when advertised:
 
 - SPECIAL-USE for mailbox roles
