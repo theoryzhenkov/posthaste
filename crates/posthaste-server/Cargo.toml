@@ -23,6 +23,7 @@ keyring = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain" }
 posthaste-engine = { path = "../posthaste-engine" }
+posthaste-imap = { path = "../posthaste-imap" }
 posthaste-store = { path = "../posthaste-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }

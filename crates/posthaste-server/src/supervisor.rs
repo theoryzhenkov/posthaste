@@ -10,6 +10,7 @@ use posthaste_domain::{
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
+use posthaste_imap::{ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
@@ -506,10 +507,38 @@ async fn build_connection(
                 push_events,
             })
         }
-        AccountDriver::ImapSmtp => Err(GatewayError::Rejected(
-            "IMAP/SMTP runtime is not implemented yet".to_string(),
-        )
-        .into()),
+        AccountDriver::ImapSmtp => {
+            let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
+                GatewayError::Rejected("missing IMAP/SMTP secret reference".to_string())
+            })?;
+            let secret = secret_store.resolve(secret_ref)?;
+            let config = ImapConnectionConfig::from_account_transport(&account.transport, secret)
+                .map_err(imap_adapter_error)?;
+            let gateway = LiveImapSmtpGateway::connect(config)
+                .await
+                .map_err(imap_adapter_error)?;
+            info!(
+                account_id = %account.id,
+                mailbox_count = gateway.discovery().mailboxes.len(),
+                "IMAP discovery complete"
+            );
+            Ok(AccountConnection {
+                gateway: Arc::new(gateway),
+                push_events: None,
+            })
+        }
+    }
+}
+
+fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
+    match error {
+        ImapAdapterError::MissingTransport
+        | ImapAdapterError::MissingUsername
+        | ImapAdapterError::MissingSecret
+        | ImapAdapterError::InvalidMailboxName(_) => {
+            GatewayError::Rejected(error.to_string()).into()
+        }
+        ImapAdapterError::Client(message) => GatewayError::Network(message).into(),
     }
 }
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = { workspace = true }
 hex = { workspace = true }
 imap-client = { workspace = true }
 mail-parser = { workspace = true }
@@ -11,4 +12,3 @@ posthaste-domain = { path = "../posthaste-domain" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-

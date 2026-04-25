@@ -2994,6 +2994,7 @@ dependencies = [
 name = "posthaste-imap"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "hex",
  "imap-client",
  "mail-parser",
@@ -3018,6 +3019,7 @@ dependencies = [
  "posthaste-config",
  "posthaste-domain",
  "posthaste-engine",
+ "posthaste-imap",
  "posthaste-store",
  "serde",
  "serde_json",
