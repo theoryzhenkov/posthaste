@@ -307,6 +307,12 @@ pub trait ImapMessageLocationStore: Send + Sync {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Vec<ImapMessageLocation>, StoreError>;
+
+    fn list_imap_mailbox_message_locations(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+    ) -> Result<Vec<ImapMessageLocation>, StoreError>;
 }
 
 /// IMAP message location write boundary.
