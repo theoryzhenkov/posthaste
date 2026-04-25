@@ -30,6 +30,7 @@ import { MessageList } from './components/MessageList'
 import { SettingsOverlay } from './components/SettingsOverlay'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
+import { SurfaceHost } from './components/SurfaceHost'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import {
@@ -42,6 +43,7 @@ import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
 import { mailKeys, type MailSelection } from './mailState'
 import { queryKeys } from './queryKeys'
+import { messageSurfaceFromSelection, type SurfaceDescriptor } from './surfaces'
 
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
@@ -92,6 +94,9 @@ function MailClient() {
   const [searchQuery, setSearchQuery] = useState('')
   const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [activeSurface, setActiveSurface] = useState<SurfaceDescriptor | null>(
+    null,
+  )
   const theme = useDesignTheme()
 
   const handlePlaceholderAction = useCallback((label: string) => {
@@ -238,6 +243,13 @@ function MailClient() {
     setIsTagEditorOpen(true)
   }, [selectedMessage])
 
+  const handleOpenFocusedMessage = useCallback(() => {
+    if (!selectedMessage) {
+      return
+    }
+    setActiveSurface(messageSurfaceFromSelection(selectedMessage))
+  }, [selectedMessage])
+
   const resolveComposeSourceId = useCallback(() => {
     return (
       selectedMessage?.sourceId ??
@@ -283,6 +295,10 @@ function MailClient() {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
+
+      if (activeSurface !== null) {
+        return
+      }
 
       if (
         (event.metaKey || event.ctrlKey) &&
@@ -333,7 +349,8 @@ function MailClient() {
         !showSettings &&
         !isCommandPaletteOpen &&
         !showShortcuts &&
-        composeIntent === null
+        composeIntent === null &&
+        activeSurface === null
       ) {
         if (selectedMessage) {
           event.preventDefault()
@@ -359,6 +376,20 @@ function MailClient() {
       if (event.key.toLowerCase() === 'l' && selectedMessage) {
         event.preventDefault()
         handleOpenTagEditor()
+        return
+      }
+      if (
+        event.key.toLowerCase() === 'o' &&
+        selectedMessage &&
+        !showSettings &&
+        !isCommandPaletteOpen &&
+        !showShortcuts &&
+        composeIntent === null &&
+        !isTagEditorOpen &&
+        activeSurface === null
+      ) {
+        event.preventDefault()
+        handleOpenFocusedMessage()
       }
     }
 
@@ -366,12 +397,15 @@ function MailClient() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
     composeIntent,
+    activeSurface,
     handleClearSelectedMessage,
     handleCompose,
+    handleOpenFocusedMessage,
     handleReply,
     handleToggleFlag,
     handleOpenTagEditor,
     isCommandPaletteOpen,
+    isTagEditorOpen,
     searchQuery,
     selectedMessage,
     showSettings,
@@ -462,6 +496,7 @@ function MailClient() {
         }}
         onCompose={handleCompose}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenFocusedMessage={handleOpenFocusedMessage}
         onPlaceholderAction={handlePlaceholderAction}
         onReply={handleReply}
         onShowShortcuts={() => setShowShortcuts(true)}
@@ -619,6 +654,12 @@ function MailClient() {
           onClose={() => setComposeIntent(null)}
         />
       )}
+      <SurfaceHost
+        surface={activeSurface}
+        onClose={() => setActiveSurface(null)}
+        onSearch={handleSearch}
+        onSelectMessage={handleSelectMessage}
+      />
     </div>
   )
 }
