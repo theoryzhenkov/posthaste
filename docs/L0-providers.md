@@ -113,6 +113,25 @@ authoritatively. Moves prefer `UID MOVE` plus UIDPLUS `COPYUID`; fall back to
 SMTP sends do not return a synced message object. After a successful send, the
 runtime triggers sync and reconciles Sent mail from the provider.
 
+## Implementation references
+
+IMAP behavior must be traceable to protocol specifications or existing client
+library behavior. When changing the IMAP adapter, update this table if a new
+source informs the implementation.
+
+| Posthaste area | Local implementation | Reference source |
+|---|---|---|
+| IMAP connection/auth/discovery | `posthaste-imap::discover_imap_account`, `LiveImapSmtpGateway::connect` | `imap-client` 0.3.0 constructors/auth/capability/list wrappers: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs> |
+| Capability normalization | `posthaste_domain::ImapCapabilities`, `normalize_imap_capabilities` | RFC 9051 capabilities and IMAP4rev2 baseline: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-types` capability variants: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
+| Mailbox LIST and roles | `map_imap_mailbox`, `imap_special_use_role` | RFC 6154 SPECIAL-USE attributes: <https://www.rfc-editor.org/rfc/rfc6154.html>; `imap-client` LIST task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/list.rs> |
+| SELECT/EXAMINE state | `selected_mailbox_from_examine`, `ImapSelectedMailbox` | RFC 9051 SELECT/EXAMINE response codes including `UIDVALIDITY` and `UIDNEXT`: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` SELECT task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/select.rs> |
+| Mailbox sync planning | `plan_imap_mailbox_sync` | RFC 9051 UID semantics and FETCH/SEARCH commands: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 CONDSTORE/QRESYNC and `HIGHESTMODSEQ`: <https://datatracker.ietf.org/doc/html/rfc7162> |
+| Message identity and UID reuse | `imap_message_id`, `ImapMessageLocation` | RFC 9051 UID and UIDVALIDITY semantics: <https://www.rfc-editor.org/rfc/rfc9051.html> |
+| Gmail identity/labels | `ImapProviderFeatures`, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
+| Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
+| FETCH item extraction | planned `UID FETCH` metadata path | RFC 9051 FETCH data items (`FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` FETCH task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` fetch item model: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs> |
+| Move/copy mutation planning | `plan_imap_move` | RFC 6851 MOVE: <https://datatracker.ietf.org/doc/html/rfc6851>; RFC 4315 UIDPLUS `COPYUID`/`APPENDUID`: <https://datatracker.ietf.org/doc/html/rfc4315> |
+
 ## Identity and threading
 
 JMAP messages use the server `threadId` as authoritative. IMAP messages do not
