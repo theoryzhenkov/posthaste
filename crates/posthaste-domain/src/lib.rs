@@ -8,6 +8,7 @@
 //! @spec docs/L0-api
 
 mod config;
+mod imap;
 mod model;
 mod ports;
 mod push;
@@ -15,6 +16,7 @@ pub mod search;
 mod service;
 
 pub use config::*;
+pub use imap::*;
 pub use model::*;
 pub use ports::*;
 pub use push::*;
