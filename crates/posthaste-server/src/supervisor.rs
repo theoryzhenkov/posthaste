@@ -539,7 +539,8 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::MissingSelectData(_)
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
-        | ImapAdapterError::ParseMessageHeaders => GatewayError::Rejected(error.to_string()).into(),
+        | ImapAdapterError::ParseMessageHeaders
+        | ImapAdapterError::ParseMessageBody => GatewayError::Rejected(error.to_string()).into(),
         ImapAdapterError::Client(message) => GatewayError::Network(message).into(),
     }
 }
