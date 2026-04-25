@@ -16,6 +16,12 @@ pub enum ImapAdapterError {
     InvalidMailboxName(String),
     #[error("IMAP SELECT/EXAMINE response missing {0}")]
     MissingSelectData(&'static str),
+    #[error("IMAP UIDVALIDITY changed for {mailbox_name}: expected {expected}, got {actual}")]
+    UidValidityMismatch {
+        mailbox_name: String,
+        expected: u32,
+        actual: u32,
+    },
     #[error("IMAP FETCH response missing {0}")]
     MissingFetchData(&'static str),
     #[error("invalid IMAP UID sequence set: {0}")]

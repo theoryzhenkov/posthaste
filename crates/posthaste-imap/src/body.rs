@@ -1,7 +1,41 @@
+use imap_client::imap_types::fetch::{
+    MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName,
+};
 use mail_parser::{MessageParser, MimeHeaders};
-use posthaste_domain::{BlobId, FetchedBody, MessageAttachment, MessageId};
+use posthaste_domain::{BlobId, FetchedBody, ImapMessageLocation, MessageAttachment, MessageId};
 
-use crate::ImapAdapterError;
+use crate::discovery::connect_authenticated_client;
+use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfig};
+
+/// Fetch a full raw IMAP message without marking it read, then parse it into
+/// Posthaste's lazy body projection.
+///
+/// @spec docs/L1-sync#body-lazy
+pub async fn fetch_message_body_by_location(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    location: &ImapMessageLocation,
+) -> Result<FetchedBody, ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    let selected =
+        selected_mailbox_from_examine(mailbox_name, client.examine(mailbox_name).await?)?;
+    if selected.uid_validity != location.uid_validity {
+        return Err(ImapAdapterError::UidValidityMismatch {
+            mailbox_name: mailbox_name.to_string(),
+            expected: location.uid_validity.0,
+            actual: selected.uid_validity.0,
+        });
+    }
+
+    let uid = std::num::NonZeroU32::new(location.uid.0)
+        .ok_or_else(|| ImapAdapterError::InvalidUidSequence("UID 0".to_string()))?;
+    let items = client
+        .uid_fetch_first(uid, body_fetch_item_names())
+        .await
+        .map_err(ImapAdapterError::from)?;
+
+    fetched_body_from_items(&location.message_id, location, items)
+}
 
 /// Parse a fetched raw IMAP message into Posthaste's lazy body projection.
 ///
@@ -33,6 +67,49 @@ pub fn imap_body_from_raw_mime(
         raw_mime,
         attachments,
     })
+}
+
+fn body_fetch_item_names() -> MacroOrMessageDataItemNames<'static> {
+    MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+        MessageDataItemName::Uid,
+        MessageDataItemName::BodyExt {
+            section: None,
+            partial: None,
+            peek: true,
+        },
+    ])
+}
+
+pub fn fetched_body_from_items(
+    message_id: &MessageId,
+    location: &ImapMessageLocation,
+    items: impl IntoIterator<Item = MessageDataItem<'static>>,
+) -> Result<FetchedBody, ImapAdapterError> {
+    let mut uid = None;
+    let mut raw_mime = None;
+
+    for item in items {
+        match item {
+            MessageDataItem::Uid(next_uid) => {
+                uid = Some(next_uid.get());
+            }
+            MessageDataItem::BodyExt {
+                section: None,
+                origin: None,
+                data,
+            } => {
+                raw_mime = data.into_option().map(|bytes| bytes.into_owned());
+            }
+            _ => {}
+        }
+    }
+
+    let uid = uid.ok_or(ImapAdapterError::MissingFetchData("UID"))?;
+    if uid != location.uid.0 {
+        return Err(ImapAdapterError::MissingFetchData("matching UID"));
+    }
+    let raw_mime = raw_mime.ok_or(ImapAdapterError::MissingFetchData("BODY.PEEK[]"))?;
+    imap_body_from_raw_mime(message_id, raw_mime)
 }
 
 fn imap_attachment_from_part(
@@ -74,7 +151,23 @@ fn imap_attachment_blob_id(message_id: &MessageId, index: usize) -> BlobId {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
+    use imap_client::imap_types::core::NString;
+    use posthaste_domain::{ImapUid, ImapUidValidity, MailboxId};
+
     use super::*;
+
+    fn location() -> ImapMessageLocation {
+        ImapMessageLocation {
+            message_id: MessageId::from("message-1"),
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            uid_validity: ImapUidValidity(9),
+            uid: ImapUid(42),
+            modseq: None,
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        }
+    }
 
     #[test]
     fn parses_text_html_and_attachment_metadata() {
@@ -132,5 +225,40 @@ mod tests {
 
         assert!(body.body_text.is_some());
         assert_eq!(body.raw_mime, None);
+    }
+
+    #[test]
+    fn fetched_body_extracts_body_peek_without_seen_side_effect_item() {
+        let raw = b"From: Alice <alice@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlain body\r\n";
+        let body = fetched_body_from_items(
+            &MessageId::from("message-1"),
+            &location(),
+            [
+                MessageDataItem::Uid(NonZeroU32::new(42).expect("uid")),
+                MessageDataItem::BodyExt {
+                    section: None,
+                    origin: None,
+                    data: NString::try_from(raw.as_slice()).expect("raw nstring"),
+                },
+            ],
+        )
+        .expect("body");
+
+        assert_eq!(body.body_text.as_deref(), Some("Plain body\r\n"));
+    }
+
+    #[test]
+    fn fetched_body_rejects_missing_body_peek() {
+        let error = fetched_body_from_items(
+            &MessageId::from("message-1"),
+            &location(),
+            [MessageDataItem::Uid(NonZeroU32::new(42).expect("uid"))],
+        )
+        .expect_err("body is required");
+
+        assert!(matches!(
+            error,
+            ImapAdapterError::MissingFetchData("BODY.PEEK[]")
+        ));
     }
 }

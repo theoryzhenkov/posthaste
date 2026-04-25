@@ -224,6 +224,7 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)
+        | ImapAdapterError::UidValidityMismatch { .. }
         | ImapAdapterError::MissingFetchData(_)
         | ImapAdapterError::InvalidUidSequence(_)
         | ImapAdapterError::ParseMessageHeaders
