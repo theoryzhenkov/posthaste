@@ -16,6 +16,7 @@ const SHORTCUTS: { keys: string[]; action: string }[] = [
   { keys: ['k', '\u2191'], action: 'Previous conversation' },
   { keys: ['e'], action: 'Archive' },
   { keys: ['#', 'Backspace'], action: 'Trash' },
+  { keys: ['o'], action: 'Open message' },
   { keys: ['/'], action: 'Open command search' },
   { keys: ['?'], action: 'Toggle this reference' },
 ]

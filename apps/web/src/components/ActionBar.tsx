@@ -4,6 +4,7 @@ import {
   Command,
   Flag,
   Forward,
+  Maximize2,
   Moon,
   PenSquare,
   Reply,
@@ -27,6 +28,7 @@ interface ActionBarProps {
   onClearSearch: () => void
   onCompose: () => void
   onOpenCommandPalette: () => void
+  onOpenFocusedMessage: () => void
   onPlaceholderAction: (label: string) => void
   onReply: () => void
   onShowShortcuts: () => void
@@ -149,6 +151,7 @@ export function ActionBar({
   onClearSearch,
   onCompose,
   onOpenCommandPalette,
+  onOpenFocusedMessage,
   onPlaceholderAction,
   onReply,
   onShowShortcuts,
@@ -225,6 +228,13 @@ export function ActionBar({
         icon={<Tag size={14} strokeWidth={1.6} />}
         onClick={onTag}
         title="Tag"
+      />
+      <ToolbarChip
+        hint="O"
+        disabled={!isMessageSelected}
+        icon={<Maximize2 size={14} strokeWidth={1.6} />}
+        onClick={onOpenFocusedMessage}
+        title="Open message"
       />
 
       <div className="flex-1" />
