@@ -4,6 +4,7 @@ use std::{
 };
 
 use imap_client::client::tokio::Client as ImapClient;
+use imap_client::imap_types::body::{BodyStructure, SpecificFields};
 use imap_client::imap_types::command::{CommandBody, FetchModifier};
 use imap_client::imap_types::extensions::enable::CapabilityEnable;
 use imap_client::imap_types::fetch::{
@@ -207,6 +208,7 @@ async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterErro
 fn fetch_item_names(fetch_modseq: bool) -> MacroOrMessageDataItemNames<'static> {
     let mut items = vec![
         MessageDataItemName::Flags,
+        MessageDataItemName::BodyStructure,
         MessageDataItemName::Rfc822Header,
         MessageDataItemName::Rfc822Size,
         MessageDataItemName::Uid,
@@ -320,6 +322,7 @@ pub fn fetched_header_from_items(
     let mut modseq = None;
     let mut flags = Vec::new();
     let mut rfc822_size = None;
+    let mut has_attachment = false;
     let mut headers = None;
 
     for item in items {
@@ -338,6 +341,9 @@ pub fn fetched_header_from_items(
             MessageDataItem::Rfc822Size(size) => {
                 rfc822_size = Some(i64::from(size));
             }
+            MessageDataItem::BodyStructure(body_structure) => {
+                has_attachment = body_structure_has_attachment(&body_structure);
+            }
             MessageDataItem::Uid(next_uid) => {
                 uid = Some(ImapUid(next_uid.get()));
             }
@@ -354,9 +360,40 @@ pub fn fetched_header_from_items(
         modseq,
         flags,
         rfc822_size: rfc822_size.ok_or(ImapAdapterError::MissingFetchData("RFC822.SIZE"))?,
+        has_attachment,
         headers: headers.ok_or(ImapAdapterError::MissingFetchData("RFC822.HEADER"))?,
         updated_at,
     })
+}
+
+fn body_structure_has_attachment(body_structure: &BodyStructure<'_>) -> bool {
+    match body_structure {
+        BodyStructure::Single {
+            body,
+            extension_data,
+        } => {
+            let has_attachment_disposition = extension_data
+                .as_ref()
+                .and_then(|extension| extension.tail.as_ref())
+                .and_then(|disposition| disposition.disposition.as_ref())
+                .is_some_and(|(kind, _)| kind.as_ref().eq_ignore_ascii_case(b"attachment"));
+            let has_name_parameter = body
+                .basic
+                .parameter_list
+                .iter()
+                .any(|(key, _)| key.as_ref().eq_ignore_ascii_case(b"name"));
+            let is_basic_non_text = matches!(
+                &body.specific,
+                SpecificFields::Basic { r#type, .. }
+                    if !r#type.as_ref().eq_ignore_ascii_case(b"text")
+            );
+
+            has_attachment_disposition || has_name_parameter || is_basic_non_text
+        }
+        BodyStructure::Multi { bodies, .. } => {
+            bodies.as_ref().iter().any(body_structure_has_attachment)
+        }
+    }
 }
 
 fn imap_flag_fetch_name(flag: FlagFetch<'static>) -> String {
@@ -370,6 +407,8 @@ fn imap_flag_fetch_name(flag: FlagFetch<'static>) -> String {
 mod tests {
     use std::num::{NonZeroU32, NonZeroU64};
 
+    use imap_client::imap_types::body::{BasicFields, Body, BodyStructure, SpecificFields};
+    use imap_client::imap_types::core::IString;
     use imap_client::imap_types::core::{NString, Text};
     use imap_client::imap_types::flag::{Flag, FlagFetch};
     use posthaste_domain::{ImapUidValidity, MailboxId};
@@ -421,6 +460,7 @@ mod tests {
             ]
         );
         assert_eq!(fetched.rfc822_size, 512);
+        assert!(!fetched.has_attachment);
         assert!(fetched.headers.starts_with(b"From: Alice"));
     }
 
@@ -448,6 +488,7 @@ mod tests {
             fetch_item_names(false),
             MacroOrMessageDataItemNames::MessageDataItemNames(vec![
                 MessageDataItemName::Flags,
+                MessageDataItemName::BodyStructure,
                 MessageDataItemName::Rfc822Header,
                 MessageDataItemName::Rfc822Size,
                 MessageDataItemName::Uid,
@@ -457,12 +498,33 @@ mod tests {
             fetch_item_names(true),
             MacroOrMessageDataItemNames::MessageDataItemNames(vec![
                 MessageDataItemName::Flags,
+                MessageDataItemName::BodyStructure,
                 MessageDataItemName::Rfc822Header,
                 MessageDataItemName::Rfc822Size,
                 MessageDataItemName::Uid,
                 MessageDataItemName::ModSeq,
             ])
         );
+    }
+
+    #[test]
+    fn fetched_header_marks_bodystructure_attachment_metadata() {
+        let fetched = fetched_header_from_items(
+            &selected_mailbox(),
+            [
+                MessageDataItem::Rfc822Header(
+                    NString::try_from(b"Subject: With attachment\r\n\r\n".as_slice())
+                        .expect("header nstring"),
+                ),
+                MessageDataItem::Rfc822Size(512),
+                MessageDataItem::Uid(NonZeroU32::new(42).expect("uid")),
+                MessageDataItem::BodyStructure(attachment_body_structure()),
+            ],
+            "2026-04-25T00:00:00Z".to_string(),
+        )
+        .expect("fetched header");
+
+        assert!(fetched.has_attachment);
     }
 
     #[test]
@@ -532,5 +594,27 @@ mod tests {
             snapshot.vanished_uids,
             vec![ImapUid(7), ImapUid(8), ImapUid(10)]
         );
+    }
+
+    fn attachment_body_structure() -> BodyStructure<'static> {
+        BodyStructure::Single {
+            body: Body {
+                basic: BasicFields {
+                    parameter_list: vec![(
+                        IString::try_from("name").expect("name key"),
+                        IString::try_from("notes.txt").expect("name value"),
+                    )],
+                    id: NString::NIL,
+                    description: NString::NIL,
+                    content_transfer_encoding: IString::try_from("base64").expect("encoding"),
+                    size: 12,
+                },
+                specific: SpecificFields::Basic {
+                    r#type: IString::try_from("application").expect("type"),
+                    subtype: IString::try_from("pdf").expect("subtype"),
+                },
+            },
+            extension_data: None,
+        }
     }
 }

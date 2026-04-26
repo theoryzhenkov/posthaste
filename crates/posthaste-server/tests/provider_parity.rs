@@ -344,6 +344,7 @@ fn imap_sync_batch() -> SyncBatch {
             modseq: Some(posthaste_domain::ImapModSeq(777)),
             flags: vec!["\\Seen".to_string(), "\\Flagged".to_string()],
             rfc822_size: 512,
+            has_attachment: true,
             headers: concat!(
                 "From: Alice <alice@example.test>\r\n",
                 "Date: Sat, 25 Apr 2026 12:00:00 +0000\r\n",
