@@ -99,6 +99,10 @@ dev-smoke:
 # Override with `just stalwart-up admin=... user=...` or set env vars directly.
 STALWART_ADMIN_PASSWORD := env_var_or_default("POSTHASTE_STALWART_ADMIN_PASSWORD", "devadmin")
 STALWART_USER_PASSWORD := env_var_or_default("POSTHASTE_STALWART_USER_PASSWORD", "devpass")
+STALWART_HTTP_BIND := env_var_or_default("POSTHASTE_STALWART_BIND", "127.0.0.1:8080")
+STALWART_HTTP_URL := env_var_or_default("POSTHASTE_STALWART_URL", "http://127.0.0.1:8080")
+STALWART_IMAP_BIND := env_var_or_default("POSTHASTE_STALWART_IMAP_BIND", "127.0.0.1:1143")
+STALWART_SMTP_BIND := env_var_or_default("POSTHASTE_STALWART_SMTP_BIND", "127.0.0.1:1587")
 STALWART_DATA := justfile_directory() / "var/dev/stalwart/data"
 STALWART_LOGS := justfile_directory() / "var/dev/stalwart/logs"
 SERVER_LOG_PATH_SCRIPT := justfile_directory() / "tools/dev/overmind/server-log-path.sh"
@@ -108,6 +112,10 @@ stalwart-up:
     POSTHASTE_STALWART_DATA={{ STALWART_DATA }} \
         POSTHASTE_STALWART_LOGS={{ STALWART_LOGS }} \
         POSTHASTE_STALWART_ADMIN_PASSWORD={{ STALWART_ADMIN_PASSWORD }} \
+        POSTHASTE_STALWART_BIND={{ STALWART_HTTP_BIND }} \
+        POSTHASTE_STALWART_URL={{ STALWART_HTTP_URL }} \
+        POSTHASTE_STALWART_IMAP_BIND={{ STALWART_IMAP_BIND }} \
+        POSTHASTE_STALWART_SMTP_BIND={{ STALWART_SMTP_BIND }} \
         stalwart -c tools/dev/stalwart/config.toml
 
 # Provision the dev domain + mailbox user. Idempotent.
@@ -125,6 +133,8 @@ stalwart-reset:
 stalwart-dev:
     @echo 'export POSTHASTE_BOOTSTRAP_PATH={{ justfile_directory() }}/tools/dev/bootstrap.stalwart.toml'
     @echo 'export POSTHASTE_STALWART_USER_PASSWORD={{ STALWART_USER_PASSWORD }}'
+    @echo 'export POSTHASTE_STALWART_IMAP_BIND={{ STALWART_IMAP_BIND }}'
+    @echo 'export POSTHASTE_STALWART_SMTP_BIND={{ STALWART_SMTP_BIND }}'
 
 # Print the current or expected persisted server log path for dev.
 server-log-path:

@@ -9,6 +9,14 @@ protocol = "http"
 bind = "%{env:POSTHASTE_STALWART_BIND}%"
 url = "%{env:POSTHASTE_STALWART_URL}%"
 
+[server.listener.imap]
+protocol = "imap"
+bind = "%{env:POSTHASTE_STALWART_IMAP_BIND}%"
+
+[server.listener.smtp]
+protocol = "smtp"
+bind = "%{env:POSTHASTE_STALWART_SMTP_BIND}%"
+
 [storage]
 data = "rocksdb"
 fts = "rocksdb"
