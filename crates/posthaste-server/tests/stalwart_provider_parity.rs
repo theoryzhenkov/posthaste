@@ -9,8 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ImapTransportSettings,
-    ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SmtpTransportSettings,
-    TransportSecurity, RFC3339_EPOCH,
+    MessageSummary, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SetKeywordsCommand,
+    SmtpTransportSettings, SyncTrigger, TransportSecurity, RFC3339_EPOCH,
 };
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
@@ -240,24 +240,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
     .await
     .expect("IMAP gateway should connect");
 
-    harness
-        .service
-        .sync_account(
-            &AccountId::from("jmap-stalwart"),
-            posthaste_domain::SyncTrigger::Manual,
-            &jmap_gateway,
-        )
-        .await
-        .expect("JMAP sync should succeed");
-    harness
-        .service
-        .sync_account(
-            &AccountId::from("imap-stalwart"),
-            posthaste_domain::SyncTrigger::Manual,
-            &imap_gateway,
-        )
-        .await
-        .expect("IMAP sync should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     let jmap_messages = normalized_messages(&harness, "jmap-stalwart");
     let imap_messages = normalized_messages(&harness, "imap-stalwart");
@@ -267,6 +250,82 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         jmap_messages.len() >= 8,
         "fixture should contain enough messages to exercise multiple mailbox roles"
     );
+
+    let initial_imap_location_count = imap_location_count(&harness);
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+    assert_eq!(
+        jmap_messages,
+        normalized_messages(&harness, "jmap-stalwart")
+    );
+    assert_eq!(
+        imap_messages,
+        normalized_messages(&harness, "imap-stalwart")
+    );
+    assert_eq!(initial_imap_location_count, imap_location_count(&harness));
+
+    let target = jmap_message_by_subject(
+        &harness,
+        "jmap-stalwart",
+        "Welcome to the Posthaste sandbox",
+    );
+    harness
+        .service
+        .set_keywords(
+            &AccountId::from("jmap-stalwart"),
+            &target.id,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: vec!["$seen".to_string()],
+            },
+            &jmap_gateway,
+        )
+        .await
+        .expect("JMAP flag mutation should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    let jmap_target = message_by_subject(
+        &harness,
+        "jmap-stalwart",
+        "Welcome to the Posthaste sandbox",
+    );
+    let imap_target = message_by_subject(
+        &harness,
+        "imap-stalwart",
+        "Welcome to the Posthaste sandbox",
+    );
+    assert!(!jmap_target.is_read);
+    assert!(jmap_target.is_flagged);
+    assert_eq!(jmap_target.is_read, imap_target.is_read);
+    assert_eq!(jmap_target.is_flagged, imap_target.is_flagged);
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
+}
+
+async fn sync_pair(
+    harness: &Harness,
+    jmap_gateway: &LiveJmapGateway,
+    imap_gateway: &LiveImapSmtpGateway,
+) {
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("jmap-stalwart"),
+            SyncTrigger::Manual,
+            jmap_gateway,
+        )
+        .await
+        .expect("JMAP sync should succeed");
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("imap-stalwart"),
+            SyncTrigger::Manual,
+            imap_gateway,
+        )
+        .await
+        .expect("IMAP sync should succeed");
 }
 
 fn normalized_messages(harness: &Harness, account_id: &str) -> BTreeSet<String> {
@@ -286,6 +345,38 @@ fn normalized_messages(harness: &Harness, account_id: &str) -> BTreeSet<String> 
             )
         })
         .collect()
+}
+
+fn jmap_message_by_subject(harness: &Harness, account_id: &str, subject: &str) -> MessageSummary {
+    message_by_subject(harness, account_id, subject)
+}
+
+fn message_by_subject(harness: &Harness, account_id: &str, subject: &str) -> MessageSummary {
+    harness
+        .service
+        .list_messages(&AccountId::from(account_id), None)
+        .expect("messages should list")
+        .into_iter()
+        .find(|message| message.subject.as_deref() == Some(subject))
+        .unwrap_or_else(|| panic!("message with subject {subject:?} should exist"))
+}
+
+fn imap_location_count(harness: &Harness) -> usize {
+    use posthaste_domain::ImapMessageLocationStore;
+
+    harness
+        .service
+        .list_messages(&AccountId::from("imap-stalwart"), None)
+        .expect("IMAP messages should list")
+        .into_iter()
+        .map(|message| {
+            harness
+                .store
+                .list_imap_message_locations(&AccountId::from("imap-stalwart"), &message.id)
+                .expect("IMAP locations should list")
+                .len()
+        })
+        .sum()
 }
 
 fn temp_root(prefix: &str) -> PathBuf {
