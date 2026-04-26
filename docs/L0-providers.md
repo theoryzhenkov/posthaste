@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Provider driver strategy for JMAP, IMAP/SMTP, and future native APIs"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-26
+reviewed: 2026-04-26
 depends:
   - path: README
   - path: docs/L0-accounts
@@ -75,19 +75,20 @@ unsupported command surfaces are rejected explicitly.
 
 Mailbox message sync starts by examining the mailbox and mapping SELECT/EXAMINE
 state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
-when present. `HIGHESTMODSEQ` remains optional until the protocol client
-exposes CONDSTORE/QRESYNC select metadata.
+when present. `HIGHESTMODSEQ` is captured through a local EXAMINE task because
+the upstream protocol client does not expose that response code.
 
 The first message mapping path consumes RFC 822 headers, not full message
 bodies. Initial or invalidated snapshots use `UID SEARCH ALL` followed by
-chunked `UID FETCH` for `FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`, and,
-when CONDSTORE/QRESYNC is advertised, `MODSEQ`. Subsequent syncs with valid
-per-mailbox `UIDVALIDITY` state reconcile current mailbox UID descriptors
-against stored `ImapMessageLocation` rows, upsert current metadata, and delete
-local messages whose stored mailbox UID is no longer returned by the server.
-This follows RFC 4549's safe disconnected-client baseline until QRESYNC
-`VANISHED` handling is implemented. Body text, HTML, raw MIME, and attachment
-metadata are fetched lazily when a message is opened.
+chunked `UID FETCH` for `FLAGS`, `BODYSTRUCTURE`, `RFC822.HEADER`,
+`RFC822.SIZE`, `UID`, and, when CONDSTORE/QRESYNC is advertised, `MODSEQ`.
+`BODYSTRUCTURE` is used only for message-list attachment presence; body text,
+HTML, raw MIME, and attachment detail metadata remain lazy. Subsequent syncs
+with valid per-mailbox `UIDVALIDITY` state reconcile current mailbox UID
+descriptors against stored `ImapMessageLocation` rows, upsert current metadata,
+and delete local messages whose stored mailbox UID is no longer returned by the
+server. QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for efficient flag
+and expunge reconciliation.
 
 The driver prefers IMAP extensions when advertised:
 
@@ -143,7 +144,8 @@ source informs the implementation.
 | Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Lazy body fetch/parsing | `fetch_message_body_by_location`, `fetched_body_from_items`, `imap_body_from_raw_mime` | RFC 9051 `BODY.PEEK[]` does not implicitly set `\Seen` and UIDs are valid only in a `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first`/FETCH task behavior: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` body and attachment APIs: <https://docs.rs/mail-parser/0.11.2/mail_parser/struct.Message.html>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Attachment blob download | `LiveImapSmtpGateway::download_blob`, `fetch_raw_message_by_location`, `imap_attachment_bytes_from_raw_mime`, `parse_imap_attachment_blob_id` | RFC 9051 `BODY.PEEK[]` fetches message bytes without the `\Seen` side effect and the stored UID is valid only within the selected mailbox `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first` uses UID FETCH and returns FETCH items from server responses: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` resolves attachment ordinals and decoded part contents: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/header.rs> |
-| FETCH item extraction | `fetch_mailbox_header_records`, `fetch_mailbox_changed_since_snapshot`, `ChangedSinceFetchTask`, `fetched_header_from_items` | RFC 9051 SEARCH/UID/FETCH data items (`FLAGS`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 `MODSEQ`, `CHANGEDSINCE`, and `VANISHED` as CONDSTORE/QRESYNC FETCH items and modifiers: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` UID SEARCH/UID FETCH wrappers and FETCH task sequence-number collection, noting the stock task leaves `modifiers` empty so Posthaste adds a local task for `CHANGEDSINCE`: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` command/fetch/sequence-set models provide typed `FetchModifier::ChangedSince`, `FetchModifier::Vanished`, `Data::Vanished`, and bounded UID sequence expansion: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/command.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/sequence.rs> |
+| FETCH item extraction | `fetch_mailbox_header_records`, `fetch_mailbox_changed_since_snapshot`, `ChangedSinceFetchTask`, `fetched_header_from_items` | RFC 9051 SEARCH/UID/FETCH data items (`FLAGS`, `BODYSTRUCTURE`, `RFC822.HEADER`, `RFC822.SIZE`, `UID`): <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 `MODSEQ`, `CHANGEDSINCE`, and `VANISHED` as CONDSTORE/QRESYNC FETCH items and modifiers: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` UID SEARCH/UID FETCH wrappers and FETCH task sequence-number collection, noting the stock task leaves `modifiers` empty so Posthaste adds a local task for `CHANGEDSINCE`: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `imap-types` command/fetch/body/sequence-set models provide typed `BodyStructure`, `FetchModifier::ChangedSince`, `FetchModifier::Vanished`, `Data::Vanished`, and bounded UID sequence expansion: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/command.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/fetch.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/body.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/sequence.rs> |
+| Live provider parity testing | `stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages`, `tools/dev/stalwart/config.toml`, `tools/dev/stalwart/seed.sh` | Stalwart supports JMAP, IMAP, and SMTP in one server, making it the local real-provider reference for cross-driver parity: <https://github.com/stalwartlabs/stalwart>, <https://stalw.art/mail-server>; Stalwart listener configuration supports separate HTTP, IMAP, and SMTP loopback listeners: <https://stalw.art/docs/server/listener/>; Stalwart CLI/import tooling is used by the seed script for fixture mailboxes: <https://stalw.art/docs/management/cli/overview/>, <https://stalw.art/docs/management/cli/import/maildir> |
 | Keyword mutation | `LiveImapSmtpGateway::set_keywords`, `apply_imap_keyword_delta_by_location`, `imap_flags_for_keywords` | RFC 9051 `UID STORE`, `+FLAGS`, `-FLAGS`, `PERMANENTFLAGS`, and nonexistent UID no-op behavior: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_store` and STORE task command construction: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/store.rs>; `imap-types` flag and store models: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/flag.rs> |
 | Mailbox replacement and delete marking | `LiveImapSmtpGateway::replace_mailboxes`, `LiveImapSmtpGateway::destroy_message`, `copy_imap_message_to_mailbox_by_location`, `mark_imap_message_deleted_by_location`, `expunge_imap_message_by_location` | RFC 9051 COPY/MOVE behavior, `COPYUID`, `UID STORE`, nonexistent UID no-op behavior, and `\Deleted` semantics: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 6851 explains why COPY/STORE/EXPUNGE fallback has side effects and why MOVE is preferred: <https://www.rfc-editor.org/rfc/rfc6851.html>; RFC 4315 UIDPLUS `UID EXPUNGE` avoids expunging other clients' `\Deleted` messages: <https://datatracker.ietf.org/doc/html/rfc4315>; `imap-client` COPY/MOVE/STORE wrappers expose command success but not COPYUID output, and the local adapter uses `imap-client`'s task API plus `imap-types` `ExpungeUid` command model for UID EXPUNGE: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/copy.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/move.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/command.rs> |
 | Reply/forward context | `LiveImapSmtpGateway::fetch_reply_context`, `fetch_imap_reply_context_by_location`, `imap_reply_context_from_raw_mime` | RFC 9051 stored message identity and `BODY.PEEK[]` raw message fetch semantics: <https://www.rfc-editor.org/rfc/rfc9051.html>; `mail-parser` address, subject, message-id, references, and text body APIs: <https://docs.rs/mail-parser/0.11.2/mail_parser/struct.Message.html>, <https://docs.rs/mail-parser/0.11.2/mail_parser/struct.Addr.html>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/address.rs> |
@@ -224,3 +226,4 @@ with servers that expose both protocols.
 | imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | jmapaccess-preferred | SHOULD | IMAP setup prefers JMAP when the server advertises JMAPACCESS for the same message store |
+| live-provider-parity | SHOULD | Real-server tests compare JMAP and IMAP projections against the same Stalwart mailbox fixture |
