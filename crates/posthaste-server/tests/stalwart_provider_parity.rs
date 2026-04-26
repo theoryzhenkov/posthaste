@@ -9,9 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ImapTransportSettings,
-    MailboxId, MailboxSummary, MessageSummary, ProviderAuthKind, ProviderHint,
-    ReplaceMailboxesCommand, SecretKind, SecretRef, SetKeywordsCommand, SmtpTransportSettings,
-    SyncTrigger, TransportSecurity, RFC3339_EPOCH,
+    MailboxId, MailboxSummary, MessageSummary, ProviderAuthKind, ProviderHint, Recipient,
+    ReplaceMailboxesCommand, SecretKind, SecretRef, SendMessageRequest, SetKeywordsCommand,
+    SmtpTransportSettings, SyncTrigger, TransportSecurity, RFC3339_EPOCH,
 };
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
@@ -181,6 +181,10 @@ impl StalwartFixture {
                 security: TransportSecurity::Plain,
             }),
         }
+    }
+
+    fn email(&self) -> String {
+        "dev@example.org".to_string()
     }
 }
 
@@ -367,6 +371,39 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         normalized_messages(&harness, "jmap-stalwart"),
         normalized_messages(&harness, "imap-stalwart")
     );
+
+    harness
+        .service
+        .send_message(
+            &AccountId::from("jmap-stalwart"),
+            &SendMessageRequest {
+                to: vec![Recipient {
+                    name: Some("Dev Account".to_string()),
+                    email: stalwart.email(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "JMAP parity self-send".to_string(),
+                body: "Sent through the JMAP gateway.".to_string(),
+                in_reply_to: None,
+                references: None,
+            },
+            &jmap_gateway,
+        )
+        .await
+        .expect("JMAP send should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
+    let sent_labels =
+        mailbox_labels_for_subject(&harness, "imap-stalwart", "JMAP parity self-send");
+    assert!(
+        sent_labels.contains("sent") || sent_labels.contains("inbox"),
+        "self-send should be visible in sent or inbox after sync"
+    );
 }
 
 async fn sync_pair(
@@ -394,8 +431,8 @@ async fn sync_pair(
         .expect("IMAP sync should succeed");
 }
 
-fn normalized_messages(harness: &Harness, account_id: &str) -> BTreeSet<String> {
-    harness
+fn normalized_messages(harness: &Harness, account_id: &str) -> Vec<String> {
+    let mut messages = harness
         .service
         .list_messages(&AccountId::from(account_id), None)
         .expect("messages should list")
@@ -410,7 +447,9 @@ fn normalized_messages(harness: &Harness, account_id: &str) -> BTreeSet<String> 
                 message.is_flagged
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    messages.sort();
+    messages
 }
 
 fn jmap_message_by_subject(harness: &Harness, account_id: &str, subject: &str) -> MessageSummary {
