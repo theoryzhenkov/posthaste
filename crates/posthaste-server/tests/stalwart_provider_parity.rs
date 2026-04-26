@@ -9,8 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ImapTransportSettings,
-    MessageSummary, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SetKeywordsCommand,
-    SmtpTransportSettings, SyncTrigger, TransportSecurity, RFC3339_EPOCH,
+    MailboxId, MailboxSummary, MessageSummary, ProviderAuthKind, ProviderHint,
+    ReplaceMailboxesCommand, SecretKind, SecretRef, SetKeywordsCommand, SmtpTransportSettings,
+    SyncTrigger, TransportSecurity, RFC3339_EPOCH,
 };
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
@@ -301,6 +302,71 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         normalized_messages(&harness, "jmap-stalwart"),
         normalized_messages(&harness, "imap-stalwart")
     );
+
+    let archive_id = mailbox_id_by_label(&harness, "jmap-stalwart", "archive");
+    harness
+        .service
+        .replace_mailboxes(
+            &AccountId::from("jmap-stalwart"),
+            &jmap_target.id,
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![archive_id],
+            },
+            &jmap_gateway,
+        )
+        .await
+        .expect("JMAP mailbox move should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    let jmap_labels = mailbox_labels_for_subject(
+        &harness,
+        "jmap-stalwart",
+        "Welcome to the Posthaste sandbox",
+    );
+    let imap_labels = mailbox_labels_for_subject(
+        &harness,
+        "imap-stalwart",
+        "Welcome to the Posthaste sandbox",
+    );
+    assert_eq!(jmap_labels, BTreeSet::from(["archive".to_string()]));
+    assert_eq!(jmap_labels, imap_labels);
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
+
+    let deleted = jmap_message_by_subject(
+        &harness,
+        "jmap-stalwart",
+        "Build failure on obsolete branch",
+    );
+    harness
+        .service
+        .destroy_message(
+            &AccountId::from("jmap-stalwart"),
+            &deleted.id,
+            &jmap_gateway,
+        )
+        .await
+        .expect("JMAP delete should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    assert!(maybe_message_by_subject(
+        &harness,
+        "jmap-stalwart",
+        "Build failure on obsolete branch"
+    )
+    .is_none());
+    assert!(maybe_message_by_subject(
+        &harness,
+        "imap-stalwart",
+        "Build failure on obsolete branch"
+    )
+    .is_none());
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
 }
 
 async fn sync_pair(
@@ -352,13 +418,63 @@ fn jmap_message_by_subject(harness: &Harness, account_id: &str, subject: &str) -
 }
 
 fn message_by_subject(harness: &Harness, account_id: &str, subject: &str) -> MessageSummary {
+    maybe_message_by_subject(harness, account_id, subject)
+        .unwrap_or_else(|| panic!("message with subject {subject:?} should exist"))
+}
+
+fn maybe_message_by_subject(
+    harness: &Harness,
+    account_id: &str,
+    subject: &str,
+) -> Option<MessageSummary> {
     harness
         .service
         .list_messages(&AccountId::from(account_id), None)
         .expect("messages should list")
         .into_iter()
         .find(|message| message.subject.as_deref() == Some(subject))
-        .unwrap_or_else(|| panic!("message with subject {subject:?} should exist"))
+}
+
+fn mailbox_id_by_label(harness: &Harness, account_id: &str, label: &str) -> MailboxId {
+    harness
+        .service
+        .list_mailboxes(&AccountId::from(account_id))
+        .expect("mailboxes should list")
+        .into_iter()
+        .find(|mailbox| mailbox_label(mailbox) == label)
+        .map(|mailbox| mailbox.id)
+        .unwrap_or_else(|| panic!("mailbox with label {label:?} should exist"))
+}
+
+fn mailbox_labels_for_subject(
+    harness: &Harness,
+    account_id: &str,
+    subject: &str,
+) -> BTreeSet<String> {
+    let mailboxes = harness
+        .service
+        .list_mailboxes(&AccountId::from(account_id))
+        .expect("mailboxes should list")
+        .into_iter()
+        .map(|mailbox| (mailbox.id.clone(), mailbox_label(&mailbox)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    message_by_subject(harness, account_id, subject)
+        .mailbox_ids
+        .into_iter()
+        .map(|mailbox_id| {
+            mailboxes
+                .get(&mailbox_id)
+                .cloned()
+                .unwrap_or_else(|| mailbox_id.to_string())
+        })
+        .collect()
+}
+
+fn mailbox_label(mailbox: &MailboxSummary) -> String {
+    mailbox
+        .role
+        .clone()
+        .unwrap_or_else(|| mailbox.name.to_ascii_lowercase())
 }
 
 fn imap_location_count(harness: &Harness) -> usize {
