@@ -75,6 +75,20 @@ else
 fi
 export POSTHASTE_STALWART_URL="${POSTHASTE_STALWART_URL:-http://127.0.0.1:$POSTHASTE_STALWART_PORT}"
 
+if [[ -z "${POSTHASTE_STALWART_IMAP_BIND:-}" ]]; then
+  POSTHASTE_STALWART_IMAP_PORT="$(find_available_port 1143)"
+  export POSTHASTE_STALWART_IMAP_BIND="127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT"
+else
+  POSTHASTE_STALWART_IMAP_PORT="$(port_from_bind "$POSTHASTE_STALWART_IMAP_BIND")"
+fi
+
+if [[ -z "${POSTHASTE_STALWART_SMTP_BIND:-}" ]]; then
+  POSTHASTE_STALWART_SMTP_PORT="$(find_available_port 1587)"
+  export POSTHASTE_STALWART_SMTP_BIND="127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT"
+else
+  POSTHASTE_STALWART_SMTP_PORT="$(port_from_bind "$POSTHASTE_STALWART_SMTP_BIND")"
+fi
+
 if [[ -z "${POSTHASTE_BIND:-}" ]]; then
   POSTHASTE_SERVER_PORT="$(find_available_port 3001)"
   export POSTHASTE_BIND="127.0.0.1:$POSTHASTE_SERVER_PORT"
@@ -148,7 +162,7 @@ rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 
 log_path="$("$root/tools/dev/overmind/server-log-path.sh")"
 echo "Persisted server log: $log_path (tail with 'just server-log-tail')"
-echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
+echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, IMAP 127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT, SMTP 127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
 
 if [[ "${POSTHASTE_DEV_STACK_SMOKE:-}" == "1" ]]; then
   require_var_dev_path() {
