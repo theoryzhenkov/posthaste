@@ -79,6 +79,30 @@ export interface AutomationRulePreviewResponse {
   items: MessageSummary[]
 }
 
+interface AccountConnectionOverviewBase {
+  provider: ProviderHint
+  auth: ProviderAuthKind
+  username: string | null
+  imap: MailEndpointSettings | null
+  smtp: MailEndpointSettings | null
+  secret: SecretStatus
+}
+
+export interface ManualCredentialsAccountConnectionOverview extends AccountConnectionOverviewBase {
+  kind: 'manualCredentials'
+  auth: 'password' | 'appPassword'
+  baseUrl: string | null
+}
+
+export interface ManagedOAuthAccountConnectionOverview extends AccountConnectionOverviewBase {
+  kind: 'managedOAuth'
+  auth: 'oauth2'
+}
+
+export type AccountConnectionOverview =
+  | ManualCredentialsAccountConnectionOverview
+  | ManagedOAuthAccountConnectionOverview
+
 /**
  * Summary of a configured account, including transport and sync status.
  * @spec docs/L1-api#account-crud-lifecycle
@@ -91,15 +115,7 @@ export interface AccountOverview {
   driver: AccountDriver
   enabled: boolean
   appearance: AccountAppearance
-  transport: {
-    provider: ProviderHint
-    auth: ProviderAuthKind
-    baseUrl: string | null
-    username: string | null
-    imap: MailEndpointSettings | null
-    smtp: MailEndpointSettings | null
-    secret: SecretStatus
-  }
+  connection: AccountConnectionOverview
   createdAt: string
   updatedAt: string
   isDefault: boolean

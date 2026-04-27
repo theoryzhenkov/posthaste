@@ -20,6 +20,7 @@ import type {
   SmartMailboxSummary,
   UpdateAccountInput,
 } from '../../api/types'
+import type { ExistingAccountEditorModel } from './accountEditorModel'
 import type { AccountFormState, SmartMailboxFormState } from './types'
 
 /** Default empty form state for creating a new account. */
@@ -66,8 +67,11 @@ export function formFromAccount(account: AccountOverview): AccountFormState {
     emailPatternsText: account.emailPatterns?.join('\n') ?? '',
     appearanceInitials: normalizeAccountInitials(account.appearance.initials),
     appearanceColorHue: account.appearance.colorHue,
-    baseUrl: account.transport.baseUrl ?? '',
-    username: account.transport.username ?? '',
+    baseUrl:
+      account.connection.kind === 'manualCredentials'
+        ? (account.connection.baseUrl ?? '')
+        : '',
+    username: account.connection.username ?? '',
     password: '',
   }
 }
@@ -254,7 +258,7 @@ export function buildCreateAccountPayload(
  */
 export function buildUpdateAccountPayload(
   form: AccountFormState,
-  account?: AccountOverview | null,
+  editorModel: ExistingAccountEditorModel,
 ): UpdateAccountInput {
   const input: UpdateAccountInput = {
     name: form.name.trim(),
@@ -262,16 +266,19 @@ export function buildUpdateAccountPayload(
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     appearance: buildAccountAppearanceInput(form),
   }
-  if (account?.transport.auth === 'oauth2') {
-    return input
-  }
-  return {
-    ...input,
-    transport: {
-      baseUrl: form.baseUrl,
-      username: form.username,
-    },
-    secret: buildSecretInput(form),
+
+  switch (editorModel.connection.kind) {
+    case 'managedOAuth':
+      return input
+    case 'manualCredentials':
+      return {
+        ...input,
+        transport: {
+          baseUrl: form.baseUrl,
+          username: form.username,
+        },
+        secret: buildSecretInput(form),
+      }
   }
 }
 
