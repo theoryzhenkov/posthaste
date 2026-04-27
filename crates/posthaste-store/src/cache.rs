@@ -151,6 +151,48 @@ pub(crate) fn ensure_body_cache_object_tx(
 
 pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Result<(), StoreError> {
     let now = now_iso8601()?;
+    let pruned_queue = connection
+        .execute(
+            "DELETE FROM cache_rescore_queue
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM message m
+                WHERE m.account_id = cache_rescore_queue.account_id
+                  AND m.id = cache_rescore_queue.message_id
+             )",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
+    let pruned_signals = connection
+        .execute(
+            "DELETE FROM cache_message_signal
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM message m
+                WHERE m.account_id = cache_message_signal.account_id
+                  AND m.id = cache_message_signal.message_id
+             )",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
+    let pruned_objects = connection
+        .execute(
+            "DELETE FROM cache_object
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM message m
+                WHERE m.account_id = cache_object.account_id
+                  AND m.id = cache_object.message_id
+             )",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
+    if pruned_queue > 0 || pruned_signals > 0 || pruned_objects > 0 {
+        debug!(
+            pruned_queue,
+            pruned_signals, pruned_objects, "pruned orphan cache child rows"
+        );
+    }
     connection
         .execute(
             "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
