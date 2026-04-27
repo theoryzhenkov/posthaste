@@ -32,3 +32,15 @@ ephemeral log.
   eventually load data, but progress was hard to inspect while it was running.
 
 ## Closed
+
+### PH-002: OAuth account editor exposes password and base URL fields
+
+- Status: closed
+- Severity: medium
+- Area: Settings accounts UI
+- Observed: A Google account created through OAuth still showed editable Base
+  URL and Password fields, and did not clearly indicate Google/OAuth.
+- Expected: Provider OAuth accounts should display provider/auth details and
+  hide manually edited transport credentials.
+- Resolution: OAuth accounts now show read-only connection details and omit
+  manual server/password controls.
