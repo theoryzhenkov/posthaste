@@ -35,6 +35,17 @@ pub struct ImapMailboxHeaderSnapshot {
     pub headers: Vec<ImapMappedHeader>,
 }
 
+/// Header-level delta for mailboxes where UID is the only available sync state.
+///
+/// `current_uids` is an authoritative UID listing for deletion reconciliation,
+/// while `headers` only contains records newer than the stored UID watermark.
+#[derive(Clone, Debug)]
+pub struct ImapMailboxUidDeltaSnapshot {
+    pub selected: ImapSelectedMailbox,
+    pub headers: Vec<ImapMappedHeader>,
+    pub current_uids: Vec<ImapUid>,
+}
+
 /// Header-level records changed since a previously stored mailbox MODSEQ.
 ///
 /// `headers` is intentionally partial: it contains only messages returned by
@@ -106,6 +117,62 @@ pub async fn fetch_mailbox_header_snapshot(
             .await?;
 
     Ok(ImapMailboxHeaderSnapshot { selected, headers })
+}
+
+/// Fetch headers for messages whose UID is above the stored watermark.
+///
+/// RFC 3501/9051 UID ranges with `*` can include the highest existing UID even
+/// when the lower bound is above all assigned UIDs, so this path searches all
+/// UIDs and filters client-side instead of issuing `UID SEARCH UID n:*`.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+/// @spec docs/L1-sync#body-lazy
+pub async fn fetch_mailbox_headers_after_uid(
+    config: &ImapConnectionConfig,
+    mailbox_name: &str,
+    after_uid: ImapUid,
+    updated_at: String,
+) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    client.refresh_capabilities().await?;
+    let fetch_modseq = normalize_imap_capabilities(
+        client
+            .state
+            .capabilities_iter()
+            .map(std::string::ToString::to_string),
+    )
+    .supports_condstore();
+    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
+    let mut uids = client.uid_search([SearchKey::All]).await?;
+
+    uids.sort_unstable();
+    uids.dedup();
+    let current_uids = uids
+        .iter()
+        .map(|uid| ImapUid(uid.get()))
+        .collect::<Vec<_>>();
+    let new_uids = uids
+        .into_iter()
+        .filter(|uid| uid.get() > after_uid.0)
+        .collect::<Vec<_>>();
+    info!(
+        mailbox_id = %selected.mailbox_id,
+        uid_count = current_uids.len(),
+        new_uid_count = new_uids.len(),
+        after_uid = after_uid.0,
+        fetch_modseq,
+        "IMAP mailbox UID delta search completed"
+    );
+
+    let headers =
+        fetch_selected_mailbox_headers(&mut client, &selected, &new_uids, fetch_modseq, updated_at)
+            .await?;
+
+    Ok(ImapMailboxUidDeltaSnapshot {
+        selected,
+        headers,
+        current_uids,
+    })
 }
 
 /// Fetch message headers and flags changed since a stored MODSEQ.
