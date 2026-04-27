@@ -5,7 +5,8 @@ use std::time::Instant;
 
 use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
-    AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
+    AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
+    CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
     GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream, PushStatus,
     PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncProgress,
     SyncProgressReporter, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
@@ -17,7 +18,7 @@ use posthaste_imap::{
     SmtpConnectionConfig,
 };
 use serde_json::json;
-use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use uuid::Uuid;
@@ -28,14 +29,11 @@ use crate::push::resilient_push_stream;
 const AUTOMATION_BACKFILL_BATCH_SIZE: usize = 10;
 const AUTOMATION_BACKFILL_INITIAL_DELAY: Duration = Duration::from_secs(10);
 const AUTOMATION_BACKFILL_INTERVAL: Duration = Duration::from_secs(15);
-const CACHE_WORKER_BATCH_SIZE: usize = 3;
-const CACHE_RESCORE_BATCH_SIZE: usize = 100;
-const CACHE_STALE_RESCORE_BATCH_SIZE: usize = 100;
 const CACHE_BACKGROUND_PRESSURE: f64 = 0.0;
 const CACHE_INTERACTIVE_PRESSURE: f64 = 1.0;
 const CACHE_STALE_RESCORE_AFTER: Duration = Duration::from_secs(6 * 60 * 60);
 const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
-const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(10);
+const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
@@ -55,6 +53,7 @@ struct SupervisorShared {
     event_sender: broadcast::Sender<DomainEvent>,
     gateways: RwLock<HashMap<String, SharedGateway>>,
     runtime_overviews: RwLock<HashMap<String, AccountRuntimeOverview>>,
+    cache_resources: Mutex<CacheResourceGovernor>,
     poll_interval: Duration,
 }
 
@@ -110,6 +109,10 @@ impl AccountSupervisor {
                 event_sender,
                 gateways: RwLock::new(HashMap::new()),
                 runtime_overviews: RwLock::new(HashMap::new()),
+                cache_resources: Mutex::new(CacheResourceGovernor::new(
+                    Instant::now(),
+                    CacheResourcePolicy::default(),
+                )),
                 poll_interval,
             }),
             runtimes: RwLock::new(HashMap::new()),
@@ -398,111 +401,172 @@ async fn process_cache_maintenance_batch(
     gateway: Option<SharedGateway>,
     interactive_pressure: f64,
 ) {
-    match shared.service.queue_stale_cache_rescore_batch(
-        account_id,
-        CACHE_STALE_RESCORE_AFTER,
-        CACHE_STALE_RESCORE_BATCH_SIZE,
-    ) {
-        Ok(queued) => {
-            if queued > 0 {
-                debug!(
-                    account_id = %account_id,
-                    queued,
-                    stale_after_seconds = CACHE_STALE_RESCORE_AFTER.as_secs(),
-                    batch_size = CACHE_STALE_RESCORE_BATCH_SIZE,
-                    "stale cache rescore candidates queued"
-                );
-            }
-        }
-        Err(error) => {
-            warn!(
-                account_id = %account_id,
-                error = %error,
-                "stale cache rescore queueing failed"
-            );
-        }
-    }
-
-    match shared
-        .service
-        .process_cache_rescore_batch(account_id, CACHE_RESCORE_BATCH_SIZE)
-    {
-        Ok(outcome) => {
-            if outcome.updated > 0 {
-                debug!(
-                    account_id = %account_id,
-                    scanned = outcome.scanned,
-                    updated = outcome.updated,
-                    skipped = outcome.skipped,
-                    "cache rescore batch completed"
-                );
-            }
-        }
-        Err(error) => {
-            warn!(
-                account_id = %account_id,
-                error = %error,
-                "cache rescore batch failed"
-            );
-        }
-    }
-
-    let Some(gateway) = gateway else {
-        debug!(
-            account_id = %account_id,
-            "cache worker skipped because no gateway is connected"
-        );
-        return;
+    let started = Instant::now();
+    let lease = {
+        let mut governor = shared.cache_resources.lock().await;
+        governor.grant(started, interactive_pressure)
     };
+    let mut feedback = CacheMaintenanceFeedback::default();
+    debug!(
+        account_id = %account_id,
+        interactive_pressure,
+        stale_rescore_limit = lease.stale_rescore_limit,
+        rescore_limit = lease.rescore_limit,
+        fetch_request_limit = lease.fetch.request_limit,
+        fetch_byte_limit = lease.fetch.byte_limit,
+        network_rate_multiplier = lease.network_rate_multiplier,
+        in_backoff = lease.in_backoff,
+        "cache maintenance resource lease granted"
+    );
 
-    match shared
-        .service
-        .process_body_cache_batch(
+    if lease.stale_rescore_limit > 0 {
+        match shared.service.queue_stale_cache_rescore_batch(
             account_id,
-            gateway.as_ref(),
-            CACHE_WORKER_BATCH_SIZE,
-            interactive_pressure,
-        )
-        .await
-    {
-        Ok(outcome) => {
-            if !outcome.events.is_empty() {
-                shared.publish_events(&outcome.events);
+            CACHE_STALE_RESCORE_AFTER,
+            lease.stale_rescore_limit,
+        ) {
+            Ok(queued) => {
+                feedback.stale_rescore_queued = queued;
+                if queued > 0 {
+                    debug!(
+                        account_id = %account_id,
+                        queued,
+                        stale_after_seconds = CACHE_STALE_RESCORE_AFTER.as_secs(),
+                        lease_limit = lease.stale_rescore_limit,
+                        "stale cache rescore candidates queued"
+                    );
+                }
             }
-            if outcome.attempted > 0 || outcome.cached > 0 || outcome.failed > 0 {
-                info!(
+            Err(error) => {
+                feedback.had_error = true;
+                warn!(
                     account_id = %account_id,
-                    scanned = outcome.scanned,
-                    attempted = outcome.attempted,
-                    cached = outcome.cached,
-                    failed = outcome.failed,
-                    skipped = outcome.skipped,
-                    event_count = outcome.events.len(),
-                    "cache worker batch completed"
-                );
-            } else if outcome.skipped > 0 {
-                debug!(
-                    account_id = %account_id,
-                    scanned = outcome.scanned,
-                    skipped = outcome.skipped,
-                    "cache worker skipped candidates outside current budget"
-                );
-            } else {
-                debug!(
-                    account_id = %account_id,
-                    scanned = outcome.scanned,
-                    "cache worker batch completed without fetch work"
+                    error = %error,
+                    "stale cache rescore queueing failed"
                 );
             }
         }
-        Err(error) => {
-            warn!(
+    }
+
+    if lease.rescore_limit > 0 {
+        match shared
+            .service
+            .process_cache_rescore_batch(account_id, lease.rescore_limit)
+        {
+            Ok(outcome) => {
+                feedback.rescore_scanned = outcome.scanned;
+                if outcome.updated > 0 {
+                    debug!(
+                        account_id = %account_id,
+                        scanned = outcome.scanned,
+                        updated = outcome.updated,
+                        skipped = outcome.skipped,
+                        lease_limit = lease.rescore_limit,
+                        "cache rescore batch completed"
+                    );
+                }
+            }
+            Err(error) => {
+                feedback.had_error = true;
+                warn!(
+                    account_id = %account_id,
+                    error = %error,
+                    "cache rescore batch failed"
+                );
+            }
+        }
+    }
+
+    match (gateway, lease.fetch.has_fetch_budget()) {
+        (None, true) => {
+            debug!(
                 account_id = %account_id,
-                error = %error,
-                "cache worker batch failed"
+                fetch_request_limit = lease.fetch.request_limit,
+                fetch_byte_limit = lease.fetch.byte_limit,
+                "cache worker skipped because no gateway is connected"
+            );
+        }
+        (Some(gateway), true) => {
+            match shared
+                .service
+                .process_body_cache_batch(account_id, gateway.as_ref(), lease.fetch)
+                .await
+            {
+                Ok(outcome) => {
+                    feedback.fetch_attempted = outcome.attempted;
+                    feedback.fetch_attempted_bytes = outcome.attempted_bytes;
+                    feedback.fetch_cached = outcome.cached;
+                    feedback.fetch_failed = outcome.failed;
+                    if !outcome.events.is_empty() {
+                        shared.publish_events(&outcome.events);
+                    }
+                    if outcome.attempted > 0 || outcome.cached > 0 || outcome.failed > 0 {
+                        info!(
+                            account_id = %account_id,
+                            scanned = outcome.scanned,
+                            attempted = outcome.attempted,
+                            attempted_bytes = outcome.attempted_bytes,
+                            cached = outcome.cached,
+                            cached_bytes = outcome.cached_bytes,
+                            failed = outcome.failed,
+                            skipped = outcome.skipped,
+                            event_count = outcome.events.len(),
+                            "cache worker batch completed"
+                        );
+                    } else if outcome.skipped > 0 {
+                        debug!(
+                            account_id = %account_id,
+                            scanned = outcome.scanned,
+                            skipped = outcome.skipped,
+                            "cache worker skipped candidates outside current resource/cache budget"
+                        );
+                    } else {
+                        debug!(
+                            account_id = %account_id,
+                            scanned = outcome.scanned,
+                            "cache worker batch completed without fetch work"
+                        );
+                    }
+                }
+                Err(error) => {
+                    feedback.had_error = true;
+                    feedback.had_fetch_error = true;
+                    warn!(
+                        account_id = %account_id,
+                        error = %error,
+                        "cache worker batch failed"
+                    );
+                }
+            }
+        }
+        _ => {
+            debug!(
+                account_id = %account_id,
+                in_backoff = lease.in_backoff,
+                "cache worker skipped because no fetch resource lease was granted"
             );
         }
     }
+
+    feedback.elapsed = started.elapsed();
+    let now = Instant::now();
+    let mut governor = shared.cache_resources.lock().await;
+    governor.record_feedback(now, &lease, feedback);
+    debug!(
+        account_id = %account_id,
+        stale_rescore_queued = feedback.stale_rescore_queued,
+        rescore_scanned = feedback.rescore_scanned,
+        fetch_attempted = feedback.fetch_attempted,
+        fetch_attempted_bytes = feedback.fetch_attempted_bytes,
+        fetch_cached = feedback.fetch_cached,
+        fetch_failed = feedback.fetch_failed,
+        elapsed_ms = feedback.elapsed.as_millis(),
+        had_error = feedback.had_error,
+        had_fetch_error = feedback.had_fetch_error,
+        network_rate_multiplier = governor.network_rate_multiplier(),
+        in_backoff = governor.is_in_backoff(now),
+        "cache maintenance resource feedback recorded"
+    );
 }
 
 fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interval {

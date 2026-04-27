@@ -9,21 +9,22 @@ use crate::{
     decide_cache_admission, score_cache_candidate, AccountDriver, AccountId, AccountSettings,
     AddToMailboxCommand, AppSettings, AutomationAction, AutomationBackfillBatchOutcome,
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, AutomationRule,
-    AutomationTrigger, CacheAdmission, CacheCandidate, CacheCandidateSignals, CacheFetchUnit,
-    CacheLayer, CacheMessageSignals, CacheObjectState, CachePolicy, CachePriorityUpdate,
-    CacheRescoreBatchOutcome, CacheRescoreCandidate, CacheSignalUpdate, CacheStore,
-    CacheWorkerBatchOutcome, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
-    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
-    ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
-    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
-    MessageListStore, MessageMailboxStore, MessagePage, MessageRecord, MessageSortField,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse, SidebarSmartMailbox,
-    SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
-    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection,
-    SourceDataStore, SourceProjectionStore, StoreError, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
+    AutomationTrigger, CacheAdmission, CacheCandidate, CacheCandidateSignals, CacheFetchLease,
+    CacheFetchUnit, CacheLayer, CacheMessageSignals, CacheObjectState, CachePolicy,
+    CachePriorityUpdate, CacheRescoreBatchOutcome, CacheRescoreCandidate, CacheSignalUpdate,
+    CacheStore, CacheWorkerBatchOutcome, CommandResult, ConfigDiff, ConfigRepository,
+    ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
+    ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
+    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
+    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
+    MessageRecord, MessageSortField, MessageSummary, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, StoreError, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore,
+    TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
     EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
@@ -1016,11 +1017,10 @@ impl MailService {
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
-        batch_size: usize,
-        interactive_pressure: f64,
+        lease: CacheFetchLease,
     ) -> Result<CacheWorkerBatchOutcome, ServiceError> {
         let mut outcome = CacheWorkerBatchOutcome::default();
-        if batch_size == 0 {
+        if !lease.has_fetch_budget() {
             return Ok(outcome);
         }
 
@@ -1035,11 +1035,14 @@ impl MailService {
         }
 
         let mut used_bytes = self.cache_store.cache_used_bytes()?;
-        let scan_limit = batch_size.saturating_mul(4).max(batch_size);
+        let scan_limit = lease
+            .request_limit
+            .saturating_mul(4)
+            .max(lease.request_limit);
         let initial_budget = settings
             .cache_policy
             .clone()
-            .budget(used_bytes, interactive_pressure);
+            .budget(used_bytes, lease.interactive_pressure);
         let candidates = self.cache_store.list_cache_fetch_candidates(
             account_id,
             CacheLayer::Body,
@@ -1048,7 +1051,8 @@ impl MailService {
         debug!(
             account_id = %account_id,
             layer = CacheLayer::Body.as_str(),
-            batch_size,
+            request_limit = lease.request_limit,
+            byte_limit = lease.byte_limit,
             scan_limit,
             candidate_count = candidates.len(),
             used_bytes,
@@ -1065,15 +1069,29 @@ impl MailService {
                 "cache worker found no wanted body candidates"
             );
         }
+        let mut remaining_lease_bytes = lease.byte_limit;
         for candidate in candidates {
-            if outcome.attempted >= batch_size {
+            if outcome.attempted >= lease.request_limit {
                 break;
             }
             outcome.scanned += 1;
+            if candidate.fetch_bytes > remaining_lease_bytes {
+                outcome.skipped += 1;
+                debug!(
+                    account_id = %account_id,
+                    message_id = candidate.message_id.as_str(),
+                    layer = candidate.layer.as_str(),
+                    fetch_unit = candidate.fetch_unit.as_str(),
+                    fetch_bytes = candidate.fetch_bytes,
+                    remaining_lease_bytes,
+                    "cache candidate deferred by fetch byte lease"
+                );
+                continue;
+            }
             let budget = settings
                 .cache_policy
                 .clone()
-                .budget(used_bytes, interactive_pressure);
+                .budget(used_bytes, lease.interactive_pressure);
             let admission =
                 decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget);
             debug!(
@@ -1104,6 +1122,10 @@ impl MailService {
                 None,
             )?;
             outcome.attempted += 1;
+            outcome.attempted_bytes = outcome
+                .attempted_bytes
+                .saturating_add(candidate.fetch_bytes);
+            remaining_lease_bytes = remaining_lease_bytes.saturating_sub(candidate.fetch_bytes);
             debug!(
                 account_id = %account_id,
                 message_id = %message_id,
@@ -1153,6 +1175,7 @@ impl MailService {
             )?;
             used_bytes = used_bytes.saturating_add(candidate.fetch_bytes);
             outcome.cached += 1;
+            outcome.cached_bytes = outcome.cached_bytes.saturating_add(candidate.fetch_bytes);
             outcome.events.extend(result.events);
             debug!(
                 account_id = %account_id,
@@ -2818,6 +2841,10 @@ mod tests {
         }
     }
 
+    fn sample_fetch_lease(request_limit: usize, byte_limit: u64) -> CacheFetchLease {
+        CacheFetchLease::new(request_limit, byte_limit, 0.0)
+    }
+
     fn sample_cache_rescore_candidate(message_id: &str) -> CacheRescoreCandidate {
         CacheRescoreCandidate {
             account_id: "primary".to_string(),
@@ -3307,12 +3334,14 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(10, 1024 * 1024))
             .await
             .expect("cache worker should fetch an admitted body");
 
         assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.attempted_bytes, 32 * 1024);
         assert_eq!(outcome.cached, 1);
+        assert_eq!(outcome.cached_bytes, 32 * 1024);
         assert_eq!(outcome.failed, 0);
         assert_eq!(outcome.skipped, 0);
         assert_eq!(
@@ -3366,12 +3395,14 @@ mod tests {
         )));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(10, 1024 * 1024))
             .await
             .expect("cache worker should record fetch failures");
 
         assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.attempted_bytes, 32 * 1024);
         assert_eq!(outcome.cached, 0);
+        assert_eq!(outcome.cached_bytes, 0);
         assert_eq!(outcome.failed, 1);
         assert_eq!(outcome.skipped, 0);
         assert!(store
@@ -3415,7 +3446,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let error = service
-            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(10, 1024 * 1024))
             .await
             .expect_err("cache worker should surface local store failures");
 
@@ -3461,7 +3492,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(10, 1024 * 1024))
             .await
             .expect("cache worker should skip over-budget candidates");
 
@@ -3509,7 +3540,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 1, 0.0)
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(1, 1024 * 1024))
             .await
             .expect("cache worker should scan past oversized candidates");
 
@@ -3523,6 +3554,39 @@ mod tests {
                 .lock()
                 .expect("fetch attempts lock poisoned"),
             vec![MessageId::from("small-enough")]
+        );
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_respects_fetch_byte_lease() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![
+                sample_cache_fetch_candidate("too-large-for-lease", 2 * 1024),
+                sample_cache_fetch_candidate("fits-lease", 512),
+            ]),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
+
+        let outcome = service
+            .process_body_cache_batch(&account_id, &gateway, sample_fetch_lease(2, 1024))
+            .await
+            .expect("cache worker should respect fetch byte lease");
+
+        assert_eq!(outcome.scanned, 2);
+        assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.attempted_bytes, 512);
+        assert_eq!(outcome.cached, 1);
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(
+            *gateway
+                .fetch_attempts
+                .lock()
+                .expect("fetch attempts lock poisoned"),
+            vec![MessageId::from("fits-lease")]
         );
     }
 
