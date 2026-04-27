@@ -93,6 +93,7 @@ impl PreviewHarness {
                 supervisor,
                 event_sender,
                 account_logo_root: state_root.join("account-assets/logos"),
+                oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
             }),
             store: database_store,
         }
