@@ -5,8 +5,8 @@ use lettre::message::{header, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use posthaste_domain::{
-    AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient, SendMessageRequest,
-    TransportSecurity,
+    AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient,
+    SendMessageRequest, TransportSecurity,
 };
 use pulldown_cmark::{html, Options, Parser};
 
@@ -20,6 +20,8 @@ pub struct SmtpConnectionConfig {
     pub host: String,
     pub port: u16,
     pub security: TransportSecurity,
+    pub sender_name: Option<String>,
+    pub sender_email: String,
     pub username: String,
     pub secret: String,
     pub auth: ProviderAuthKind,
@@ -27,8 +29,35 @@ pub struct SmtpConnectionConfig {
 }
 
 impl SmtpConnectionConfig {
+    pub fn from_account_settings(
+        account: &AccountSettings,
+        secret: String,
+    ) -> Result<Self, ImapAdapterError> {
+        Self::from_parts(
+            &account.transport,
+            account.full_name.as_deref(),
+            concrete_sender_email(&account.email_patterns)
+                .or_else(|| concrete_sender_email(account.transport.username.iter())),
+            secret,
+        )
+    }
+
     pub fn from_account_transport(
         transport: &AccountTransportSettings,
+        secret: String,
+    ) -> Result<Self, ImapAdapterError> {
+        Self::from_parts(
+            transport,
+            None,
+            concrete_sender_email(transport.username.iter()),
+            secret,
+        )
+    }
+
+    fn from_parts(
+        transport: &AccountTransportSettings,
+        sender_name: Option<&str>,
+        sender_email: Option<String>,
         secret: String,
     ) -> Result<Self, ImapAdapterError> {
         let smtp = transport
@@ -44,17 +73,34 @@ impl SmtpConnectionConfig {
         if secret.trim().is_empty() {
             return Err(ImapAdapterError::MissingSecret);
         }
+        let sender_email = sender_email.ok_or(ImapAdapterError::MissingSmtpSenderEmail)?;
+        let sender_name = sender_name.and_then(|name| {
+            let name = name.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        });
 
         Ok(Self {
             host: smtp.host.clone(),
             port: smtp.port,
             security: smtp.security.clone(),
+            sender_name,
+            sender_email,
             username: username.to_string(),
             secret,
             auth: transport.auth.clone(),
             provider: transport.provider.clone(),
         })
     }
+}
+
+fn concrete_sender_email<'a>(emails: impl IntoIterator<Item = &'a String>) -> Option<String> {
+    emails.into_iter().find_map(|email| {
+        let email = email.trim();
+        if email.is_empty() || email.contains('*') {
+            return None;
+        }
+        email.parse::<Address>().is_ok().then(|| email.to_string())
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -220,13 +266,15 @@ pub fn smtp_mailbox_for_recipient(recipient: &Recipient) -> Result<Mailbox, Imap
 }
 
 fn smtp_sender_mailbox(config: &SmtpConnectionConfig) -> Result<Mailbox, ImapAdapterError> {
-    let name = config
-        .username
-        .split('@')
-        .next()
-        .filter(|name| !name.is_empty())
-        .map(str::to_string);
-    smtp_mailbox(name, &config.username)
+    let name = config.sender_name.clone().or_else(|| {
+        config
+            .sender_email
+            .split('@')
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    });
+    smtp_mailbox(name, &config.sender_email)
 }
 
 fn smtp_mailbox(name: Option<String>, email: &str) -> Result<Mailbox, ImapAdapterError> {
@@ -261,8 +309,9 @@ mod tests {
     use tokio::sync::oneshot;
 
     use posthaste_domain::{
-        AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient, SmtpTransportSettings,
-        TransportSecurity,
+        AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ProviderAuthKind,
+        ProviderHint, Recipient, SecretKind, SecretRef, SmtpTransportSettings, TransportSecurity,
+        RFC3339_EPOCH,
     };
 
     use super::*;
@@ -348,6 +397,32 @@ mod tests {
     }
 
     #[test]
+    fn config_from_account_settings_separates_auth_username_from_sender_email() {
+        let account = test_account(
+            Some("Alice Example"),
+            vec!["*@example.test", "alice@example.test"],
+            "alice-login",
+        );
+
+        let config = SmtpConnectionConfig::from_account_settings(&account, "secret".to_string())
+            .expect("SMTP config");
+
+        assert_eq!(config.username, "alice-login");
+        assert_eq!(config.sender_email, "alice@example.test");
+        assert_eq!(config.sender_name.as_deref(), Some("Alice Example"));
+    }
+
+    #[test]
+    fn config_from_account_settings_rejects_missing_sender_email() {
+        let account = test_account(None, vec!["*@example.test"], "alice-login");
+
+        let error = SmtpConnectionConfig::from_account_settings(&account, "secret".to_string())
+            .expect_err("concrete sender email should be required");
+
+        assert!(matches!(error, ImapAdapterError::MissingSmtpSenderEmail));
+    }
+
+    #[test]
     fn provider_sent_copy_policy_avoids_known_auto_saved_providers() {
         assert_eq!(
             smtp_sent_copy_strategy(&ProviderHint::Gmail),
@@ -374,6 +449,8 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: addr.port(),
             security: TransportSecurity::Plain,
+            sender_name: Some("Alice".to_string()),
+            sender_email: "alice@example.test".to_string(),
             username: "alice@example.test".to_string(),
             secret: "secret".to_string(),
             auth: ProviderAuthKind::Password,
@@ -417,6 +494,8 @@ mod tests {
             host: "smtp.example.test".to_string(),
             port: 587,
             security: TransportSecurity::StartTls,
+            sender_name: None,
+            sender_email: "alice@example.test".to_string(),
             username: "alice@example.test".to_string(),
             secret: "secret".to_string(),
             auth: ProviderAuthKind::Password,
@@ -428,6 +507,39 @@ mod tests {
         Recipient {
             name: name.map(str::to_string),
             email: email.to_string(),
+        }
+    }
+
+    fn test_account(
+        full_name: Option<&str>,
+        email_patterns: Vec<&str>,
+        username: &str,
+    ) -> AccountSettings {
+        AccountSettings {
+            id: AccountId::from("primary"),
+            name: "Primary".to_string(),
+            full_name: full_name.map(str::to_string),
+            email_patterns: email_patterns.into_iter().map(str::to_string).collect(),
+            driver: AccountDriver::ImapSmtp,
+            enabled: true,
+            appearance: None,
+            transport: AccountTransportSettings {
+                provider: ProviderHint::Generic,
+                auth: ProviderAuthKind::Password,
+                username: Some(username.to_string()),
+                secret_ref: Some(SecretRef {
+                    kind: SecretKind::Env,
+                    key: "POSTHASTE_TEST_SECRET".to_string(),
+                }),
+                smtp: Some(SmtpTransportSettings {
+                    host: "smtp.example.test".to_string(),
+                    port: 587,
+                    security: TransportSecurity::StartTls,
+                }),
+                ..Default::default()
+            },
+            created_at: RFC3339_EPOCH.to_string(),
+            updated_at: RFC3339_EPOCH.to_string(),
         }
     }
 

@@ -2091,6 +2091,31 @@ mod tests {
     }
 
     #[test]
+    fn imap_smtp_account_requires_sender_email_when_username_is_not_email() {
+        let account = imap_smtp_account("alice-login", vec!["*@example.com"]);
+
+        let error = validate_account_settings(&account).expect_err("validation should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_account");
+        assert!(error.body.message.contains("sender email"));
+    }
+
+    #[test]
+    fn imap_smtp_account_allows_login_name_with_sender_email_pattern() {
+        let account = imap_smtp_account("alice-login", vec!["alice@example.com"]);
+
+        assert!(validate_account_settings(&account).is_ok());
+    }
+
+    #[test]
+    fn imap_smtp_account_allows_email_username_as_sender_fallback() {
+        let account = imap_smtp_account("alice@example.com", Vec::new());
+
+        assert!(validate_account_settings(&account).is_ok());
+    }
+
+    #[test]
     fn secret_replace_requires_password() {
         let error = validate_secret_request(&SecretWriteRequest {
             mode: SecretWriteMode::Replace,
@@ -2175,5 +2200,37 @@ mod tests {
                 color_hue: 245,
             }
         );
+    }
+
+    fn imap_smtp_account(username: &str, email_patterns: Vec<&str>) -> AccountSettings {
+        AccountSettings {
+            id: AccountId::from("primary"),
+            name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: email_patterns.into_iter().map(str::to_string).collect(),
+            driver: AccountDriver::ImapSmtp,
+            enabled: true,
+            appearance: None,
+            transport: posthaste_domain::AccountTransportSettings {
+                username: Some(username.to_string()),
+                secret_ref: Some(SecretRef {
+                    kind: SecretKind::Env,
+                    key: "POSTHASTE_IMAP_PASSWORD".to_string(),
+                }),
+                imap: Some(ImapTransportSettings {
+                    host: "imap.example.com".to_string(),
+                    port: 993,
+                    security: posthaste_domain::TransportSecurity::Tls,
+                }),
+                smtp: Some(SmtpTransportSettings {
+                    host: "smtp.example.com".to_string(),
+                    port: 587,
+                    security: posthaste_domain::TransportSecurity::StartTls,
+                }),
+                ..Default::default()
+            },
+            created_at: "2026-03-31T10:00:00Z".to_string(),
+            updated_at: "2026-03-31T10:00:00Z".to_string(),
+        }
     }
 }
