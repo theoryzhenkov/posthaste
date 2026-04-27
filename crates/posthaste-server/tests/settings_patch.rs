@@ -10,7 +10,7 @@ use axum::Json;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
+    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, CachePolicy,
     ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
@@ -179,6 +179,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
                 default_account_id: None,
+                cache_policy: None,
                 automation_rules: Some(vec![source_rule("primary")]),
                 automation_drafts: None,
             }),
@@ -226,6 +227,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
                 default_account_id: Some(None),
+                cache_policy: None,
                 automation_rules: None,
                 automation_drafts: None,
             }),
@@ -240,6 +242,42 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
     assert_eq!(
         app_toml["automations"][0]["id"].as_str(),
         Some("rule-newsletters")
+    );
+}
+
+#[tokio::test]
+async fn patch_settings_can_update_cache_policy() {
+    let harness = SettingsHarness::new();
+
+    let Json(settings) = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                default_account_id: None,
+                cache_policy: Some(CachePolicy {
+                    soft_cap_bytes: 64 * 1024 * 1024,
+                    hard_cap_bytes: 32 * 1024 * 1024,
+                    cache_bodies: true,
+                    cache_raw_messages: false,
+                    cache_attachments: false,
+                }),
+                automation_rules: None,
+                automation_drafts: None,
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(settings.cache_policy.soft_cap_bytes, 64 * 1024 * 1024);
+    assert_eq!(settings.cache_policy.hard_cap_bytes, 64 * 1024 * 1024);
+    let app_toml = harness.app_toml();
+    assert_eq!(
+        app_toml["cache"]["soft_cap_bytes"].as_integer(),
+        Some(64 * 1024 * 1024)
+    );
+    assert_eq!(
+        app_toml["cache"]["hard_cap_bytes"].as_integer(),
+        Some(64 * 1024 * 1024)
     );
 }
 
@@ -267,6 +305,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
             State(harness.state.clone()),
             Json(PatchSettingsRequest {
                 default_account_id: None,
+                cache_policy: None,
                 automation_rules: None,
                 automation_drafts: Some(vec![draft]),
             }),
@@ -297,6 +336,7 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
             default_account_id: Some(Some("missing".to_string())),
+            cache_policy: None,
             automation_rules: None,
             automation_drafts: None,
         }),
@@ -336,6 +376,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         State(harness.state.clone()),
         Json(PatchSettingsRequest {
             default_account_id: None,
+            cache_policy: None,
             automation_rules: Some(vec![invalid_rule]),
             automation_drafts: None,
         }),

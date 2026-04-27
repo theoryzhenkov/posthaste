@@ -28,6 +28,9 @@ use crate::push::resilient_push_stream;
 const AUTOMATION_BACKFILL_BATCH_SIZE: usize = 10;
 const AUTOMATION_BACKFILL_INITIAL_DELAY: Duration = Duration::from_secs(10);
 const AUTOMATION_BACKFILL_INTERVAL: Duration = Duration::from_secs(15);
+const CACHE_WORKER_BATCH_SIZE: usize = 3;
+const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
+const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
@@ -247,6 +250,11 @@ async fn run_account_runtime(
         AUTOMATION_BACKFILL_INTERVAL,
     );
     backfill_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut cache_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + CACHE_WORKER_INITIAL_DELAY,
+        CACHE_WORKER_INTERVAL,
+    );
+    cache_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     shared
         .set_runtime_overview(
             &account_id,
@@ -286,6 +294,13 @@ async fn run_account_runtime(
             }
             _ = backfill_interval.tick() => {
                 let _ = process_automation_backfill_batch(
+                    &shared,
+                    &account_id,
+                    connection.as_ref().map(|connection| connection.gateway.clone()),
+                ).await;
+            }
+            _ = cache_interval.tick() => {
+                process_body_cache_batch(
                     &shared,
                     &account_id,
                     connection.as_ref().map(|connection| connection.gateway.clone()),
@@ -337,6 +352,52 @@ async fn run_account_runtime(
                     }
                 }
             }
+        }
+    }
+}
+
+async fn process_body_cache_batch(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    gateway: Option<SharedGateway>,
+) {
+    let Some(gateway) = gateway else {
+        return;
+    };
+
+    match shared
+        .service
+        .process_body_cache_batch(account_id, gateway.as_ref(), CACHE_WORKER_BATCH_SIZE)
+        .await
+    {
+        Ok(outcome) => {
+            if !outcome.events.is_empty() {
+                shared.publish_events(&outcome.events);
+            }
+            if outcome.attempted > 0 || outcome.cached > 0 || outcome.failed > 0 {
+                info!(
+                    account_id = %account_id,
+                    attempted = outcome.attempted,
+                    cached = outcome.cached,
+                    failed = outcome.failed,
+                    skipped = outcome.skipped,
+                    event_count = outcome.events.len(),
+                    "cache worker batch completed"
+                );
+            } else if outcome.skipped > 0 {
+                debug!(
+                    account_id = %account_id,
+                    skipped = outcome.skipped,
+                    "cache worker skipped candidates outside current budget"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                account_id = %account_id,
+                error = %error,
+                "cache worker batch failed"
+            );
         }
     }
 }
