@@ -43,6 +43,64 @@ JMAP reports discovery and mailbox/message fetch phases, while IMAP reports
 capability discovery, mailbox planning, per-mailbox no-op skips, and mailbox
 fetch phases. The supervisor clears progress on success or failure.
 
+## Local cache planning
+
+Metadata remains mandatory and outside eviction. Optional local cache objects are
+scored per layer:
+
+- body
+- raw message
+- attachment blob
+
+The first cache planner uses manual utility scoring. A candidate's priority is:
+
+```text
+priority = utility / size_cost
+size_cost = (max(size_bytes, 4 KiB) / 1 MiB) ^ alpha
+```
+
+Default `alpha` is `0.7`, so large objects are penalized without making high
+utility large attachments impossible to cache.
+
+Message utility is a weighted sum of normalized signals:
+
+```text
+message_utility =
+  0.35 * recency
++ 0.20 * thread_activity
++ 0.15 * sender_affinity
++ 0.10 * explicit_importance
++ 0.10 * search_context
++ 0.10 * local_behavior
+```
+
+Recency uses a 30-day half-life. Thread, sender, and local behavior signals are
+saturating decayed counts. Explicit importance is derived from flags, unread
+state, and Inbox membership. Search context is stronger for tight result sets
+and top-ranked visible results:
+
+```text
+search_context =
+  (1 - ln(result_count + 1) / ln(total_messages + 1))
+  * (1 / sqrt(result_rank + 1))
+```
+
+Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
+attachment blobs. Attachment blobs receive object modifiers for inline
+attachments and previously opened attachments.
+
+Cache budgets have a soft cap and a hard cap. Interactive work such as opening a
+message or narrowing a search can raise the temporary target between those caps:
+
+```text
+effective_target =
+  soft_cap + interactive_pressure * (hard_cap - soft_cap)
+```
+
+Admission is allowed when the candidate fits under `effective_target`. When it
+does not, the candidate must beat the lowest-priority evictable cached object.
+Admission is never allowed when it would cross the hard cap.
+
 ## State management
 
 State strings are per-type, per-account, and stored in `sync_cursor`. The engine reads them on startup and after every successful cycle.
@@ -201,3 +259,5 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |
 | automation-backfill-durable | MUST | Automation backfill progress is stored in SQLite and completed jobs for the same rule fingerprint do not rerun after restart |
 | sync-progress-runtime | SHOULD | Running account syncs expose compact user-facing progress and clear it on success or failure |
+| cache-priority-size-aware | SHOULD | Optional body, raw-message, and attachment cache candidates are prioritized by manual utility divided by size cost |
+| cache-admission-hard-cap | MUST | Optional cache admission may exceed the soft cap under pressure but must not exceed the hard cap |
