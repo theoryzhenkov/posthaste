@@ -189,7 +189,10 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 last_accessed_at TEXT,
                 fetched_at TEXT,
                 error_code TEXT,
-                PRIMARY KEY (account_id, message_id, layer, object_id)
+                PRIMARY KEY (account_id, message_id, layer, object_id),
+                FOREIGN KEY (account_id, message_id)
+                    REFERENCES message(account_id, id)
+                    ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS cache_message_signal (
@@ -206,7 +209,10 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 direct_user_boost REAL,
                 pinned INTEGER,
                 dirty_at TEXT,
-                PRIMARY KEY (account_id, message_id)
+                PRIMARY KEY (account_id, message_id),
+                FOREIGN KEY (account_id, message_id)
+                    REFERENCES message(account_id, id)
+                    ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS cache_rescore_queue (
@@ -214,7 +220,10 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 message_id TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 queued_at TEXT NOT NULL,
-                PRIMARY KEY (account_id, message_id)
+                PRIMARY KEY (account_id, message_id),
+                FOREIGN KEY (account_id, message_id)
+                    REFERENCES message(account_id, id)
+                    ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_message_thread
@@ -258,11 +267,15 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
             ",
         )
         .map_err(sql_to_store_error)?;
+    crate::cache::repair_missing_body_cache_objects(connection)?;
     Ok(())
 }
 
-/// Configures WAL journal mode and a 5-second busy timeout.
+/// Configures WAL journal mode, foreign-key enforcement, and a 5-second busy timeout.
 pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
+    connection
+        .pragma_update(None, "foreign_keys", "ON")
+        .map_err(sql_to_store_error)?;
     connection
         .pragma_update(None, "journal_mode", "wal")
         .map_err(sql_to_store_error)?;

@@ -92,15 +92,25 @@ search_context =
   * (1 / sqrt(result_rank + 1))
 ```
 
+Every message has exactly one structural body `cache_object` row, keyed by
+`(account_id, message_id, layer = body, object_id = '')`. `message` remains the
+source of truth for message existence and metadata; `cache_object` is the child
+ledger for optional-content work and cache state. Sync writes create the body
+row in the same transaction as message metadata, lazy body writes mark it
+`cached`, message deletes remove cache child state, and store startup repairs
+legacy databases that have messages without body cache rows.
+
 The first implemented candidate source is baseline sync-time scoring. It uses
 metadata available in the synced message record: recency, Inbox membership,
-unread state, flagged state, and fetch size. Local user/app activity then updates
-message-level signals separately from metadata sync. Search result visibility is
-the first signal producer: visible ranked results write search context and a
-rank-decayed direct user boost into `cache_message_signal`, enqueue the message
-in `cache_rescore_queue`, and wake the account runtime for cache maintenance.
-Opening/starred thread behavior and thread-level activity should use the same
-signal queue instead of adding fetch-specific shortcuts.
+unread state, flagged state, and fetch size. Structural rows start with neutral
+byte counts until the scorer materializes provider-aware values. Local user/app
+activity then updates message-level signals separately from metadata sync.
+Search result visibility is the first signal producer: visible ranked results
+write search context and a rank-decayed direct user boost into
+`cache_message_signal`, enqueue the message in `cache_rescore_queue`, and wake
+the account runtime for cache maintenance. Opening/starred thread behavior and
+thread-level activity should use the same signal queue instead of adding
+fetch-specific shortcuts.
 
 Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
@@ -130,9 +140,12 @@ Metadata sync only records cache candidates; it does not fetch optional content.
 The account runtime runs cache maintenance while a gateway is connected. A
 maintenance batch first consumes dirty re-score rows, rebuilds each candidate's
 current signal set from message metadata plus `cache_message_signal`, updates
+provider-aware `fetch_unit`, `value_bytes`, `fetch_bytes`, and
 `cache_object.priority`, and marks non-cached/non-fetching objects `wanted`.
-It then scans a bounded priority-ordered window of wanted body candidates,
-admits only candidates that fit the current budget, marks them `fetching`,
+Unscored structural rows have `fetch_bytes = 0` and are not eligible for fetch
+selection until this re-score step gives them a concrete fetch cost. The worker
+then scans a bounded priority-ordered window of wanted body candidates, admits
+only candidates that fit the current budget, marks them `fetching`,
 fetches through the same gateway body path as lazy open, applies the body to the
 local store, and marks the cache object `cached`. Periodic maintenance uses
 background pressure; interactive maintenance triggered by visible search results
@@ -228,7 +241,7 @@ Important derived tables:
   deduplicate messages across labels while retaining per-mailbox UIDs.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 - `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
-- `cache_object` stores scored optional-content candidates and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read wanted rows from this table and cached rows contribute to the configured cache budget.
+- `cache_object` stores scored optional-content child objects and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Every message has one structural body row; later layers add raw-message or attachment rows as policy decides. Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read scored wanted rows from this table and cached rows contribute to the configured cache budget.
 - `cache_message_signal` stores local cache utility signals that do not come from provider metadata, including search result visibility, local behavior scores, direct user boost, and pinned state.
 - `cache_rescore_queue` stores account/message pairs whose cache objects need priority re-scoring after signal changes. The runtime drains this queue before selecting fetch work.
 
@@ -302,6 +315,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
 | cache-priority-size-aware | MUST | Optional cache priority uses fetch-unit bytes, so IMAP raw-message body fetches are penalized by combined message size |
 | cache-worker-budget | MUST | Cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
+| cache-object-parity | MUST | Every synced message has one structural body `cache_object` child row, and message deletion removes its cache object, cache signals, and rescore queue rows |
 | cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue`, and are applied by re-scoring before fetch selection |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
