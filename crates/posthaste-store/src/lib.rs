@@ -1742,6 +1742,66 @@ mod tests {
         Ok(())
     }
 
+    // spec: docs/L1-sync#cache-object-parity
+    #[test]
+    fn opening_store_prunes_orphan_cache_child_rows() -> Result<(), StoreError> {
+        let root = temp_root();
+        let db_path = root.join("mail.sqlite");
+        let data_root = root.join("data");
+        let account = AccountId::from("primary");
+        let message_id = MessageId::from("orphan-message");
+        {
+            let _store = DatabaseStore::open(&db_path, &data_root)?;
+        }
+        {
+            let connection =
+                Connection::open(&db_path).map_err(|err| StoreError::Failure(err.to_string()))?;
+            connection
+                .pragma_update(None, "foreign_keys", "OFF")
+                .map_err(sql_to_store_error)?;
+            connection
+                .execute(
+                    "INSERT INTO cache_object (
+                        account_id, message_id, layer, object_id, fetch_unit, state,
+                        value_bytes, fetch_bytes, priority, reason, last_scored_at
+                     ) VALUES (?1, ?2, 'body', '', 'body_only', 'wanted', 0, 4096, 1, 'legacy', '2026-04-27T00:00:00Z')",
+                    params![account.as_str(), message_id.as_str()],
+                )
+                .map_err(sql_to_store_error)?;
+            connection
+                .execute(
+                    "INSERT INTO cache_message_signal (
+                        account_id, message_id, direct_user_boost, dirty_at
+                     ) VALUES (?1, ?2, 1, '2026-04-27T00:00:00Z')",
+                    params![account.as_str(), message_id.as_str()],
+                )
+                .map_err(sql_to_store_error)?;
+            connection
+                .execute(
+                    "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
+                     VALUES (?1, ?2, 'legacy', '2026-04-27T00:00:00Z')",
+                    params![account.as_str(), message_id.as_str()],
+                )
+                .map_err(sql_to_store_error)?;
+        }
+
+        let store = DatabaseStore::open(db_path, data_root)?;
+
+        assert_eq!(
+            cache_child_count(&store, "cache_object", &account, &message_id)?,
+            0
+        );
+        assert_eq!(
+            cache_child_count(&store, "cache_message_signal", &account, &message_id)?,
+            0
+        );
+        assert_eq!(
+            cache_child_count(&store, "cache_rescore_queue", &account, &message_id)?,
+            0
+        );
+        Ok(())
+    }
+
     #[test]
     fn imap_mailbox_state_round_trips_provider_cursors() -> Result<(), StoreError> {
         let root = temp_root();
