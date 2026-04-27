@@ -341,6 +341,36 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         normalized_messages(&harness, "imap-stalwart")
     );
 
+    let imap_move_target = message_by_subject(&harness, "imap-stalwart", "Invoice 2048 attached");
+    let imap_archive_id = mailbox_id_by_label(&harness, "imap-stalwart", "archive");
+    harness
+        .service
+        .replace_mailboxes(
+            &AccountId::from("imap-stalwart"),
+            &imap_move_target.id,
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![imap_archive_id],
+            },
+            &imap_gateway,
+        )
+        .await
+        .expect("IMAP mailbox move should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    let jmap_imap_move_labels =
+        mailbox_labels_for_subject(&harness, "jmap-stalwart", "Invoice 2048 attached");
+    let imap_move_labels =
+        mailbox_labels_for_subject(&harness, "imap-stalwart", "Invoice 2048 attached");
+    assert_eq!(
+        jmap_imap_move_labels,
+        BTreeSet::from(["archive".to_string()])
+    );
+    assert_eq!(jmap_imap_move_labels, imap_move_labels);
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
+
     let deleted = jmap_message_by_subject(
         &harness,
         "jmap-stalwart",
