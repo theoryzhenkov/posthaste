@@ -56,7 +56,7 @@ The first cache planner uses manual utility scoring. A candidate's priority is:
 
 ```text
 priority = utility / size_cost
-size_cost = (max(size_bytes, 4 KiB) / 1 MiB) ^ alpha
+size_cost = (max(fetch_bytes, 4 KiB) / 1 MiB) ^ alpha
 ```
 
 Default `alpha` is `0.7`, so large objects are penalized without making high
@@ -89,6 +89,14 @@ Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
 attachments and previously opened attachments.
 
+`value_bytes` is the useful local content being prioritized. `fetch_bytes` is
+the remote fetch/storage unit needed to satisfy the candidate and is the value
+used by `size_cost`. JMAP body candidates can use a `body_only` fetch unit,
+while IMAP body candidates use `raw_message` because IMAP cannot reliably fetch
+the parsed body/attachment split that JMAP exposes. That makes large IMAP
+messages naturally score lower for speculative background caching while still
+allowing a high-utility message to win.
+
 Cache budgets have a soft cap and a hard cap. Interactive work such as opening a
 message or narrowing a search can raise the temporary target between those caps:
 
@@ -100,6 +108,18 @@ effective_target =
 Admission is allowed when the candidate fits under `effective_target`. When it
 does not, the candidate must beat the lowest-priority evictable cached object.
 Admission is never allowed when it would cross the hard cap.
+
+Metadata sync only records cache candidates; it does not fetch optional content.
+The account runtime runs a low-priority body cache worker while a gateway is
+connected. Each worker batch scans a bounded priority-ordered window of wanted
+body candidates, admits only candidates that fit the current background budget,
+marks them `fetching`, fetches through the same gateway body path as lazy open,
+applies the body to the local store, and marks the cache object `cached`.
+Scanning more rows than the fetch-attempt cap prevents one large over-budget
+message from starving smaller candidates behind it. Gateway failures mark the
+object `failed` with the service error code and do not fail the whole runtime.
+Eviction and attachment-blob workers are later policy layers, not part of the
+first worker slice.
 
 ## State management
 
@@ -166,6 +186,7 @@ The runtime schema is centered around raw message state plus locally derived pro
 - `source_projection`
 - `automation_backfill_job`
 - `sender_address_cache`
+- `cache_object`
 
 Important derived tables:
 
@@ -183,6 +204,7 @@ Important derived tables:
   deduplicate messages across labels while retaining per-mailbox UIDs.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 - `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
+- `cache_object` stores scored optional-content candidates and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read wanted rows from this table and cached rows contribute to the configured cache budget.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 
@@ -240,7 +262,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 - Full mailbox snapshots are authoritative: missing remote mailboxes are pruned locally when `replace_all_mailboxes` is true.
 - Full email snapshots are authoritative: missing remote messages are pruned locally when `replace_all_messages` is true.
 - Conversation projections are derived from synced message state and use server `threadId` as the grouping key for JMAP mail.
-- Email bodies are fetched lazily on first view, not during metadata sync.
+- Metadata sync never fetches email bodies. Bodies are optional content fetched by lazy open or by the background cache worker after metadata is committed.
 
 ## Assertions
 
@@ -250,8 +272,10 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | state-atomic | MUST | State strings persisted in same SQLite transaction as data via apply_sync_batch |
 | snapshot-authoritative | MUST | Full mailbox snapshots prune stale local mailboxes when they disappear remotely |
 | message-snapshot-authoritative | MUST | Full email snapshots prune stale local messages when they disappear remotely |
-| body-lazy | MUST | Email bodies are fetched on first view, not during metadata sync |
+| body-lazy | MUST | Metadata sync does not fetch email bodies; bodies are fetched by lazy open or the background cache worker after metadata is committed |
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
+| cache-priority-size-aware | MUST | Optional cache priority uses fetch-unit bytes, so IMAP raw-message body fetches are penalized by combined message size |
+| cache-worker-budget | MUST | Background cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
