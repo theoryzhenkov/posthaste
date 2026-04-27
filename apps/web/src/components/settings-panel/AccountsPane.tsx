@@ -8,6 +8,7 @@ import { Cloud, Mail, Plus, Settings2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { buildOAuthRedirectUri, startProviderOAuth } from '../../api/client'
 import type { AccountOverview, ProviderHint } from '../../api/types'
+import { providerOAuthClientIds } from '../../config/oauthProviders'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
@@ -221,11 +222,6 @@ function AccountsEmptyState({
       }
     />
   )
-}
-
-const providerOAuthClientIds: Partial<Record<ProviderHint, string>> = {
-  gmail: import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? '',
-  outlook: import.meta.env.VITE_MICROSOFT_OAUTH_CLIENT_ID?.trim() ?? '',
 }
 
 function AccountSetupChoice({ onManual }: { onManual: () => void }) {
