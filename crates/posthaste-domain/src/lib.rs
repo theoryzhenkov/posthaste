@@ -16,6 +16,7 @@ mod push;
 pub mod search;
 mod service;
 
+pub use cache::*;
 pub use config::*;
 pub use imap::*;
 pub use model::*;

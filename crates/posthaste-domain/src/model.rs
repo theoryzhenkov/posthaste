@@ -9,6 +9,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::{
+    cache::CachePolicy,
     imap::{ImapMailboxSyncState, ImapMessageLocation},
     ConfigError,
 };
@@ -163,6 +164,8 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
+    #[serde(default)]
+    pub cache_policy: CachePolicy,
     #[serde(default)]
     pub automation_rules: Vec<AutomationRule>,
     #[serde(default)]

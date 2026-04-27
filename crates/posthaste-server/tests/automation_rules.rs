@@ -188,6 +188,7 @@ impl RuleHarness {
                 default_account_id: None,
                 automation_rules: rules,
                 automation_drafts: Vec::new(),
+                ..Default::default()
             })
             .expect("settings should save");
     }

@@ -1,10 +1,11 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, ImapTransportSettings,
-    MailboxId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, SmtpTransportSettings, TransportSecurity, RFC3339_EPOCH,
+    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, CachePolicy,
+    ImapTransportSettings, MailboxId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
+    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
+    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SmtpTransportSettings,
+    TransportSecurity, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,11 +27,50 @@ pub struct AppToml {
     pub daemon: DaemonToml,
     #[serde(default)]
     pub logging: LoggingToml,
+    #[serde(default)]
+    pub cache: CachePolicyToml,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct LoggingToml {
     pub level: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct CachePolicyToml {
+    pub soft_cap_bytes: Option<u64>,
+    pub hard_cap_bytes: Option<u64>,
+    pub cache_bodies: Option<bool>,
+    pub cache_raw_messages: Option<bool>,
+    pub cache_attachments: Option<bool>,
+}
+
+impl CachePolicyToml {
+    fn to_cache_policy(&self) -> CachePolicy {
+        let default = CachePolicy::default();
+        CachePolicy {
+            soft_cap_bytes: self.soft_cap_bytes.unwrap_or(default.soft_cap_bytes),
+            hard_cap_bytes: self
+                .hard_cap_bytes
+                .unwrap_or(default.hard_cap_bytes)
+                .max(self.soft_cap_bytes.unwrap_or(default.soft_cap_bytes)),
+            cache_bodies: self.cache_bodies.unwrap_or(default.cache_bodies),
+            cache_raw_messages: self
+                .cache_raw_messages
+                .unwrap_or(default.cache_raw_messages),
+            cache_attachments: self.cache_attachments.unwrap_or(default.cache_attachments),
+        }
+    }
+
+    fn from_cache_policy(policy: &CachePolicy) -> Self {
+        Self {
+            soft_cap_bytes: Some(policy.soft_cap_bytes),
+            hard_cap_bytes: Some(policy.hard_cap_bytes),
+            cache_bodies: Some(policy.cache_bodies),
+            cache_raw_messages: Some(policy.cache_raw_messages),
+            cache_attachments: Some(policy.cache_attachments),
+        }
+    }
 }
 
 /// Daemon-specific settings read only at startup (bind address, CORS, poll
@@ -51,6 +91,7 @@ impl AppToml {
     pub fn to_app_settings(&self) -> Result<AppSettings, String> {
         Ok(AppSettings {
             default_account_id: self.default_source_id.as_deref().map(AccountId::from),
+            cache_policy: self.cache.to_cache_policy(),
             automation_rules: self
                 .automations
                 .iter()
@@ -87,6 +128,7 @@ impl AppToml {
                 .collect(),
             daemon: existing.daemon.clone(),
             logging: existing.logging.clone(),
+            cache: CachePolicyToml::from_cache_policy(&settings.cache_policy),
         }
     }
 }
@@ -1036,6 +1078,7 @@ mod tests {
                 actions: vec![AutomationAction::ApplyTag { tag: String::new() }],
                 backfill: true,
             }],
+            ..Default::default()
         };
         let existing = AppToml {
             schema_version: 1,
@@ -1044,6 +1087,7 @@ mod tests {
             draft_automations: Vec::new(),
             daemon: DaemonToml::default(),
             logging: LoggingToml::default(),
+            cache: CachePolicyToml::default(),
         };
         let toml_struct = AppToml::from_app_settings(&settings, &existing);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
