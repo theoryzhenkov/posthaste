@@ -16,14 +16,14 @@ use crate::{
     copy_imap_message_to_mailbox_by_location, discover_imap_account, examine_imap_mailbox,
     expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
     fetch_mailbox_changed_since_snapshot, fetch_mailbox_header_snapshot,
-    fetch_message_body_by_location, fetch_raw_message_by_location,
+    fetch_mailbox_headers_after_uid, fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,
     imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
     mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
     parse_imap_attachment_blob_id, smtp_sent_copy_strategy, submit_smtp_message,
-    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig, ImapMappedHeader,
-    SmtpConnectionConfig, SmtpSentCopyStrategy,
+    DiscoveredImapAccount, ImapAdapterError, ImapChangedSinceSnapshot, ImapConnectionConfig,
+    ImapMappedHeader, SmtpConnectionConfig, SmtpSentCopyStrategy,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -158,7 +158,8 @@ impl MailGateway for LiveImapSmtpGateway {
         let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;
         let store = self.store.as_ref();
         let mut planned_mailboxes = Vec::new();
-        let mut requires_full_message_snapshot = store.is_none();
+        let account_full_message_snapshot = store.is_none();
+        let mut has_full_mailbox_snapshot = account_full_message_snapshot;
 
         for mailbox in discovery
             .mailboxes
@@ -199,7 +200,7 @@ impl MailGateway for LiveImapSmtpGateway {
                     "IMAP mailbox sync plan detail"
                 );
                 if matches!(plan, ImapMailboxSyncPlan::FullSnapshot { .. }) {
-                    requires_full_message_snapshot = true;
+                    has_full_mailbox_snapshot = true;
                 }
                 planned_mailboxes.push(PlannedImapMailbox {
                     id: mailbox.id.clone(),
@@ -233,56 +234,69 @@ impl MailGateway for LiveImapSmtpGateway {
         let mut local_locations = Vec::new();
         let mut mailbox_states = Vec::new();
         let mut explicit_deleted_uids = Vec::new();
-        let uses_partial_delta = planned_mailboxes
-            .iter()
-            .any(|mailbox| matches!(mailbox.plan, ImapMailboxSyncPlan::QresyncDelta { .. }));
+        let uses_partial_delta = planned_mailboxes.iter().any(|mailbox| {
+            matches!(
+                mailbox.plan,
+                ImapMailboxSyncPlan::QresyncDelta { .. }
+                    | ImapMailboxSyncPlan::FetchNewByUid { .. }
+            )
+        });
         let planned_mailbox_count = planned_mailboxes.len();
 
         info!(
             account_id = %account_id,
             mailbox_count = planned_mailbox_count,
-            requires_full_message_snapshot,
+            account_full_message_snapshot,
+            has_full_mailbox_snapshot,
             uses_partial_delta,
             "IMAP sync fetch started"
         );
 
         for (mailbox_index, mailbox) in planned_mailboxes.into_iter().enumerate() {
             local_locations.extend(mailbox.local_locations.clone());
-            if requires_full_message_snapshot {
-                let started = Instant::now();
-                info!(
-                    account_id = %account_id,
-                    mailbox_id = %mailbox.id,
-                    mailbox_index = mailbox_index + 1,
-                    mailbox_count = planned_mailbox_count,
-                    mode = "full_snapshot",
-                    "IMAP mailbox header fetch started"
-                );
-                let snapshot =
-                    fetch_mailbox_header_snapshot(&self.config, &mailbox.name, updated_at.clone())
-                        .await
-                        .map_err(imap_error_to_gateway)?;
-                let header_count = snapshot.headers.len();
-                mailbox_states.push(imap_mailbox_state_from_header_snapshot(
-                    &snapshot,
-                    updated_at.clone(),
-                ));
-                headers.extend(snapshot.headers);
-                info!(
-                    account_id = %account_id,
-                    mailbox_id = %mailbox.id,
-                    mailbox_index = mailbox_index + 1,
-                    mailbox_count = planned_mailbox_count,
-                    mode = "full_snapshot",
-                    message_count = header_count,
-                    duration_ms = started.elapsed().as_millis() as u64,
-                    "IMAP mailbox header fetch completed"
-                );
-                continue;
-            }
 
             let plan_name = imap_sync_plan_name(&mailbox.plan);
             match mailbox.plan {
+                ImapMailboxSyncPlan::FullSnapshot { .. } => {
+                    let started = Instant::now();
+                    info!(
+                        account_id = %account_id,
+                        mailbox_id = %mailbox.id,
+                        mailbox_index = mailbox_index + 1,
+                        mailbox_count = planned_mailbox_count,
+                        mode = "full_snapshot",
+                        "IMAP mailbox header fetch started"
+                    );
+                    let snapshot = fetch_mailbox_header_snapshot(
+                        &self.config,
+                        &mailbox.name,
+                        updated_at.clone(),
+                    )
+                    .await
+                    .map_err(imap_error_to_gateway)?;
+                    let header_count = snapshot.headers.len();
+                    if !account_full_message_snapshot {
+                        explicit_deleted_uids.extend(missing_location_identities(
+                            &mailbox.local_locations,
+                            &snapshot.headers,
+                        ));
+                    }
+                    mailbox_states.push(imap_mailbox_state_from_header_snapshot(
+                        &snapshot,
+                        updated_at.clone(),
+                    ));
+                    headers.extend(snapshot.headers);
+                    info!(
+                        account_id = %account_id,
+                        mailbox_id = %mailbox.id,
+                        mailbox_index = mailbox_index + 1,
+                        mailbox_count = planned_mailbox_count,
+                        mode = "full_snapshot",
+                        message_count = header_count,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "IMAP mailbox header fetch completed"
+                    );
+                }
                 ImapMailboxSyncPlan::QresyncDelta { since_modseq, .. } => {
                     let started = Instant::now();
                     info!(
@@ -342,8 +356,7 @@ impl MailGateway for LiveImapSmtpGateway {
                         "IMAP mailbox header fetch completed"
                     );
                 }
-                ImapMailboxSyncPlan::CondstoreDelta { .. }
-                | ImapMailboxSyncPlan::FetchNewByUid { .. } => {
+                ImapMailboxSyncPlan::CondstoreDelta { .. } => {
                     let started = Instant::now();
                     info!(
                         account_id = %account_id,
@@ -361,12 +374,10 @@ impl MailGateway for LiveImapSmtpGateway {
                     .await
                     .map_err(imap_error_to_gateway)?;
                     let header_count = snapshot.headers.len();
-                    if uses_partial_delta {
-                        explicit_deleted_uids.extend(missing_location_identities(
-                            &mailbox.local_locations,
-                            &snapshot.headers,
-                        ));
-                    }
+                    explicit_deleted_uids.extend(missing_location_identities(
+                        &mailbox.local_locations,
+                        &snapshot.headers,
+                    ));
                     mailbox_states.push(imap_mailbox_state_from_header_snapshot(
                         &snapshot,
                         updated_at.clone(),
@@ -383,8 +394,56 @@ impl MailGateway for LiveImapSmtpGateway {
                         "IMAP mailbox header fetch completed"
                     );
                 }
-                ImapMailboxSyncPlan::FullSnapshot { .. } => {
-                    unreachable!("full snapshot plans are handled by the all-mailbox full pass");
+                ImapMailboxSyncPlan::FetchNewByUid { after_uid } => {
+                    let started = Instant::now();
+                    info!(
+                        account_id = %account_id,
+                        mailbox_id = %mailbox.id,
+                        mailbox_index = mailbox_index + 1,
+                        mailbox_count = planned_mailbox_count,
+                        mode = "fetch_new_by_uid",
+                        after_uid = after_uid.0,
+                        "IMAP mailbox header fetch started"
+                    );
+                    let snapshot = fetch_mailbox_headers_after_uid(
+                        &self.config,
+                        &mailbox.name,
+                        after_uid,
+                        updated_at.clone(),
+                    )
+                    .await
+                    .map_err(imap_error_to_gateway)?;
+                    let header_count = snapshot.headers.len();
+                    let deleted_before = explicit_deleted_uids.len();
+                    explicit_deleted_uids.extend(missing_location_identities_from_uids(
+                        &mailbox.local_locations,
+                        &snapshot.current_uids,
+                    ));
+                    let deleted_uid_count = explicit_deleted_uids.len() - deleted_before;
+                    if let Some(stored_state) = mailbox.stored_state.as_ref() {
+                        mailbox_states.push(imap_mailbox_state_from_changed_since_snapshot(
+                            stored_state,
+                            &ImapChangedSinceSnapshot {
+                                selected: snapshot.selected,
+                                headers: snapshot.headers.clone(),
+                                vanished_uids: Vec::new(),
+                                is_full_snapshot: false,
+                            },
+                            updated_at.clone(),
+                        ));
+                    }
+                    headers.extend(snapshot.headers);
+                    info!(
+                        account_id = %account_id,
+                        mailbox_id = %mailbox.id,
+                        mailbox_index = mailbox_index + 1,
+                        mailbox_count = planned_mailbox_count,
+                        mode = "fetch_new_by_uid",
+                        message_count = header_count,
+                        deleted_uid_count,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        "IMAP mailbox header fetch completed"
+                    );
                 }
             }
         }
@@ -398,7 +457,7 @@ impl MailGateway for LiveImapSmtpGateway {
             "IMAP sync fetch completed"
         );
 
-        if requires_full_message_snapshot {
+        if account_full_message_snapshot {
             Ok(imap_full_sync_batch(
                 account_id,
                 discovery,
@@ -406,7 +465,10 @@ impl MailGateway for LiveImapSmtpGateway {
                 mailbox_states,
                 updated_at,
             ))
-        } else if uses_partial_delta {
+        } else if uses_partial_delta
+            || !explicit_deleted_uids.is_empty()
+            || has_full_mailbox_snapshot
+        {
             Ok(imap_condstore_delta_sync_batch(
                 account_id,
                 discovery,
@@ -691,6 +753,28 @@ fn missing_location_identities(
         .collect()
 }
 
+fn missing_location_identities_from_uids(
+    local_locations: &[ImapMessageLocation],
+    remote_uids: &[ImapUid],
+) -> Vec<(MailboxId, ImapUidValidity, ImapUid)> {
+    let remote_uids = remote_uids
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    local_locations
+        .iter()
+        .filter(|location| !remote_uids.contains(&location.uid))
+        .map(|location| {
+            (
+                location.mailbox_id.clone(),
+                location.uid_validity,
+                location.uid,
+            )
+        })
+        .collect()
+}
+
 fn imap_sync_plan_name(plan: &ImapMailboxSyncPlan) -> &'static str {
     match plan {
         ImapMailboxSyncPlan::FullSnapshot { .. } => "full_snapshot",
@@ -754,6 +838,28 @@ mod tests {
             }),
             "qresync_delta"
         );
+    }
+
+    #[test]
+    fn detects_missing_uid_locations_from_current_uid_listing() {
+        let mailbox_id = MailboxId::from("imap:mailbox:inbox");
+        let kept = ImapMessageLocation {
+            message_id: MessageId::from("message-kept"),
+            mailbox_id: mailbox_id.clone(),
+            uid_validity: ImapUidValidity(7),
+            uid: ImapUid(10),
+            modseq: None,
+            updated_at: "2026-04-27T00:00:00Z".to_string(),
+        };
+        let missing = ImapMessageLocation {
+            message_id: MessageId::from("message-missing"),
+            uid: ImapUid(11),
+            ..kept.clone()
+        };
+
+        let deleted = missing_location_identities_from_uids(&[kept, missing], &[ImapUid(10)]);
+
+        assert_eq!(deleted, vec![(mailbox_id, ImapUidValidity(7), ImapUid(11))]);
     }
 
     #[tokio::test]
