@@ -421,6 +421,16 @@ pub trait CacheStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<CacheRescoreCandidate>, StoreError>;
 
+    /// Queue stale cache objects for re-scoring in bounded oldest-first batches.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn queue_stale_cache_rescore_candidates(
+        &self,
+        account_id: &AccountId,
+        stale_before: &str,
+        limit: usize,
+    ) -> Result<usize, StoreError>;
+
     /// Persist re-scored priorities and clear the corresponding dirty queue rows.
     ///
     /// @spec docs/L1-sync#local-cache-planning
