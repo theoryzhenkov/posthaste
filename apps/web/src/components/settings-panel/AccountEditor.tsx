@@ -28,8 +28,14 @@ import type {
 } from '../../api/types'
 import { AccountMark } from '../AccountMark'
 import {
-  buildCreateAccountPayload,
+  buildAccountEditorModel,
+  type AccountEditorConnectionModel,
+  type ExistingAccountEditorModel,
+  type ManagedOAuthConnectionModel,
+} from './accountEditorModel'
+import {
   buildAccountAppearanceInput,
+  buildCreateAccountPayload,
   buildUpdateAccountPayload,
   emptyAccountForm,
   formFromAccount,
@@ -60,11 +66,20 @@ function appearanceFromForm(
   }
 }
 
-function accountFieldsSignature(form: AccountFormState): string {
-  return JSON.stringify({
+function accountFieldsSignature(
+  form: AccountFormState,
+  connection: AccountEditorConnectionModel,
+): string {
+  const signature = {
     name: form.name.trim(),
     fullName: form.fullName.trim(),
     emailPatternsText: form.emailPatternsText.trim(),
+  }
+  if (connection.kind === 'managedOAuth') {
+    return JSON.stringify(signature)
+  }
+  return JSON.stringify({
+    ...signature,
     baseUrl: form.baseUrl.trim(),
     username: form.username.trim(),
     passwordChanged: form.password.trim().length > 0,
@@ -100,6 +115,10 @@ export function AccountEditor({
   isCommandPending: boolean
   commandError: string | null
 }) {
+  const editorModel = useMemo(
+    () => buildAccountEditorModel(editorTarget, editingAccount),
+    [editorTarget, editingAccount],
+  )
   const [form, setForm] = useState(() =>
     editingAccount ? formFromAccount(editingAccount) : emptyAccountForm(),
   )
@@ -108,22 +127,25 @@ export function AccountEditor({
     null,
   )
   const [savedAccountFieldsSignature, setSavedAccountFieldsSignature] =
-    useState(() => accountFieldsSignature(form))
+    useState(() => accountFieldsSignature(form, editorModel.connection))
 
   const saveMutation = useMutation({
     mutationFn: async (currentForm: typeof form) => {
-      return editorTarget === 'new'
+      return editorModel.kind === 'new'
         ? createAccount(buildCreateAccountPayload(currentForm))
         : updateAccount(
-            editorTarget,
-            buildUpdateAccountPayload(currentForm, editingAccount),
+            editorModel.account.id,
+            buildUpdateAccountPayload(currentForm, editorModel),
           )
     },
     onSuccess: async (account) => {
       setErrorMessage(null)
       setVerification(null)
       const savedForm = formFromAccount(account)
-      setSavedAccountFieldsSignature(accountFieldsSignature(savedForm))
+      const savedEditorModel = buildAccountEditorModel(account.id, account)
+      setSavedAccountFieldsSignature(
+        accountFieldsSignature(savedForm, savedEditorModel.connection),
+      )
       setForm(savedForm)
       await onSaved(account)
     },
@@ -145,11 +167,13 @@ export function AccountEditor({
     },
   })
 
-  const isEditing = editorTarget !== 'new' && editingAccount !== null
-  const isOAuthAccount = editingAccount?.transport.auth === 'oauth2'
+  const existingModel: ExistingAccountEditorModel | null =
+    editorModel.kind === 'new' ? null : editorModel
+  const existingAccount = existingModel?.account ?? null
   const formAppearance = appearanceFromForm(form)
   const hasUnsavedAccountChanges =
-    accountFieldsSignature(form) !== savedAccountFieldsSignature
+    accountFieldsSignature(form, editorModel.connection) !==
+    savedAccountFieldsSignature
 
   return (
     <div className="pb-8">
@@ -157,7 +181,7 @@ export function AccountEditor({
         title={
           editorTarget === 'new'
             ? 'New account'
-            : (editingAccount?.name ?? 'Account')
+            : (existingAccount?.name ?? 'Account')
         }
         leading={
           <AccountMark
@@ -167,29 +191,17 @@ export function AccountEditor({
         }
         meta={
           <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-            {isEditing && editingAccount ? (
-              <>
-                <StatusDot
-                  status={editingAccount.status}
-                  className="size-1.5"
-                />
-                <span className="font-mono uppercase tracking-[0.12em]">
-                  {editingAccount.status}
-                </span>
-                <span aria-hidden>·</span>
-                <span>{providerLabel(editingAccount.transport.provider)}</span>
-                <span aria-hidden>·</span>
-                <span>{authLabel(editingAccount.transport.auth)}</span>
-              </>
+            {existingModel ? (
+              <AccountHeaderMeta model={existingModel} />
             ) : (
               'Configure the account, then apply it.'
             )}
           </p>
         }
         actions={
-          isEditing && editingAccount ? (
+          existingAccount ? (
             <AccountActions
-              account={editingAccount}
+              account={existingAccount}
               onCommand={onCommand}
               isCommandPending={isCommandPending}
             />
@@ -197,10 +209,10 @@ export function AccountEditor({
         }
       />
 
-      {editingAccount?.lastSyncError && (
+      {existingAccount?.lastSyncError && (
         <div className="mt-4">
           <FeedbackBanner tone="error">
-            {editingAccount.lastSyncError}
+            {existingAccount.lastSyncError}
           </FeedbackBanner>
         </div>
       )}
@@ -244,65 +256,18 @@ export function AccountEditor({
 
       <SettingsSection title="Appearance">
         <AccountAppearanceFields
-          accountId={isEditing ? editingAccount.id : null}
+          accountId={existingAccount?.id ?? null}
           form={form}
           onChange={setForm}
           onSaved={onSaved}
         />
       </SettingsSection>
 
-      {isOAuthAccount && editingAccount ? (
-        <OAuthConnectionDetails account={editingAccount} />
-      ) : (
-        <>
-          <SettingsSection title="Server">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field
-                label="Base URL"
-                value={form.baseUrl}
-                placeholder="https://mail.example.com/jmap"
-                onChange={(value) =>
-                  setForm((current) => ({ ...current, baseUrl: value }))
-                }
-              />
-              <Field
-                label="Username"
-                value={form.username}
-                placeholder="you@example.com"
-                onChange={(value) =>
-                  setForm((current) => ({ ...current, username: value }))
-                }
-              />
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title="Password">
-            {editingAccount?.transport.secret.configured && (
-              <p className="-mt-1 text-[12px] text-muted-foreground">
-                A password is configured. Enter a new one to replace it.
-              </p>
-            )}
-
-            <Input
-              id="account-password"
-              type="password"
-              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-              value={form.password}
-              placeholder={
-                editingAccount?.transport.secret.configured
-                  ? '********'
-                  : 'Password'
-              }
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  password: event.target.value,
-                }))
-              }
-            />
-          </SettingsSection>
-        </>
-      )}
+      <ConnectionEditor
+        connection={editorModel.connection}
+        form={form}
+        onChange={setForm}
+      />
 
       <SettingsFooter>
         {verification?.identityEmail && (
@@ -326,11 +291,11 @@ export function AccountEditor({
           >
             Apply
           </Button>
-          {isEditing && editingAccount && (
+          {existingAccount && (
             <Button
               type="button"
               variant="outline"
-              onClick={() => verifyMutation.mutate(editingAccount.id)}
+              onClick={() => verifyMutation.mutate(existingAccount.id)}
               disabled={
                 verifyMutation.isPending ||
                 saveMutation.isPending ||
@@ -347,9 +312,9 @@ export function AccountEditor({
         </div>
       </SettingsFooter>
 
-      {isEditing && editingAccount && (
+      {existingAccount && (
         <DangerSection
-          account={editingAccount}
+          account={existingAccount}
           onCommand={onCommand}
           isCommandPending={isCommandPending}
         />
@@ -358,30 +323,116 @@ export function AccountEditor({
   )
 }
 
-function OAuthConnectionDetails({ account }: { account: AccountOverview }) {
+function AccountHeaderMeta({ model }: { model: ExistingAccountEditorModel }) {
+  return (
+    <>
+      <StatusDot status={model.account.status} className="size-1.5" />
+      <span className="font-mono uppercase tracking-[0.12em]">
+        {model.account.status}
+      </span>
+      <span aria-hidden>·</span>
+      <span>{providerLabel(model.account.connection.provider)}</span>
+      <span aria-hidden>·</span>
+      <span>{authLabel(model.account.connection.auth)}</span>
+    </>
+  )
+}
+
+function ConnectionEditor({
+  connection,
+  form,
+  onChange,
+}: {
+  connection: AccountEditorConnectionModel
+  form: AccountFormState
+  onChange: React.Dispatch<React.SetStateAction<AccountFormState>>
+}) {
+  switch (connection.kind) {
+    case 'managedOAuth':
+      return <OAuthConnectionDetails connection={connection} />
+    case 'manualCredentials':
+      return (
+        <>
+          <SettingsSection title="Server">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Base URL"
+                value={form.baseUrl}
+                placeholder="https://mail.example.com/jmap"
+                onChange={(value) =>
+                  onChange((current) => ({ ...current, baseUrl: value }))
+                }
+              />
+              <Field
+                label="Username"
+                value={form.username}
+                placeholder="you@example.com"
+                onChange={(value) =>
+                  onChange((current) => ({ ...current, username: value }))
+                }
+              />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Password">
+            {connection.account?.connection.secret.configured && (
+              <p className="-mt-1 text-[12px] text-muted-foreground">
+                A password is configured. Enter a new one to replace it.
+              </p>
+            )}
+
+            <Input
+              id="account-password"
+              type="password"
+              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
+              value={form.password}
+              placeholder={
+                connection.account?.connection.secret.configured
+                  ? '********'
+                  : 'Password'
+              }
+              onChange={(event) =>
+                onChange((current) => ({
+                  ...current,
+                  password: event.target.value,
+                }))
+              }
+            />
+          </SettingsSection>
+        </>
+      )
+  }
+}
+
+function OAuthConnectionDetails({
+  connection,
+}: {
+  connection: ManagedOAuthConnectionModel
+}) {
+  const { account } = connection
   return (
     <SettingsSection title="Connection">
       <div className="grid gap-3 sm:grid-cols-2">
         <ReadOnlyDetail
           label="Provider"
-          value={providerLabel(account.transport.provider)}
+          value={providerLabel(account.connection.provider)}
         />
         <ReadOnlyDetail
           label="Authentication"
-          value={authLabel(account.transport.auth)}
+          value={authLabel(account.connection.auth)}
         />
-        <ReadOnlyDetail label="Username" value={account.transport.username} />
+        <ReadOnlyDetail label="Username" value={account.connection.username} />
         <ReadOnlyDetail label="Driver" value={driverLabel(account.driver)} />
-        {account.transport.imap && (
+        {account.connection.imap && (
           <ReadOnlyDetail
             label="IMAP"
-            value={`${account.transport.imap.host}:${account.transport.imap.port}`}
+            value={`${account.connection.imap.host}:${account.connection.imap.port}`}
           />
         )}
-        {account.transport.smtp && (
+        {account.connection.smtp && (
           <ReadOnlyDetail
             label="SMTP"
-            value={`${account.transport.smtp.host}:${account.transport.smtp.port}`}
+            value={`${account.connection.smtp.host}:${account.connection.smtp.port}`}
           />
         )}
       </div>

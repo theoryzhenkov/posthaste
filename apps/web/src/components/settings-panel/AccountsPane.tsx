@@ -135,7 +135,7 @@ export function AccountsPane({
                 label={account.name}
                 sublabel={
                   account.emailPatterns?.[0] ??
-                  account.transport.username ??
+                  account.connection.username ??
                   account.fullName ??
                   undefined
                 }

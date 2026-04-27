@@ -43,4 +43,5 @@ ephemeral log.
 - Expected: Provider OAuth accounts should display provider/auth details and
   hide manually edited transport credentials.
 - Resolution: OAuth accounts now show read-only connection details and omit
-  manual server/password controls.
+  manual server/password controls. Account overviews now expose a backend-owned
+  `connection.kind` variant for manual credentials versus managed OAuth.
