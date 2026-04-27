@@ -4,11 +4,12 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::{
-    score_cache_candidate, AccountDriver, AccountId, AccountSettings, AddToMailboxCommand,
-    AppSettings, AutomationAction, AutomationBackfillBatchOutcome, AutomationBackfillJob,
-    AutomationBackfillJobStatus, AutomationBackfillStore, AutomationRule, AutomationTrigger,
-    CacheCandidate, CacheCandidateSignals, CacheFetchUnit, CacheLayer, CacheMessageSignals,
-    CachePolicy, CacheStore, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
+    decide_cache_admission, score_cache_candidate, AccountDriver, AccountId, AccountSettings,
+    AddToMailboxCommand, AppSettings, AutomationAction, AutomationBackfillBatchOutcome,
+    AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, AutomationRule,
+    AutomationTrigger, CacheAdmission, CacheCandidate, CacheCandidateSignals, CacheFetchUnit,
+    CacheLayer, CacheMessageSignals, CacheObjectState, CachePolicy, CacheStore,
+    CacheWorkerBatchOutcome, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
     ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
     ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
     MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
@@ -765,6 +766,95 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Fetch one bounded batch of wanted message-body cache candidates.
+    ///
+    /// The first worker slice has no eviction path, so it admits only bodies
+    /// that fit under the current effective background target.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    pub async fn process_body_cache_batch(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+        batch_size: usize,
+    ) -> Result<CacheWorkerBatchOutcome, ServiceError> {
+        let mut outcome = CacheWorkerBatchOutcome::default();
+        if batch_size == 0 {
+            return Ok(outcome);
+        }
+
+        let settings = self.config.get_app_settings()?;
+        if !settings.cache_policy.cache_bodies {
+            return Ok(outcome);
+        }
+
+        let mut used_bytes = self.cache_store.cache_used_bytes()?;
+        let scan_limit = batch_size.saturating_mul(4).max(batch_size);
+        let candidates = self.cache_store.list_cache_fetch_candidates(
+            account_id,
+            CacheLayer::Body,
+            scan_limit,
+        )?;
+        for candidate in candidates {
+            if outcome.attempted >= batch_size {
+                break;
+            }
+            let budget = settings.cache_policy.clone().budget(used_bytes, 0.0);
+            if decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget)
+                != CacheAdmission::AdmitWithinTarget
+            {
+                outcome.skipped += 1;
+                continue;
+            }
+
+            let message_id = MessageId::from(candidate.message_id.as_str());
+            self.cache_store.mark_cache_object_state(
+                account_id,
+                &message_id,
+                candidate.layer,
+                candidate.object_id.as_deref(),
+                CacheObjectState::Fetching,
+                None,
+            )?;
+            outcome.attempted += 1;
+
+            let fetched = match gateway.fetch_message_body(account_id, &message_id).await {
+                Ok(fetched) => fetched,
+                Err(error) => {
+                    let service_error = ServiceError::from(error);
+                    let error_code = service_error.code().to_string();
+                    self.cache_store.mark_cache_object_state(
+                        account_id,
+                        &message_id,
+                        candidate.layer,
+                        candidate.object_id.as_deref(),
+                        CacheObjectState::Failed,
+                        Some(error_code.as_str()),
+                    )?;
+                    outcome.failed += 1;
+                    continue;
+                }
+            };
+
+            let result = self
+                .sync_writer
+                .apply_message_body(account_id, &message_id, &fetched)?;
+            self.cache_store.mark_cache_object_state(
+                account_id,
+                &message_id,
+                candidate.layer,
+                candidate.object_id.as_deref(),
+                CacheObjectState::Cached,
+                None,
+            )?;
+            used_bytes = used_bytes.saturating_add(candidate.fetch_bytes);
+            outcome.cached += 1;
+            outcome.events.extend(result.events);
+        }
+
+        Ok(outcome)
+    }
+
     /// Download a blob for a specific account via the registered gateway.
     pub async fn download_blob(
         &self,
@@ -1516,15 +1606,16 @@ mod tests {
 
     use super::*;
     use crate::{
-        AutomationBackfillStore, CachedSenderAddress, ConfigError, ConfigSnapshot,
-        ConversationReadStore, DomainEvent, EventFilter, EventStore, FetchedBody, GatewayError,
-        ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore, ImapSyncStateStore,
-        MailboxReadStore, MessageCommandStore, MessageDetail, MessageDetailStore, MessageListStore,
-        MessageMailboxStore, MutationOutcome, PushTransport, Recipient, SenderAddressCacheStore,
-        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-        SmartMailboxStore, SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError,
-        SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
+        AutomationBackfillStore, CacheFetchCandidate, CachedSenderAddress, ConfigError,
+        ConfigSnapshot, ConversationReadStore, DomainEvent, EventFilter, EventStore, FetchedBody,
+        GatewayError, ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
+        ImapSyncStateStore, MailboxReadStore, MessageCommandStore, MessageDetail,
+        MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome, PushTransport,
+        Recipient, SenderAddressCacheStore, SmartMailboxCondition, SmartMailboxField,
+        SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator,
+        SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue,
+        SourceDataStore, SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncStateStore,
+        SyncWriteStore,
     };
 
     struct TestConfig {
@@ -1636,6 +1727,11 @@ mod tests {
         source_data_deletes: Mutex<Vec<String>>,
         automation_backfill_jobs: Mutex<Vec<AutomationBackfillJob>>,
         cache_candidates: Mutex<Vec<CacheCandidate>>,
+        cache_fetch_candidates: Mutex<Vec<CacheFetchCandidate>>,
+        cache_state_changes: Mutex<Vec<(MessageId, CacheObjectState, Option<String>)>>,
+        cache_used_bytes: Mutex<u64>,
+        applied_bodies: Mutex<Vec<(MessageId, Option<String>, Option<String>)>>,
+        apply_body_error: Option<String>,
         keyword_adds: Mutex<Vec<(MessageId, Vec<String>)>>,
         rule_page: Mutex<Vec<MessageSummary>>,
         mutation_state: Mutex<MutationStoreState>,
@@ -1651,6 +1747,11 @@ mod tests {
                 source_data_deletes: Mutex::new(Vec::new()),
                 automation_backfill_jobs: Mutex::new(Vec::new()),
                 cache_candidates: Mutex::new(Vec::new()),
+                cache_fetch_candidates: Mutex::new(Vec::new()),
+                cache_state_changes: Mutex::new(Vec::new()),
+                cache_used_bytes: Mutex::new(0),
+                applied_bodies: Mutex::new(Vec::new()),
+                apply_body_error: None,
                 keyword_adds: Mutex::new(Vec::new()),
                 rule_page: Mutex::new(Vec::new()),
                 mutation_state: Mutex::new(MutationStoreState::default()),
@@ -1904,10 +2005,24 @@ mod tests {
         fn apply_message_body(
             &self,
             _account_id: &AccountId,
-            _message_id: &MessageId,
-            _body: &FetchedBody,
+            message_id: &MessageId,
+            body: &FetchedBody,
         ) -> Result<CommandResult, StoreError> {
-            Err(StoreError::Failure("unused".to_string()))
+            if let Some(error) = &self.apply_body_error {
+                return Err(StoreError::Failure(error.clone()));
+            }
+            self.applied_bodies
+                .lock()
+                .expect("applied bodies lock poisoned")
+                .push((
+                    message_id.clone(),
+                    body.body_html.clone(),
+                    body.body_text.clone(),
+                ));
+            Ok(CommandResult {
+                detail: None,
+                events: Vec::new(),
+            })
         }
     }
 
@@ -1925,27 +2040,48 @@ mod tests {
 
         fn list_cache_fetch_candidates(
             &self,
-            _account_id: &AccountId,
-            _layer: crate::CacheLayer,
-            _limit: usize,
+            account_id: &AccountId,
+            layer: crate::CacheLayer,
+            limit: usize,
         ) -> Result<Vec<crate::CacheFetchCandidate>, StoreError> {
-            Ok(Vec::new())
+            Ok(self
+                .cache_fetch_candidates
+                .lock()
+                .expect("cache fetch candidates lock poisoned")
+                .iter()
+                .filter(|candidate| {
+                    candidate.account_id == account_id.as_str() && candidate.layer == layer
+                })
+                .take(limit)
+                .cloned()
+                .collect())
         }
 
         fn mark_cache_object_state(
             &self,
             _account_id: &AccountId,
-            _message_id: &MessageId,
+            message_id: &MessageId,
             _layer: crate::CacheLayer,
             _object_id: Option<&str>,
-            _state: crate::CacheObjectState,
-            _error_code: Option<&str>,
+            state: crate::CacheObjectState,
+            error_code: Option<&str>,
         ) -> Result<(), StoreError> {
+            self.cache_state_changes
+                .lock()
+                .expect("cache state changes lock poisoned")
+                .push((
+                    message_id.clone(),
+                    state,
+                    error_code.map(ToString::to_string),
+                ));
             Ok(())
         }
 
         fn cache_used_bytes(&self) -> Result<u64, StoreError> {
-            Ok(0)
+            Ok(*self
+                .cache_used_bytes
+                .lock()
+                .expect("cache used bytes lock poisoned"))
         }
     }
 
@@ -2251,6 +2387,27 @@ mod tests {
         }
     }
 
+    fn sample_cache_fetch_candidate(message_id: &str, fetch_bytes: u64) -> CacheFetchCandidate {
+        CacheFetchCandidate {
+            account_id: "primary".to_string(),
+            message_id: message_id.to_string(),
+            layer: CacheLayer::Body,
+            object_id: None,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            fetch_bytes,
+            priority: 1.0,
+        }
+    }
+
+    fn sample_fetched_body() -> FetchedBody {
+        FetchedBody {
+            body_html: None,
+            body_text: Some("Cached body".to_string()),
+            raw_mime: None,
+            attachments: Vec::new(),
+        }
+    }
+
     fn sample_automation_rule() -> AutomationRule {
         AutomationRule {
             id: "rule-posthaste".to_string(),
@@ -2287,6 +2444,8 @@ mod tests {
     struct MutationGateway {
         revision: Mutex<u64>,
         batch: Option<SyncBatch>,
+        fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
+        fetch_attempts: Mutex<Vec<MessageId>>,
     }
 
     impl MutationGateway {
@@ -2294,6 +2453,8 @@ mod tests {
             Self {
                 revision: Mutex::new(revision),
                 batch: None,
+                fetch_body_result: Mutex::new(None),
+                fetch_attempts: Mutex::new(Vec::new()),
             }
         }
 
@@ -2301,6 +2462,17 @@ mod tests {
             Self {
                 revision: Mutex::new(revision),
                 batch: Some(batch),
+                fetch_body_result: Mutex::new(None),
+                fetch_attempts: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_fetch_body_result(result: Result<FetchedBody, GatewayError>) -> Self {
+            Self {
+                revision: Mutex::new(1),
+                batch: None,
+                fetch_body_result: Mutex::new(Some(result)),
+                fetch_attempts: Mutex::new(Vec::new()),
             }
         }
 
@@ -2339,9 +2511,17 @@ mod tests {
         async fn fetch_message_body(
             &self,
             _account_id: &AccountId,
-            _message_id: &MessageId,
+            message_id: &MessageId,
         ) -> Result<FetchedBody, GatewayError> {
-            Err(GatewayError::Rejected("unused".to_string()))
+            self.fetch_attempts
+                .lock()
+                .expect("fetch attempts lock poisoned")
+                .push(message_id.clone());
+            self.fetch_body_result
+                .lock()
+                .expect("fetch body result lock poisoned")
+                .take()
+                .unwrap_or_else(|| Err(GatewayError::Rejected("unused".to_string())))
         }
 
         async fn download_blob(
@@ -2537,6 +2717,240 @@ mod tests {
         assert_eq!(candidates[0].fetch_unit, CacheFetchUnit::RawMessage);
         assert_eq!(candidates[0].value_bytes, 256 * 1024);
         assert_eq!(candidates[0].fetch_bytes, 12 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_fetches_admitted_candidates_and_marks_cached() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![sample_cache_fetch_candidate(
+                "message-1",
+                32 * 1024,
+            )]),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
+
+        let outcome = service
+            .process_body_cache_batch(&account_id, &gateway, 10)
+            .await
+            .expect("cache worker should fetch an admitted body");
+
+        assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.cached, 1);
+        assert_eq!(outcome.failed, 0);
+        assert_eq!(outcome.skipped, 0);
+        assert_eq!(
+            *gateway
+                .fetch_attempts
+                .lock()
+                .expect("fetch attempts lock poisoned"),
+            vec![MessageId::from("message-1")]
+        );
+        assert_eq!(
+            *store
+                .applied_bodies
+                .lock()
+                .expect("applied bodies lock poisoned"),
+            vec![(
+                MessageId::from("message-1"),
+                None,
+                Some("Cached body".to_string())
+            )]
+        );
+        assert_eq!(
+            *store
+                .cache_state_changes
+                .lock()
+                .expect("cache state changes lock poisoned"),
+            vec![
+                (
+                    MessageId::from("message-1"),
+                    CacheObjectState::Fetching,
+                    None
+                ),
+                (MessageId::from("message-1"), CacheObjectState::Cached, None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_marks_gateway_failures_and_continues() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![sample_cache_fetch_candidate(
+                "message-1",
+                32 * 1024,
+            )]),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Err(GatewayError::Network(
+            "offline".to_string(),
+        )));
+
+        let outcome = service
+            .process_body_cache_batch(&account_id, &gateway, 10)
+            .await
+            .expect("cache worker should record fetch failures");
+
+        assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.cached, 0);
+        assert_eq!(outcome.failed, 1);
+        assert_eq!(outcome.skipped, 0);
+        assert!(store
+            .applied_bodies
+            .lock()
+            .expect("applied bodies lock poisoned")
+            .is_empty());
+        assert_eq!(
+            *store
+                .cache_state_changes
+                .lock()
+                .expect("cache state changes lock poisoned"),
+            vec![
+                (
+                    MessageId::from("message-1"),
+                    CacheObjectState::Fetching,
+                    None
+                ),
+                (
+                    MessageId::from("message-1"),
+                    CacheObjectState::Failed,
+                    Some("network_error".to_string())
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_surfaces_store_failures() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![sample_cache_fetch_candidate(
+                "message-1",
+                32 * 1024,
+            )]),
+            apply_body_error: Some("write failed".to_string()),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
+
+        let error = service
+            .process_body_cache_batch(&account_id, &gateway, 10)
+            .await
+            .expect_err("cache worker should surface local store failures");
+
+        assert_eq!(error.code(), "storage_failure");
+        assert_eq!(
+            *store
+                .cache_state_changes
+                .lock()
+                .expect("cache state changes lock poisoned"),
+            vec![(
+                MessageId::from("message-1"),
+                CacheObjectState::Fetching,
+                None
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_skips_candidates_that_do_not_fit_budget() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![sample_cache_fetch_candidate(
+                "message-1",
+                32 * 1024,
+            )]),
+            cache_used_bytes: Mutex::new(1024),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig {
+            app_settings: Mutex::new(AppSettings {
+                cache_policy: CachePolicy {
+                    soft_cap_bytes: 1024,
+                    hard_cap_bytes: 1024,
+                    cache_bodies: true,
+                    cache_raw_messages: false,
+                    cache_attachments: false,
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
+
+        let outcome = service
+            .process_body_cache_batch(&account_id, &gateway, 10)
+            .await
+            .expect("cache worker should skip over-budget candidates");
+
+        assert_eq!(outcome.attempted, 0);
+        assert_eq!(outcome.cached, 0);
+        assert_eq!(outcome.failed, 0);
+        assert_eq!(outcome.skipped, 1);
+        assert!(gateway
+            .fetch_attempts
+            .lock()
+            .expect("fetch attempts lock poisoned")
+            .is_empty());
+        assert!(store
+            .cache_state_changes
+            .lock()
+            .expect("cache state changes lock poisoned")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn body_cache_worker_scans_past_large_candidates_to_find_one_that_fits() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_fetch_candidates: Mutex::new(vec![
+                sample_cache_fetch_candidate("too-large", 2 * 1024),
+                sample_cache_fetch_candidate("small-enough", 512),
+            ]),
+            cache_used_bytes: Mutex::new(1024),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig {
+            app_settings: Mutex::new(AppSettings {
+                cache_policy: CachePolicy {
+                    soft_cap_bytes: 2 * 1024,
+                    hard_cap_bytes: 2 * 1024,
+                    cache_bodies: true,
+                    cache_raw_messages: false,
+                    cache_attachments: false,
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
+
+        let outcome = service
+            .process_body_cache_batch(&account_id, &gateway, 1)
+            .await
+            .expect("cache worker should scan past oversized candidates");
+
+        assert_eq!(outcome.attempted, 1);
+        assert_eq!(outcome.cached, 1);
+        assert_eq!(outcome.failed, 0);
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(
+            *gateway
+                .fetch_attempts
+                .lock()
+                .expect("fetch attempts lock poisoned"),
+            vec![MessageId::from("small-enough")]
+        );
     }
 
     #[tokio::test]
