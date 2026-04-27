@@ -5,8 +5,8 @@ use std::time::Duration;
 use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, PushEventStream, PushStatus, PushStreamEvent,
-    ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
+    GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream, PushStatus,
+    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
+use crate::oauth::{OAuthTokenService, OAuthTokenSet};
 use crate::push::resilient_push_stream;
 
 const AUTOMATION_BACKFILL_BATCH_SIZE: usize = 10;
@@ -480,7 +481,6 @@ async fn build_connection(
     account: &AccountSettings,
     shared: &Arc<SupervisorShared>,
 ) -> Result<AccountConnection, ServiceError> {
-    let secret_store = shared.secret_store.as_ref();
     match account.driver {
         AccountDriver::Mock => Ok(AccountConnection {
             gateway: Arc::new(MockJmapGateway::default()),
@@ -501,7 +501,7 @@ async fn build_connection(
             let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
                 GatewayError::Rejected("missing JMAP secret reference".to_string())
             })?;
-            let secret = secret_store.resolve(secret_ref)?;
+            let secret = resolve_account_secret(account, shared, secret_ref).await?;
             let client = connect_jmap_client(url, username, &secret).await?;
             let gateway: SharedGateway = Arc::new(LiveJmapGateway::from_client(client));
 
@@ -540,7 +540,7 @@ async fn build_connection(
             let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
                 GatewayError::Rejected("missing IMAP/SMTP secret reference".to_string())
             })?;
-            let secret = secret_store.resolve(secret_ref)?;
+            let secret = resolve_account_secret(account, shared, secret_ref).await?;
             let imap_config =
                 ImapConnectionConfig::from_account_transport(&account.transport, secret.clone())
                     .map_err(imap_adapter_error)?;
@@ -561,6 +561,30 @@ async fn build_connection(
             })
         }
     }
+}
+
+async fn resolve_account_secret(
+    account: &AccountSettings,
+    shared: &Arc<SupervisorShared>,
+    secret_ref: &posthaste_domain::SecretRef,
+) -> Result<String, ServiceError> {
+    let secret = shared.secret_store.resolve(secret_ref)?;
+    if account.transport.auth != ProviderAuthKind::OAuth2 {
+        return Ok(secret);
+    }
+
+    let token_set = OAuthTokenSet::decode(&secret)?;
+    let token_service = OAuthTokenService::new()?;
+    let access_token = token_service
+        .access_token(&token_set, time::OffsetDateTime::now_utc())
+        .await?;
+    if let Some(updated_token_set) = access_token.updated_token_set {
+        shared
+            .secret_store
+            .update(secret_ref, &updated_token_set.encode()?)?;
+    }
+
+    Ok(access_token.token)
 }
 
 fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
