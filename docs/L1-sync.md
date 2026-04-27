@@ -26,6 +26,8 @@ The sync engine runs as a Rust async task per enabled account. Three triggers ca
 
 For each cycle, the engine loads stored cursors from SQLite, then syncs mailbox state and email state. There is no standalone thread delta fetch for the local conversation list; thread and conversation projections are derived from synced Email records, using JMAP `threadId` as the authoritative grouping key for JMAP accounts.
 
+The runtime emits INFO-level structured progress logs for sync start, provider discovery, mailbox/message fetch phases, store writes, and sync completion/failure. Each sync cycle has a `sync_id` span field so nested gateway and store events can be queried as one operation. IMAP sync logs per-mailbox planning decisions, per-mailbox header fetch start/completion, and chunked header fetch progress; JMAP full snapshots log ID discovery and metadata chunk progress. These diagnostics are intentionally backend logs first; user-facing progress UI consumes a smaller account progress model rather than raw log lines.
+
 ## State management
 
 State strings are per-type, per-account, and stored in `sync_cursor`. The engine reads them on startup and after every successful cycle.

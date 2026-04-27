@@ -1,9 +1,12 @@
+use std::time::Instant;
+
 use jmap_client::client::Client;
 use jmap_client::{email, mailbox};
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, MailboxRecord, MessageId,
     MessageRecord, SyncCursor, SyncObject,
 };
+use tracing::{debug, info, warn};
 
 use crate::conversions::{to_mailbox_record, to_message_record};
 use crate::live::map_gateway_error;
@@ -44,7 +47,10 @@ pub(crate) async fn fetch_mailbox_sync(
     match since_state.and_then(non_empty_state) {
         Some(state) => match fetch_mailbox_delta(client, state).await {
             Ok(sync) => Ok(sync),
-            Err(GatewayError::CannotCalculateChanges) => fetch_mailbox_full(client).await,
+            Err(GatewayError::CannotCalculateChanges) => {
+                warn!("JMAP mailbox delta unavailable, falling back to full snapshot");
+                fetch_mailbox_full(client).await
+            }
             Err(err) => Err(err),
         },
         None => fetch_mailbox_full(client).await,
@@ -63,7 +69,10 @@ pub(crate) async fn fetch_email_sync(
     match since_state.and_then(non_empty_state) {
         Some(state) => match fetch_email_delta(client, state).await {
             Ok(sync) => Ok(sync),
-            Err(GatewayError::CannotCalculateChanges) => fetch_email_full(client).await,
+            Err(GatewayError::CannotCalculateChanges) => {
+                warn!("JMAP email delta unavailable, falling back to full snapshot");
+                fetch_email_full(client).await
+            }
             Err(err) => Err(err),
         },
         None => fetch_email_full(client).await,
@@ -80,14 +89,17 @@ async fn fetch_mailbox_delta(
     client: &Client,
     since_state: &str,
 ) -> Result<MailboxSync, GatewayError> {
+    debug!("JMAP mailbox delta fetch started");
     let mut current_state = since_state.to_string();
     let mut upsert = Vec::new();
     let mut deleted = Vec::new();
+    let mut page_count = 0usize;
     loop {
         let changes = client
             .mailbox_changes(&current_state, 500)
             .await
             .map_err(map_gateway_error)?;
+        page_count += 1;
         deleted.extend(changes.destroyed().iter().cloned().map(MailboxId));
         let fetch_ids: Vec<&str> = changes
             .created()
@@ -118,6 +130,12 @@ async fn fetch_mailbox_delta(
             break;
         }
     }
+    debug!(
+        page_count,
+        upsert_count = upsert.len(),
+        deleted_count = deleted.len(),
+        "JMAP mailbox delta fetch completed"
+    );
     Ok(MailboxSync {
         mailboxes: upsert,
         deleted_mailbox_ids: deleted,
@@ -141,14 +159,18 @@ async fn fetch_email_delta(
     client: &Client,
     since_state: &str,
 ) -> Result<MessageSync, GatewayError> {
+    debug!("JMAP email delta fetch started");
     let mut current_state = since_state.to_string();
     let mut upsert = Vec::new();
     let mut deleted = Vec::new();
+    let mut page_count = 0usize;
+    let mut chunk_count = 0usize;
     loop {
         let changes = client
             .email_changes(&current_state, Some(500))
             .await
             .map_err(map_gateway_error)?;
+        page_count += 1;
         deleted.extend(changes.destroyed().iter().cloned().map(MessageId));
         let fetch_ids: Vec<String> = changes
             .created()
@@ -157,6 +179,7 @@ async fn fetch_email_delta(
             .cloned()
             .collect();
         for chunk in fetch_ids.chunks(100) {
+            chunk_count += 1;
             let mut request = client.build();
             request
                 .get_email()
@@ -176,6 +199,13 @@ async fn fetch_email_delta(
             break;
         }
     }
+    debug!(
+        page_count,
+        chunk_count,
+        upsert_count = upsert.len(),
+        deleted_count = deleted.len(),
+        "JMAP email delta fetch completed"
+    );
     Ok(MessageSync {
         messages: upsert,
         deleted_message_ids: deleted,
@@ -196,11 +226,16 @@ async fn fetch_email_delta(
 /// @spec docs/L1-sync#full-snapshot-reconciliation
 /// @spec docs/L0-sync#full-snapshot-reconciliation
 async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError> {
+    let started = Instant::now();
     let mailbox_ids = client
         .mailbox_query(None::<mailbox::query::Filter>, None::<Vec<_>>)
         .await
         .map_err(map_gateway_error)?
         .take_ids();
+    info!(
+        mailbox_count = mailbox_ids.len(),
+        "JMAP full mailbox snapshot IDs fetched"
+    );
     let mut request = client.build();
     request
         .get_mailbox()
@@ -217,6 +252,11 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
         .await
         .map_err(map_gateway_error)?;
     let state = response.take_state();
+    info!(
+        mailbox_count = mailbox_ids.len(),
+        duration_ms = started.elapsed().as_millis() as u64,
+        "JMAP full mailbox snapshot fetched"
+    );
     Ok(MailboxSync {
         mailboxes: response.take_list().iter().map(to_mailbox_record).collect(),
         deleted_mailbox_ids: Vec::new(),
@@ -237,6 +277,7 @@ async fn fetch_mailbox_full(client: &Client) -> Result<MailboxSync, GatewayError
 /// @spec docs/L1-sync#sync-granularity
 /// @spec docs/L0-sync#sync-granularity
 async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> {
+    let started = Instant::now();
     let email_ids = client
         .email_query(
             None::<email::query::Filter>,
@@ -245,6 +286,10 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
         .await
         .map_err(map_gateway_error)?
         .take_ids();
+    info!(
+        message_count = email_ids.len(),
+        "JMAP full email snapshot IDs fetched"
+    );
     let mut messages = Vec::new();
     let mut state = None;
     if email_ids.is_empty() {
@@ -258,7 +303,8 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
                 .take_state(),
         );
     } else {
-        for chunk in email_ids.chunks(100) {
+        let chunk_count = email_ids.len().div_ceil(100);
+        for (chunk_index, chunk) in email_ids.chunks(100).enumerate() {
             let mut request = client.build();
             request
                 .get_email()
@@ -269,8 +315,20 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
                 state = Some(response.take_state());
             }
             messages.extend(response.take_list().iter().map(to_message_record));
+            info!(
+                chunk_index = chunk_index + 1,
+                chunk_count,
+                fetched_count = messages.len(),
+                total_count = email_ids.len(),
+                "JMAP full email metadata fetch progress"
+            );
         }
     }
+    info!(
+        message_count = messages.len(),
+        duration_ms = started.elapsed().as_millis() as u64,
+        "JMAP full email snapshot fetched"
+    );
     Ok(MessageSync {
         messages,
         deleted_message_ids: Vec::new(),

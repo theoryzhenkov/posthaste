@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use hex::encode as hex_encode;
 use posthaste_domain::{
@@ -1304,8 +1305,21 @@ impl SyncWriteStore for DatabaseStore {
             messages = batch.messages.len(),
             "applying sync batch to store"
         );
+        let started = Instant::now();
         let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
-        self.write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))
+        let events = self
+            .write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))?;
+        info!(
+            account_id = %account_id,
+            mailbox_count = batch.mailboxes.len(),
+            message_count = batch.messages.len(),
+            deleted_mailbox_count = batch.deleted_mailbox_ids.len(),
+            deleted_message_count = batch.deleted_message_ids.len(),
+            event_count = events.len(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "sync batch applied to store"
+        );
+        Ok(events)
     }
 
     /// Stores a lazily fetched message body and emits a `message.body_cached`

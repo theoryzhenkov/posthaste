@@ -143,3 +143,10 @@ server-log-path:
 # Follow the persisted server log file used by the dev stack.
 server-log-tail:
     @tail -F "$({{ SERVER_LOG_PATH_SCRIPT }})"
+
+# Query the persisted JSONL server log. Examples:
+#   just server-log-query --account local-stalwart --message "sync completed"
+#   just server-log-query --sync-id 6f2a4a72-0c59-4d89-9d4e-2a2b9f2c4a87
+#   just server-log-query --target posthaste_imap --json --limit 20
+server-log-query *args:
+    @bash tools/dev/logs/query.sh {{ args }}
