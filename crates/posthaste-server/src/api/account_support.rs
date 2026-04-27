@@ -24,7 +24,7 @@ pub(super) async fn account_overview(
             .clone()
             .map(normalize_account_appearance)
             .unwrap_or_else(|| default_account_appearance(&account)),
-        transport: account_transport_overview(&account),
+        connection: account_connection_overview(&account),
         created_at: account.created_at.clone(),
         updated_at: account.updated_at.clone(),
         is_default: settings.default_account_id.as_ref() == Some(&account.id),
@@ -32,16 +32,29 @@ pub(super) async fn account_overview(
     }
 }
 
-/// Build the transport portion of an account overview with redacted secret status.
-fn account_transport_overview(account: &AccountSettings) -> AccountTransportOverview {
-    AccountTransportOverview {
-        provider: account.transport.provider.clone(),
-        auth: account.transport.auth.clone(),
-        base_url: account.transport.base_url.clone(),
-        username: account.transport.username.clone(),
-        imap: account.transport.imap.clone(),
-        smtp: account.transport.smtp.clone(),
-        secret: secret_status(account.transport.secret_ref.as_ref()),
+/// Build the account connection variant from persisted transport settings.
+fn account_connection_overview(account: &AccountSettings) -> AccountConnectionOverview {
+    let secret = secret_status(account.transport.secret_ref.as_ref());
+    match account.transport.auth {
+        ProviderAuthKind::OAuth2 => AccountConnectionOverview::ManagedOAuth {
+            provider: account.transport.provider.clone(),
+            auth: account.transport.auth.clone(),
+            username: account.transport.username.clone(),
+            imap: account.transport.imap.clone(),
+            smtp: account.transport.smtp.clone(),
+            secret,
+        },
+        ProviderAuthKind::Password | ProviderAuthKind::AppPassword => {
+            AccountConnectionOverview::ManualCredentials {
+                provider: account.transport.provider.clone(),
+                auth: account.transport.auth.clone(),
+                base_url: account.transport.base_url.clone(),
+                username: account.transport.username.clone(),
+                imap: account.transport.imap.clone(),
+                smtp: account.transport.smtp.clone(),
+                secret,
+            }
+        }
     }
 }
 

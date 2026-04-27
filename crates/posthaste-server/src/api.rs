@@ -10,10 +10,10 @@ use axum::response::Html;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
-    AccountOverview, AccountSettings, AccountTransportOverview, AccountTransportSettings,
-    AddToMailboxCommand, AppSettings, AutomationAction, AutomationRule, CachedSenderAddress,
-    CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
+    AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AddToMailboxCommand,
+    AppSettings, AutomationAction, AutomationRule, CachedSenderAddress, CommandResult,
+    ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
     ImapTransportSettings, MailboxId, MailboxSummary, MessageAttachment, MessageCursor,
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, ProviderAuthKind,

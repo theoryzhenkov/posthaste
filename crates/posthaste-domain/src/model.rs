@@ -429,19 +429,33 @@ pub struct AccountSettings {
     pub updated_at: String,
 }
 
-/// API-facing transport summary with redacted secret status.
+/// API-facing account connection variant used by account settings UIs.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountTransportOverview {
-    pub provider: ProviderHint,
-    pub auth: ProviderAuthKind,
-    pub base_url: Option<String>,
-    pub username: Option<String>,
-    pub imap: Option<ImapTransportSettings>,
-    pub smtp: Option<SmtpTransportSettings>,
-    pub secret: SecretStatus,
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum AccountConnectionOverview {
+    ManualCredentials {
+        provider: ProviderHint,
+        auth: ProviderAuthKind,
+        base_url: Option<String>,
+        username: Option<String>,
+        imap: Option<ImapTransportSettings>,
+        smtp: Option<SmtpTransportSettings>,
+        secret: SecretStatus,
+    },
+    ManagedOAuth {
+        provider: ProviderHint,
+        auth: ProviderAuthKind,
+        username: Option<String>,
+        imap: Option<ImapTransportSettings>,
+        smtp: Option<SmtpTransportSettings>,
+        secret: SecretStatus,
+    },
 }
 
 /// Runtime health status of a mail account.
@@ -508,7 +522,7 @@ pub struct AccountOverview {
     pub driver: AccountDriver,
     pub enabled: bool,
     pub appearance: AccountAppearance,
-    pub transport: AccountTransportOverview,
+    pub connection: AccountConnectionOverview,
     pub created_at: String,
     pub updated_at: String,
     pub is_default: bool,
@@ -1323,4 +1337,54 @@ pub enum SecretStoreError {
     Unavailable(String),
     #[error("secret store does not support operation: {0}")]
     Unsupported(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn configured_secret() -> SecretStatus {
+        SecretStatus {
+            storage: SecretStorage::Os,
+            configured: true,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn manual_connection_overview_serializes_editable_credentials_variant() {
+        let value = serde_json::to_value(AccountConnectionOverview::ManualCredentials {
+            provider: ProviderHint::Generic,
+            auth: ProviderAuthKind::AppPassword,
+            base_url: Some("https://mail.example.com/jmap".to_string()),
+            username: Some("me@example.com".to_string()),
+            imap: None,
+            smtp: None,
+            secret: configured_secret(),
+        })
+        .expect("serialize connection overview");
+
+        assert_eq!(value["kind"], "manualCredentials");
+        assert_eq!(value["auth"], "appPassword");
+        assert_eq!(value["baseUrl"], "https://mail.example.com/jmap");
+        assert_eq!(value["username"], "me@example.com");
+    }
+
+    #[test]
+    fn oauth_connection_overview_serializes_managed_variant_without_base_url() {
+        let value = serde_json::to_value(AccountConnectionOverview::ManagedOAuth {
+            provider: ProviderHint::Gmail,
+            auth: ProviderAuthKind::OAuth2,
+            username: Some("me@gmail.com".to_string()),
+            imap: None,
+            smtp: None,
+            secret: configured_secret(),
+        })
+        .expect("serialize connection overview");
+
+        assert_eq!(value["kind"], "managedOAuth");
+        assert_eq!(value["provider"], "gmail");
+        assert_eq!(value["auth"], "oauth2");
+        assert!(value.get("baseUrl").is_none());
+    }
 }
