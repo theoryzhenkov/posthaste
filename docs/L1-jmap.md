@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "JMAP session, method calls, type system, push, error model"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-jmap
 dependents:
@@ -50,6 +50,11 @@ These come from `jmap-client` and are not reimplemented:
 - Optional RFC 9404 blob-management methods only when the server advertises `urn:ietf:params:jmap:blob`
 
 `Mailbox/set` is used for user-controlled mailbox metadata, starting with role assignment. Role changes use the mailbox sync state as `ifInState`, and clearing a role sends an explicit JSON `null` patch. Because JMAP servers reject duplicate system roles, role reassignment clears the previous role owner before assigning the new owner with the returned mailbox state.
+
+Sending uses the selected compose `From` address when present. If the address
+matches a server `Identity`, Posthaste submits with that `identityId`; otherwise
+it submits with the default identity ID while setting the requested `Email.from`
+address, leaving the server to accept or reject catch-all or alias usage.
 
 ## Push
 

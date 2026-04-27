@@ -1219,6 +1219,7 @@ pub struct ReplyContext {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendMessageRequest {
+    pub from: Option<Recipient>,
     pub to: Vec<Recipient>,
     pub cc: Vec<Recipient>,
     pub bcc: Vec<Recipient>,

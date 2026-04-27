@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-ui
   - path: docs/L0-branding
@@ -163,6 +163,13 @@ Settings detail pages use shared settings primitives: a centered `SettingsPage`,
 Account editing follows that shared property-page pattern. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
 
 Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved or pinned so the user can keep reading and interacting with the underlying mail UI.
+
+Compose exposes `From` as editable text with suggestions instead of a fixed
+select. Suggestions include configured account addresses, the current provider
+identity, and locally cached free-form senders that have previously sent
+successfully. The adjacent sender menu shows available suggestions with their
+account names; typing a catch-all address is allowed and the provider validates
+it during send.
 
 Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }` or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, while `o` opens or focuses one stable `message-*` window per exact source/message ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 

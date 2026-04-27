@@ -5,7 +5,7 @@
  * @spec docs/L1-compose#mime-structure
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Mail, Reply, Send } from 'lucide-react'
+import { ChevronDown, Loader2, Mail, Reply, Send } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -16,8 +16,13 @@ import {
 } from 'react'
 import { toast } from 'sonner'
 
-import { fetchIdentity, fetchReplyContext, sendMessage } from '@/api/client'
-import type { Recipient, SendMessageInput } from '@/api/types'
+import {
+  fetchAccounts,
+  fetchIdentity,
+  fetchReplyContext,
+  sendMessage,
+} from '@/api/client'
+import type { AccountOverview, Recipient, SendMessageInput } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
@@ -35,6 +40,7 @@ interface ComposeOverlayProps {
 }
 
 interface ComposeForm {
+  from: string
   to: string
   cc: string
   bcc: string
@@ -43,12 +49,29 @@ interface ComposeForm {
 }
 
 const EMPTY_FORM: ComposeForm = {
+  from: '',
   to: '',
   cc: '',
   bcc: '',
   subject: '',
   body: '',
 }
+
+interface FromAddressOption {
+  sourceId: string
+  sourceName: string
+  name: string | null
+  email: string
+  origin: 'configured' | 'identity' | 'cached'
+}
+
+interface CachedFromAddress {
+  sourceId: string
+  name: string | null
+  email: string
+}
+
+const FROM_CACHE_KEY = 'posthaste.fromAddressCache.v1'
 
 function formatRecipient(recipient: Recipient): string {
   return recipient.name
@@ -78,8 +101,13 @@ function parseRecipients(value: string): Recipient[] {
     })
 }
 
+function parseSender(value: string): Recipient | null {
+  return parseRecipients(value)[0] ?? null
+}
+
 function buildSendInput(form: ComposeForm): SendMessageInput {
   return {
+    from: parseSender(form.from),
     to: parseRecipients(form.to),
     cc: parseRecipients(form.cc),
     bcc: parseRecipients(form.bcc),
@@ -90,12 +118,131 @@ function buildSendInput(form: ComposeForm): SendMessageInput {
   }
 }
 
+function isConcreteEmailPattern(pattern: string): boolean {
+  const trimmed = pattern.trim()
+  return (
+    trimmed.length > 0 &&
+    !trimmed.includes('*') &&
+    /^[^@\s]+@[^@\s]+$/.test(trimmed)
+  )
+}
+
+function wildcardMatchesEmail(pattern: string, email: string): boolean {
+  const trimmed = pattern.trim().toLowerCase()
+  const normalizedEmail = email.trim().toLowerCase()
+  return trimmed.startsWith('*@') && normalizedEmail.endsWith(trimmed.slice(1))
+}
+
+function readFromCache(): CachedFromAddress[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FROM_CACHE_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed.filter(
+      (item): item is CachedFromAddress =>
+        typeof item?.sourceId === 'string' &&
+        typeof item?.email === 'string' &&
+        (item.name === null || typeof item.name === 'string'),
+    )
+  } catch {
+    return []
+  }
+}
+
+function writeFromCache(addresses: CachedFromAddress[]) {
+  try {
+    localStorage.setItem(FROM_CACHE_KEY, JSON.stringify(addresses.slice(0, 40)))
+  } catch {
+    // Cache persistence is opportunistic and must not fail a successful send.
+  }
+}
+
+function rememberFromAddress(sourceId: string, from: Recipient) {
+  const email = from.email.trim()
+  if (!isConcreteEmailPattern(email)) {
+    return
+  }
+  const next = [
+    { sourceId, name: from.name, email },
+    ...readFromCache().filter(
+      (item) =>
+        item.sourceId !== sourceId ||
+        item.email.toLowerCase() !== email.toLowerCase(),
+    ),
+  ]
+  writeFromCache(next)
+}
+
+function optionLabel(option: FromAddressOption): string {
+  return option.name ? `${option.name} <${option.email}>` : option.email
+}
+
+function accountFromOptions(
+  accounts: AccountOverview[],
+  identity: Recipient | null,
+  identitySourceId: string,
+): FromAddressOption[] {
+  const byAccount = new Map(accounts.map((account) => [account.id, account]))
+  const options: FromAddressOption[] = []
+
+  for (const account of accounts) {
+    for (const email of account.emailPatterns.filter(isConcreteEmailPattern)) {
+      options.push({
+        sourceId: account.id,
+        sourceName: account.name,
+        name: account.fullName,
+        email,
+        origin: 'configured',
+      })
+    }
+  }
+
+  if (identity) {
+    options.unshift({
+      sourceId: identitySourceId,
+      sourceName: byAccount.get(identitySourceId)?.name ?? identitySourceId,
+      name: identity.name,
+      email: identity.email,
+      origin: 'identity',
+    })
+  }
+
+  for (const cached of readFromCache()) {
+    const account = byAccount.get(cached.sourceId)
+    if (!account) {
+      continue
+    }
+    options.push({
+      sourceId: cached.sourceId,
+      sourceName: account.name,
+      name: cached.name,
+      email: cached.email,
+      origin: 'cached',
+    })
+  }
+
+  const seen = new Set<string>()
+  return options.filter((option) => {
+    const key = `${option.sourceId}:${option.email.toLowerCase()}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
 export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
   const identityQuery = useQuery({
     queryKey: ['identity', intent.sourceId],
     queryFn: () => fetchIdentity(intent.sourceId),
+  })
+  const accountsQuery = useQuery({
+    queryKey: queryKeys.accounts,
+    queryFn: fetchAccounts,
   })
   const replyContextQuery = useQuery({
     queryKey:
@@ -126,6 +273,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       ? `\n\n${replyContextQuery.data.quotedBody}`
       : ''
     return {
+      from: '',
       to: formatRecipients(replyContextQuery.data.to),
       cc: '',
       bcc: '',
@@ -142,6 +290,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     form: initialForm,
     resetKey: formResetKey,
   }))
+  const [fromMenuOpen, setFromMenuOpen] = useState(false)
+  const [fromInputFocused, setFromInputFocused] = useState(false)
 
   if (composeState.resetKey !== formResetKey) {
     setComposeState({
@@ -167,6 +317,12 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       errorMessage: message,
     }))
   }, [])
+  const setField = useCallback(
+    <K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) => {
+      setForm((current) => ({ ...current, [field]: value }))
+    },
+    [setForm],
+  )
 
   useEffect(() => {
     if (intent.kind === 'reply' && replyContextQuery.data) {
@@ -174,10 +330,98 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     }
   }, [composeKey, intent.kind, replyContextQuery.data])
 
+  useEffect(() => {
+    const identity = identityQuery.data
+    if (!identity || form.from.trim().length > 0) {
+      return
+    }
+    const frame = requestAnimationFrame(() => {
+      setForm((current) =>
+        current.from.trim().length > 0
+          ? current
+          : { ...current, from: formatRecipient(identity) },
+      )
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [form.from, identityQuery.data, setForm])
+
+  const fromIdentity = useMemo(
+    () =>
+      identityQuery.data
+        ? {
+            name: identityQuery.data.name || null,
+            email: identityQuery.data.email,
+          }
+        : null,
+    [identityQuery.data],
+  )
+  const fromOptions = useMemo(
+    () =>
+      accountFromOptions(
+        accountsQuery.data ?? [],
+        fromIdentity,
+        intent.sourceId,
+      ),
+    [accountsQuery.data, fromIdentity, intent.sourceId],
+  )
+  const displayedFromOptions = useMemo(() => {
+    const needle = form.from.trim().toLowerCase()
+    if (fromMenuOpen || needle.length === 0) {
+      return fromOptions
+    }
+    return fromOptions
+      .filter((option) => {
+        const label = optionLabel(option).toLowerCase()
+        return (
+          option.email.toLowerCase().includes(needle) ||
+          option.sourceName.toLowerCase().includes(needle) ||
+          label.includes(needle)
+        )
+      })
+      .slice(0, 6)
+  }, [form.from, fromMenuOpen, fromOptions])
+
+  const resolveSubmissionSourceId = useCallback(
+    (from: Recipient | null): string => {
+      const email = from?.email.trim().toLowerCase()
+      if (!email) {
+        return intent.sourceId
+      }
+      const exact = fromOptions.find(
+        (option) => option.email.toLowerCase() === email,
+      )
+      if (exact) {
+        return exact.sourceId
+      }
+      const accounts = accountsQuery.data ?? []
+      const currentAccount = accounts.find(
+        (account) => account.id === intent.sourceId,
+      )
+      if (
+        currentAccount?.emailPatterns.some((pattern) =>
+          wildcardMatchesEmail(pattern, email),
+        )
+      ) {
+        return currentAccount.id
+      }
+      return (
+        accounts.find((account) =>
+          account.emailPatterns.some((pattern) =>
+            wildcardMatchesEmail(pattern, email),
+          ),
+        )?.id ?? intent.sourceId
+      )
+    },
+    [accountsQuery.data, fromOptions, intent.sourceId],
+  )
+
   const sendMutation = useMutation({
-    mutationFn: (input: SendMessageInput) =>
-      sendMessage(intent.sourceId, input),
-    onSuccess: async () => {
+    mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
+      sendMessage(variables.sourceId, variables.input),
+    onSuccess: async (_data, variables) => {
+      if (variables.input.from) {
+        rememberFromAddress(variables.sourceId, variables.input.from)
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
         queryClient.invalidateQueries({ queryKey: ['conversations'] }),
@@ -193,6 +437,9 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const isPreparingReply =
     intent.kind === 'reply' && replyContextQuery.isLoading
   const fromLabel = useMemo(() => {
+    if (form.from.trim().length > 0) {
+      return form.from
+    }
     if (identityQuery.isError) {
       return 'Sender unavailable'
     }
@@ -203,18 +450,26 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     return identity.name
       ? `${identity.name} <${identity.email}>`
       : identity.email
-  }, [identityQuery.data, identityQuery.isError])
+  }, [form.from, identityQuery.data, identityQuery.isError])
 
-  function setField<K extends keyof ComposeForm>(
-    field: K,
-    value: ComposeForm[K],
-  ) {
-    setForm((current) => ({ ...current, [field]: value }))
-  }
-
-  function validate(input: SendMessageInput): string | null {
+  function validate(
+    formData: ComposeForm,
+    input: SendMessageInput,
+  ): string | null {
+    if (
+      formData.from.trim().length > 0 &&
+      parseRecipients(formData.from).length !== 1
+    ) {
+      return 'From address must be a single email address.'
+    }
+    if (!input.from || input.from.email.trim().length === 0) {
+      return 'Add a From address.'
+    }
     if (input.to.length === 0) {
       return 'Add at least one recipient.'
+    }
+    if (!isConcreteEmailPattern(input.from.email)) {
+      return 'From address must be a single email address.'
     }
     if (input.to.some((recipient) => recipient.email.trim().length === 0)) {
       return 'Recipient email addresses cannot be empty.'
@@ -234,14 +489,24 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       input.inReplyTo = replyContextQuery.data.inReplyTo
       input.references = replyContextQuery.data.references
     }
-    const validationError = validate(input)
+    const validationError = validate(form, input)
     if (validationError) {
       setErrorMessage(validationError)
       return
     }
     setErrorMessage(null)
-    sendMutation.mutate(input)
-  }, [form, intent.kind, replyContextQuery.data, sendMutation, setErrorMessage])
+    sendMutation.mutate({
+      sourceId: resolveSubmissionSourceId(input.from),
+      input,
+    })
+  }, [
+    form,
+    intent.kind,
+    replyContextQuery.data,
+    resolveSubmissionSourceId,
+    sendMutation,
+    setErrorMessage,
+  ])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -281,6 +546,65 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       onClose={onClose}
     >
       <div className="grid shrink-0 gap-2 border-b border-border/70 px-4 py-3">
+        <ComposeLine label="From">
+          <div className="relative flex min-w-0 items-center gap-1">
+            <Input
+              value={form.from}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  setFromInputFocused(false)
+                  setFromMenuOpen(false)
+                }, 120)
+              }}
+              onChange={(event) => {
+                setField('from', event.target.value)
+                setFromMenuOpen(false)
+              }}
+              onFocus={() => setFromInputFocused(true)}
+              className="h-7 min-w-0 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
+              placeholder="name@example.com"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0 text-muted-foreground hover:bg-[var(--hover-bg)]"
+              title="Choose sender"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setFromInputFocused(true)
+                setFromMenuOpen((open) => !open)
+              }}
+            >
+              <ChevronDown size={15} />
+            </Button>
+            {(fromMenuOpen || fromInputFocused) &&
+              displayedFromOptions.length > 0 && (
+                <div className="absolute left-0 right-8 top-8 z-20 max-h-56 overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+                  {displayedFromOptions.map((option) => (
+                    <button
+                      key={`${option.sourceId}:${option.email}`}
+                      type="button"
+                      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-[var(--hover-bg)]"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setField('from', optionLabel(option))
+                        setFromMenuOpen(false)
+                        setFromInputFocused(false)
+                      }}
+                    >
+                      <span className="min-w-0 truncate">
+                        {optionLabel(option)}
+                      </span>
+                      <span className="max-w-32 truncate text-[11px] text-muted-foreground">
+                        {option.sourceName}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+          </div>
+        </ComposeLine>
         <ComposeLine label="To">
           <Input
             value={form.to}

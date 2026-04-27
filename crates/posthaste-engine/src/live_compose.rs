@@ -1,6 +1,6 @@
 use jmap_client::{email, identity, mailbox};
 use posthaste_domain::{
-    AccountId, GatewayError, Identity, MailGateway, MessageId, ReplyContext, SendMessageRequest,
+    AccountId, GatewayError, Identity, MessageId, ReplyContext, SendMessageRequest,
 };
 
 use crate::compose::{
@@ -13,6 +13,13 @@ use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 /// @spec docs/L1-jmap#methods-used
 /// @spec docs/L1-compose#composesession-interface
 pub(crate) async fn fetch_identity(gateway: &LiveJmapGateway) -> Result<Identity, GatewayError> {
+    let mut identities = fetch_identities(gateway).await?;
+    identities
+        .pop()
+        .ok_or_else(|| GatewayError::Rejected("no identity available".to_string()))
+}
+
+async fn fetch_identities(gateway: &LiveJmapGateway) -> Result<Vec<Identity>, GatewayError> {
     let mut request = gateway.client().build();
     request.get_identity().properties([
         identity::Property::Id,
@@ -20,19 +27,18 @@ pub(crate) async fn fetch_identity(gateway: &LiveJmapGateway) -> Result<Identity
         identity::Property::Email,
     ]);
     let mut response = gateway.send_request(request).await?;
-    let mut identities = required_method_response(response.pop_method_response(), "Identity/get")?
+    let identities = required_method_response(response.pop_method_response(), "Identity/get")?
         .unwrap_get_identity()
         .map_err(map_gateway_error)?
         .take_list();
-    let identity = identities
-        .pop()
-        .ok_or_else(|| GatewayError::Rejected("no identity available".to_string()))?;
-
-    Ok(Identity {
-        id: identity.id().unwrap_or_default().to_string(),
-        name: identity.name().unwrap_or_default().to_string(),
-        email: identity.email().unwrap_or_default().to_string(),
-    })
+    Ok(identities
+        .into_iter()
+        .map(|identity| Identity {
+            id: identity.id().unwrap_or_default().to_string(),
+            name: identity.name().unwrap_or_default().to_string(),
+            email: identity.email().unwrap_or_default().to_string(),
+        })
+        .collect())
 }
 
 /// Fetch the original message metadata needed for reply/forward composition.
@@ -111,10 +117,10 @@ pub(crate) async fn fetch_reply_context(
 /// @spec docs/L1-jmap#methods-used
 pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
-    account_id: &AccountId,
+    _account_id: &AccountId,
     request_data: &SendMessageRequest,
 ) -> Result<(), GatewayError> {
-    let identity = fetch_send_identity(gateway, account_id).await?;
+    let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
     let drafts_mailbox_id = gateway
         .fetch_mailbox_id_by_role(mailbox::Role::Drafts)
         .await?;
@@ -200,146 +206,97 @@ pub(crate) async fn send_message(
 /// @spec docs/L1-jmap#methods-used
 /// @spec docs/L1-compose#composesession-interface
 async fn fetch_send_identity(
-    gateway: &impl MailGateway,
-    account_id: &AccountId,
+    gateway: &LiveJmapGateway,
+    requested_from: Option<&posthaste_domain::Recipient>,
 ) -> Result<Identity, GatewayError> {
-    gateway.fetch_identity(account_id).await
+    resolve_send_identity(fetch_identities(gateway).await?, requested_from)
+}
+
+fn resolve_send_identity(
+    mut identities: Vec<Identity>,
+    requested_from: Option<&posthaste_domain::Recipient>,
+) -> Result<Identity, GatewayError> {
+    let default_identity = identities
+        .pop()
+        .ok_or_else(|| GatewayError::Rejected("no identity available".to_string()))?;
+
+    let Some(requested_from) = requested_from else {
+        return Ok(default_identity);
+    };
+    let requested_email = requested_from.email.trim();
+    if requested_email.is_empty() {
+        return Err(GatewayError::Rejected(
+            "sender email address cannot be empty".to_string(),
+        ));
+    }
+
+    let identity_id = identities
+        .iter()
+        .chain(std::iter::once(&default_identity))
+        .find(|identity| identity.email.eq_ignore_ascii_case(requested_email))
+        .map(|identity| identity.id.clone())
+        .unwrap_or_else(|| default_identity.id.clone());
+    Ok(Identity {
+        id: identity_id,
+        name: requested_from
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(default_identity.name.as_str())
+            .to_string(),
+        email: requested_email.to_string(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-    use posthaste_domain::{
-        BlobId, FetchedBody, MailboxId, MutationOutcome, PushTransport, SetKeywordsCommand,
-        SyncBatch, SyncCursor,
-    };
-
     use super::*;
 
-    struct RecordingGateway {
-        seen_account_ids: Mutex<Vec<AccountId>>,
+    #[test]
+    fn send_identity_uses_requested_from_with_matching_identity_id() {
+        let identity = resolve_send_identity(
+            vec![
+                Identity {
+                    id: "primary".to_string(),
+                    name: "Primary".to_string(),
+                    email: "primary@example.com".to_string(),
+                },
+                Identity {
+                    id: "alias".to_string(),
+                    name: "Alias".to_string(),
+                    email: "alias@example.com".to_string(),
+                },
+            ],
+            Some(&posthaste_domain::Recipient {
+                name: Some("Alias Sender".to_string()),
+                email: "ALIAS@example.com".to_string(),
+            }),
+        )
+        .expect("identity should resolve");
+
+        assert_eq!(identity.id, "alias");
+        assert_eq!(identity.name, "Alias Sender");
+        assert_eq!(identity.email, "ALIAS@example.com");
     }
 
-    #[async_trait]
-    impl MailGateway for RecordingGateway {
-        async fn sync(
-            &self,
-            _account_id: &AccountId,
-            _cursors: &[SyncCursor],
-        ) -> Result<SyncBatch, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
+    #[test]
+    fn send_identity_uses_default_identity_id_for_freeform_sender() {
+        let identity = resolve_send_identity(
+            vec![Identity {
+                id: "primary".to_string(),
+                name: "Primary".to_string(),
+                email: "primary@example.com".to_string(),
+            }],
+            Some(&posthaste_domain::Recipient {
+                name: None,
+                email: "catchall@example.com".to_string(),
+            }),
+        )
+        .expect("identity should resolve");
 
-        async fn fetch_message_body(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<FetchedBody, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn download_blob(
-            &self,
-            _account_id: &AccountId,
-            _blob_id: &BlobId,
-        ) -> Result<Vec<u8>, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn set_keywords(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _command: &SetKeywordsCommand,
-        ) -> Result<MutationOutcome, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn replace_mailboxes(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-            _mailbox_ids: &[MailboxId],
-        ) -> Result<MutationOutcome, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn destroy_message(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-            _expected_state: Option<&str>,
-        ) -> Result<MutationOutcome, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn set_mailbox_role(
-            &self,
-            _account_id: &AccountId,
-            _mailbox_id: &MailboxId,
-            _expected_state: Option<&str>,
-            _role: Option<&str>,
-            _clear_role_from: Option<&MailboxId>,
-        ) -> Result<MutationOutcome, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn fetch_identity(&self, account_id: &AccountId) -> Result<Identity, GatewayError> {
-            self.seen_account_ids
-                .lock()
-                .expect("recording lock poisoned")
-                .push(account_id.clone());
-            Ok(Identity {
-                id: "identity-1".to_string(),
-                name: "Alice".to_string(),
-                email: "alice@example.com".to_string(),
-            })
-        }
-
-        async fn fetch_reply_context(
-            &self,
-            _account_id: &AccountId,
-            _message_id: &MessageId,
-        ) -> Result<ReplyContext, GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        async fn send_message(
-            &self,
-            _account_id: &AccountId,
-            _request: &SendMessageRequest,
-        ) -> Result<(), GatewayError> {
-            Err(GatewayError::Rejected("not implemented".to_string()))
-        }
-
-        fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
-            vec![]
-        }
-    }
-
-    #[tokio::test]
-    async fn send_identity_lookup_uses_requested_account_id() {
-        let gateway = RecordingGateway {
-            seen_account_ids: Mutex::new(Vec::new()),
-        };
-        let requested_account_id = AccountId::from("secondary");
-
-        let identity = fetch_send_identity(&gateway, &requested_account_id)
-            .await
-            .expect("identity lookup should succeed");
-
-        assert_eq!(identity.email, "alice@example.com");
-        assert_eq!(
-            gateway
-                .seen_account_ids
-                .lock()
-                .expect("recording lock poisoned")
-                .as_slice(),
-            &[requested_account_id]
-        );
+        assert_eq!(identity.id, "primary");
+        assert_eq!(identity.name, "Primary");
+        assert_eq!(identity.email, "catchall@example.com");
     }
 }
