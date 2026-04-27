@@ -165,6 +165,61 @@ fn source_message_scope_rule(source_id: &str, mailbox_id: Option<&MailboxId>) ->
     all_rule(nodes)
 }
 
+async fn record_search_cache_visibility(
+    state: &Arc<AppState>,
+    page: &MessagePage,
+    scope_rule: &SmartMailboxRule,
+    result_rule: &SmartMailboxRule,
+) {
+    let total_messages = match state.service.count_messages_by_rule(scope_rule) {
+        Ok((_, total)) => total.max(0) as u64,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "skipping cache search visibility signals because scope count failed"
+            );
+            return;
+        }
+    };
+    let result_count = match state.service.count_messages_by_rule(result_rule) {
+        Ok((_, total)) => total.max(0) as u64,
+        Err(error) => {
+            warn!(
+                error = %error,
+                "skipping cache search visibility signals because result count failed"
+            );
+            return;
+        }
+    };
+    let account_ids =
+        match state
+            .service
+            .record_cache_search_visibility(page, total_messages, result_count)
+        {
+            Ok(account_ids) => account_ids,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "failed to record cache search visibility signals"
+                );
+                return;
+            }
+        };
+    for account_id in account_ids {
+        if let Err(error) = state
+            .supervisor
+            .trigger_cache_maintenance(&account_id)
+            .await
+        {
+            warn!(
+                account_id = %account_id,
+                error = %error,
+                "failed to trigger cache maintenance after search visibility signal"
+            );
+        }
+    }
+}
+
 const DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 5;
 const MAX_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 50;
 
@@ -1430,16 +1485,18 @@ pub async fn list_source_messages(
     let sort_direction = query.sort_dir.unwrap_or_default();
     if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
         let scoped_rule = source_message_scope_rule(&source_id, mailbox_id.as_ref());
+        let result_rule = combine_rules(vec![scoped_rule.clone(), search_rule]);
         let page = state
             .service
             .query_message_page_by_rule(
-                &combine_rules(vec![scoped_rule, search_rule]),
+                &result_rule,
                 limit,
                 cursor.as_ref(),
                 sort_field,
                 sort_direction,
             )
             .map_err(ApiError::from_service_error)?;
+        record_search_cache_visibility(&state, &page, &scoped_rule, &result_rule).await;
         return Ok(Json(message_page_response(page)));
     }
     let page = state
@@ -1609,16 +1666,19 @@ pub async fn list_smart_mailbox_messages(
             .service
             .get_smart_mailbox(&smart_mailbox_id)
             .map_err(ApiError::from_service_error)?;
+        let scope_rule = mailbox.rule;
+        let result_rule = combine_rules(vec![scope_rule.clone(), search_rule]);
         let page = state
             .service
             .query_message_page_by_rule(
-                &combine_rules(vec![mailbox.rule, search_rule]),
+                &result_rule,
                 limit,
                 cursor.as_ref(),
                 sort_field,
                 sort_direction,
             )
             .map_err(ApiError::from_service_error)?;
+        record_search_cache_visibility(&state, &page, &scope_rule, &result_rule).await;
         return Ok(Json(message_page_response(page)));
     }
 

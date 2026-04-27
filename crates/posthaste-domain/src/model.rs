@@ -393,6 +393,16 @@ pub struct CacheWorkerBatchOutcome {
     pub events: Vec<DomainEvent>,
 }
 
+/// Result of one optional-content cache re-score batch.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Debug, Default)]
+pub struct CacheRescoreBatchOutcome {
+    pub scanned: usize,
+    pub updated: usize,
+    pub skipped: usize,
+}
+
 /// Event types that can cause an automation rule to run.
 ///
 /// @spec docs/L1-sync#automation-actions

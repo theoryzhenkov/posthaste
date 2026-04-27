@@ -192,6 +192,31 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 PRIMARY KEY (account_id, message_id, layer, object_id)
             );
 
+            CREATE TABLE IF NOT EXISTS cache_message_signal (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                search_total_messages INTEGER,
+                search_result_count INTEGER,
+                search_result_rank INTEGER,
+                search_seen_count INTEGER NOT NULL DEFAULT 0,
+                last_search_seen_at TEXT,
+                thread_activity_score REAL,
+                sender_affinity_score REAL,
+                local_behavior_score REAL,
+                direct_user_boost REAL,
+                pinned INTEGER,
+                dirty_at TEXT,
+                PRIMARY KEY (account_id, message_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS cache_rescore_queue (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                queued_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, message_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
             CREATE INDEX IF NOT EXISTS idx_message_account_received
@@ -226,6 +251,10 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 ON cache_object (account_id, state, layer, priority DESC);
             CREATE INDEX IF NOT EXISTS idx_cache_cached_bytes
                 ON cache_object (state, fetch_bytes);
+            CREATE INDEX IF NOT EXISTS idx_cache_signal_dirty
+                ON cache_message_signal (account_id, dirty_at);
+            CREATE INDEX IF NOT EXISTS idx_cache_rescore_queue
+                ON cache_rescore_queue (account_id, queued_at);
             ",
         )
         .map_err(sql_to_store_error)?;
