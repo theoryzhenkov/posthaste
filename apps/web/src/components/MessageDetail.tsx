@@ -32,6 +32,7 @@ import type {
 } from '../api/types'
 import { cn } from '../lib/utils'
 import { mergeConversationView } from '../mailState'
+import { resolveMessageBodyRender } from '../messageBody'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { EmailFrame } from './EmailFrame'
@@ -275,6 +276,7 @@ export function MessageDetail({
     message.attachments.find(
       (attachment) => attachment.id === selectedAttachmentId,
     ) ?? null
+  const bodyRender = resolveMessageBodyRender(message)
   void onSelectMessage
 
   return (
@@ -499,9 +501,16 @@ export function MessageDetail({
         )}
 
         <div className="min-h-0 flex-1 overflow-hidden bg-panel">
-          {message.bodyText ? (
+          {bodyRender.kind === 'html' ? (
+            <div className="ph-scroll h-full max-w-[720px] overflow-auto px-[22px] py-[18px]">
+              <EmailFrame
+                className="h-full min-h-[480px] bg-card"
+                html={bodyRender.html}
+              />
+            </div>
+          ) : bodyRender.kind === 'text' ? (
             <article className="ph-scroll h-full max-w-[720px] overflow-auto px-[22px] py-[18px] text-[13px] leading-[1.6] text-foreground/92">
-              {message.bodyText.split(/\n{2,}/).map((paragraph, index) => (
+              {bodyRender.paragraphs.map((paragraph, index) => (
                 <p
                   key={`${index}-${paragraph.slice(0, 20)}`}
                   className="mb-4 whitespace-pre-wrap last:mb-0"
@@ -510,16 +519,9 @@ export function MessageDetail({
                 </p>
               ))}
             </article>
-          ) : message.bodyHtml ? (
-            <div className="ph-scroll h-full max-w-[720px] overflow-auto px-[22px] py-[18px]">
-              <EmailFrame
-                className="h-full min-h-[480px] bg-card"
-                html={message.bodyHtml}
-              />
-            </div>
           ) : (
             <p className="ph-scroll h-full overflow-auto px-[22px] py-[18px] text-[13px] text-muted-foreground">
-              {message.preview ?? 'No content available.'}
+              {bodyRender.fallback}
             </p>
           )}
         </div>
