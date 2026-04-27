@@ -220,6 +220,7 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 message_id TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 queued_at TEXT NOT NULL,
+                rescore_priority REAL NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, message_id),
                 FOREIGN KEY (account_id, message_id)
                     REFERENCES message(account_id, id)
@@ -267,7 +268,43 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
             ",
         )
         .map_err(sql_to_store_error)?;
+    ensure_column(
+        connection,
+        "cache_rescore_queue",
+        "rescore_priority",
+        "ALTER TABLE cache_rescore_queue ADD COLUMN rescore_priority REAL NOT NULL DEFAULT 0",
+    )?;
+    connection
+        .execute(
+            "CREATE INDEX IF NOT EXISTS idx_cache_rescore_priority
+             ON cache_rescore_queue (account_id, rescore_priority DESC, queued_at, message_id)",
+            [],
+        )
+        .map_err(sql_to_store_error)?;
     crate::cache::repair_missing_body_cache_objects(connection)?;
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &'static str,
+    column_name: &'static str,
+    alter_sql: &'static str,
+) -> Result<(), StoreError> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(sql_to_store_error)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sql_to_store_error)?;
+    for column in columns {
+        if column.map_err(sql_to_store_error)? == column_name {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(alter_sql, [])
+        .map_err(sql_to_store_error)?;
     Ok(())
 }
 

@@ -4,6 +4,7 @@ const MIB: f64 = 1024.0 * 1024.0;
 const MIN_BILLABLE_BYTES: f64 = 4.0 * 1024.0;
 const DEFAULT_SIZE_ALPHA: f64 = 0.7;
 const PINNED_BONUS: f64 = 4.0;
+const LOCAL_SIGNAL_RESCORE_BASE: f64 = 100.0;
 
 /// Tunable manual weights for optional local cache utility scoring.
 ///
@@ -292,6 +293,43 @@ pub struct CacheSignalUpdate {
     pub pinned: Option<bool>,
 }
 
+/// Cheap urgency estimate for ordering dirty cache objects before full scoring.
+///
+/// This is deliberately separate from final fetch priority: it only decides
+/// which dirty objects should be re-scored first. Final cache priority is still
+/// computed from full candidate metadata after the row leaves this queue.
+///
+/// @spec docs/L1-sync#cache-signal-rescore
+pub fn cache_signal_rescore_priority(update: &CacheSignalUpdate) -> f64 {
+    let search = update
+        .search
+        .as_ref()
+        .map(search_context_score)
+        .unwrap_or(0.0);
+    let direct_user_boost = finite_nonnegative(update.direct_user_boost.unwrap_or(0.0));
+    let thread_activity = saturating_signal(update.thread_activity.unwrap_or(0.0), 4.0);
+    let sender_affinity = saturating_signal(update.sender_affinity.unwrap_or(0.0), 4.0);
+    let local_behavior = saturating_signal(update.local_behavior.unwrap_or(0.0), 4.0);
+    let pinned = if update.pinned.unwrap_or(false) {
+        PINNED_BONUS
+    } else {
+        0.0
+    };
+
+    let signal_urgency = 10.0 * direct_user_boost
+        + 8.0 * search
+        + 4.0 * thread_activity
+        + 2.0 * sender_affinity
+        + 2.0 * local_behavior
+        + pinned;
+
+    if signal_urgency > 0.0 {
+        LOCAL_SIGNAL_RESCORE_BASE + signal_urgency
+    } else {
+        1.0
+    }
+}
+
 /// Cache object plus current metadata/signals used by the re-score worker.
 ///
 /// @spec docs/L1-sync#local-cache-planning
@@ -320,6 +358,7 @@ pub struct CacheRescoreCandidate {
     pub direct_user_boost: f64,
     pub pinned: bool,
     pub signal_reason: String,
+    pub rescore_priority: f64,
 }
 
 /// Priority update emitted by the re-score worker.
@@ -647,6 +686,27 @@ mod tests {
         });
 
         assert!(searched_score.priority > baseline_score.priority);
+    }
+
+    #[test]
+    fn local_signal_rescore_priority_beats_background_work() {
+        let priority = cache_signal_rescore_priority(&CacheSignalUpdate {
+            account_id: "primary".to_string(),
+            message_id: "message-1".to_string(),
+            reason: "search-visible".to_string(),
+            search: Some(CacheSearchSignals {
+                total_messages: 1_000,
+                result_count: 10,
+                result_rank: 0,
+            }),
+            thread_activity: None,
+            sender_affinity: None,
+            local_behavior: None,
+            direct_user_boost: Some(0.8),
+            pinned: None,
+        });
+
+        assert!(priority > LOCAL_SIGNAL_RESCORE_BASE);
     }
 
     // spec: docs/L1-sync#cache-priority-size-aware

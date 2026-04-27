@@ -17,13 +17,14 @@ use std::time::Instant;
 
 use hex::encode as hex_encode;
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId,
-    AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, CacheCandidate,
-    CacheFetchCandidate, CacheFetchUnit, CacheLayer, CacheObjectState, CachePriorityUpdate,
-    CacheRescoreCandidate, CacheSearchSignals, CacheSignalUpdate, CacheStore, CachedSenderAddress,
-    CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
-    ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
-    EventStore, FetchedBody, ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
+    cache_signal_rescore_priority, now_iso8601 as domain_now_iso8601,
+    synthesize_plain_text_raw_mime, AccountId, AutomationBackfillJob, AutomationBackfillJobStatus,
+    AutomationBackfillStore, CacheCandidate, CacheFetchCandidate, CacheFetchUnit, CacheLayer,
+    CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate, CacheSearchSignals,
+    CacheSignalUpdate, CacheStore, CachedSenderAddress, CommandResult, ConversationCursor,
+    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, EventStore, FetchedBody,
+    ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
     ImapMessageLocationWriteStore, ImapModSeq, ImapSyncStateStore, ImapSyncStateWriteStore,
     ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
     MessageCursor, MessageDetail, MessageDetailStore, MessageId, MessageListStore,
