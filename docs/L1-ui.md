@@ -166,10 +166,12 @@ Settings, mailbox editor, shortcuts, onboarding, and compose share the modal pri
 
 Compose exposes `From` as editable text with suggestions instead of a fixed
 select. Suggestions include configured account addresses, the current provider
-identity, and locally cached free-form senders that have previously sent
+identity, and backend-cached free-form senders that have previously sent
 successfully. The adjacent sender menu shows available suggestions with their
 account names; typing a catch-all address is allowed and the provider validates
-it during send.
+it during send. Compose loads the accepted free-form cache through
+`queryKeys.senderAddresses`; it does not keep sender identities in browser
+storage.
 
 Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }` or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, while `o` opens or focuses one stable `message-*` window per exact source/message ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 

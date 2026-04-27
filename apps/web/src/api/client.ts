@@ -13,6 +13,7 @@ import type {
   AppSettings,
   AutomationRulePreviewInput,
   AutomationRulePreviewResponse,
+  CachedSenderAddress,
   ConversationPage,
   ConversationView,
   CreateAccountInput,
@@ -438,6 +439,11 @@ export async function fetchSourceMessages(
 /** @spec docs/L1-api#compose */
 export async function fetchIdentity(sourceId: string): Promise<Identity> {
   return request<Identity>(`/sources/${sourceId}/identity`)
+}
+
+/** @spec docs/L1-api#compose */
+export async function fetchSenderAddresses(): Promise<CachedSenderAddress[]> {
+  return request<CachedSenderAddress[]>('/sender-addresses')
 }
 
 /** @spec docs/L1-api#compose */

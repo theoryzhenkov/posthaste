@@ -3,13 +3,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, AutomationBackfillJob, BlobId, CommandResult, ConversationCursor, ConversationId,
-    ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
-    ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
-    MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
-    PushTransport, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
-    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor,
-    SyncObject, TagSummary, ThreadId, ThreadView,
+    AccountId, AutomationBackfillJob, BlobId, CachedSenderAddress, CommandResult,
+    ConversationCursor, ConversationId, ConversationPage, ConversationSortField, ConversationView,
+    EventFilter, FetchedBody, Identity, ImapMailboxSyncState, ImapMessageLocation, MailboxId,
+    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, MutationOutcome, PushTransport, Recipient, ReplaceMailboxesCommand,
+    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
+    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, TagSummary, ThreadId,
+    ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -443,6 +444,22 @@ pub trait SourceDataStore: Send + Sync {
     fn delete_source_data(&self, account_id: &AccountId) -> Result<(), StoreError>;
 }
 
+/// Durable cache of sender addresses that have already passed provider send
+/// validation.
+///
+/// @spec docs/L1-compose#sender-selection
+pub trait SenderAddressCacheStore: Send + Sync {
+    /// List cached sender addresses across all configured account IDs.
+    fn list_sender_address_cache(&self) -> Result<Vec<CachedSenderAddress>, StoreError>;
+
+    /// Remember a sender address for the account that successfully submitted it.
+    fn remember_sender_address(
+        &self,
+        account_id: &AccountId,
+        sender: &Recipient,
+    ) -> Result<(), StoreError>;
+}
+
 /// Durable automation backfill scheduling boundary.
 pub trait AutomationBackfillStore: Send + Sync {
     /// Create the current account/rules job if it does not exist, returning the job.
@@ -505,6 +522,7 @@ pub trait MailStore:
     + EventStore
     + SourceProjectionStore
     + SourceDataStore
+    + SenderAddressCacheStore
     + AutomationBackfillStore
 {
 }
@@ -525,6 +543,7 @@ impl<T> MailStore for T where
         + EventStore
         + SourceProjectionStore
         + SourceDataStore
+        + SenderAddressCacheStore
         + AutomationBackfillStore
 {
 }

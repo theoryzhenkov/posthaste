@@ -82,6 +82,7 @@ merged across enabled accounts and exclude system keywords such as `$seen` and
 
 | Method | Path | Handler | Request | Response |
 |--------|------|---------|---------|----------|
+| GET | `/sender-addresses` | `list_sender_addresses` | -- | `CachedSenderAddress[]` |
 | GET | `/sources/{source_id}/identity` | `get_identity` | -- | `Identity` |
 | GET | `/sources/{source_id}/messages/{id}/reply-context` | `get_reply_context` | -- | `ReplyContext` |
 | POST | `/sources/{source_id}/commands/send` | `send_message` | `SendMessageRequest` | `OkResponse` |
@@ -90,6 +91,10 @@ merged across enabled accounts and exclude system keywords such as `$seen` and
 backend uses that sender address for the outgoing RFC 5322 `From` field. The
 route `source_id` is still the account that submits the message; the frontend
 may choose that account from configured sender suggestions or wildcard ownership.
+After a successful send, the backend records the selected sender in the local
+SQLite `sender_address_cache`; failed or rejected sends do not update it.
+`GET /sender-addresses` returns those accepted free-form sender suggestions
+across accounts for compose autosuggest.
 
 ### Message commands
 

@@ -17,6 +17,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   accounts: ['accounts'] as const,
   account: (accountId: string | null) => ['account', accountId] as const,
+  senderAddresses: ['sender-addresses'] as const,
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
   sidebar: ['sidebar'] as const,
   messagesRoot: ['messages'] as const,

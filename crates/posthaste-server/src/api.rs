@@ -11,18 +11,18 @@ use axum::Json;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
     AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
-    AutomationAction, AutomationRule, CommandResult, ConversationCursor, ConversationId,
-    ConversationPage, ConversationSortField, ConversationSummary, ConversationView, DomainEvent,
-    EventFilter, GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
-    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
-    SendMessageRequest, ServiceError, SetKeywordsCommand, SharedGateway, SidebarResponse,
-    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
-    SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue,
-    SmtpTransportSettings, SortDirection, SyncTrigger, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    AutomationAction, AutomationRule, CachedSenderAddress, CommandResult, ConversationCursor,
+    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
+    DomainEvent, EventFilter, GatewayError, Identity, ImapTransportSettings, MailboxId,
+    MailboxSummary, MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage,
+    MessageSortField, MessageSummary, ProviderAuthKind, ProviderHint, Recipient,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
+    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary,
+    SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
+    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1431,6 +1431,19 @@ pub async fn get_identity(
         .map_err(ApiError::from_service_error)
 }
 
+/// GET /v1/sender-addresses
+///
+/// @spec docs/L1-api#compose
+pub async fn list_sender_addresses(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<CachedSenderAddress>>, ApiError> {
+    state
+        .store
+        .list_sender_address_cache()
+        .map(Json)
+        .map_err(store_error_to_api)
+}
+
 /// GET /v1/sources/{source_id}/messages/{id}/reply-context
 ///
 /// @spec docs/L1-api#compose
@@ -1466,6 +1479,16 @@ pub async fn send_message(
         .send_message(&account_id, &request, gateway.as_ref())
         .await
         .map_err(ApiError::from_service_error)?;
+    if let Some(sender) = &request.from {
+        if let Err(error) = state.store.remember_sender_address(&account_id, sender) {
+            warn!(
+                source_id = %account_id,
+                sender = %sender.email,
+                error = %error,
+                "send accepted but sender address cache update failed"
+            );
+        }
+    }
     if let Err(error) = state
         .supervisor
         .trigger_account_sync(&account_id, SyncTrigger::Manual)
