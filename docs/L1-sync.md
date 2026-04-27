@@ -108,9 +108,11 @@ activity then updates message-level signals separately from metadata sync.
 Search result visibility is the first signal producer: visible ranked results
 write search context and a rank-decayed direct user boost into
 `cache_message_signal`, enqueue the message in `cache_rescore_queue`, and wake
-the account runtime for cache maintenance. Opening/starred thread behavior and
-thread-level activity should use the same signal queue instead of adding
-fetch-specific shortcuts.
+the account runtime for cache maintenance. If a signal lands on a legacy message
+that is missing its structural body row, the store materializes that row before
+queueing the re-score. Opening/starred thread behavior and thread-level
+activity should use the same signal queue instead of adding fetch-specific
+shortcuts.
 
 Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
