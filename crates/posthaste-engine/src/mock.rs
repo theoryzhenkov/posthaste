@@ -53,6 +53,7 @@ impl MailGateway for MockJmapGateway {
         &self,
         _account_id: &AccountId,
         _cursors: &[SyncCursor],
+        _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         let state = self
             .state

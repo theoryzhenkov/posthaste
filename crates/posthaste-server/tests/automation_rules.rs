@@ -194,7 +194,12 @@ impl RuleHarness {
 
     async fn sync(&self, account_id: &str, gateway: &ScriptedGateway) {
         self.service
-            .sync_account(&AccountId::from(account_id), SyncTrigger::Manual, gateway)
+            .sync_account(
+                &AccountId::from(account_id),
+                SyncTrigger::Manual,
+                gateway,
+                None,
+            )
             .await
             .expect("sync should succeed");
     }
@@ -339,6 +344,7 @@ impl MailGateway for ScriptedGateway {
         &self,
         _account_id: &AccountId,
         _cursors: &[SyncCursor],
+        _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         let state = self
             .state

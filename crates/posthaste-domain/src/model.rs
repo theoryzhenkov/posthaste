@@ -484,6 +484,42 @@ pub enum PushStatus {
     Disabled,
 }
 
+/// Coarse user-facing phase for a running sync cycle.
+///
+/// @spec docs/L1-sync#sync-loop
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncProgressStage {
+    Connecting,
+    Discovering,
+    Planning,
+    Fetching,
+    Storing,
+    Waiting,
+}
+
+/// Current user-facing progress for an account sync.
+///
+/// This is intentionally compact and coarse. Provider adapters may report more
+/// frequent internal logs, but the runtime overview only exposes stable status
+/// useful to users.
+///
+/// @spec docs/L1-sync#sync-loop
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    pub sync_id: String,
+    pub trigger: SyncTrigger,
+    pub started_at: String,
+    pub stage: SyncProgressStage,
+    pub detail: String,
+    pub mailbox_name: Option<String>,
+    pub mailbox_index: Option<usize>,
+    pub mailbox_count: Option<usize>,
+    pub message_count: Option<usize>,
+    pub total_count: Option<usize>,
+}
+
 /// Volatile runtime state for an account (sync status, push status, last error).
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
@@ -495,6 +531,7 @@ pub struct AccountRuntimeOverview {
     pub last_sync_at: Option<String>,
     pub last_sync_error: Option<String>,
     pub last_sync_error_code: Option<String>,
+    pub sync_progress: Option<SyncProgress>,
 }
 
 impl Default for AccountRuntimeOverview {
@@ -505,6 +542,7 @@ impl Default for AccountRuntimeOverview {
             last_sync_at: None,
             last_sync_error: None,
             last_sync_error_code: None,
+            sync_progress: None,
         }
     }
 }
