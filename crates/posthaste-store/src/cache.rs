@@ -2,6 +2,8 @@ use super::*;
 
 const BODY_CACHE_OBJECT_ID: &str = "";
 const BODY_STRUCTURAL_REPAIR_REASON: &str = "body-structural";
+pub(crate) const BACKGROUND_RESCORE_PRIORITY: f64 = 0.0;
+const BACKGROUND_RESCORE_PRIORITY_CEILING: f64 = 99.0;
 
 fn cache_object_id_key(object_id: Option<&str>) -> &str {
     object_id.unwrap_or("")
@@ -92,6 +94,7 @@ pub(crate) fn ensure_body_cache_object_tx(
     message_id: &MessageId,
     body_cached_hint: bool,
     reason: &str,
+    rescore_priority: f64,
 ) -> Result<(), StoreError> {
     let now = now_iso8601()?;
     let body_cached = body_cached_hint || body_exists_tx(tx, account_id, message_id)?;
@@ -133,20 +136,39 @@ pub(crate) fn ensure_body_cache_object_tx(
     )
     .map_err(sql_to_store_error)?;
     tx.execute(
-        "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO cache_rescore_queue (
+            account_id, message_id, reason, queued_at, rescore_priority
+         ) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(account_id, message_id) DO UPDATE SET
-            reason = excluded.reason,
-            queued_at = excluded.queued_at",
+            reason = CASE
+                WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+                THEN excluded.reason
+                ELSE cache_rescore_queue.reason
+            END,
+            queued_at = CASE
+                WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+                THEN excluded.queued_at
+                ELSE cache_rescore_queue.queued_at
+            END,
+            rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)",
         params![
             account_id.as_str(),
             message_id.as_str(),
             reason,
             now.as_str(),
+            finite_rescore_priority(rescore_priority),
         ],
     )
     .map_err(sql_to_store_error)?;
     Ok(())
+}
+
+fn finite_rescore_priority(priority: f64) -> f64 {
+    if priority.is_finite() {
+        priority.max(0.0)
+    } else {
+        0.0
+    }
 }
 
 pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Result<(), StoreError> {
@@ -195,8 +217,10 @@ pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Resu
     }
     connection
         .execute(
-            "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
-             SELECT m.account_id, m.id, ?1, ?2
+            "INSERT INTO cache_rescore_queue (
+                account_id, message_id, reason, queued_at, rescore_priority
+             )
+             SELECT m.account_id, m.id, ?1, ?2, ?3
              FROM message m
              WHERE NOT EXISTS (
                 SELECT 1
@@ -207,9 +231,22 @@ pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Resu
                   AND co.object_id = ''
              )
              ON CONFLICT(account_id, message_id) DO UPDATE SET
-                reason = excluded.reason,
-                queued_at = excluded.queued_at",
-            params![BODY_STRUCTURAL_REPAIR_REASON, now.as_str()],
+                reason = CASE
+                    WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+                    THEN excluded.reason
+                    ELSE cache_rescore_queue.reason
+                END,
+                queued_at = CASE
+                    WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+                    THEN excluded.queued_at
+                    ELSE cache_rescore_queue.queued_at
+                END,
+                rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)",
+            params![
+                BODY_STRUCTURAL_REPAIR_REASON,
+                now.as_str(),
+                BACKGROUND_RESCORE_PRIORITY
+            ],
         )
         .map_err(sql_to_store_error)?;
     let repaired = connection
@@ -357,6 +394,7 @@ impl CacheStore for DatabaseStore {
                     &MessageId::from(update.message_id.as_str()),
                     false,
                     update.reason.as_str(),
+                    cache_signal_rescore_priority(update),
                 )?;
             }
             Ok(())
@@ -375,10 +413,10 @@ impl CacheStore for DatabaseStore {
         let mut statement = connection
             .prepare(
                 "WITH queued AS (
-                    SELECT account_id, message_id, reason, queued_at
+                    SELECT account_id, message_id, reason, queued_at, rescore_priority
                     FROM cache_rescore_queue
                     WHERE account_id = ?1
-                    ORDER BY queued_at ASC
+                    ORDER BY rescore_priority DESC, queued_at ASC, message_id ASC
                     LIMIT ?2
                  )
                  SELECT
@@ -414,7 +452,8 @@ impl CacheStore for DatabaseStore {
                     cms.search_result_rank,
                     COALESCE(cms.direct_user_boost, 0),
                     COALESCE(cms.pinned, 0),
-                    queued.reason
+                    queued.reason,
+                    queued.rescore_priority
                  FROM queued
                  JOIN cache_object co
                    ON co.account_id = queued.account_id
@@ -425,7 +464,7 @@ impl CacheStore for DatabaseStore {
                  LEFT JOIN cache_message_signal cms
                    ON cms.account_id = co.account_id
                   AND cms.message_id = co.message_id
-                 ORDER BY queued.queued_at ASC, co.priority DESC",
+                 ORDER BY queued.rescore_priority DESC, queued.queued_at ASC, co.priority DESC",
             )
             .map_err(sql_to_store_error)?;
         let rows = statement
@@ -493,6 +532,7 @@ impl CacheStore for DatabaseStore {
                     direct_user_boost: row.get(21)?,
                     pinned: row.get::<_, i64>(22)? != 0,
                     signal_reason: row.get(23)?,
+                    rescore_priority: row.get(24)?,
                 })
             })
             .map_err(sql_to_store_error)?;
@@ -533,14 +573,26 @@ impl CacheStore for DatabaseStore {
                         ORDER BY oldest_scored_at ASC, highest_priority DESC
                         LIMIT ?3
                      )
-                     INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
-                     SELECT account_id, message_id, 'stale-periodic', ?4
+                     INSERT INTO cache_rescore_queue (
+                        account_id, message_id, reason, queued_at, rescore_priority
+                     )
+                     SELECT
+                        account_id,
+                        message_id,
+                        'stale-periodic',
+                        ?4,
+                        CASE
+                            WHEN highest_priority > ?5 THEN ?5
+                            WHEN highest_priority > 0 THEN highest_priority
+                            ELSE 0
+                        END
                      FROM stale",
                     params![
                         account_id.as_str(),
                         stale_before,
                         limit as i64,
-                        now.as_str()
+                        now.as_str(),
+                        BACKGROUND_RESCORE_PRIORITY_CEILING,
                     ],
                 )
                 .map_err(sql_to_store_error)?;
@@ -869,6 +921,167 @@ mod tests {
         assert_eq!(candidates[0].direct_user_boost, 0.4);
         assert!(candidates[0].pinned);
         assert_eq!(candidates[0].signal_reason, "search-visible");
+        assert!(candidates[0].rescore_priority > 100.0);
+        Ok(())
+    }
+
+    #[test]
+    fn rescore_queue_prioritizes_local_signals_over_structural_backlog() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        insert_message_metadata(&store, "old-structural", "2026-04-20T00:00:00Z")?;
+        insert_message_metadata(&store, "visible", "2026-04-27T00:00:00Z")?;
+        store.write_transaction(|tx| {
+            ensure_body_cache_object_tx(
+                tx,
+                &account,
+                &MessageId::from("old-structural"),
+                false,
+                "body-structural",
+                BACKGROUND_RESCORE_PRIORITY,
+            )
+        })?;
+
+        store.record_cache_signal_updates(&[CacheSignalUpdate {
+            account_id: "primary".to_string(),
+            message_id: "visible".to_string(),
+            reason: "search-visible".to_string(),
+            search: Some(CacheSearchSignals {
+                total_messages: 100,
+                result_count: 3,
+                result_rank: 0,
+            }),
+            thread_activity: None,
+            sender_affinity: None,
+            local_behavior: None,
+            direct_user_boost: Some(0.8),
+            pinned: None,
+        }])?;
+
+        let candidates = store.list_cache_rescore_candidates(&account, 1)?;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].message_id, "visible");
+        assert_eq!(candidates[0].signal_reason, "search-visible");
+        Ok(())
+    }
+
+    #[test]
+    fn lower_priority_enqueue_does_not_demote_existing_signal_work() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        let message_id = MessageId::from("message-1");
+        insert_message_metadata(&store, message_id.as_str(), "2026-04-27T00:00:00Z")?;
+        store.record_cache_signal_updates(&[CacheSignalUpdate {
+            account_id: "primary".to_string(),
+            message_id: message_id.to_string(),
+            reason: "search-visible".to_string(),
+            search: None,
+            thread_activity: None,
+            sender_affinity: None,
+            local_behavior: None,
+            direct_user_boost: Some(0.8),
+            pinned: None,
+        }])?;
+        store.write_transaction(|tx| {
+            ensure_body_cache_object_tx(
+                tx,
+                &account,
+                &message_id,
+                false,
+                "body-structural",
+                BACKGROUND_RESCORE_PRIORITY,
+            )
+        })?;
+
+        let candidates = store.list_cache_rescore_candidates(&account, 1)?;
+
+        assert_eq!(candidates[0].message_id, "message-1");
+        assert_eq!(candidates[0].signal_reason, "search-visible");
+        assert!(candidates[0].rescore_priority > 100.0);
+        Ok(())
+    }
+
+    #[test]
+    fn stale_rescore_priority_stays_below_local_signal_work() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        insert_message_metadata(&store, "stale-high", "2026-04-20T00:00:00Z")?;
+        insert_message_metadata(&store, "visible", "2026-04-27T00:00:00Z")?;
+        store.upsert_cache_candidates(&[candidate("stale-high", 500.0, 4096)])?;
+        set_last_scored_at(&store, "stale-high", "2026-04-20T00:00:00Z")?;
+
+        let queued =
+            store.queue_stale_cache_rescore_candidates(&account, "2026-04-22T00:00:00Z", 10)?;
+        assert_eq!(queued, 1);
+
+        store.record_cache_signal_updates(&[CacheSignalUpdate {
+            account_id: "primary".to_string(),
+            message_id: "visible".to_string(),
+            reason: "search-visible".to_string(),
+            search: Some(CacheSearchSignals {
+                total_messages: 100,
+                result_count: 3,
+                result_rank: 0,
+            }),
+            thread_activity: None,
+            sender_affinity: None,
+            local_behavior: None,
+            direct_user_boost: Some(0.8),
+            pinned: None,
+        }])?;
+
+        let candidates = store.list_cache_rescore_candidates(&account, 2)?;
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.message_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["visible", "stale-high"]
+        );
+        assert!(candidates[1].rescore_priority < 100.0);
+        Ok(())
+    }
+
+    #[test]
+    fn opening_store_migrates_existing_rescore_queue_priority() -> Result<(), StoreError> {
+        let root = temp_root();
+        std::fs::create_dir_all(&root).map_err(io_to_store_error)?;
+        let db_path = root.join("mail.sqlite");
+        let data_root = root.join("data");
+        {
+            let connection = Connection::open(&db_path).map_err(sql_to_store_error)?;
+            connection
+                .execute_batch(
+                    "CREATE TABLE cache_rescore_queue (
+                        account_id TEXT NOT NULL,
+                        message_id TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        queued_at TEXT NOT NULL,
+                        PRIMARY KEY (account_id, message_id)
+                    );",
+                )
+                .map_err(sql_to_store_error)?;
+        }
+
+        let store = DatabaseStore::open(&db_path, data_root)?;
+        let connection = store.read_connection()?;
+        let mut statement = connection
+            .prepare("PRAGMA table_info(cache_rescore_queue)")
+            .map_err(sql_to_store_error)?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(sql_to_store_error)?;
+        let mut has_rescore_priority = false;
+        for column in columns {
+            has_rescore_priority |= column.map_err(sql_to_store_error)? == "rescore_priority";
+        }
+
+        assert!(has_rescore_priority);
         Ok(())
     }
 

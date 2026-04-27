@@ -942,6 +942,7 @@ impl MailService {
                     utility = score.utility,
                     size_cost = score.size_cost,
                     signal_reason = candidate.signal_reason.as_str(),
+                    rescore_priority = candidate.rescore_priority,
                     direct_user_boost = candidate.direct_user_boost,
                     search_result_rank = candidate.search.as_ref().map(|search| search.result_rank),
                     "cache candidate re-scored"
@@ -2845,6 +2846,7 @@ mod tests {
             direct_user_boost: 0.8,
             pinned: false,
             signal_reason: "search-visible".to_string(),
+            rescore_priority: 108.0,
         }
     }
 
