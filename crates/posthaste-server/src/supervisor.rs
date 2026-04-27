@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
@@ -17,6 +18,7 @@ use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn, Instrument};
+use uuid::Uuid;
 
 use crate::oauth::{OAuthTokenService, OAuthTokenSet};
 use crate::push::resilient_push_stream;
@@ -393,7 +395,35 @@ async fn process_sync_trigger(
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
-    debug!(account_id = %account_id, trigger = ?trigger, "sync triggered");
+    let sync_id = Uuid::new_v4().to_string();
+    let span = info_span!(
+        "sync.cycle",
+        account_id = %account_id,
+        sync_id = %sync_id,
+        trigger = trigger.as_str()
+    );
+
+    process_sync_trigger_inner(shared, account, trigger, connection, reply, sync_id)
+        .instrument(span)
+        .await
+}
+
+async fn process_sync_trigger_inner(
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    trigger: SyncTrigger,
+    connection: &mut Option<AccountConnection>,
+    reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
+    sync_id: String,
+) -> Result<(), ServiceError> {
+    let account_id = account.id.clone();
+    let started = Instant::now();
+    info!(
+        account_id = %account_id,
+        sync_id = %sync_id,
+        trigger = trigger.as_str(),
+        "sync started"
+    );
     shared
         .set_status_only(&account_id, AccountStatus::Syncing)
         .await;
@@ -415,7 +445,14 @@ async fn process_sync_trigger(
     match result {
         Ok(events) => {
             let event_count = events.len();
-            info!(account_id = %account_id, event_count, "sync completed");
+            info!(
+                account_id = %account_id,
+                sync_id = %sync_id,
+                trigger = trigger.as_str(),
+                event_count,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "sync completed"
+            );
             shared.publish_events(&events);
             shared.mark_sync_success(&account_id).await;
             if let Some(reply) = reply {
@@ -435,7 +472,15 @@ async fn process_sync_trigger(
             } else {
                 "sync"
             };
-            error!(account_id = %account_id, error = %error, stage, "sync failed");
+            error!(
+                account_id = %account_id,
+                sync_id = %sync_id,
+                trigger = trigger.as_str(),
+                error = %error,
+                stage,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "sync failed"
+            );
             if let Ok(event) = shared.service.record_sync_failure(
                 &account_id,
                 error.code(),
@@ -501,6 +546,13 @@ async fn build_connection(
             let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
                 GatewayError::Rejected("missing JMAP secret reference".to_string())
             })?;
+            info!(
+                account_id = %account.id,
+                driver = "jmap",
+                target_url = url,
+                has_username = username.is_some(),
+                "connecting account gateway"
+            );
             let secret = resolve_account_secret(account, shared, secret_ref).await?;
             let client = connect_jmap_client(url, username, &secret).await?;
             let gateway: SharedGateway = Arc::new(LiveJmapGateway::from_client(client));
@@ -546,6 +598,18 @@ async fn build_connection(
                     .map_err(imap_adapter_error)?;
             let smtp_config = SmtpConnectionConfig::from_account_settings(account, secret)
                 .map_err(imap_adapter_error)?;
+            info!(
+                account_id = %account.id,
+                driver = "imap_smtp",
+                imap_host = %imap_config.host,
+                imap_port = imap_config.port,
+                imap_security = ?imap_config.security,
+                smtp_host = %smtp_config.host,
+                smtp_port = smtp_config.port,
+                smtp_security = ?smtp_config.security,
+                auth = ?imap_config.auth,
+                "connecting account gateway"
+            );
             let gateway =
                 LiveImapSmtpGateway::connect(imap_config, smtp_config, Some(shared.store.clone()))
                     .await

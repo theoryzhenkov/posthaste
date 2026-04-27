@@ -17,6 +17,7 @@ use imap_client::imap_types::sequence::SequenceSet;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
 use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid};
+use tracing::{debug, info};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
@@ -93,6 +94,12 @@ pub async fn fetch_mailbox_header_snapshot(
     // not depend on provider-specific ordering or duplicate behavior.
     uids.sort_unstable();
     uids.dedup();
+    info!(
+        mailbox_id = %selected.mailbox_id,
+        uid_count = uids.len(),
+        fetch_modseq,
+        "IMAP mailbox UID search completed"
+    );
 
     let headers =
         fetch_selected_mailbox_headers(&mut client, &selected, &uids, fetch_modseq, updated_at)
@@ -127,6 +134,13 @@ pub async fn fetch_mailbox_changed_since_snapshot(
         let mut uids = client.uid_search([SearchKey::All]).await?;
         uids.sort_unstable();
         uids.dedup();
+        info!(
+            mailbox_id = %selected.mailbox_id,
+            uid_count = uids.len(),
+            fetch_modseq = true,
+            reason = "qresync_enable_unavailable",
+            "IMAP mailbox UID search completed"
+        );
         let headers =
             fetch_selected_mailbox_headers(&mut client, &selected, &uids, true, updated_at).await?;
 
@@ -173,7 +187,8 @@ pub(crate) async fn fetch_selected_mailbox_headers(
     updated_at: String,
 ) -> Result<Vec<ImapMappedHeader>, ImapAdapterError> {
     let mut records = Vec::new();
-    for chunk in uids.chunks(UID_FETCH_CHUNK_SIZE) {
+    let chunk_count = uids.len().div_ceil(UID_FETCH_CHUNK_SIZE);
+    for (chunk_index, chunk) in uids.chunks(UID_FETCH_CHUNK_SIZE).enumerate() {
         let sequence_set = SequenceSet::try_from(chunk)
             .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
         let responses = client
@@ -185,9 +200,22 @@ pub(crate) async fn fetch_selected_mailbox_headers(
             let fetched = fetched_header_from_items(selected, items, updated_at.clone())?;
             records.push(imap_header_message_record(selected, fetched)?);
         }
+        info!(
+            mailbox_id = %selected.mailbox_id,
+            chunk_index = chunk_index + 1,
+            chunk_count,
+            fetched_count = records.len(),
+            total_count = uids.len(),
+            "IMAP mailbox header fetch progress"
+        );
     }
 
     records.sort_by_key(|record| record.location.uid);
+    debug!(
+        mailbox_id = %selected.mailbox_id,
+        fetched_count = records.len(),
+        "IMAP mailbox header fetch sorted"
+    );
     Ok(records)
 }
 

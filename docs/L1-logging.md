@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Logging contracts: crate layout, span conventions, config schema, event content rules, frontend logger interface"
-modified: 2026-04-04
-reviewed: 2026-04-24
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-logging
   - path: docs/L1-accounts
@@ -26,7 +26,7 @@ A layered subscriber composed of:
 | Layer | Sink | Format | When |
 |-------|------|--------|------|
 | Stderr | terminal | Human-readable, ANSI colors | Always (dev and prod) |
-| File appender | `<data_dir>/logs/posthaste-YYYY-MM-DD.log` | JSON lines (one object per event/span) | Always |
+| File appender | `<data_dir>/logs/posthaste.YYYY-MM-DD` | JSON lines (one object per event) | Always |
 | Env filter | — | — | Controls which levels reach each layer |
 | Reload filter | — | — | Enables runtime log-level changes |
 
@@ -51,13 +51,26 @@ Log level is a user-facing setting in the account/global TOML config:
 level = "info"          # One of: error, warn, info, debug, trace
 ```
 
-`RUST_LOG` env var takes precedence when set (development override). If the `tracing-subscriber` reload handle is straightforward to wire, level changes from config apply at runtime without restart. Otherwise, restart-to-apply is acceptable for v1.
+`RUST_LOG` env var takes precedence when set (development override). Without `RUST_LOG`, the configured level applies to Posthaste crates only (`posthaste_server`, `posthaste_engine`, `posthaste_imap`, `posthaste_store`, `posthaste_domain`) while dependency crates default to `warn`. This keeps debug development logs useful without recording protocol-parser span noise from dependencies. If the `tracing-subscriber` reload handle is straightforward to wire, level changes from config apply at runtime without restart. Otherwise, restart-to-apply is acceptable for v1.
 
 ### Log file management
 
 - Rotation: daily, via `tracing-appender::rolling::daily`
 - Retention: 7 days — older files deleted on rotation
 - Location: `<data_dir>/logs/` (resolved from the existing config root directory logic)
+- Span close events are not emitted by default. Long-lived or high-frequency dependency spans can otherwise dominate JSON logs without adding operator-level diagnostics.
+
+### Log querying
+
+Dev stacks expose the active persisted log path through `just server-log-path` and follow it with `just server-log-tail`. Structured JSONL logs are queried with:
+
+```sh
+just server-log-query --account local-stalwart --message sync completed
+just server-log-query --sync-id 6f2a4a72-0c59-4d89-9d4e-2a2b9f2c4a87
+just server-log-query --target posthaste_imap --json --limit 20
+```
+
+The query helper supports filtering by level, target substring, account ID, sync ID, message substring, timestamp lower bound, and compact JSON output. Account and sync filtering check top-level fields and active span fields so events emitted from nested sync spans still match.
 
 ### Span conventions
 
@@ -179,6 +192,8 @@ In browser dev mode (no Tauri), pino logs go to the browser console only. In Tau
 | seven-day-retention | SHOULD | Log files older than 7 days are deleted automatically |
 | config-level | MUST | Log level is configurable via `[logging].level` in TOML config |
 | env-override | MUST | `RUST_LOG` env var overrides config-file level when set |
+| app-scoped-default-filter | SHOULD | Without `RUST_LOG`, configured debug/trace levels apply to Posthaste crates while dependency crates stay at warn-or-higher |
+| query-helper | SHOULD | Dev tooling provides a JSONL log query helper with account, sync ID, target, level, message, and since filters |
 | coarse-spans | MUST | Spans exist at HTTP request, sync cycle, push connection, and store query boundaries |
 | fe-pino | MUST | Frontend uses pino with domain-scoped child loggers |
 | error-boundary | SHOULD | Errors are logged at the handling boundary, not the origination point |
