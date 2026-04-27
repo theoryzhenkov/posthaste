@@ -240,7 +240,6 @@ async fn run_account_runtime(
 ) {
     let account_id = account.id.clone();
     let mut connection: Option<AccountConnection> = None;
-    let mut interval = tokio::time::interval(shared.poll_interval);
     let mut backfill_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + AUTOMATION_BACKFILL_INITIAL_DELAY,
         AUTOMATION_BACKFILL_INTERVAL,
@@ -266,6 +265,7 @@ async fn run_account_runtime(
         None,
     )
     .await;
+    let mut interval = sync_poll_interval(shared.poll_interval);
 
     loop {
         let next_push = async {
@@ -280,6 +280,7 @@ async fn run_account_runtime(
                 let _ = process_sync_trigger(
                     &shared, &account, SyncTrigger::Poll, &mut connection, None,
                 ).await;
+                interval = sync_poll_interval(shared.poll_interval);
             }
             _ = backfill_interval.tick() => {
                 let _ = process_automation_backfill_batch(
@@ -294,11 +295,13 @@ async fn run_account_runtime(
                         let _ = process_sync_trigger(
                             &shared, &account, trigger, &mut connection, Some(reply),
                         ).await;
+                        interval = sync_poll_interval(shared.poll_interval);
                     }
                     RuntimeCommand::TriggerOnly { trigger } => {
                         let _ = process_sync_trigger(
                             &shared, &account, trigger, &mut connection, None,
                         ).await;
+                        interval = sync_poll_interval(shared.poll_interval);
                     }
                 }
             }
@@ -313,6 +316,7 @@ async fn run_account_runtime(
                         let _ = process_sync_trigger(
                             &shared, &account, SyncTrigger::Push, &mut connection, None,
                         ).await;
+                        interval = sync_poll_interval(shared.poll_interval);
                     }
                     PushStreamEvent::Connected { transport } => {
                         info!(account_id = %account_id, transport, "push connected");
@@ -333,6 +337,13 @@ async fn run_account_runtime(
             }
         }
     }
+}
+
+fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interval {
+    let mut interval =
+        tokio::time::interval_at(tokio::time::Instant::now() + poll_interval, poll_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval
 }
 
 async fn process_automation_backfill_batch(
