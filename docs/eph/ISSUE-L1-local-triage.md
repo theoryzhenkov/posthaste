@@ -19,6 +19,21 @@ ephemeral log.
 
 ## Open
 
+### PH-003: Personalized cache utility model
+
+- Status: open
+- Severity: low
+- Area: Cache/offline
+- Observed: Manual cache scoring can cover the initial local-first cache
+  policy, but different users will value message bodies, raw source, and
+  attachments differently.
+- Expected: After cache events are recorded, Posthaste should evaluate a local
+  per-user utility model that learns bounded score multipliers from cache
+  hits/misses and user behavior without replacing the baseline manual policy.
+- Notes: Start with a shadow model only. Compare predicted utility against the
+  manual scorer under the same byte budget before enabling learned
+  personalization.
+
 ### PH-001: IMAP initial sync progress is opaque
 
 - Status: open
