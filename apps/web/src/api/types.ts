@@ -192,6 +192,20 @@ export interface VerificationResponse {
   pushSupported: boolean
 }
 
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface StartProviderOAuthInput {
+  provider: ProviderHint
+  clientId: string
+  redirectUri: string
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export interface StartOAuthResponse {
+  authorizationUrl: string
+  state: string
+  redirectUri: string
+}
+
 /** @spec docs/L1-api#compose */
 export interface Identity {
   id: string
