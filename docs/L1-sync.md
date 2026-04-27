@@ -34,6 +34,13 @@ For each cycle, the engine loads stored cursors from SQLite, then syncs mailbox 
 
 The runtime emits INFO-level structured progress logs for sync start, provider discovery, mailbox/message fetch phases, store writes, and sync completion/failure. Each sync cycle has a `sync_id` span field so nested gateway and store events can be queried as one operation. IMAP sync logs per-mailbox planning decisions, conservative STATUS no-op skips, per-mailbox header fetch start/completion, and chunked header fetch progress; JMAP full snapshots log ID discovery and metadata chunk progress. These diagnostics are intentionally backend logs first; user-facing progress UI consumes a smaller account progress model rather than raw log lines.
 
+Local cache diagnostics are structured backend logs as well. Candidate
+generation logs the account, driver, fetch unit, candidate counts, scored byte
+totals, and per-candidate score details at TRACE. Cache worker batches log
+budget inputs, scan limits, candidate counts, admission decisions, fetch starts,
+fetch failures, and successful stores at DEBUG. Supervisor logs summarize each
+worker batch with scanned, attempted, cached, failed, and skipped counts.
+
 While a sync is running, the supervisor stores compact user-facing progress in
 `AccountRuntimeOverview.syncProgress`. Progress contains the sync ID, trigger,
 start timestamp, stage (`connecting`, `discovering`, `planning`, `fetching`,
@@ -84,6 +91,15 @@ search_context =
   (1 - ln(result_count + 1) / ln(total_messages + 1))
   * (1 / sqrt(result_rank + 1))
 ```
+
+The first implemented candidate source is baseline sync-time scoring. It uses
+metadata available in the synced message record: recency, Inbox membership,
+unread state, flagged state, and fetch size. The scorer type already accepts
+search, thread-activity, sender-affinity, and local-behavior signals, but those
+signals require separate event paths that are not part of the baseline sync
+candidate generation. Search result visibility, opening/starred thread behavior,
+and thread-level activity should update cache candidates through a later
+re-score path rather than waiting for another remote sync.
 
 Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
