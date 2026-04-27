@@ -20,6 +20,7 @@ base64 = { workspace = true }
 dirs = { workspace = true }
 dotenvy = { workspace = true }
 futures-util = { workspace = true }
+jsonwebtoken = { workspace = true }
 keyring = { workspace = true }
 oauth2 = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }

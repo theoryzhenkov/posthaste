@@ -14,6 +14,7 @@ futures-util = "0.3"
 hex = "0.4"
 imap-client = "0.3"
 jmap-client = { git = "https://github.com/theoryzhenkov/jmap-client.git", branch = "feat/ws-correlation" }
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto", "use_pem"] }
 keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native", "windows-native"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-platform-verifier", "ring", "pool"] }
 mail-parser = "0.11"
