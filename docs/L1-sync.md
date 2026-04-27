@@ -142,13 +142,22 @@ does not, the candidate must beat the lowest-priority evictable cached object.
 Admission is never allowed when it would cross the hard cap.
 
 Metadata sync only records cache candidates; it does not fetch optional content.
-The account runtime runs cache maintenance while a gateway is connected. Each
-maintenance batch first queues a bounded oldest-first set of stale cache objects
-whose `last_scored_at` is older than the runtime threshold, excluding objects
-already queued or currently fetching. This lets time-sensitive signals such as
-recency converge even when no sync/search/user signal touches a message. Stale
-maintenance may use existing cache priority to order background work, but its
-`rescore_priority` stays below the local-signal band.
+The account runtime runs cache maintenance through a supervisor-owned resource
+governor instead of fixed sleeps plus fixed batch sizes. The governor grants
+short leases for re-score rows, provider fetch requests, and estimated fetch
+bytes. Background leases refill slowly and stay bounded; interactive maintenance
+triggered by visible search/opening activity receives a small immediate burst.
+Gateway/cache failures lower the network-rate multiplier and can place fetch
+work in short backoff while still allowing local re-score work to continue. Each
+maintenance slice logs the granted lease and the feedback used to tune the next
+one.
+
+Each maintenance batch first queues a bounded oldest-first set of stale cache
+objects whose `last_scored_at` is older than the runtime threshold, excluding
+objects already queued or currently fetching. This lets time-sensitive signals
+such as recency converge even when no sync/search/user signal touches a message.
+Stale maintenance may use existing cache priority to order background work, but
+its `rescore_priority` stays below the local-signal band.
 The batch then consumes dirty re-score rows ordered by `rescore_priority DESC`,
 then `queued_at ASC`, rebuilds each candidate's current signal set from message
 metadata plus `cache_message_signal`, updates
@@ -157,16 +166,16 @@ provider-aware `fetch_unit`, `value_bytes`, `fetch_bytes`, and
 Unscored structural rows have `fetch_bytes = 0` and are not eligible for fetch
 selection until this re-score step gives them a concrete fetch cost. The worker
 then scans a bounded priority-ordered window of wanted body candidates, admits
-only candidates that fit the current budget, marks them `fetching`,
-fetches through the same gateway body path as lazy open, applies the body to the
-local store, and marks the cache object `cached`. Periodic maintenance uses
-background pressure; interactive maintenance triggered by visible search results
-may use the burst space between the soft and hard caps. Scanning more rows than
-the fetch-attempt cap prevents one large over-budget message from starving
-smaller candidates behind it. Gateway failures mark the object `failed` with the
-service error code and do not fail the whole runtime. Eviction and
-attachment-blob workers are later policy layers, not part of the first worker
-slice.
+only candidates that fit both the cache budget and the current fetch byte/request
+lease, marks them `fetching`, fetches through the same gateway body path as lazy
+open, applies the body to the local store, and marks the cache object `cached`.
+Periodic maintenance uses background pressure; interactive maintenance triggered
+by visible search results may use the burst space between the soft and hard
+caps. Scanning more rows than the fetch-attempt cap prevents one large
+over-budget or over-lease message from starving smaller candidates behind it.
+Gateway failures mark the object `failed` with the service error code and do not
+fail the whole runtime. Eviction and attachment-blob workers are later policy
+layers, not part of the first worker slice.
 
 ## State management
 
@@ -327,6 +336,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
 | cache-priority-size-aware | MUST | Optional cache priority uses fetch-unit bytes, so IMAP raw-message body fetches are penalized by combined message size |
 | cache-worker-budget | MUST | Cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
+| cache-resource-governor | MUST | Cache maintenance uses bounded resource leases for re-score rows, fetch requests, and fetch bytes, logs lease/feedback decisions, and backs off fetches after failures |
 | cache-object-parity | MUST | Every synced message has one structural body `cache_object` child row, and message deletion removes its cache object, cache signals, and rescore queue rows |
 | cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue` with higher re-score priority than background maintenance, and are applied by re-scoring before fetch selection |
 | cache-stale-rescore | MUST | Cache maintenance periodically queues bounded oldest-first stale cache objects for re-scoring so recency and other time-sensitive utility signals converge |

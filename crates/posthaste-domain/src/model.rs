@@ -387,7 +387,9 @@ pub struct AutomationBackfillBatchOutcome {
 pub struct CacheWorkerBatchOutcome {
     pub scanned: usize,
     pub attempted: usize,
+    pub attempted_bytes: u64,
     pub cached: usize,
+    pub cached_bytes: u64,
     pub failed: usize,
     pub skipped: usize,
     pub events: Vec<DomainEvent>,
