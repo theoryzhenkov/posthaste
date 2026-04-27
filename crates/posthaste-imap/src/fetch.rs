@@ -98,7 +98,17 @@ pub async fn fetch_mailbox_header_snapshot(
             .map(std::string::ToString::to_string),
     )
     .supports_condstore();
-    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
+    fetch_mailbox_header_snapshot_with_client(&mut client, mailbox_name, fetch_modseq, updated_at)
+        .await
+}
+
+pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+    fetch_modseq: bool,
+    updated_at: String,
+) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
+    let selected = examine_selected_mailbox(client, mailbox_name).await?;
     let mut uids = client.uid_search([SearchKey::All]).await?;
 
     // Normalize search output before chunking so later sync reconciliation does
@@ -113,8 +123,7 @@ pub async fn fetch_mailbox_header_snapshot(
     );
 
     let headers =
-        fetch_selected_mailbox_headers(&mut client, &selected, &uids, fetch_modseq, updated_at)
-            .await?;
+        fetch_selected_mailbox_headers(client, &selected, &uids, fetch_modseq, updated_at).await?;
 
     Ok(ImapMailboxHeaderSnapshot { selected, headers })
 }
@@ -142,7 +151,24 @@ pub async fn fetch_mailbox_headers_after_uid(
             .map(std::string::ToString::to_string),
     )
     .supports_condstore();
-    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
+    fetch_mailbox_headers_after_uid_with_client(
+        &mut client,
+        mailbox_name,
+        after_uid,
+        fetch_modseq,
+        updated_at,
+    )
+    .await
+}
+
+pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+    after_uid: ImapUid,
+    fetch_modseq: bool,
+    updated_at: String,
+) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
+    let selected = examine_selected_mailbox(client, mailbox_name).await?;
     let mut uids = client.uid_search([SearchKey::All]).await?;
 
     uids.sort_unstable();
@@ -165,7 +191,7 @@ pub async fn fetch_mailbox_headers_after_uid(
     );
 
     let headers =
-        fetch_selected_mailbox_headers(&mut client, &selected, &new_uids, fetch_modseq, updated_at)
+        fetch_selected_mailbox_headers(client, &selected, &new_uids, fetch_modseq, updated_at)
             .await?;
 
     Ok(ImapMailboxUidDeltaSnapshot {
@@ -191,12 +217,29 @@ pub async fn fetch_mailbox_changed_since_snapshot(
     include_vanished: bool,
     updated_at: String,
 ) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
-    let since_modseq =
-        NonZeroU64::new(since_modseq.0).ok_or(ImapAdapterError::InvalidModSeq(since_modseq.0))?;
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
-    let fetch_vanished = include_vanished && enable_qresync(&mut client).await?;
-    let selected = examine_selected_mailbox(&mut client, mailbox_name).await?;
+    fetch_mailbox_changed_since_snapshot_with_client(
+        &mut client,
+        mailbox_name,
+        since_modseq,
+        include_vanished,
+        updated_at,
+    )
+    .await
+}
+
+pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+    since_modseq: ImapModSeq,
+    include_vanished: bool,
+    updated_at: String,
+) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
+    let since_modseq =
+        NonZeroU64::new(since_modseq.0).ok_or(ImapAdapterError::InvalidModSeq(since_modseq.0))?;
+    let fetch_vanished = include_vanished && enable_qresync(client).await?;
+    let selected = examine_selected_mailbox(client, mailbox_name).await?;
     if include_vanished && !fetch_vanished {
         let mut uids = client.uid_search([SearchKey::All]).await?;
         uids.sort_unstable();
@@ -209,7 +252,7 @@ pub async fn fetch_mailbox_changed_since_snapshot(
             "IMAP mailbox UID search completed"
         );
         let headers =
-            fetch_selected_mailbox_headers(&mut client, &selected, &uids, true, updated_at).await?;
+            fetch_selected_mailbox_headers(client, &selected, &uids, true, updated_at).await?;
 
         return Ok(ImapChangedSinceSnapshot {
             selected,
