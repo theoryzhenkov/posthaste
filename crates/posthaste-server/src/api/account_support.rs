@@ -254,6 +254,13 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
         }
         validate_endpoint("IMAP", account.transport.imap.as_ref())?;
         validate_endpoint("SMTP", account.transport.smtp.as_ref())?;
+        if !has_concrete_sender_email(account) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "IMAP/SMTP accounts require a concrete sender email pattern when username is not an email address",
+            ));
+        }
     }
     if let Some(appearance) = &account.appearance {
         validate_account_appearance(appearance)?;
@@ -312,6 +319,28 @@ impl EndpointLike for SmtpTransportSettings {
     fn port(&self) -> u16 {
         self.port
     }
+}
+
+fn has_concrete_sender_email(account: &AccountSettings) -> bool {
+    account
+        .email_patterns
+        .iter()
+        .any(|pattern| is_concrete_email_pattern(pattern))
+        || account
+            .transport
+            .username
+            .as_deref()
+            .is_some_and(is_concrete_email_pattern)
+}
+
+fn is_concrete_email_pattern(pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() || pattern.contains('*') {
+        return false;
+    }
+    pattern
+        .split_once('@')
+        .is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
 }
 
 pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), ApiError> {

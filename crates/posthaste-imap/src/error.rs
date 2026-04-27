@@ -10,6 +10,8 @@ pub enum ImapAdapterError {
     MissingSmtpTransport,
     #[error("missing IMAP username")]
     MissingUsername,
+    #[error("missing concrete SMTP sender email; configure email_patterns with an address")]
+    MissingSmtpSenderEmail,
     #[error("missing IMAP secret")]
     MissingSecret,
     #[error("IMAP client error: {0}")]
