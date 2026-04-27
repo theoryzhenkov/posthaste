@@ -86,6 +86,11 @@ merged across enabled accounts and exclude system keywords such as `$seen` and
 | GET | `/sources/{source_id}/messages/{id}/reply-context` | `get_reply_context` | -- | `ReplyContext` |
 | POST | `/sources/{source_id}/commands/send` | `send_message` | `SendMessageRequest` | `OkResponse` |
 
+`SendMessageRequest` includes optional `from: Recipient`. When present, the
+backend uses that sender address for the outgoing RFC 5322 `From` field. The
+route `source_id` is still the account that submits the message; the frontend
+may choose that account from configured sender suggestions or wildcard ownership.
+
 ### Message commands
 
 | Method | Path | Handler | Request | Response |

@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-compose
   - path: docs/L1-jmap
@@ -87,6 +87,7 @@ ComposeSession {
     fn forward(accountId: String, emailId: String) -> ComposeSession
 
     // Editing (all return Result)
+    fn set_from(sender: FfiRecipient) -> Result<()>
     fn set_to(recipients: [FfiRecipient]) -> Result<()>
     fn set_cc(recipients: [FfiRecipient]) -> Result<()>
     fn set_bcc(recipients: [FfiRecipient]) -> Result<()>
@@ -107,6 +108,16 @@ ComposeSession {
     fn state() -> ComposeState
 }
 ```
+
+## Sender selection
+
+The `From` field is editable text with suggestions, not a closed enum. Suggested
+values come from configured account `email_patterns`, provider identities, and
+locally cached free-form senders that previously succeeded. A selected sender
+also selects the account used to submit the message. Free-form addresses are
+allowed so catch-all domains such as `*@example.com` can send from
+`anything@example.com`; the provider remains authoritative by accepting or
+rejecting the send. The local cache is updated only after a successful send.
 
 ## Reply quoting
 
@@ -141,6 +152,7 @@ ComposeError
 ## Invariants
 
 - Markdown source is always preserved as the text/plain part
+- The sender is explicit in the compose request; configured identities and local cache entries are suggestions, not the full allowed set
 - HTML output contains no external resource references
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
 - Send uses EmailSubmission/set. Server-side draft cleanup or Sent placement is requested through `onSuccessUpdateEmail` and the implicit Email/set response is handled as part of the same JMAP operation.
@@ -154,6 +166,7 @@ ComposeError
 |----|------|-----------|
 | markdown-preserved | MUST | The Markdown source is always the text/plain part of sent email |
 | html-self-contained | MUST | Rendered HTML contains no external resource references |
+| sender-explicit | MUST | The compose request carries the selected From address and does not restrict senders to a fixed local list |
 | draft-jmap | MUST | Drafts are stored on server via Email/set with $draft keyword |
 | send-submission | MUST | Sending uses EmailSubmission/set, not raw SMTP |
 | reply-threading | MUST | Replies set In-Reply-To and References headers correctly |

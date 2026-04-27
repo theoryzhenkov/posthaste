@@ -210,6 +210,7 @@ export interface ReplyContext {
 
 /** @spec docs/L1-api#compose */
 export interface SendMessageInput {
+  from: Recipient | null
   to: Recipient[]
   cc: Recipient[]
   bcc: Recipient[]

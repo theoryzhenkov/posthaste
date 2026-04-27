@@ -379,6 +379,10 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         .send_message(
             &AccountId::from("jmap-stalwart"),
             &SendMessageRequest {
+                from: Some(Recipient {
+                    name: Some("Dev Account".to_string()),
+                    email: stalwart.email(),
+                }),
                 to: vec![Recipient {
                     name: Some("Dev Account".to_string()),
                     email: stalwart.email(),
@@ -412,6 +416,10 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
         .send_message(
             &AccountId::from("imap-stalwart"),
             &SendMessageRequest {
+                from: Some(Recipient {
+                    name: Some("Dev Account".to_string()),
+                    email: stalwart.email(),
+                }),
                 to: vec![Recipient {
                     name: Some("Dev Account".to_string()),
                     email: stalwart.email(),

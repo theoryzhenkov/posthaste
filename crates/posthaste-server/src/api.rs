@@ -1529,6 +1529,13 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
 }
 
 fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), ApiError> {
+    if request.from.as_ref().is_some_and(recipient_email_is_empty) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_compose",
+            "sender email address cannot be empty",
+        ));
+    }
     if request.to.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -2024,6 +2031,7 @@ mod tests {
     #[test]
     fn send_message_rejects_missing_to_recipient() {
         let error = validate_send_message_request(&SendMessageRequest {
+            from: None,
             to: Vec::new(),
             cc: Vec::new(),
             bcc: Vec::new(),

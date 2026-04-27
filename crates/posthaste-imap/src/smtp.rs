@@ -119,7 +119,7 @@ pub fn build_smtp_message(
     request: &SendMessageRequest,
 ) -> Result<Message, ImapAdapterError> {
     let mut builder = Message::builder()
-        .from(smtp_sender_mailbox(config)?)
+        .from(smtp_sender_mailbox(config, request.from.as_ref())?)
         .subject(request.subject.clone())
         .message_id(None);
 
@@ -252,7 +252,13 @@ pub fn smtp_mailbox_for_recipient(recipient: &Recipient) -> Result<Mailbox, Imap
     smtp_mailbox(recipient.name.clone(), &recipient.email)
 }
 
-fn smtp_sender_mailbox(config: &SmtpConnectionConfig) -> Result<Mailbox, ImapAdapterError> {
+fn smtp_sender_mailbox(
+    config: &SmtpConnectionConfig,
+    from: Option<&Recipient>,
+) -> Result<Mailbox, ImapAdapterError> {
+    if let Some(from) = from {
+        return smtp_mailbox_for_recipient(from);
+    }
     let name = config.sender_name.clone().or_else(|| {
         config
             .sender_email
@@ -318,6 +324,7 @@ mod tests {
     fn builds_multipart_message_with_threading_headers_and_hidden_bcc() {
         let config = test_config();
         let request = SendMessageRequest {
+            from: None,
             to: vec![recipient(Some("Bob"), "bob@example.test")],
             cc: vec![recipient(None, "carol@example.test")],
             bcc: vec![recipient(Some("Dana"), "dana@example.test")],
@@ -345,6 +352,28 @@ mod tests {
         assert!(render_smtp_markdown(&request.body).contains("<strong>world</strong>"));
         assert!(!formatted.contains("Bcc:"));
         assert!(!formatted.contains("dana@example.test"));
+    }
+
+    #[test]
+    fn builds_message_with_requested_from_identity() {
+        let config = test_config();
+        let request = SendMessageRequest {
+            from: Some(recipient(Some("Catch All"), "catch@example.test")),
+            to: vec![recipient(None, "bob@example.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Status".to_string(),
+            body: "Hello".to_string(),
+            in_reply_to: None,
+            references: None,
+        };
+
+        let message = build_smtp_message(&config, &request).expect("SMTP message");
+        let formatted = String::from_utf8(message.formatted()).expect("message is UTF-8");
+
+        assert!(formatted.contains("From:"));
+        assert!(formatted.contains("Catch All"));
+        assert!(formatted.contains("<catch@example.test>"));
     }
 
     #[test]
@@ -444,6 +473,7 @@ mod tests {
             provider: ProviderHint::Generic,
         };
         let request = SendMessageRequest {
+            from: None,
             to: vec![recipient(Some("Bob"), "bob@example.test")],
             cc: Vec::new(),
             bcc: vec![recipient(Some("Dana"), "dana@example.test")],
