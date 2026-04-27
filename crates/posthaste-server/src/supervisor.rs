@@ -7,8 +7,9 @@ use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus, DomainEvent,
     GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream, PushStatus,
-    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncProgress,
+    SyncProgressReporter, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
+    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
@@ -347,6 +348,23 @@ fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interval {
     interval
 }
 
+fn sync_progress_reporter(
+    shared: &Arc<SupervisorShared>,
+    account_id: AccountId,
+    sync_id: String,
+    trigger: SyncTrigger,
+    started_at: String,
+) -> SyncProgressReporter {
+    let shared = shared.clone();
+    SyncProgressReporter::new(sync_id, trigger, started_at, move |progress| {
+        let shared = shared.clone();
+        let account_id = account_id.clone();
+        tokio::spawn(async move {
+            shared.set_sync_progress(&account_id, Some(progress)).await;
+        });
+    })
+}
+
 async fn process_automation_backfill_batch(
     shared: &Arc<SupervisorShared>,
     account_id: &AccountId,
@@ -430,6 +448,9 @@ async fn process_sync_trigger_inner(
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
     let started = Instant::now();
+    let started_at = time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| GatewayError::Rejected(error.to_string()))?;
     info!(
         account_id = %account_id,
         sync_id = %sync_id,
@@ -437,15 +458,41 @@ async fn process_sync_trigger_inner(
         "sync started"
     );
     shared
-        .set_status_only(&account_id, AccountStatus::Syncing)
+        .set_sync_progress(
+            &account_id,
+            Some(SyncProgress {
+                sync_id: sync_id.clone(),
+                trigger: trigger.clone(),
+                started_at: started_at.clone(),
+                stage: SyncProgressStage::Connecting,
+                detail: "Connecting account".to_string(),
+                mailbox_name: None,
+                mailbox_index: None,
+                mailbox_count: None,
+                message_count: None,
+                total_count: None,
+            }),
+        )
         .await;
 
     let result = match ensure_connection(shared, account, connection).await {
         Ok(()) => {
             if let Some(connection) = connection.as_ref() {
+                let progress = sync_progress_reporter(
+                    shared,
+                    account_id.clone(),
+                    sync_id.clone(),
+                    trigger.clone(),
+                    started_at.clone(),
+                );
                 shared
                     .service
-                    .sync_account(&account_id, trigger.clone(), connection.gateway.as_ref())
+                    .sync_account(
+                        &account_id,
+                        trigger.clone(),
+                        connection.gateway.as_ref(),
+                        Some(progress),
+                    )
                     .await
             } else {
                 Err(GatewayError::Unavailable(account_id.to_string()).into())
@@ -776,10 +823,23 @@ impl SupervisorShared {
             .unwrap_or_default()
     }
 
-    /// Update only the account status, preserving other overview fields.
-    async fn set_status_only(&self, account_id: &AccountId, status: AccountStatus) {
+    /// Update the running sync progress, setting account status to Syncing while present.
+    async fn set_sync_progress(&self, account_id: &AccountId, progress: Option<SyncProgress>) {
         let mut current = self.runtime_overview(account_id).await;
-        current.status = status;
+        match progress {
+            Some(progress) => {
+                if !matches!(progress.stage, SyncProgressStage::Connecting)
+                    && !matches!(current.status, AccountStatus::Syncing)
+                {
+                    return;
+                }
+                current.sync_progress = Some(progress);
+                current.status = AccountStatus::Syncing;
+            }
+            None => {
+                current.sync_progress = None;
+            }
+        }
         self.set_runtime_overview(account_id, current).await;
     }
 
@@ -799,6 +859,7 @@ impl SupervisorShared {
             .ok();
         current.last_sync_error = None;
         current.last_sync_error_code = None;
+        current.sync_progress = None;
         if matches!(current.push, PushStatus::Disabled) {
             current.push = PushStatus::Reconnecting;
         }
@@ -817,6 +878,7 @@ impl SupervisorShared {
         };
         current.last_sync_error = Some(error.to_string());
         current.last_sync_error_code = Some(error.code().to_string());
+        current.sync_progress = None;
         if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
             current.push = PushStatus::Reconnecting;
         }
@@ -853,18 +915,21 @@ impl SupervisorShared {
             .insert(account_id.to_string(), overview.clone());
 
         let mut side_effects = Vec::new();
-        if previous.as_ref().map(|item| &item.status) != Some(&overview.status) {
+        if previous.as_ref().map(|item| &item.status) != Some(&overview.status)
+            || previous.as_ref().map(|item| &item.sync_progress) != Some(&overview.sync_progress)
+        {
             if let Ok(event) = self.store.append_event(
                 account_id,
                 EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
                 None,
                 None,
                 json!({
-                    "status": format!("{:?}", overview.status).to_lowercase(),
-                    "push": format!("{:?}", overview.push).to_lowercase(),
+                    "status": &overview.status,
+                    "push": &overview.push,
                     "lastSyncAt": overview.last_sync_at,
                     "lastSyncError": overview.last_sync_error,
                     "lastSyncErrorCode": overview.last_sync_error_code,
+                    "syncProgress": overview.sync_progress,
                 }),
             ) {
                 side_effects.push(event);

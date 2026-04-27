@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use jmap_client::client::Client;
-use posthaste_domain::{GatewayError, SyncBatch, SyncCursor, SyncObject};
+use posthaste_domain::{
+    GatewayError, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncProgressReporter,
+    SyncProgressStage, SyncTrigger,
+};
 use tracing::info;
 
 use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
@@ -16,6 +19,7 @@ use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 pub(crate) async fn sync_account(
     client: &Arc<Client>,
     cursors: &[SyncCursor],
+    progress: Option<SyncProgressReporter>,
 ) -> Result<SyncBatch, GatewayError> {
     let mailbox_cursor = cursors
         .iter()
@@ -31,7 +35,27 @@ pub(crate) async fn sync_account(
         has_message_state = message_cursor.is_some(),
         "JMAP sync fetch started"
     );
+    report_progress(
+        &progress,
+        SyncProgressStage::Discovering,
+        "Checking JMAP state",
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let mailbox_start = Instant::now();
+    report_progress(
+        &progress,
+        SyncProgressStage::Fetching,
+        "Fetching mailboxes",
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let mailbox_sync = fetch_mailbox_sync(client, mailbox_cursor).await?;
     info!(
         mode = if mailbox_sync.replace_all_mailboxes {
@@ -45,6 +69,16 @@ pub(crate) async fn sync_account(
         "JMAP mailbox sync fetched"
     );
     let email_start = Instant::now();
+    report_progress(
+        &progress,
+        SyncProgressStage::Fetching,
+        "Fetching messages",
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let email_sync = fetch_email_sync(client, message_cursor).await?;
     info!(
         mailboxes = mailbox_sync.mailboxes.len(),
@@ -68,4 +102,30 @@ pub(crate) async fn sync_account(
         replace_all_messages: email_sync.replace_all_messages,
         cursors: vec![mailbox_sync.cursor, email_sync.cursor],
     })
+}
+
+fn report_progress(
+    reporter: &Option<SyncProgressReporter>,
+    stage: SyncProgressStage,
+    detail: &str,
+    mailbox_name: Option<String>,
+    mailbox_index: Option<usize>,
+    mailbox_count: Option<usize>,
+    message_count: Option<usize>,
+    total_count: Option<usize>,
+) {
+    if let Some(reporter) = reporter {
+        reporter.report(SyncProgress {
+            sync_id: String::new(),
+            trigger: SyncTrigger::Manual,
+            started_at: String::new(),
+            stage,
+            detail: detail.to_string(),
+            mailbox_name,
+            mailbox_index,
+            mailbox_count,
+            message_count,
+            total_count,
+        });
+    }
 }

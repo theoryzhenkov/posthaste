@@ -189,8 +189,9 @@ impl MailGateway for LiveJmapGateway {
         &self,
         _account_id: &AccountId,
         cursors: &[SyncCursor],
+        progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
-        crate::live_sync::sync_account(&self.client, cursors).await
+        crate::live_sync::sync_account(&self.client, cursors, progress).await
     }
 
     /// Lazily fetch the body content of a single message via `Email/get`.

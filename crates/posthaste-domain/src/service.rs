@@ -599,7 +599,7 @@ impl MailService {
                 clear_role_from.as_ref(),
             )
             .await?;
-        self.sync_account(account_id, SyncTrigger::Manual, gateway)
+        self.sync_account(account_id, SyncTrigger::Manual, gateway, None)
             .await
     }
 
@@ -740,9 +740,24 @@ impl MailService {
         account_id: &AccountId,
         trigger: SyncTrigger,
         gateway: &dyn MailGateway,
+        progress: Option<crate::SyncProgressReporter>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let cursors = self.sync_state.get_sync_cursors(account_id)?;
-        let batch = gateway.sync(account_id, &cursors).await?;
+        let batch = gateway.sync(account_id, &cursors, progress.clone()).await?;
+        if let Some(progress) = progress {
+            progress.report(crate::SyncProgress {
+                sync_id: String::new(),
+                trigger: trigger.clone(),
+                started_at: String::new(),
+                stage: crate::SyncProgressStage::Storing,
+                detail: "Applying synced changes".to_string(),
+                mailbox_name: None,
+                mailbox_index: None,
+                mailbox_count: None,
+                message_count: Some(batch.messages.len()),
+                total_count: None,
+            });
+        }
         let mut events = self.sync_writer.apply_sync_batch(account_id, &batch)?;
         let action_events = self
             .apply_automation_rules(account_id, &batch.messages, gateway)
@@ -2126,6 +2141,7 @@ mod tests {
             &self,
             _account_id: &AccountId,
             _cursors: &[SyncCursor],
+            _progress: Option<crate::SyncProgressReporter>,
         ) -> Result<SyncBatch, GatewayError> {
             self.batch
                 .clone()
@@ -2356,7 +2372,7 @@ mod tests {
         );
 
         service
-            .sync_account(&account_id, SyncTrigger::Manual, &gateway)
+            .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
             .await
             .expect("sync should apply action");
 

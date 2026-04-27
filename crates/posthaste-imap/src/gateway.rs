@@ -7,7 +7,8 @@ use posthaste_domain::{
     GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
     ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
     MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
+    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressReporter,
+    SyncProgressStage, SyncTrigger,
 };
 use tracing::{debug, info, warn};
 
@@ -146,8 +147,19 @@ impl MailGateway for LiveImapSmtpGateway {
         &self,
         account_id: &AccountId,
         _cursors: &[SyncCursor],
+        progress: Option<SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         let sync_started = Instant::now();
+        report_sync_progress(
+            &progress,
+            SyncProgressStage::Discovering,
+            "Checking IMAP capabilities",
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         let discovery = self.discovery.clone();
         let mut client = connect_authenticated_client(&self.config)
             .await
@@ -183,12 +195,33 @@ impl MailGateway for LiveImapSmtpGateway {
         let mut planned_mailboxes = Vec::new();
         let account_full_message_snapshot = store.is_none();
         let mut has_full_mailbox_snapshot = account_full_message_snapshot;
+        report_sync_progress(
+            &progress,
+            SyncProgressStage::Planning,
+            "Planning mailbox sync",
+            None,
+            None,
+            Some(selectable_mailbox_count),
+            None,
+            None,
+        );
 
-        for mailbox in discovery
+        for (mailbox_index, mailbox) in discovery
             .mailboxes
             .iter()
             .filter(|mailbox| mailbox.selectable)
+            .enumerate()
         {
+            report_sync_progress(
+                &progress,
+                SyncProgressStage::Planning,
+                "Planning mailbox sync",
+                Some(mailbox.name.clone()),
+                Some(mailbox_index + 1),
+                Some(selectable_mailbox_count),
+                None,
+                None,
+            );
             if let Some(store) = store {
                 let stored_state = store
                     .get_imap_mailbox_state(account_id, &mailbox.id)
@@ -310,6 +343,16 @@ impl MailGateway for LiveImapSmtpGateway {
             uses_partial_delta,
             "IMAP sync fetch started"
         );
+        report_sync_progress(
+            &progress,
+            SyncProgressStage::Fetching,
+            "Fetching mailbox changes",
+            None,
+            None,
+            Some(planned_mailbox_count),
+            None,
+            None,
+        );
 
         for (mailbox_index, mailbox) in planned_mailboxes.into_iter().enumerate() {
             local_locations.extend(mailbox.local_locations.clone());
@@ -317,6 +360,16 @@ impl MailGateway for LiveImapSmtpGateway {
             let plan_name = planned_imap_sync_plan_name(&mailbox.plan);
             match mailbox.plan {
                 PlannedImapMailboxSync::SkipUnchanged => {
+                    report_sync_progress(
+                        &progress,
+                        SyncProgressStage::Fetching,
+                        "Mailbox unchanged",
+                        Some(mailbox.name.clone()),
+                        Some(mailbox_index + 1),
+                        Some(planned_mailbox_count),
+                        Some(0),
+                        None,
+                    );
                     info!(
                         account_id = %account_id,
                         mailbox_id = %mailbox.id,
@@ -331,6 +384,16 @@ impl MailGateway for LiveImapSmtpGateway {
                 }
                 PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::FullSnapshot { .. }) => {
                     let started = Instant::now();
+                    report_sync_progress(
+                        &progress,
+                        SyncProgressStage::Fetching,
+                        "Fetching mailbox",
+                        Some(mailbox.name.clone()),
+                        Some(mailbox_index + 1),
+                        Some(planned_mailbox_count),
+                        None,
+                        None,
+                    );
                     info!(
                         account_id = %account_id,
                         mailbox_id = %mailbox.id,
@@ -375,6 +438,16 @@ impl MailGateway for LiveImapSmtpGateway {
                     ..
                 }) => {
                     let started = Instant::now();
+                    report_sync_progress(
+                        &progress,
+                        SyncProgressStage::Fetching,
+                        "Fetching mailbox changes",
+                        Some(mailbox.name.clone()),
+                        Some(mailbox_index + 1),
+                        Some(planned_mailbox_count),
+                        None,
+                        None,
+                    );
                     info!(
                         account_id = %account_id,
                         mailbox_id = %mailbox.id,
@@ -434,6 +507,16 @@ impl MailGateway for LiveImapSmtpGateway {
                 }
                 PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::CondstoreDelta { .. }) => {
                     let started = Instant::now();
+                    report_sync_progress(
+                        &progress,
+                        SyncProgressStage::Fetching,
+                        "Fetching mailbox changes",
+                        Some(mailbox.name.clone()),
+                        Some(mailbox_index + 1),
+                        Some(planned_mailbox_count),
+                        None,
+                        None,
+                    );
                     info!(
                         account_id = %account_id,
                         mailbox_id = %mailbox.id,
@@ -473,6 +556,16 @@ impl MailGateway for LiveImapSmtpGateway {
                 }
                 PlannedImapMailboxSync::Sync(ImapMailboxSyncPlan::FetchNewByUid { after_uid }) => {
                     let started = Instant::now();
+                    report_sync_progress(
+                        &progress,
+                        SyncProgressStage::Fetching,
+                        "Checking mailbox for new messages",
+                        Some(mailbox.name.clone()),
+                        Some(mailbox_index + 1),
+                        Some(planned_mailbox_count),
+                        None,
+                        None,
+                    );
                     info!(
                         account_id = %account_id,
                         mailbox_id = %mailbox.id,
@@ -866,6 +959,32 @@ fn planned_imap_sync_plan_name(plan: &PlannedImapMailboxSync) -> &'static str {
     match plan {
         PlannedImapMailboxSync::SkipUnchanged => "skip_unchanged",
         PlannedImapMailboxSync::Sync(plan) => imap_sync_plan_name(plan),
+    }
+}
+
+fn report_sync_progress(
+    reporter: &Option<SyncProgressReporter>,
+    stage: SyncProgressStage,
+    detail: &str,
+    mailbox_name: Option<String>,
+    mailbox_index: Option<usize>,
+    mailbox_count: Option<usize>,
+    message_count: Option<usize>,
+    total_count: Option<usize>,
+) {
+    if let Some(reporter) = reporter {
+        reporter.report(SyncProgress {
+            sync_id: String::new(),
+            trigger: SyncTrigger::Manual,
+            started_at: String::new(),
+            stage,
+            detail: detail.to_string(),
+            mailbox_name,
+            mailbox_index,
+            mailbox_count,
+            message_count,
+            total_count,
+        });
     }
 }
 
