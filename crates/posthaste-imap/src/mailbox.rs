@@ -2,6 +2,7 @@ use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::command::CommandBody;
 use imap_client::imap_types::mailbox::Mailbox;
 use imap_client::imap_types::response::{Code, Data, StatusBody, StatusKind};
+use imap_client::imap_types::status::{StatusDataItem, StatusDataItemName};
 use imap_client::imap_types::IntoStatic;
 use imap_client::tasks::tasks::select::SelectDataUnvalidated;
 use imap_client::tasks::tasks::TaskError;
@@ -23,6 +24,35 @@ pub async fn examine_imap_mailbox(
     examine_selected_mailbox(&mut client, mailbox_name).await
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ImapMailboxStatus {
+    pub messages: Option<u32>,
+    pub uid_next: Option<ImapUid>,
+    pub uid_validity: Option<ImapUidValidity>,
+}
+
+/// Fetch cheap mailbox status without selecting the mailbox.
+///
+/// RFC 9051 STATUS is useful as a preflight, but the RFC also warns clients not
+/// to expect many consecutive STATUS commands to be fast. Posthaste only uses
+/// this to skip heavier reconciliation when the returned state proves the
+/// mailbox cannot have changed under the current UIDVALIDITY epoch.
+///
+/// @spec docs/L0-providers#imap-delta-fallback
+pub(crate) async fn status_imap_mailbox(
+    client: &mut ImapClient,
+    mailbox_name: &str,
+) -> Result<ImapMailboxStatus, ImapAdapterError> {
+    let mailbox = Mailbox::try_from(mailbox_name)
+        .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
+        .into_static();
+    client
+        .resolve(StatusTask::new(mailbox))
+        .await
+        .map_err(ImapAdapterError::from)?
+        .map_err(|error| ImapAdapterError::Client(error.to_string()))
+}
+
 pub(crate) async fn examine_selected_mailbox(
     client: &mut ImapClient,
     mailbox_name: &str,
@@ -36,6 +66,68 @@ pub(crate) async fn examine_selected_mailbox(
         .map_err(ImapAdapterError::from)?
         .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
     selected_mailbox_from_examine_state(mailbox_name, data)
+}
+
+#[derive(Clone, Debug)]
+struct StatusTask {
+    mailbox: Mailbox<'static>,
+    output: ImapMailboxStatus,
+}
+
+impl StatusTask {
+    fn new(mailbox: Mailbox<'static>) -> Self {
+        Self {
+            mailbox,
+            output: ImapMailboxStatus::default(),
+        }
+    }
+}
+
+impl Task for StatusTask {
+    type Output = Result<ImapMailboxStatus, TaskError>;
+
+    fn command_body(&self) -> CommandBody<'static> {
+        CommandBody::Status {
+            mailbox: self.mailbox.clone(),
+            item_names: vec![
+                StatusDataItemName::Messages,
+                StatusDataItemName::UidNext,
+                StatusDataItemName::UidValidity,
+            ]
+            .into(),
+        }
+    }
+
+    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
+        match data {
+            Data::Status { items, .. } => {
+                for item in items.iter() {
+                    match item {
+                        StatusDataItem::Messages(messages) => {
+                            self.output.messages = Some(*messages);
+                        }
+                        StatusDataItem::UidNext(uid_next) => {
+                            self.output.uid_next = Some(ImapUid(uid_next.get()));
+                        }
+                        StatusDataItem::UidValidity(uid_validity) => {
+                            self.output.uid_validity = Some(ImapUidValidity(uid_validity.get()));
+                        }
+                        _ => {}
+                    }
+                }
+                None
+            }
+            data => Some(data),
+        }
+    }
+
+    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
+        match status_body.kind {
+            StatusKind::Ok => Ok(self.output),
+            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
+            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
+        }
+    }
 }
 
 /// Convert an IMAP EXAMINE/SELECT response into Posthaste's selected-mailbox state.
