@@ -254,12 +254,19 @@ export function buildCreateAccountPayload(
  */
 export function buildUpdateAccountPayload(
   form: AccountFormState,
+  account?: AccountOverview | null,
 ): UpdateAccountInput {
-  return {
+  const input: UpdateAccountInput = {
     name: form.name.trim(),
     fullName: form.fullName.trim() || null,
     emailPatterns: parseEmailPatterns(form.emailPatternsText),
     appearance: buildAccountAppearanceInput(form),
+  }
+  if (account?.transport.auth === 'oauth2') {
+    return input
+  }
+  return {
+    ...input,
     transport: {
       baseUrl: form.baseUrl,
       username: form.username,

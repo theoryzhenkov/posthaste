@@ -20,7 +20,12 @@ import {
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { createAccount, updateAccount, verifyAccount } from '../../api/client'
-import type { AccountOverview, VerificationResponse } from '../../api/types'
+import type {
+  AccountOverview,
+  ProviderAuthKind,
+  ProviderHint,
+  VerificationResponse,
+} from '../../api/types'
 import { AccountMark } from '../AccountMark'
 import {
   buildCreateAccountPayload,
@@ -109,7 +114,10 @@ export function AccountEditor({
     mutationFn: async (currentForm: typeof form) => {
       return editorTarget === 'new'
         ? createAccount(buildCreateAccountPayload(currentForm))
-        : updateAccount(editorTarget, buildUpdateAccountPayload(currentForm))
+        : updateAccount(
+            editorTarget,
+            buildUpdateAccountPayload(currentForm, editingAccount),
+          )
     },
     onSuccess: async (account) => {
       setErrorMessage(null)
@@ -138,6 +146,7 @@ export function AccountEditor({
   })
 
   const isEditing = editorTarget !== 'new' && editingAccount !== null
+  const isOAuthAccount = editingAccount?.transport.auth === 'oauth2'
   const formAppearance = appearanceFromForm(form)
   const hasUnsavedAccountChanges =
     accountFieldsSignature(form) !== savedAccountFieldsSignature
@@ -167,6 +176,10 @@ export function AccountEditor({
                 <span className="font-mono uppercase tracking-[0.12em]">
                   {editingAccount.status}
                 </span>
+                <span aria-hidden>·</span>
+                <span>{providerLabel(editingAccount.transport.provider)}</span>
+                <span aria-hidden>·</span>
+                <span>{authLabel(editingAccount.transport.auth)}</span>
               </>
             ) : (
               'Configure the account, then apply it.'
@@ -238,52 +251,58 @@ export function AccountEditor({
         />
       </SettingsSection>
 
-      <SettingsSection title="Server">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Base URL"
-            value={form.baseUrl}
-            placeholder="https://mail.example.com/jmap"
-            onChange={(value) =>
-              setForm((current) => ({ ...current, baseUrl: value }))
-            }
-          />
-          <Field
-            label="Username"
-            value={form.username}
-            placeholder="you@example.com"
-            onChange={(value) =>
-              setForm((current) => ({ ...current, username: value }))
-            }
-          />
-        </div>
-      </SettingsSection>
+      {isOAuthAccount && editingAccount ? (
+        <OAuthConnectionDetails account={editingAccount} />
+      ) : (
+        <>
+          <SettingsSection title="Server">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Base URL"
+                value={form.baseUrl}
+                placeholder="https://mail.example.com/jmap"
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, baseUrl: value }))
+                }
+              />
+              <Field
+                label="Username"
+                value={form.username}
+                placeholder="you@example.com"
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, username: value }))
+                }
+              />
+            </div>
+          </SettingsSection>
 
-      <SettingsSection title="Password">
-        {editingAccount?.transport.secret.configured && (
-          <p className="-mt-1 text-[12px] text-muted-foreground">
-            A password is configured. Enter a new one to replace it.
-          </p>
-        )}
+          <SettingsSection title="Password">
+            {editingAccount?.transport.secret.configured && (
+              <p className="-mt-1 text-[12px] text-muted-foreground">
+                A password is configured. Enter a new one to replace it.
+              </p>
+            )}
 
-        <Input
-          id="account-password"
-          type="password"
-          className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-          value={form.password}
-          placeholder={
-            editingAccount?.transport.secret.configured
-              ? '********'
-              : 'Password'
-          }
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              password: event.target.value,
-            }))
-          }
-        />
-      </SettingsSection>
+            <Input
+              id="account-password"
+              type="password"
+              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
+              value={form.password}
+              placeholder={
+                editingAccount?.transport.secret.configured
+                  ? '********'
+                  : 'Password'
+              }
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  password: event.target.value,
+                }))
+              }
+            />
+          </SettingsSection>
+        </>
+      )}
 
       <SettingsFooter>
         {verification?.identityEmail && (
@@ -337,6 +356,95 @@ export function AccountEditor({
       )}
     </div>
   )
+}
+
+function OAuthConnectionDetails({ account }: { account: AccountOverview }) {
+  return (
+    <SettingsSection title="Connection">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ReadOnlyDetail
+          label="Provider"
+          value={providerLabel(account.transport.provider)}
+        />
+        <ReadOnlyDetail
+          label="Authentication"
+          value={authLabel(account.transport.auth)}
+        />
+        <ReadOnlyDetail label="Username" value={account.transport.username} />
+        <ReadOnlyDetail label="Driver" value={driverLabel(account.driver)} />
+        {account.transport.imap && (
+          <ReadOnlyDetail
+            label="IMAP"
+            value={`${account.transport.imap.host}:${account.transport.imap.port}`}
+          />
+        )}
+        {account.transport.smtp && (
+          <ReadOnlyDetail
+            label="SMTP"
+            value={`${account.transport.smtp.host}:${account.transport.smtp.port}`}
+          />
+        )}
+      </div>
+      <p className="text-[12px] leading-5 text-muted-foreground">
+        Connection settings and credentials are managed by the provider OAuth
+        flow.
+      </p>
+    </SettingsSection>
+  )
+}
+
+function ReadOnlyDetail({
+  label,
+  value,
+}: {
+  label: string
+  value?: string | null
+}) {
+  return (
+    <div className="grid min-h-12 gap-1 rounded-md border border-border-soft bg-bg-elev/45 px-3 py-2">
+      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </span>
+      <span className="truncate text-[13px] text-foreground">
+        {value?.trim() || 'Not configured'}
+      </span>
+    </div>
+  )
+}
+
+function providerLabel(provider: ProviderHint): string {
+  switch (provider) {
+    case 'gmail':
+      return 'Google'
+    case 'outlook':
+      return 'Outlook'
+    case 'icloud':
+      return 'iCloud'
+    case 'generic':
+      return 'Generic'
+  }
+}
+
+function authLabel(auth: ProviderAuthKind): string {
+  switch (auth) {
+    case 'oauth2':
+      return 'OAuth 2.0'
+    case 'appPassword':
+      return 'App password'
+    case 'password':
+      return 'Password'
+  }
+}
+
+function driverLabel(driver: AccountOverview['driver']): string {
+  switch (driver) {
+    case 'jmap':
+      return 'JMAP'
+    case 'imapSmtp':
+      return 'IMAP/SMTP'
+    case 'mock':
+      return 'Mock'
+  }
 }
 
 function AccountAppearanceFields({
