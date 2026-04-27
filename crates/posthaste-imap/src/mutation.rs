@@ -21,6 +21,9 @@ use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfi
 ///
 /// The command validates the stored UIDVALIDITY epoch before issuing STORE so a
 /// stale UID cannot mutate a different message after provider-side UID reuse.
+/// Keyword mutations use `.SILENT` because Posthaste already knows the intended
+/// delta and real providers may omit or sparsely populate the untagged FETCH
+/// response for accepted STORE commands.
 ///
 /// @spec docs/L1-api#message-commands
 pub async fn apply_imap_keyword_delta_by_location(
@@ -36,18 +39,16 @@ pub async fn apply_imap_keyword_delta_by_location(
     let add_flags = imap_flags_for_keywords(&command.add)?;
     let remove_flags = imap_flags_for_keywords(&command.remove)?;
     if !add_flags.is_empty() {
-        let items = client
-            .uid_store(uid_set.clone(), StoreType::Add, add_flags)
+        client
+            .uid_silent_store(uid_set.clone(), StoreType::Add, add_flags)
             .await
             .map_err(ImapAdapterError::from)?;
-        verify_uid_store_response(location, items.into_values().flatten())?;
     }
     if !remove_flags.is_empty() {
-        let items = client
-            .uid_store(uid_set, StoreType::Remove, remove_flags)
+        client
+            .uid_silent_store(uid_set, StoreType::Remove, remove_flags)
             .await
             .map_err(ImapAdapterError::from)?;
-        verify_uid_store_response(location, items.into_values().flatten())?;
     }
 
     Ok(MutationOutcome { cursor: None })
@@ -111,15 +112,11 @@ pub async fn mark_imap_message_deleted_by_location(
 ) -> Result<MutationOutcome, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, mailbox_name, location).await?;
-    let items = client
-        .uid_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
+    verify_uid_fetch_response(&mut client, location).await?;
+    client
+        .uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
         .await
         .map_err(ImapAdapterError::from)?;
-    verify_message_data_contains_uid(
-        location,
-        items.into_values().flatten(),
-        "matching UID STORE response",
-    )?;
 
     Ok(MutationOutcome { cursor: None })
 }
@@ -136,15 +133,11 @@ pub async fn expunge_imap_message_by_location(
 ) -> Result<MutationOutcome, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     select_validated_mailbox(&mut client, mailbox_name, location).await?;
-    let items = client
-        .uid_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
+    verify_uid_fetch_response(&mut client, location).await?;
+    client
+        .uid_silent_store(uid_sequence_set(location)?, StoreType::Add, [Flag::Deleted])
         .await
         .map_err(ImapAdapterError::from)?;
-    verify_message_data_contains_uid(
-        location,
-        items.into_values().flatten(),
-        "matching UID STORE response",
-    )?;
     let _expunged = uid_expunge(&mut client, location).await?;
 
     Ok(MutationOutcome { cursor: None })
@@ -242,13 +235,6 @@ fn uid(location: &ImapMessageLocation) -> Result<NonZeroU32, ImapAdapterError> {
 
 fn uid_fetch_item_names() -> MacroOrMessageDataItemNames<'static> {
     MacroOrMessageDataItemNames::MessageDataItemNames(vec![MessageDataItemName::Uid])
-}
-
-fn verify_uid_store_response(
-    location: &ImapMessageLocation,
-    items: impl IntoIterator<Item = MessageDataItem<'static>>,
-) -> Result<(), ImapAdapterError> {
-    verify_message_data_contains_uid(location, items, "matching UID STORE response")
 }
 
 fn verify_message_data_contains_uid(
@@ -372,31 +358,6 @@ mod tests {
                 keyword,
                 ..
             } if keyword == "bad keyword"
-        ));
-    }
-
-    #[test]
-    fn verifies_uid_store_response_contains_matching_uid() {
-        let location = location();
-
-        verify_uid_store_response(
-            &location,
-            [MessageDataItem::Uid(NonZeroU32::new(42).expect("uid"))],
-        )
-        .expect("matching UID");
-    }
-
-    #[test]
-    fn rejects_uid_store_response_without_matching_uid() {
-        let error = verify_uid_store_response(
-            &location(),
-            [MessageDataItem::Uid(NonZeroU32::new(99).expect("uid"))],
-        )
-        .expect_err("matching UID is required");
-
-        assert!(matches!(
-            error,
-            ImapAdapterError::MissingFetchData("matching UID STORE response")
         ));
     }
 
