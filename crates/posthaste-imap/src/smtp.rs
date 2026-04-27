@@ -36,20 +36,7 @@ impl SmtpConnectionConfig {
         Self::from_parts(
             &account.transport,
             account.full_name.as_deref(),
-            concrete_sender_email(&account.email_patterns)
-                .or_else(|| concrete_sender_email(account.transport.username.iter())),
-            secret,
-        )
-    }
-
-    pub fn from_account_transport(
-        transport: &AccountTransportSettings,
-        secret: String,
-    ) -> Result<Self, ImapAdapterError> {
-        Self::from_parts(
-            transport,
-            None,
-            concrete_sender_email(transport.username.iter()),
+            concrete_sender_email(&account.email_patterns),
             secret,
         )
     }
@@ -317,13 +304,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_from_transport_requires_smtp_settings() {
-        let transport = AccountTransportSettings {
-            username: Some("alice@example.test".to_string()),
-            ..Default::default()
-        };
+    fn config_from_account_settings_requires_smtp_settings() {
+        let mut account = test_account(None, vec!["alice@example.test"], "alice-login");
+        account.transport.smtp = None;
 
-        let error = SmtpConnectionConfig::from_account_transport(&transport, "secret".to_string())
+        let error = SmtpConnectionConfig::from_account_settings(&account, "secret".to_string())
             .expect_err("SMTP settings should be required");
 
         assert!(matches!(error, ImapAdapterError::MissingSmtpTransport));
@@ -375,20 +360,12 @@ mod tests {
 
     #[test]
     fn config_preserves_oauth2_auth_kind_for_xoauth2_sends() {
-        let transport = AccountTransportSettings {
-            provider: ProviderHint::Outlook,
-            username: Some("alice@example.test".to_string()),
-            auth: ProviderAuthKind::OAuth2,
-            smtp: Some(SmtpTransportSettings {
-                host: "smtp.example.test".to_string(),
-                port: 587,
-                security: TransportSecurity::StartTls,
-            }),
-            ..Default::default()
-        };
+        let mut account = test_account(None, vec!["alice@example.test"], "alice-login");
+        account.transport.provider = ProviderHint::Outlook;
+        account.transport.auth = ProviderAuthKind::OAuth2;
 
         let config =
-            SmtpConnectionConfig::from_account_transport(&transport, "access-token".to_string())
+            SmtpConnectionConfig::from_account_settings(&account, "access-token".to_string())
                 .expect("SMTP config");
 
         assert_eq!(config.auth, ProviderAuthKind::OAuth2);
@@ -418,6 +395,16 @@ mod tests {
 
         let error = SmtpConnectionConfig::from_account_settings(&account, "secret".to_string())
             .expect_err("concrete sender email should be required");
+
+        assert!(matches!(error, ImapAdapterError::MissingSmtpSenderEmail));
+    }
+
+    #[test]
+    fn config_from_account_settings_does_not_use_email_username_as_sender() {
+        let account = test_account(None, Vec::new(), "alice@example.test");
+
+        let error = SmtpConnectionConfig::from_account_settings(&account, "secret".to_string())
+            .expect_err("configured sender email should be required");
 
         assert!(matches!(error, ImapAdapterError::MissingSmtpSenderEmail));
     }

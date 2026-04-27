@@ -258,7 +258,7 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_account",
-                "IMAP/SMTP accounts require a concrete sender email pattern when username is not an email address",
+                "IMAP/SMTP accounts require a concrete sender email pattern",
             ));
         }
     }
@@ -326,11 +326,6 @@ fn has_concrete_sender_email(account: &AccountSettings) -> bool {
         .email_patterns
         .iter()
         .any(|pattern| is_concrete_email_pattern(pattern))
-        || account
-            .transport
-            .username
-            .as_deref()
-            .is_some_and(is_concrete_email_pattern)
 }
 
 fn is_concrete_email_pattern(pattern: &str) -> bool {
