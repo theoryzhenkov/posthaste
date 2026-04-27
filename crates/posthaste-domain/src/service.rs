@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::json;
 use tracing::{debug, trace};
@@ -967,6 +968,41 @@ impl MailService {
             "cache rescore worker batch completed"
         );
         Ok(outcome)
+    }
+
+    /// Queue stale cache objects for re-scoring so time-sensitive utility, such
+    /// as recency, converges even without new sync or search signals.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    pub fn queue_stale_cache_rescore_batch(
+        &self,
+        account_id: &AccountId,
+        stale_after: Duration,
+        batch_size: usize,
+    ) -> Result<usize, ServiceError> {
+        if batch_size == 0 {
+            return Ok(0);
+        }
+        let stale_seconds = i64::try_from(stale_after.as_secs()).unwrap_or(i64::MAX);
+        let stale_before = (time::OffsetDateTime::now_utc()
+            - time::Duration::seconds(stale_seconds))
+        .format(&time::format_description::well_known::Rfc3339)
+        .map_err(|err| StoreError::Failure(err.to_string()))?;
+        let queued = self.cache_store.queue_stale_cache_rescore_candidates(
+            account_id,
+            stale_before.as_str(),
+            batch_size,
+        )?;
+        if queued > 0 {
+            debug!(
+                account_id = %account_id,
+                stale_after_seconds = stale_after.as_secs(),
+                stale_before = stale_before.as_str(),
+                queued,
+                "stale cache candidates queued for re-score"
+            );
+        }
+        Ok(queued)
     }
 
     /// Fetch one bounded batch of wanted message-body cache candidates.
@@ -2050,6 +2086,8 @@ mod tests {
         cache_candidates: Mutex<Vec<CacheCandidate>>,
         cache_signal_updates: Mutex<Vec<CacheSignalUpdate>>,
         cache_rescore_candidates: Mutex<Vec<CacheRescoreCandidate>>,
+        stale_cache_rescore_requests: Mutex<Vec<(AccountId, String, usize)>>,
+        stale_cache_rescore_result: usize,
         cache_priority_updates: Mutex<Vec<CachePriorityUpdate>>,
         cache_fetch_candidates: Mutex<Vec<CacheFetchCandidate>>,
         cache_state_changes: Mutex<Vec<(MessageId, CacheObjectState, Option<String>)>>,
@@ -2073,6 +2111,8 @@ mod tests {
                 cache_candidates: Mutex::new(Vec::new()),
                 cache_signal_updates: Mutex::new(Vec::new()),
                 cache_rescore_candidates: Mutex::new(Vec::new()),
+                stale_cache_rescore_requests: Mutex::new(Vec::new()),
+                stale_cache_rescore_result: 0,
                 cache_priority_updates: Mutex::new(Vec::new()),
                 cache_fetch_candidates: Mutex::new(Vec::new()),
                 cache_state_changes: Mutex::new(Vec::new()),
@@ -2390,6 +2430,19 @@ mod tests {
                 .take(limit)
                 .cloned()
                 .collect())
+        }
+
+        fn queue_stale_cache_rescore_candidates(
+            &self,
+            account_id: &AccountId,
+            stale_before: &str,
+            limit: usize,
+        ) -> Result<usize, StoreError> {
+            self.stale_cache_rescore_requests
+                .lock()
+                .expect("stale cache rescore requests lock poisoned")
+                .push((account_id.clone(), stale_before.to_string(), limit));
+            Ok(self.stale_cache_rescore_result)
         }
 
         fn update_cache_priorities(
@@ -3209,6 +3262,32 @@ mod tests {
         assert_eq!(updates[0].fetch_unit, CacheFetchUnit::RawMessage);
         assert_eq!(updates[0].value_bytes, 256 * 1024);
         assert_eq!(updates[0].fetch_bytes, 12 * 1024 * 1024);
+    }
+
+    // spec: docs/L1-sync#cache-stale-rescore
+    #[test]
+    fn stale_cache_rescore_batch_queues_bounded_cutoff() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            stale_cache_rescore_result: 7,
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+
+        let queued = service
+            .queue_stale_cache_rescore_batch(&account_id, Duration::from_secs(60), 25)
+            .expect("stale queue should succeed");
+
+        assert_eq!(queued, 7);
+        let requests = store
+            .stale_cache_rescore_requests
+            .lock()
+            .expect("stale cache rescore requests lock poisoned");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].0, account_id);
+        assert_eq!(requests[0].2, 25);
+        assert!(!requests[0].1.is_empty());
     }
 
     #[tokio::test]
