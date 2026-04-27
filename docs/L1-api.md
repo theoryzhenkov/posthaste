@@ -203,7 +203,7 @@ The frontend exposes mailbox action editors, but they persist through global `au
 
 ## Secret management
 
-Account secrets are opaque authentication material. For JMAP accounts this may be an OAuth token set, a provider API token, or a development credential accepted by the provider. The API must not assume that the value is a Fastmail app-specific password.
+Account secrets are opaque authentication material. For JMAP accounts this may be an OAuth token set, a provider API token, or a development credential accepted by the provider. For OAuth accounts, the stored OS-keyring value is a JSON token set containing the access token, refresh token when granted, expiry, scopes, provider, and OAuth client ID; the runtime refreshes it before provider connection and passes only the current access token to XOAUTH2-capable gateways. The API must not assume that the value is a Fastmail app-specific password.
 
 Secrets use a tri-state write mode:
 

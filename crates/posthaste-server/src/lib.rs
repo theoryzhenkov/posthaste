@@ -1,6 +1,7 @@
 pub mod api;
 pub mod config;
 pub mod logging;
+pub mod oauth;
 pub mod push;
 pub mod sanitize;
 pub mod secret;
