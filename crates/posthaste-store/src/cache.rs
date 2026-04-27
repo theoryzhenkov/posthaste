@@ -38,6 +38,36 @@ fn parse_cache_fetch_unit(value: String) -> Result<CacheFetchUnit, rusqlite::Err
     })
 }
 
+fn parse_cache_object_state(value: String) -> Result<CacheObjectState, rusqlite::Error> {
+    CacheObjectState::from_str(&value).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown cache object state {value}"),
+            )),
+        )
+    })
+}
+
+fn option_u64_to_i64(value: Option<u64>) -> Result<Option<i64>, StoreError> {
+    value.map(u64_to_i64).transpose()
+}
+
+fn optional_i64_to_u64(value: Option<i64>, column: usize) -> Result<Option<u64>, rusqlite::Error> {
+    value.map(i64_to_u64).transpose().map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )),
+        )
+    })
+}
+
 impl CacheStore for DatabaseStore {
     fn upsert_cache_candidates(&self, candidates: &[CacheCandidate]) -> Result<(), StoreError> {
         if candidates.is_empty() {
@@ -79,6 +109,267 @@ impl CacheStore for DatabaseStore {
                         candidate.reason.as_str(),
                         now.as_str(),
                     ],
+                )
+                .map_err(sql_to_store_error)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn record_cache_signal_updates(&self, updates: &[CacheSignalUpdate]) -> Result<(), StoreError> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let now = now_iso8601()?;
+        self.write_transaction(|tx| {
+            for update in updates {
+                let search_total_messages =
+                    option_u64_to_i64(update.search.as_ref().map(|search| search.total_messages))?;
+                let search_result_count =
+                    option_u64_to_i64(update.search.as_ref().map(|search| search.result_count))?;
+                let search_result_rank =
+                    option_u64_to_i64(update.search.as_ref().map(|search| search.result_rank))?;
+                let pinned = update.pinned.map(bool_to_i64);
+                tx.execute(
+                    "INSERT INTO cache_message_signal (
+                        account_id, message_id,
+                        search_total_messages, search_result_count, search_result_rank,
+                        search_seen_count, last_search_seen_at,
+                        thread_activity_score, sender_affinity_score, local_behavior_score,
+                        direct_user_boost, pinned, dirty_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                    ON CONFLICT(account_id, message_id) DO UPDATE SET
+                        search_total_messages = COALESCE(excluded.search_total_messages, cache_message_signal.search_total_messages),
+                        search_result_count = COALESCE(excluded.search_result_count, cache_message_signal.search_result_count),
+                        search_result_rank = COALESCE(excluded.search_result_rank, cache_message_signal.search_result_rank),
+                        search_seen_count = cache_message_signal.search_seen_count + excluded.search_seen_count,
+                        last_search_seen_at = COALESCE(excluded.last_search_seen_at, cache_message_signal.last_search_seen_at),
+                        thread_activity_score = COALESCE(excluded.thread_activity_score, cache_message_signal.thread_activity_score),
+                        sender_affinity_score = COALESCE(excluded.sender_affinity_score, cache_message_signal.sender_affinity_score),
+                        local_behavior_score = COALESCE(excluded.local_behavior_score, cache_message_signal.local_behavior_score),
+                        direct_user_boost = COALESCE(excluded.direct_user_boost, cache_message_signal.direct_user_boost),
+                        pinned = COALESCE(excluded.pinned, cache_message_signal.pinned),
+                        dirty_at = excluded.dirty_at",
+                    params![
+                        update.account_id.as_str(),
+                        update.message_id.as_str(),
+                        search_total_messages,
+                        search_result_count,
+                        search_result_rank,
+                        if update.search.is_some() { 1_i64 } else { 0_i64 },
+                        update.search.as_ref().map(|_| now.as_str()),
+                        update.thread_activity,
+                        update.sender_affinity,
+                        update.local_behavior,
+                        update.direct_user_boost,
+                        pinned,
+                        now.as_str(),
+                    ],
+                )
+                .map_err(sql_to_store_error)?;
+                let cache_object_count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*)
+                         FROM cache_object
+                         WHERE account_id = ?1 AND message_id = ?2",
+                        params![update.account_id.as_str(), update.message_id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(sql_to_store_error)?;
+                if cache_object_count == 0 {
+                    continue;
+                }
+                tx.execute(
+                    "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(account_id, message_id) DO UPDATE SET
+                            reason = excluded.reason,
+                            queued_at = excluded.queued_at",
+                    params![
+                        update.account_id.as_str(),
+                        update.message_id.as_str(),
+                        update.reason.as_str(),
+                        now.as_str(),
+                    ],
+                )
+                .map_err(sql_to_store_error)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn list_cache_rescore_candidates(
+        &self,
+        account_id: &AccountId,
+        limit: usize,
+    ) -> Result<Vec<CacheRescoreCandidate>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "WITH queued AS (
+                    SELECT account_id, message_id, reason, queued_at
+                    FROM cache_rescore_queue
+                    WHERE account_id = ?1
+                    ORDER BY queued_at ASC
+                    LIMIT ?2
+                 )
+                 SELECT
+                    co.account_id,
+                    co.message_id,
+                    co.layer,
+                    co.object_id,
+                    co.fetch_unit,
+                    co.state,
+                    co.value_bytes,
+                    co.fetch_bytes,
+                    co.priority,
+                    m.received_at,
+                    EXISTS (
+                        SELECT 1
+                        FROM message_mailbox mm
+                        JOIN mailbox mb
+                          ON mb.account_id = mm.account_id
+                         AND mb.id = mm.mailbox_id
+                        WHERE mm.account_id = m.account_id
+                          AND mm.message_id = m.id
+                          AND mb.role = 'inbox'
+                    ) AS in_inbox,
+                    m.is_read,
+                    m.is_flagged,
+                    COALESCE(cms.thread_activity_score, 0),
+                    COALESCE(cms.sender_affinity_score, 0),
+                    COALESCE(cms.local_behavior_score, 0),
+                    cms.search_total_messages,
+                    cms.search_result_count,
+                    cms.search_result_rank,
+                    COALESCE(cms.direct_user_boost, 0),
+                    COALESCE(cms.pinned, 0),
+                    queued.reason
+                 FROM queued
+                 JOIN cache_object co
+                   ON co.account_id = queued.account_id
+                  AND co.message_id = queued.message_id
+                 JOIN message m
+                   ON m.account_id = co.account_id
+                  AND m.id = co.message_id
+                 LEFT JOIN cache_message_signal cms
+                   ON cms.account_id = co.account_id
+                  AND cms.message_id = co.message_id
+                 ORDER BY queued.queued_at ASC, co.priority DESC",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = statement
+            .query_map(params![account_id.as_str(), limit as i64], |row| {
+                let object_id: String = row.get(3)?;
+                let search_total_messages = optional_i64_to_u64(row.get(16)?, 16)?;
+                let search_result_count = optional_i64_to_u64(row.get(17)?, 17)?;
+                let search_result_rank = optional_i64_to_u64(row.get(18)?, 18)?;
+                let search = match (
+                    search_total_messages,
+                    search_result_count,
+                    search_result_rank,
+                ) {
+                    (Some(total_messages), Some(result_count), Some(result_rank)) => {
+                        Some(CacheSearchSignals {
+                            total_messages,
+                            result_count,
+                            result_rank,
+                        })
+                    }
+                    _ => None,
+                };
+                Ok(CacheRescoreCandidate {
+                    account_id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    layer: parse_cache_layer(row.get(2)?)?,
+                    object_id: if object_id.is_empty() {
+                        None
+                    } else {
+                        Some(object_id)
+                    },
+                    fetch_unit: parse_cache_fetch_unit(row.get(4)?)?,
+                    state: parse_cache_object_state(row.get(5)?)?,
+                    value_bytes: i64_to_u64(row.get(6)?).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            6,
+                            rusqlite::types::Type::Integer,
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                err.to_string(),
+                            )),
+                        )
+                    })?,
+                    fetch_bytes: i64_to_u64(row.get(7)?).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Integer,
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                err.to_string(),
+                            )),
+                        )
+                    })?,
+                    priority: row.get(8)?,
+                    received_at: row.get(9)?,
+                    in_inbox: row.get::<_, i64>(10)? != 0,
+                    unread: row.get::<_, i64>(11)? == 0,
+                    flagged: row.get::<_, i64>(12)? != 0,
+                    thread_activity: row.get(13)?,
+                    sender_affinity: row.get(14)?,
+                    local_behavior: row.get(15)?,
+                    search,
+                    direct_user_boost: row.get(19)?,
+                    pinned: row.get::<_, i64>(20)? != 0,
+                    signal_reason: row.get(21)?,
+                })
+            })
+            .map_err(sql_to_store_error)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(sql_to_store_error)
+    }
+
+    fn update_cache_priorities(&self, updates: &[CachePriorityUpdate]) -> Result<(), StoreError> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let now = now_iso8601()?;
+        self.write_transaction(|tx| {
+            for update in updates {
+                tx.execute(
+                    "UPDATE cache_object
+                     SET priority = ?5,
+                         reason = ?6,
+                         last_scored_at = ?7,
+                         state = CASE
+                            WHEN state IN ('cached', 'fetching') THEN state
+                            ELSE 'wanted'
+                         END,
+                         error_code = CASE
+                            WHEN state = 'cached' THEN error_code
+                            ELSE NULL
+                         END
+                     WHERE account_id = ?1
+                       AND message_id = ?2
+                       AND layer = ?3
+                       AND object_id = ?4",
+                    params![
+                        update.account_id.as_str(),
+                        update.message_id.as_str(),
+                        update.layer.as_str(),
+                        cache_object_id_key(update.object_id.as_deref()),
+                        update.priority,
+                        update.reason.as_str(),
+                        now.as_str(),
+                    ],
+                )
+                .map_err(sql_to_store_error)?;
+                tx.execute(
+                    "DELETE FROM cache_rescore_queue
+                     WHERE account_id = ?1 AND message_id = ?2",
+                    params![update.account_id.as_str(), update.message_id.as_str()],
                 )
                 .map_err(sql_to_store_error)?;
             }
@@ -217,6 +508,35 @@ mod tests {
         }
     }
 
+    fn insert_message_metadata(
+        store: &DatabaseStore,
+        message_id: &str,
+        received_at: &str,
+    ) -> Result<(), StoreError> {
+        store.write_transaction(|tx| {
+            tx.execute(
+                "INSERT OR IGNORE INTO mailbox (account_id, id, name, role)
+                 VALUES ('primary', 'inbox', 'Inbox', 'inbox')",
+                [],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "INSERT INTO message (
+                    account_id, id, thread_id, received_at, size, is_read, is_flagged
+                 ) VALUES ('primary', ?1, 'thread-1', ?2, 4096, 0, 1)",
+                params![message_id, received_at],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "INSERT INTO message_mailbox (account_id, message_id, mailbox_id)
+                 VALUES ('primary', ?1, 'inbox')",
+                params![message_id],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
     #[test]
     fn cache_ledger_returns_wanted_candidates_by_priority() -> Result<(), StoreError> {
         let root = temp_root();
@@ -263,6 +583,120 @@ mod tests {
                 .len(),
             1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn cache_signal_updates_queue_rescore_candidates_with_search_signals() -> Result<(), StoreError>
+    {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        insert_message_metadata(&store, "message-1", "2026-04-27T00:00:00Z")?;
+        store.upsert_cache_candidates(&[candidate("message-1", 0.5, 4096)])?;
+
+        store.record_cache_signal_updates(&[CacheSignalUpdate {
+            account_id: "primary".to_string(),
+            message_id: "message-1".to_string(),
+            reason: "search-visible".to_string(),
+            search: Some(CacheSearchSignals {
+                total_messages: 100,
+                result_count: 3,
+                result_rank: 1,
+            }),
+            thread_activity: Some(2.0),
+            sender_affinity: Some(1.0),
+            local_behavior: None,
+            direct_user_boost: Some(0.4),
+            pinned: Some(true),
+        }])?;
+
+        let candidates = store.list_cache_rescore_candidates(&account, 10)?;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].message_id, "message-1");
+        assert_eq!(candidates[0].search.as_ref().unwrap().result_rank, 1);
+        assert!(candidates[0].in_inbox);
+        assert!(candidates[0].unread);
+        assert!(candidates[0].flagged);
+        assert_eq!(candidates[0].thread_activity, 2.0);
+        assert_eq!(candidates[0].sender_affinity, 1.0);
+        assert_eq!(candidates[0].direct_user_boost, 0.4);
+        assert!(candidates[0].pinned);
+        assert_eq!(candidates[0].signal_reason, "search-visible");
+        Ok(())
+    }
+
+    #[test]
+    fn priority_updates_requeue_failed_candidates_as_wanted() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        store.upsert_cache_candidates(&[candidate("message-1", 0.5, 4096)])?;
+        store.mark_cache_object_state(
+            &account,
+            &MessageId::from("message-1"),
+            CacheLayer::Body,
+            None,
+            CacheObjectState::Failed,
+            Some("network_error"),
+        )?;
+
+        store.update_cache_priorities(&[CachePriorityUpdate {
+            account_id: "primary".to_string(),
+            message_id: "message-1".to_string(),
+            layer: CacheLayer::Body,
+            object_id: None,
+            priority: 2.0,
+            reason: "search-visible".to_string(),
+        }])?;
+
+        let candidates = store.list_cache_fetch_candidates(&account, CacheLayer::Body, 10)?;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].message_id, "message-1");
+        assert_eq!(candidates[0].priority, 2.0);
+        Ok(())
+    }
+
+    #[test]
+    fn signal_updates_without_cache_objects_do_not_block_rescore_queue() -> Result<(), StoreError> {
+        let root = temp_root();
+        let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+        let account = AccountId::from("primary");
+        insert_message_metadata(&store, "already-cached", "2026-04-27T00:00:00Z")?;
+        insert_message_metadata(&store, "wanted", "2026-04-27T00:00:00Z")?;
+        store.upsert_cache_candidates(&[candidate("wanted", 0.5, 4096)])?;
+
+        store.record_cache_signal_updates(&[
+            CacheSignalUpdate {
+                account_id: "primary".to_string(),
+                message_id: "already-cached".to_string(),
+                reason: "search-visible".to_string(),
+                search: None,
+                thread_activity: None,
+                sender_affinity: None,
+                local_behavior: None,
+                direct_user_boost: Some(0.8),
+                pinned: None,
+            },
+            CacheSignalUpdate {
+                account_id: "primary".to_string(),
+                message_id: "wanted".to_string(),
+                reason: "search-visible".to_string(),
+                search: None,
+                thread_activity: None,
+                sender_affinity: None,
+                local_behavior: None,
+                direct_user_boost: Some(0.8),
+                pinned: None,
+            },
+        ])?;
+
+        let candidates = store.list_cache_rescore_candidates(&account, 10)?;
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].message_id, "wanted");
         Ok(())
     }
 }

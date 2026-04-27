@@ -29,6 +29,9 @@ const AUTOMATION_BACKFILL_BATCH_SIZE: usize = 10;
 const AUTOMATION_BACKFILL_INITIAL_DELAY: Duration = Duration::from_secs(10);
 const AUTOMATION_BACKFILL_INTERVAL: Duration = Duration::from_secs(15);
 const CACHE_WORKER_BATCH_SIZE: usize = 3;
+const CACHE_RESCORE_BATCH_SIZE: usize = 100;
+const CACHE_BACKGROUND_PRESSURE: f64 = 0.0;
+const CACHE_INTERACTIVE_PRESSURE: f64 = 1.0;
 const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
 const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -67,6 +70,9 @@ enum RuntimeCommand {
     },
     TriggerOnly {
         trigger: SyncTrigger,
+    },
+    CacheMaintenance {
+        interactive_pressure: f64,
     },
 }
 
@@ -206,6 +212,25 @@ impl AccountSupervisor {
         Ok(())
     }
 
+    /// Request cache re-score/fetch work without waiting for completion.
+    pub async fn trigger_cache_maintenance(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<(), ServiceError> {
+        let runtimes = self.runtimes.read().await;
+        let runtime = runtimes
+            .get(account_id.as_str())
+            .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
+        runtime
+            .command_tx
+            .send(RuntimeCommand::CacheMaintenance {
+                interactive_pressure: CACHE_INTERACTIVE_PRESSURE,
+            })
+            .await
+            .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
+        Ok(())
+    }
+
     /// Get the current runtime status snapshot for an account.
     pub async fn runtime_overview(&self, account_id: &AccountId) -> AccountRuntimeOverview {
         self.shared.runtime_overview(account_id).await
@@ -300,10 +325,11 @@ async fn run_account_runtime(
                 ).await;
             }
             _ = cache_interval.tick() => {
-                process_body_cache_batch(
+                process_cache_maintenance_batch(
                     &shared,
                     &account_id,
                     connection.as_ref().map(|connection| connection.gateway.clone()),
+                    CACHE_BACKGROUND_PRESSURE,
                 ).await;
             }
             Some(command) = command_rx.recv() => {
@@ -319,6 +345,14 @@ async fn run_account_runtime(
                             &shared, &account, trigger, &mut connection, None,
                         ).await;
                         interval = sync_poll_interval(shared.poll_interval);
+                    }
+                    RuntimeCommand::CacheMaintenance { interactive_pressure } => {
+                        process_cache_maintenance_batch(
+                            &shared,
+                            &account_id,
+                            connection.as_ref().map(|connection| connection.gateway.clone()),
+                            interactive_pressure,
+                        ).await;
                     }
                 }
             }
@@ -356,11 +390,36 @@ async fn run_account_runtime(
     }
 }
 
-async fn process_body_cache_batch(
+async fn process_cache_maintenance_batch(
     shared: &Arc<SupervisorShared>,
     account_id: &AccountId,
     gateway: Option<SharedGateway>,
+    interactive_pressure: f64,
 ) {
+    match shared
+        .service
+        .process_cache_rescore_batch(account_id, CACHE_RESCORE_BATCH_SIZE)
+    {
+        Ok(outcome) => {
+            if outcome.updated > 0 {
+                debug!(
+                    account_id = %account_id,
+                    scanned = outcome.scanned,
+                    updated = outcome.updated,
+                    skipped = outcome.skipped,
+                    "cache rescore batch completed"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                account_id = %account_id,
+                error = %error,
+                "cache rescore batch failed"
+            );
+        }
+    }
+
     let Some(gateway) = gateway else {
         debug!(
             account_id = %account_id,
@@ -371,7 +430,12 @@ async fn process_body_cache_batch(
 
     match shared
         .service
-        .process_body_cache_batch(account_id, gateway.as_ref(), CACHE_WORKER_BATCH_SIZE)
+        .process_body_cache_batch(
+            account_id,
+            gateway.as_ref(),
+            CACHE_WORKER_BATCH_SIZE,
+            interactive_pressure,
+        )
         .await
     {
         Ok(outcome) => {

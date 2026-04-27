@@ -4,8 +4,9 @@ use async_trait::async_trait;
 
 use crate::{
     AccountId, AutomationBackfillJob, BlobId, CacheCandidate, CacheFetchCandidate, CacheLayer,
-    CacheObjectState, CachedSenderAddress, CommandResult, ConversationCursor, ConversationId,
-    ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
+    CacheObjectState, CachePriorityUpdate, CacheRescoreCandidate, CacheSignalUpdate,
+    CachedSenderAddress, CommandResult, ConversationCursor, ConversationId, ConversationPage,
+    ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
     ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
     PushTransport, Recipient, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
@@ -405,6 +406,25 @@ pub trait CacheStore: Send + Sync {
     ///
     /// @spec docs/L1-sync#local-cache-planning
     fn upsert_cache_candidates(&self, candidates: &[CacheCandidate]) -> Result<(), StoreError>;
+
+    /// Record local cache utility signals and enqueue affected messages for re-scoring.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn record_cache_signal_updates(&self, updates: &[CacheSignalUpdate]) -> Result<(), StoreError>;
+
+    /// Return dirty cache objects with metadata needed for priority re-scoring.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn list_cache_rescore_candidates(
+        &self,
+        account_id: &AccountId,
+        limit: usize,
+    ) -> Result<Vec<CacheRescoreCandidate>, StoreError>;
+
+    /// Persist re-scored priorities and clear the corresponding dirty queue rows.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn update_cache_priorities(&self, updates: &[CachePriorityUpdate]) -> Result<(), StoreError>;
 
     /// Return highest-priority fetch candidates for an account/layer.
     ///

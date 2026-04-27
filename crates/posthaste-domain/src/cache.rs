@@ -169,7 +169,7 @@ impl CachePolicy {
 /// Search context that temporarily raises utility for visible, tight results.
 ///
 /// @spec docs/L1-sync#local-cache-planning
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CacheSearchSignals {
     pub total_messages: u64,
@@ -273,6 +273,65 @@ pub struct CacheFetchCandidate {
     pub fetch_unit: CacheFetchUnit,
     pub fetch_bytes: u64,
     pub priority: f64,
+}
+
+/// Message-level cache signal update from local user/app activity.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheSignalUpdate {
+    pub account_id: String,
+    pub message_id: String,
+    pub reason: String,
+    pub search: Option<CacheSearchSignals>,
+    pub thread_activity: Option<f64>,
+    pub sender_affinity: Option<f64>,
+    pub local_behavior: Option<f64>,
+    pub direct_user_boost: Option<f64>,
+    pub pinned: Option<bool>,
+}
+
+/// Cache object plus current metadata/signals used by the re-score worker.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheRescoreCandidate {
+    pub account_id: String,
+    pub message_id: String,
+    pub layer: CacheLayer,
+    pub object_id: Option<String>,
+    pub fetch_unit: CacheFetchUnit,
+    pub state: CacheObjectState,
+    pub value_bytes: u64,
+    pub fetch_bytes: u64,
+    pub priority: f64,
+    pub received_at: String,
+    pub in_inbox: bool,
+    pub unread: bool,
+    pub flagged: bool,
+    pub thread_activity: f64,
+    pub sender_affinity: f64,
+    pub local_behavior: f64,
+    pub search: Option<CacheSearchSignals>,
+    pub direct_user_boost: f64,
+    pub pinned: bool,
+    pub signal_reason: String,
+}
+
+/// Priority update emitted by the re-score worker.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachePriorityUpdate {
+    pub account_id: String,
+    pub message_id: String,
+    pub layer: CacheLayer,
+    pub object_id: Option<String>,
+    pub priority: f64,
+    pub reason: String,
 }
 
 /// Result of checking a candidate against the current cache budget.

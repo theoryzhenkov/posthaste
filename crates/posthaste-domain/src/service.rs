@@ -9,7 +9,8 @@ use crate::{
     AddToMailboxCommand, AppSettings, AutomationAction, AutomationBackfillBatchOutcome,
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, AutomationRule,
     AutomationTrigger, CacheAdmission, CacheCandidate, CacheCandidateSignals, CacheFetchUnit,
-    CacheLayer, CacheMessageSignals, CacheObjectState, CachePolicy, CacheStore,
+    CacheLayer, CacheMessageSignals, CacheObjectState, CachePolicy, CachePriorityUpdate,
+    CacheRescoreBatchOutcome, CacheRescoreCandidate, CacheSignalUpdate, CacheStore,
     CacheWorkerBatchOutcome, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
     ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
     ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
@@ -190,6 +191,33 @@ fn body_fetch_bytes(account: &AccountSettings, message: &MessageRecord) -> u64 {
         CacheFetchUnit::RawMessage => nonnegative_message_size(message.size).max(4 * 1024),
         CacheFetchUnit::BodyOnly => estimated_body_bytes(message),
         CacheFetchUnit::AttachmentBlob => unreachable!("body cache never fetches attachment blobs"),
+    }
+}
+
+fn visible_rank_direct_boost(rank: u64) -> f64 {
+    0.8 / ((rank + 1) as f64).sqrt()
+}
+
+fn rescore_candidate_signals(candidate: &CacheRescoreCandidate) -> CacheCandidateSignals {
+    CacheCandidateSignals {
+        message: CacheMessageSignals {
+            age_days: message_age_days(&candidate.received_at),
+            in_inbox: candidate.in_inbox,
+            unread: candidate.unread,
+            flagged: candidate.flagged,
+            thread_activity: candidate.thread_activity,
+            sender_affinity: candidate.sender_affinity,
+            local_behavior: candidate.local_behavior,
+            search: candidate.search.clone(),
+        },
+        layer: candidate.layer,
+        fetch_unit: candidate.fetch_unit,
+        value_bytes: candidate.value_bytes,
+        fetch_bytes: candidate.fetch_bytes,
+        inline_attachment: false,
+        opened_attachment: false,
+        direct_user_boost: candidate.direct_user_boost,
+        pinned: candidate.pinned,
     }
 }
 
@@ -511,6 +539,62 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Record visible search results as cache utility signals.
+    ///
+    /// This only updates local signal state and the re-score queue; the account
+    /// runtime performs remote fetches asynchronously.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    pub fn record_cache_search_visibility(
+        &self,
+        page: &MessagePage,
+        total_messages: u64,
+        result_count: u64,
+    ) -> Result<Vec<AccountId>, ServiceError> {
+        if page.items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let total_messages = total_messages
+            .max(result_count)
+            .max(page.items.len() as u64);
+        let result_count = result_count.max(page.items.len() as u64);
+        let updates = page
+            .items
+            .iter()
+            .enumerate()
+            .map(|(rank, message)| CacheSignalUpdate {
+                account_id: message.source_id.to_string(),
+                message_id: message.id.to_string(),
+                reason: "search-visible".to_string(),
+                search: Some(crate::CacheSearchSignals {
+                    total_messages,
+                    result_count,
+                    result_rank: rank as u64,
+                }),
+                thread_activity: None,
+                sender_affinity: None,
+                local_behavior: None,
+                direct_user_boost: Some(visible_rank_direct_boost(rank as u64)),
+                pinned: None,
+            })
+            .collect::<Vec<_>>();
+        self.cache_store.record_cache_signal_updates(&updates)?;
+        let account_ids = updates
+            .iter()
+            .map(|update| AccountId::from(update.account_id.as_str()))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        debug!(
+            message_count = updates.len(),
+            account_count = account_ids.len(),
+            total_messages,
+            result_count,
+            "cache search visibility signals recorded"
+        );
+        Ok(account_ids)
+    }
+
     /// Paginated conversations matching a smart mailbox's rule.
     ///
     /// @spec docs/L1-api#smart-mailboxes
@@ -767,6 +851,71 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Re-score dirty cache candidates after local utility signals change.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    pub fn process_cache_rescore_batch(
+        &self,
+        account_id: &AccountId,
+        batch_size: usize,
+    ) -> Result<CacheRescoreBatchOutcome, ServiceError> {
+        let mut outcome = CacheRescoreBatchOutcome::default();
+        if batch_size == 0 {
+            return Ok(outcome);
+        }
+
+        let candidates = self
+            .cache_store
+            .list_cache_rescore_candidates(account_id, batch_size)?;
+        outcome.scanned = candidates.len();
+        if candidates.is_empty() {
+            debug!(
+                account_id = %account_id,
+                "cache rescore worker found no dirty candidates"
+            );
+            return Ok(outcome);
+        }
+
+        let updates = candidates
+            .iter()
+            .map(|candidate| {
+                let signals = rescore_candidate_signals(candidate);
+                let score = score_cache_candidate(&signals);
+                trace!(
+                    account_id = %account_id,
+                    message_id = candidate.message_id.as_str(),
+                    layer = candidate.layer.as_str(),
+                    fetch_unit = candidate.fetch_unit.as_str(),
+                    old_priority = candidate.priority,
+                    new_priority = score.priority,
+                    utility = score.utility,
+                    size_cost = score.size_cost,
+                    signal_reason = candidate.signal_reason.as_str(),
+                    direct_user_boost = candidate.direct_user_boost,
+                    search_result_rank = candidate.search.as_ref().map(|search| search.result_rank),
+                    "cache candidate re-scored"
+                );
+                CachePriorityUpdate {
+                    account_id: candidate.account_id.clone(),
+                    message_id: candidate.message_id.clone(),
+                    layer: candidate.layer,
+                    object_id: candidate.object_id.clone(),
+                    priority: score.priority,
+                    reason: candidate.signal_reason.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        self.cache_store.update_cache_priorities(&updates)?;
+        outcome.updated = updates.len();
+        debug!(
+            account_id = %account_id,
+            scanned = outcome.scanned,
+            updated = outcome.updated,
+            "cache rescore worker batch completed"
+        );
+        Ok(outcome)
+    }
+
     /// Fetch one bounded batch of wanted message-body cache candidates.
     ///
     /// The first worker slice has no eviction path, so it admits only bodies
@@ -778,6 +927,7 @@ impl MailService {
         account_id: &AccountId,
         gateway: &dyn MailGateway,
         batch_size: usize,
+        interactive_pressure: f64,
     ) -> Result<CacheWorkerBatchOutcome, ServiceError> {
         let mut outcome = CacheWorkerBatchOutcome::default();
         if batch_size == 0 {
@@ -796,7 +946,10 @@ impl MailService {
 
         let mut used_bytes = self.cache_store.cache_used_bytes()?;
         let scan_limit = batch_size.saturating_mul(4).max(batch_size);
-        let initial_budget = settings.cache_policy.clone().budget(used_bytes, 0.0);
+        let initial_budget = settings
+            .cache_policy
+            .clone()
+            .budget(used_bytes, interactive_pressure);
         let candidates = self.cache_store.list_cache_fetch_candidates(
             account_id,
             CacheLayer::Body,
@@ -827,7 +980,10 @@ impl MailService {
                 break;
             }
             outcome.scanned += 1;
-            let budget = settings.cache_policy.clone().budget(used_bytes, 0.0);
+            let budget = settings
+                .cache_policy
+                .clone()
+                .budget(used_bytes, interactive_pressure);
             let admission =
                 decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget);
             debug!(
@@ -1718,16 +1874,16 @@ mod tests {
 
     use super::*;
     use crate::{
-        AutomationBackfillStore, CacheFetchCandidate, CachedSenderAddress, ConfigError,
-        ConfigSnapshot, ConversationReadStore, DomainEvent, EventFilter, EventStore, FetchedBody,
-        GatewayError, ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
-        ImapSyncStateStore, MailboxReadStore, MessageCommandStore, MessageDetail,
-        MessageDetailStore, MessageListStore, MessageMailboxStore, MutationOutcome, PushTransport,
-        Recipient, SenderAddressCacheStore, SmartMailboxCondition, SmartMailboxField,
-        SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind, SmartMailboxOperator,
-        SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue,
-        SourceDataStore, SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncStateStore,
-        SyncWriteStore,
+        AutomationBackfillStore, CacheFetchCandidate, CachePriorityUpdate, CacheRescoreCandidate,
+        CacheSignalUpdate, CachedSenderAddress, ConfigError, ConfigSnapshot, ConversationReadStore,
+        DomainEvent, EventFilter, EventStore, FetchedBody, GatewayError, ImapMailboxSyncState,
+        ImapMessageLocation, ImapMessageLocationStore, ImapSyncStateStore, MailboxReadStore,
+        MessageCommandStore, MessageDetail, MessageDetailStore, MessageListStore,
+        MessageMailboxStore, MutationOutcome, PushTransport, Recipient, SenderAddressCacheStore,
+        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+        SmartMailboxStore, SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError,
+        SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
     };
 
     struct TestConfig {
@@ -1839,6 +1995,9 @@ mod tests {
         source_data_deletes: Mutex<Vec<String>>,
         automation_backfill_jobs: Mutex<Vec<AutomationBackfillJob>>,
         cache_candidates: Mutex<Vec<CacheCandidate>>,
+        cache_signal_updates: Mutex<Vec<CacheSignalUpdate>>,
+        cache_rescore_candidates: Mutex<Vec<CacheRescoreCandidate>>,
+        cache_priority_updates: Mutex<Vec<CachePriorityUpdate>>,
         cache_fetch_candidates: Mutex<Vec<CacheFetchCandidate>>,
         cache_state_changes: Mutex<Vec<(MessageId, CacheObjectState, Option<String>)>>,
         cache_used_bytes: Mutex<u64>,
@@ -1859,6 +2018,9 @@ mod tests {
                 source_data_deletes: Mutex::new(Vec::new()),
                 automation_backfill_jobs: Mutex::new(Vec::new()),
                 cache_candidates: Mutex::new(Vec::new()),
+                cache_signal_updates: Mutex::new(Vec::new()),
+                cache_rescore_candidates: Mutex::new(Vec::new()),
+                cache_priority_updates: Mutex::new(Vec::new()),
                 cache_fetch_candidates: Mutex::new(Vec::new()),
                 cache_state_changes: Mutex::new(Vec::new()),
                 cache_used_bytes: Mutex::new(0),
@@ -2147,6 +2309,44 @@ mod tests {
                 .lock()
                 .expect("cache candidates lock poisoned")
                 .extend(candidates.iter().cloned());
+            Ok(())
+        }
+
+        fn record_cache_signal_updates(
+            &self,
+            updates: &[crate::CacheSignalUpdate],
+        ) -> Result<(), StoreError> {
+            self.cache_signal_updates
+                .lock()
+                .expect("cache signal updates lock poisoned")
+                .extend(updates.iter().cloned());
+            Ok(())
+        }
+
+        fn list_cache_rescore_candidates(
+            &self,
+            account_id: &AccountId,
+            limit: usize,
+        ) -> Result<Vec<crate::CacheRescoreCandidate>, StoreError> {
+            Ok(self
+                .cache_rescore_candidates
+                .lock()
+                .expect("cache rescore candidates lock poisoned")
+                .iter()
+                .filter(|candidate| candidate.account_id == account_id.as_str())
+                .take(limit)
+                .cloned()
+                .collect())
+        }
+
+        fn update_cache_priorities(
+            &self,
+            updates: &[crate::CachePriorityUpdate],
+        ) -> Result<(), StoreError> {
+            self.cache_priority_updates
+                .lock()
+                .expect("cache priority updates lock poisoned")
+                .extend(updates.iter().cloned());
             Ok(())
         }
 
@@ -2511,6 +2711,35 @@ mod tests {
         }
     }
 
+    fn sample_cache_rescore_candidate(message_id: &str) -> CacheRescoreCandidate {
+        CacheRescoreCandidate {
+            account_id: "primary".to_string(),
+            message_id: message_id.to_string(),
+            layer: CacheLayer::Body,
+            object_id: None,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            state: CacheObjectState::Wanted,
+            value_bytes: 32 * 1024,
+            fetch_bytes: 32 * 1024,
+            priority: 1.0,
+            received_at: crate::RFC3339_EPOCH.to_string(),
+            in_inbox: true,
+            unread: true,
+            flagged: false,
+            thread_activity: 0.0,
+            sender_affinity: 0.0,
+            local_behavior: 0.0,
+            search: Some(crate::CacheSearchSignals {
+                total_messages: 1_000,
+                result_count: 5,
+                result_rank: 0,
+            }),
+            direct_user_boost: 0.8,
+            pinned: false,
+            signal_reason: "search-visible".to_string(),
+        }
+    }
+
     fn sample_fetched_body() -> FetchedBody {
         FetchedBody {
             body_html: None,
@@ -2831,6 +3060,63 @@ mod tests {
         assert_eq!(candidates[0].fetch_bytes, 12 * 1024 * 1024);
     }
 
+    #[test]
+    fn search_visibility_records_ranked_cache_signal_updates() {
+        let store = Arc::new(TestStore::default());
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+        let page = MessagePage {
+            items: vec![
+                sample_message_summary("message-1", Vec::new()),
+                sample_message_summary("message-2", Vec::new()),
+            ],
+            next_cursor: None,
+        };
+
+        let account_ids = service
+            .record_cache_search_visibility(&page, 100, 2)
+            .expect("visibility recording should succeed");
+
+        assert_eq!(account_ids, vec![AccountId::from("primary")]);
+        let updates = store
+            .cache_signal_updates
+            .lock()
+            .expect("cache signal updates lock poisoned");
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].reason, "search-visible");
+        assert_eq!(updates[0].search.as_ref().unwrap().total_messages, 100);
+        assert_eq!(updates[0].search.as_ref().unwrap().result_count, 2);
+        assert_eq!(updates[0].search.as_ref().unwrap().result_rank, 0);
+        assert_eq!(updates[1].search.as_ref().unwrap().result_rank, 1);
+        assert!(updates[0].direct_user_boost.unwrap() > updates[1].direct_user_boost.unwrap());
+    }
+
+    #[test]
+    fn cache_rescore_batch_applies_search_signal_priority() {
+        let account_id = AccountId::from("primary");
+        let store = Arc::new(TestStore {
+            cache_rescore_candidates: Mutex::new(vec![sample_cache_rescore_candidate("message-1")]),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig::default());
+        let service = MailService::new(store.clone(), config);
+
+        let outcome = service
+            .process_cache_rescore_batch(&account_id, 10)
+            .expect("rescore should succeed");
+
+        assert_eq!(outcome.scanned, 1);
+        assert_eq!(outcome.updated, 1);
+        let updates = store
+            .cache_priority_updates
+            .lock()
+            .expect("cache priority updates lock poisoned");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].message_id, "message-1");
+        assert_eq!(updates[0].reason, "search-visible");
+        assert!(updates[0].priority > 1.0);
+    }
+
     #[tokio::test]
     async fn body_cache_worker_fetches_admitted_candidates_and_marks_cached() {
         let account_id = AccountId::from("primary");
@@ -2846,7 +3132,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10)
+            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
             .await
             .expect("cache worker should fetch an admitted body");
 
@@ -2905,7 +3191,7 @@ mod tests {
         )));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10)
+            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
             .await
             .expect("cache worker should record fetch failures");
 
@@ -2954,7 +3240,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let error = service
-            .process_body_cache_batch(&account_id, &gateway, 10)
+            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
             .await
             .expect_err("cache worker should surface local store failures");
 
@@ -3000,7 +3286,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 10)
+            .process_body_cache_batch(&account_id, &gateway, 10, 0.0)
             .await
             .expect("cache worker should skip over-budget candidates");
 
@@ -3048,7 +3334,7 @@ mod tests {
         let gateway = MutationGateway::with_fetch_body_result(Ok(sample_fetched_body()));
 
         let outcome = service
-            .process_body_cache_batch(&account_id, &gateway, 1)
+            .process_body_cache_batch(&account_id, &gateway, 1, 0.0)
             .await
             .expect("cache worker should scan past oversized candidates");
 
