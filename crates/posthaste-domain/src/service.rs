@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::json;
+use tracing::{debug, trace};
 
 use crate::{
     decide_cache_admission, score_cache_candidate, AccountDriver, AccountId, AccountSettings,
@@ -785,24 +786,64 @@ impl MailService {
 
         let settings = self.config.get_app_settings()?;
         if !settings.cache_policy.cache_bodies {
+            debug!(
+                account_id = %account_id,
+                layer = CacheLayer::Body.as_str(),
+                "cache worker skipped because body caching is disabled"
+            );
             return Ok(outcome);
         }
 
         let mut used_bytes = self.cache_store.cache_used_bytes()?;
         let scan_limit = batch_size.saturating_mul(4).max(batch_size);
+        let initial_budget = settings.cache_policy.clone().budget(used_bytes, 0.0);
         let candidates = self.cache_store.list_cache_fetch_candidates(
             account_id,
             CacheLayer::Body,
             scan_limit,
         )?;
+        debug!(
+            account_id = %account_id,
+            layer = CacheLayer::Body.as_str(),
+            batch_size,
+            scan_limit,
+            candidate_count = candidates.len(),
+            used_bytes,
+            soft_cap_bytes = initial_budget.soft_cap_bytes,
+            effective_target_bytes = initial_budget.effective_target_bytes(),
+            hard_cap_bytes = initial_budget.hard_cap_bytes,
+            interactive_pressure = initial_budget.interactive_pressure,
+            "cache worker body batch planned"
+        );
+        if candidates.is_empty() {
+            debug!(
+                account_id = %account_id,
+                layer = CacheLayer::Body.as_str(),
+                "cache worker found no wanted body candidates"
+            );
+        }
         for candidate in candidates {
             if outcome.attempted >= batch_size {
                 break;
             }
+            outcome.scanned += 1;
             let budget = settings.cache_policy.clone().budget(used_bytes, 0.0);
-            if decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget)
-                != CacheAdmission::AdmitWithinTarget
-            {
+            let admission =
+                decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget);
+            debug!(
+                account_id = %account_id,
+                message_id = candidate.message_id.as_str(),
+                layer = candidate.layer.as_str(),
+                fetch_unit = candidate.fetch_unit.as_str(),
+                fetch_bytes = candidate.fetch_bytes,
+                priority = candidate.priority,
+                admission = ?admission,
+                used_bytes = budget.used_bytes,
+                effective_target_bytes = budget.effective_target_bytes(),
+                hard_cap_bytes = budget.hard_cap_bytes,
+                "cache candidate admission evaluated"
+            );
+            if admission != CacheAdmission::AdmitWithinTarget {
                 outcome.skipped += 1;
                 continue;
             }
@@ -817,12 +858,29 @@ impl MailService {
                 None,
             )?;
             outcome.attempted += 1;
+            debug!(
+                account_id = %account_id,
+                message_id = %message_id,
+                layer = candidate.layer.as_str(),
+                fetch_unit = candidate.fetch_unit.as_str(),
+                fetch_bytes = candidate.fetch_bytes,
+                priority = candidate.priority,
+                "cache candidate fetch started"
+            );
 
             let fetched = match gateway.fetch_message_body(account_id, &message_id).await {
                 Ok(fetched) => fetched,
                 Err(error) => {
                     let service_error = ServiceError::from(error);
                     let error_code = service_error.code().to_string();
+                    debug!(
+                        account_id = %account_id,
+                        message_id = %message_id,
+                        layer = candidate.layer.as_str(),
+                        fetch_unit = candidate.fetch_unit.as_str(),
+                        error_code = error_code.as_str(),
+                        "cache candidate fetch failed"
+                    );
                     self.cache_store.mark_cache_object_state(
                         account_id,
                         &message_id,
@@ -850,6 +908,15 @@ impl MailService {
             used_bytes = used_bytes.saturating_add(candidate.fetch_bytes);
             outcome.cached += 1;
             outcome.events.extend(result.events);
+            debug!(
+                account_id = %account_id,
+                message_id = %message_id,
+                layer = candidate.layer.as_str(),
+                fetch_unit = candidate.fetch_unit.as_str(),
+                fetch_bytes = candidate.fetch_bytes,
+                used_bytes,
+                "cache candidate stored"
+            );
         }
 
         Ok(outcome)
@@ -876,6 +943,12 @@ impl MailService {
         messages: &[MessageRecord],
     ) -> Result<(), ServiceError> {
         if !policy.cache_bodies || messages.is_empty() {
+            debug!(
+                account_id = %account_id,
+                message_count = messages.len(),
+                cache_bodies = policy.cache_bodies,
+                "cache candidate generation skipped"
+            );
             return Ok(());
         }
 
@@ -917,6 +990,22 @@ impl MailService {
                     pinned: false,
                 };
                 let score = score_cache_candidate(&signals);
+                trace!(
+                    account_id = %account_id,
+                    message_id = %message.id,
+                    layer = CacheLayer::Body.as_str(),
+                    fetch_unit = fetch_unit.as_str(),
+                    value_bytes,
+                    fetch_bytes,
+                    utility = score.utility,
+                    size_cost = score.size_cost,
+                    priority = score.priority,
+                    age_days = signals.message.age_days,
+                    in_inbox = signals.message.in_inbox,
+                    unread = signals.message.unread,
+                    flagged = signals.message.flagged,
+                    "cache body candidate scored"
+                );
                 CacheCandidate {
                     account_id: account_id.to_string(),
                     message_id: message.id.to_string(),
@@ -934,7 +1023,30 @@ impl MailService {
                 }
             })
             .collect::<Vec<_>>();
+        let total_fetch_bytes = candidates
+            .iter()
+            .map(|candidate| candidate.fetch_bytes)
+            .sum::<u64>();
+        let total_value_bytes = candidates
+            .iter()
+            .map(|candidate| candidate.value_bytes)
+            .sum::<u64>();
+        debug!(
+            account_id = %account_id,
+            driver = ?account.driver,
+            fetch_unit = fetch_unit.as_str(),
+            synced_message_count = messages.len(),
+            candidate_count = candidates.len(),
+            total_value_bytes,
+            total_fetch_bytes,
+            "cache body candidates scored"
+        );
         self.cache_store.upsert_cache_candidates(&candidates)?;
+        debug!(
+            account_id = %account_id,
+            candidate_count = candidates.len(),
+            "cache body candidates upserted"
+        );
         Ok(())
     }
 

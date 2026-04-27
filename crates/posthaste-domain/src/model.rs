@@ -385,6 +385,7 @@ pub struct AutomationBackfillBatchOutcome {
 /// @spec docs/L1-sync#local-cache-planning
 #[derive(Clone, Debug, Default)]
 pub struct CacheWorkerBatchOutcome {
+    pub scanned: usize,
     pub attempted: usize,
     pub cached: usize,
     pub failed: usize,

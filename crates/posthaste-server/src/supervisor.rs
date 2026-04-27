@@ -362,6 +362,10 @@ async fn process_body_cache_batch(
     gateway: Option<SharedGateway>,
 ) {
     let Some(gateway) = gateway else {
+        debug!(
+            account_id = %account_id,
+            "cache worker skipped because no gateway is connected"
+        );
         return;
     };
 
@@ -377,6 +381,7 @@ async fn process_body_cache_batch(
             if outcome.attempted > 0 || outcome.cached > 0 || outcome.failed > 0 {
                 info!(
                     account_id = %account_id,
+                    scanned = outcome.scanned,
                     attempted = outcome.attempted,
                     cached = outcome.cached,
                     failed = outcome.failed,
@@ -387,8 +392,15 @@ async fn process_body_cache_batch(
             } else if outcome.skipped > 0 {
                 debug!(
                     account_id = %account_id,
+                    scanned = outcome.scanned,
                     skipped = outcome.skipped,
                     "cache worker skipped candidates outside current budget"
+                );
+            } else {
+                debug!(
+                    account_id = %account_id,
+                    scanned = outcome.scanned,
+                    "cache worker batch completed without fetch work"
                 );
             }
         }
