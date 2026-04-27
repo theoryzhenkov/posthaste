@@ -11,19 +11,24 @@ use posthaste_domain::{
 };
 use tracing::{debug, info, warn};
 
+use crate::discovery::connect_authenticated_client;
+use crate::fetch::{
+    fetch_mailbox_changed_since_snapshot_with_client, fetch_mailbox_header_snapshot_with_client,
+    fetch_mailbox_headers_after_uid_with_client,
+};
+use crate::mailbox::examine_selected_mailbox;
 use crate::{
     append_smtp_sent_copy, apply_imap_keyword_delta_by_location,
-    copy_imap_message_to_mailbox_by_location, discover_imap_account, examine_imap_mailbox,
+    copy_imap_message_to_mailbox_by_location, discover_imap_account,
     expunge_imap_message_by_location, fetch_imap_reply_context_by_location,
-    fetch_mailbox_changed_since_snapshot, fetch_mailbox_header_snapshot,
-    fetch_mailbox_headers_after_uid, fetch_message_body_by_location, fetch_raw_message_by_location,
+    fetch_message_body_by_location, fetch_raw_message_by_location,
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,
     imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
     mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
-    parse_imap_attachment_blob_id, smtp_sent_copy_strategy, submit_smtp_message,
-    DiscoveredImapAccount, ImapAdapterError, ImapChangedSinceSnapshot, ImapConnectionConfig,
-    ImapMappedHeader, SmtpConnectionConfig, SmtpSentCopyStrategy,
+    normalize_imap_capabilities, parse_imap_attachment_blob_id, smtp_sent_copy_strategy,
+    submit_smtp_message, DiscoveredImapAccount, ImapAdapterError, ImapChangedSinceSnapshot,
+    ImapConnectionConfig, ImapMappedHeader, SmtpConnectionConfig, SmtpSentCopyStrategy,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -138,9 +143,22 @@ impl MailGateway for LiveImapSmtpGateway {
         _cursors: &[SyncCursor],
     ) -> Result<SyncBatch, GatewayError> {
         let sync_started = Instant::now();
-        let discovery = discover_imap_account(&self.config)
+        let discovery = self.discovery.clone();
+        let mut client = connect_authenticated_client(&self.config)
             .await
             .map_err(imap_error_to_gateway)?;
+        client
+            .refresh_capabilities()
+            .await
+            .map_err(ImapAdapterError::from)
+            .map_err(imap_error_to_gateway)?;
+        let fetch_modseq = normalize_imap_capabilities(
+            client
+                .state
+                .capabilities_iter()
+                .map(std::string::ToString::to_string),
+        )
+        .supports_condstore();
         let selectable_mailbox_count = discovery
             .mailboxes
             .iter()
@@ -167,7 +185,7 @@ impl MailGateway for LiveImapSmtpGateway {
             .filter(|mailbox| mailbox.selectable)
         {
             if let Some(store) = store {
-                let selected = examine_imap_mailbox(&self.config, &mailbox.name)
+                let selected = examine_selected_mailbox(&mut client, &mailbox.name)
                     .await
                     .map_err(imap_error_to_gateway)?;
                 let stored_state = store
@@ -267,9 +285,10 @@ impl MailGateway for LiveImapSmtpGateway {
                         mode = "full_snapshot",
                         "IMAP mailbox header fetch started"
                     );
-                    let snapshot = fetch_mailbox_header_snapshot(
-                        &self.config,
+                    let snapshot = fetch_mailbox_header_snapshot_with_client(
+                        &mut client,
                         &mailbox.name,
+                        fetch_modseq,
                         updated_at.clone(),
                     )
                     .await
@@ -308,8 +327,8 @@ impl MailGateway for LiveImapSmtpGateway {
                         since_modseq = since_modseq.0,
                         "IMAP mailbox header fetch started"
                     );
-                    let snapshot = fetch_mailbox_changed_since_snapshot(
-                        &self.config,
+                    let snapshot = fetch_mailbox_changed_since_snapshot_with_client(
+                        &mut client,
                         &mailbox.name,
                         since_modseq,
                         true,
@@ -366,9 +385,10 @@ impl MailGateway for LiveImapSmtpGateway {
                         mode = plan_name,
                         "IMAP mailbox header fetch started"
                     );
-                    let snapshot = fetch_mailbox_header_snapshot(
-                        &self.config,
+                    let snapshot = fetch_mailbox_header_snapshot_with_client(
+                        &mut client,
                         &mailbox.name,
+                        fetch_modseq,
                         updated_at.clone(),
                     )
                     .await
@@ -405,10 +425,11 @@ impl MailGateway for LiveImapSmtpGateway {
                         after_uid = after_uid.0,
                         "IMAP mailbox header fetch started"
                     );
-                    let snapshot = fetch_mailbox_headers_after_uid(
-                        &self.config,
+                    let snapshot = fetch_mailbox_headers_after_uid_with_client(
+                        &mut client,
                         &mailbox.name,
                         after_uid,
+                        fetch_modseq,
                         updated_at.clone(),
                     )
                     .await
