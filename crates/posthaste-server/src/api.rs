@@ -12,7 +12,7 @@ use axum::Json;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
     AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AddToMailboxCommand,
-    AppSettings, AutomationAction, AutomationRule, CachedSenderAddress, CommandResult,
+    AppSettings, AutomationAction, AutomationRule, CachePolicy, CachedSenderAddress, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
     ImapTransportSettings, MailboxId, MailboxSummary, MessageAttachment, MessageCursor,
@@ -203,8 +203,14 @@ const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
 pub struct PatchSettingsRequest {
     #[serde(default)]
     pub default_account_id: Option<Option<String>>,
+    pub cache_policy: Option<CachePolicy>,
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
+}
+
+fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
+    policy.hard_cap_bytes = policy.hard_cap_bytes.max(policy.soft_cap_bytes);
+    policy
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -530,6 +536,9 @@ pub async fn patch_settings(
     }
     if let Some(automation_drafts) = &request.automation_drafts {
         settings.automation_drafts = normalize_automation_rules(automation_drafts);
+    }
+    if let Some(cache_policy) = request.cache_policy {
+        settings.cache_policy = normalize_cache_policy(cache_policy);
     }
     validate_automation_rules(&settings.automation_rules)?;
     validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
