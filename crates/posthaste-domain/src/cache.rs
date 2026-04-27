@@ -45,6 +45,17 @@ pub enum CacheLayer {
     AttachmentBlob,
 }
 
+/// Download/storage unit needed to satisfy a cache candidate.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CacheFetchUnit {
+    BodyOnly,
+    RawMessage,
+    AttachmentBlob,
+}
+
 /// Search context that temporarily raises utility for visible, tight results.
 ///
 /// @spec docs/L1-sync#local-cache-planning
@@ -80,7 +91,9 @@ pub struct CacheMessageSignals {
 pub struct CacheCandidateSignals {
     pub message: CacheMessageSignals,
     pub layer: CacheLayer,
-    pub size_bytes: u64,
+    pub fetch_unit: CacheFetchUnit,
+    pub value_bytes: u64,
+    pub fetch_bytes: u64,
     pub inline_attachment: bool,
     pub opened_attachment: bool,
     pub direct_user_boost: f64,
@@ -154,7 +167,7 @@ pub fn score_cache_candidate_with_weights(
     let pin_bonus = if candidate.pinned { PINNED_BONUS } else { 0.0 };
     let utility =
         (message_utility * layer_weight * object_modifier) + direct_user_boost + pin_bonus;
-    let size_cost = size_cost(candidate.size_bytes, weights.size_alpha);
+    let size_cost = size_cost(candidate.fetch_bytes, weights.size_alpha);
     CacheScore {
         utility,
         size_cost,
@@ -310,7 +323,9 @@ mod tests {
         let recent_score = score_cache_candidate(&CacheCandidateSignals {
             message: base_message(),
             layer: CacheLayer::Body,
-            size_bytes: 64 * 1024,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 64 * 1024,
             inline_attachment: false,
             opened_attachment: false,
             direct_user_boost: 0.0,
@@ -319,7 +334,9 @@ mod tests {
         let old_score = score_cache_candidate(&CacheCandidateSignals {
             message: old,
             layer: CacheLayer::Body,
-            size_bytes: 64 * 1024,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 64 * 1024,
             inline_attachment: false,
             opened_attachment: false,
             direct_user_boost: 0.0,
@@ -345,7 +362,9 @@ mod tests {
         let large_score = score_cache_candidate(&CacheCandidateSignals {
             message: high_value,
             layer: CacheLayer::AttachmentBlob,
-            size_bytes: 20 * 1024 * 1024,
+            fetch_unit: CacheFetchUnit::AttachmentBlob,
+            value_bytes: 20 * 1024 * 1024,
+            fetch_bytes: 20 * 1024 * 1024,
             inline_attachment: false,
             opened_attachment: true,
             direct_user_boost: 0.0,
@@ -354,7 +373,9 @@ mod tests {
         let small_score = score_cache_candidate(&CacheCandidateSignals {
             message: low_value,
             layer: CacheLayer::AttachmentBlob,
-            size_bytes: 1024 * 1024,
+            fetch_unit: CacheFetchUnit::AttachmentBlob,
+            value_bytes: 1024 * 1024,
+            fetch_bytes: 1024 * 1024,
             inline_attachment: false,
             opened_attachment: false,
             direct_user_boost: 0.0,
@@ -377,7 +398,9 @@ mod tests {
         let searched_score = score_cache_candidate(&CacheCandidateSignals {
             message: searched,
             layer: CacheLayer::Body,
-            size_bytes: 64 * 1024,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 64 * 1024,
             inline_attachment: false,
             opened_attachment: false,
             direct_user_boost: 0.0,
@@ -386,7 +409,9 @@ mod tests {
         let baseline_score = score_cache_candidate(&CacheCandidateSignals {
             message: base_message(),
             layer: CacheLayer::Body,
-            size_bytes: 64 * 1024,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 64 * 1024,
             inline_attachment: false,
             opened_attachment: false,
             direct_user_boost: 0.0,
@@ -394,6 +419,35 @@ mod tests {
         });
 
         assert!(searched_score.priority > baseline_score.priority);
+    }
+
+    // spec: docs/L1-sync#cache-priority-size-aware
+    #[test]
+    fn body_priority_uses_fetch_unit_cost_not_body_value_size() {
+        let jmap_score = score_cache_candidate(&CacheCandidateSignals {
+            message: base_message(),
+            layer: CacheLayer::Body,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 64 * 1024,
+            inline_attachment: false,
+            opened_attachment: false,
+            direct_user_boost: 0.0,
+            pinned: false,
+        });
+        let imap_score = score_cache_candidate(&CacheCandidateSignals {
+            message: base_message(),
+            layer: CacheLayer::Body,
+            fetch_unit: CacheFetchUnit::RawMessage,
+            value_bytes: 64 * 1024,
+            fetch_bytes: 12 * 1024 * 1024,
+            inline_attachment: false,
+            opened_attachment: false,
+            direct_user_boost: 0.0,
+            pinned: false,
+        });
+
+        assert!(jmap_score.priority > imap_score.priority);
     }
 
     // spec: docs/L1-sync#cache-admission-hard-cap
