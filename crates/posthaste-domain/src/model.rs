@@ -380,6 +380,18 @@ pub struct AutomationBackfillBatchOutcome {
     pub has_more: bool,
 }
 
+/// Result of one optional-content cache worker batch.
+///
+/// @spec docs/L1-sync#local-cache-planning
+#[derive(Clone, Debug, Default)]
+pub struct CacheWorkerBatchOutcome {
+    pub attempted: usize,
+    pub cached: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub events: Vec<DomainEvent>,
+}
+
 /// Event types that can cause an automation rule to run.
 ///
 /// @spec docs/L1-sync#automation-actions
