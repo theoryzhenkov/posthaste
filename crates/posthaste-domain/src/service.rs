@@ -1,23 +1,25 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::json;
 
 use crate::{
-    AccountId, AccountSettings, AddToMailboxCommand, AppSettings, AutomationAction,
-    AutomationBackfillBatchOutcome, AutomationBackfillJob, AutomationBackfillJobStatus,
-    AutomationBackfillStore, AutomationRule, AutomationTrigger, CommandResult, ConfigDiff,
-    ConfigRepository, ConversationCursor, ConversationId, ConversationPage, ConversationReadStore,
-    ConversationSortField, ConversationView, EventStore, Identity, MailGateway, MailStore,
-    MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore, MessageCursor,
-    MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore, MessagePage,
-    MessageRecord, MessageSortField, MessageSummary, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection, SourceDataStore,
-    SourceProjectionStore, StoreError, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore,
-    TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
+    score_cache_candidate, AccountDriver, AccountId, AccountSettings, AddToMailboxCommand,
+    AppSettings, AutomationAction, AutomationBackfillBatchOutcome, AutomationBackfillJob,
+    AutomationBackfillJobStatus, AutomationBackfillStore, AutomationRule, AutomationTrigger,
+    CacheCandidate, CacheCandidateSignals, CacheFetchUnit, CacheLayer, CacheMessageSignals,
+    CachePolicy, CacheStore, CommandResult, ConfigDiff, ConfigRepository, ConversationCursor,
+    ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
+    ConversationView, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
+    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
+    MessageListStore, MessageMailboxStore, MessagePage, MessageRecord, MessageSortField,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SendMessageRequest,
+    ServiceError, SetKeywordsCommand, SharedConfigRepository, SidebarResponse, SidebarSmartMailbox,
+    SidebarSource, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxSummary, SmartMailboxValue, SortDirection,
+    SourceDataStore, SourceProjectionStore, StoreError, SyncObject, SyncStateStore, SyncTrigger,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
     EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
@@ -147,6 +149,48 @@ fn automation_backfill_fingerprint(settings: &AppSettings) -> Result<Option<Stri
     })
 }
 
+fn message_age_days(received_at: &str) -> f64 {
+    let Ok(received_at) =
+        time::OffsetDateTime::parse(received_at, &time::format_description::well_known::Rfc3339)
+    else {
+        return 365.0;
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let seconds = (now - received_at).whole_seconds().max(0) as f64;
+    seconds / 86_400.0
+}
+
+fn nonnegative_message_size(size: i64) -> u64 {
+    u64::try_from(size.max(0)).unwrap_or(0)
+}
+
+fn estimated_body_bytes(message: &MessageRecord) -> u64 {
+    let metadata_size = nonnegative_message_size(message.size);
+    if metadata_size == 0 {
+        return 64 * 1024;
+    }
+    if message.has_attachment {
+        metadata_size.min(256 * 1024).max(16 * 1024)
+    } else {
+        metadata_size.max(4 * 1024)
+    }
+}
+
+fn body_fetch_unit(account: &AccountSettings) -> CacheFetchUnit {
+    match account.driver {
+        AccountDriver::ImapSmtp => CacheFetchUnit::RawMessage,
+        AccountDriver::Jmap | AccountDriver::Mock => CacheFetchUnit::BodyOnly,
+    }
+}
+
+fn body_fetch_bytes(account: &AccountSettings, message: &MessageRecord) -> u64 {
+    match body_fetch_unit(account) {
+        CacheFetchUnit::RawMessage => nonnegative_message_size(message.size).max(4 * 1024),
+        CacheFetchUnit::BodyOnly => estimated_body_bytes(message),
+        CacheFetchUnit::AttachmentBlob => unreachable!("body cache never fetches attachment blobs"),
+    }
+}
+
 /// Orchestrates domain logic by composing gateway, store, and config ports.
 ///
 /// `MailService` is the primary entry point for all business operations.
@@ -169,6 +213,7 @@ pub struct MailService {
     events: Arc<dyn EventStore>,
     source_projections: Arc<dyn SourceProjectionStore>,
     source_data: Arc<dyn SourceDataStore>,
+    cache_store: Arc<dyn CacheStore>,
     automation_backfills: Arc<dyn AutomationBackfillStore>,
 }
 
@@ -193,6 +238,7 @@ impl MailService {
             events: store.clone(),
             source_projections: store.clone(),
             source_data: store.clone(),
+            cache_store: store.clone(),
             automation_backfills: store,
         }
     }
@@ -732,6 +778,76 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    fn upsert_body_cache_candidates(
+        &self,
+        account_id: &AccountId,
+        account: &AccountSettings,
+        policy: &CachePolicy,
+        messages: &[MessageRecord],
+    ) -> Result<(), ServiceError> {
+        if !policy.cache_bodies || messages.is_empty() {
+            return Ok(());
+        }
+
+        let inbox_mailbox_ids = self
+            .mailbox_reader
+            .list_mailboxes(account_id)?
+            .into_iter()
+            .filter(|mailbox| mailbox.role.as_deref() == Some("inbox"))
+            .map(|mailbox| mailbox.id)
+            .collect::<HashSet<_>>();
+        let fetch_unit = body_fetch_unit(account);
+        let candidates = messages
+            .iter()
+            .filter(|message| message.body_html.is_none() && message.body_text.is_none())
+            .map(|message| {
+                let value_bytes = estimated_body_bytes(message);
+                let fetch_bytes = body_fetch_bytes(account, message);
+                let signals = CacheCandidateSignals {
+                    message: CacheMessageSignals {
+                        age_days: message_age_days(&message.received_at),
+                        in_inbox: message
+                            .mailbox_ids
+                            .iter()
+                            .any(|mailbox_id| inbox_mailbox_ids.contains(mailbox_id)),
+                        unread: !message.keywords.iter().any(|keyword| keyword == "$seen"),
+                        flagged: message.keywords.iter().any(|keyword| keyword == "$flagged"),
+                        thread_activity: 0.0,
+                        sender_affinity: 0.0,
+                        local_behavior: 0.0,
+                        search: None,
+                    },
+                    layer: CacheLayer::Body,
+                    fetch_unit,
+                    value_bytes,
+                    fetch_bytes,
+                    inline_attachment: false,
+                    opened_attachment: false,
+                    direct_user_boost: 0.0,
+                    pinned: false,
+                };
+                let score = score_cache_candidate(&signals);
+                CacheCandidate {
+                    account_id: account_id.to_string(),
+                    message_id: message.id.to_string(),
+                    layer: CacheLayer::Body,
+                    object_id: None,
+                    fetch_unit,
+                    value_bytes,
+                    fetch_bytes,
+                    priority: score.priority,
+                    reason: match fetch_unit {
+                        CacheFetchUnit::BodyOnly => "body".to_string(),
+                        CacheFetchUnit::RawMessage => "body-via-raw-message".to_string(),
+                        CacheFetchUnit::AttachmentBlob => "body".to_string(),
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        self.cache_store.upsert_cache_candidates(&candidates)?;
+        Ok(())
+    }
+
     /// Run a full sync cycle: load cursors, fetch delta, apply batch, emit events.
     ///
     /// @spec docs/L1-sync#sync-loop
@@ -759,6 +875,15 @@ impl MailService {
             });
         }
         let mut events = self.sync_writer.apply_sync_batch(account_id, &batch)?;
+        if let Some(account) = self.config.get_source(account_id)? {
+            let settings = self.config.get_app_settings()?;
+            self.upsert_body_cache_candidates(
+                account_id,
+                &account,
+                &settings.cache_policy,
+                &batch.messages,
+            )?;
+        }
         let action_events = self
             .apply_automation_rules(account_id, &batch.messages, gateway)
             .await?;
@@ -1510,6 +1635,7 @@ mod tests {
         projection_deletes: Mutex<Vec<String>>,
         source_data_deletes: Mutex<Vec<String>>,
         automation_backfill_jobs: Mutex<Vec<AutomationBackfillJob>>,
+        cache_candidates: Mutex<Vec<CacheCandidate>>,
         keyword_adds: Mutex<Vec<(MessageId, Vec<String>)>>,
         rule_page: Mutex<Vec<MessageSummary>>,
         mutation_state: Mutex<MutationStoreState>,
@@ -1524,6 +1650,7 @@ mod tests {
                 projection_deletes: Mutex::new(Vec::new()),
                 source_data_deletes: Mutex::new(Vec::new()),
                 automation_backfill_jobs: Mutex::new(Vec::new()),
+                cache_candidates: Mutex::new(Vec::new()),
                 keyword_adds: Mutex::new(Vec::new()),
                 rule_page: Mutex::new(Vec::new()),
                 mutation_state: Mutex::new(MutationStoreState::default()),
@@ -1787,8 +1914,12 @@ mod tests {
     impl crate::CacheStore for TestStore {
         fn upsert_cache_candidates(
             &self,
-            _candidates: &[crate::CacheCandidate],
+            candidates: &[crate::CacheCandidate],
         ) -> Result<(), StoreError> {
+            self.cache_candidates
+                .lock()
+                .expect("cache candidates lock poisoned")
+                .extend(candidates.iter().cloned());
             Ok(())
         }
 
@@ -2097,6 +2228,29 @@ mod tests {
         }
     }
 
+    fn sample_message_record(id: &str, size: i64, has_attachment: bool) -> MessageRecord {
+        MessageRecord {
+            id: MessageId::from(id),
+            source_thread_id: ThreadId::from("thread-1"),
+            remote_blob_id: None,
+            subject: Some("Hello".to_string()),
+            from_name: Some("PostHaste Updates".to_string()),
+            from_email: Some("hello@example.com".to_string()),
+            preview: None,
+            received_at: crate::RFC3339_EPOCH.to_string(),
+            has_attachment,
+            size,
+            mailbox_ids: vec![MailboxId::from("inbox")],
+            keywords: Vec::new(),
+            body_html: None,
+            body_text: None,
+            raw_mime: None,
+            rfc_message_id: None,
+            in_reply_to: None,
+            references: Vec::new(),
+        }
+    }
+
     fn sample_automation_rule() -> AutomationRule {
         AutomationRule {
             id: "rule-posthaste".to_string(),
@@ -2301,6 +2455,88 @@ mod tests {
             .expect_err("mailbox failures should not be swallowed");
 
         assert_eq!(error.code(), "storage_failure");
+    }
+
+    #[tokio::test]
+    async fn sync_account_records_body_cache_candidate_with_body_only_fetch_cost() {
+        let account = sample_source();
+        let account_id = account.id.clone();
+        let store = Arc::new(TestStore::default());
+        let config = Arc::new(TestConfig {
+            sources: vec![account],
+            ..Default::default()
+        });
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_sync_batch(
+            1,
+            SyncBatch {
+                mailboxes: Vec::new(),
+                messages: vec![sample_message_record("message-1", 12 * 1024 * 1024, true)],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: Vec::new(),
+            },
+        );
+
+        service
+            .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
+            .await
+            .expect("sync should succeed");
+
+        let candidates = store
+            .cache_candidates
+            .lock()
+            .expect("cache candidates lock poisoned");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].layer, CacheLayer::Body);
+        assert_eq!(candidates[0].fetch_unit, CacheFetchUnit::BodyOnly);
+        assert_eq!(candidates[0].fetch_bytes, 256 * 1024);
+    }
+
+    #[tokio::test]
+    async fn sync_account_records_imap_body_candidate_with_raw_message_fetch_cost() {
+        let mut account = sample_source();
+        account.driver = AccountDriver::ImapSmtp;
+        let account_id = account.id.clone();
+        let store = Arc::new(TestStore::default());
+        let config = Arc::new(TestConfig {
+            sources: vec![account],
+            ..Default::default()
+        });
+        let service = MailService::new(store.clone(), config);
+        let gateway = MutationGateway::with_sync_batch(
+            1,
+            SyncBatch {
+                mailboxes: Vec::new(),
+                messages: vec![sample_message_record("message-1", 12 * 1024 * 1024, true)],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: Vec::new(),
+            },
+        );
+
+        service
+            .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
+            .await
+            .expect("sync should succeed");
+
+        let candidates = store
+            .cache_candidates
+            .lock()
+            .expect("cache candidates lock poisoned");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].layer, CacheLayer::Body);
+        assert_eq!(candidates[0].fetch_unit, CacheFetchUnit::RawMessage);
+        assert_eq!(candidates[0].value_bytes, 256 * 1024);
+        assert_eq!(candidates[0].fetch_bytes, 12 * 1024 * 1024);
     }
 
     #[tokio::test]
