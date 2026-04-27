@@ -128,6 +128,7 @@ pub fn import_bootstrap(
             default_account_id: app_seed.default_account_id.as_deref().map(Into::into),
             automation_rules: Vec::new(),
             automation_drafts: Vec::new(),
+            ..Default::default()
         };
         config_repo
             .put_app_settings(&settings)
