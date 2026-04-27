@@ -107,12 +107,15 @@ byte counts until the scorer materializes provider-aware values. Local user/app
 activity then updates message-level signals separately from metadata sync.
 Search result visibility is the first signal producer: visible ranked results
 write search context and a rank-decayed direct user boost into
-`cache_message_signal`, enqueue the message in `cache_rescore_queue`, and wake
-the account runtime for cache maintenance. If a signal lands on a legacy message
-that is missing its structural body row, the store materializes that row before
-queueing the re-score. Opening/starred thread behavior and thread-level
-activity should use the same signal queue instead of adding fetch-specific
-shortcuts.
+`cache_message_signal`, enqueue the message in `cache_rescore_queue` with a
+cheap local-signal `rescore_priority`, and wake the account runtime for cache
+maintenance. The re-score queue is priority-ordered: local user/app signals such
+as visible search results, opened messages, and pinned/thread-active messages
+must outrank structural repair and stale periodic maintenance, even when the
+maintenance rows are older. If a signal lands on a legacy message that is
+missing its structural body row, the store materializes that row before queueing
+the re-score. Opening/starred thread behavior and thread-level activity should
+use the same signal queue instead of adding fetch-specific shortcuts.
 
 Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
@@ -143,9 +146,12 @@ The account runtime runs cache maintenance while a gateway is connected. Each
 maintenance batch first queues a bounded oldest-first set of stale cache objects
 whose `last_scored_at` is older than the runtime threshold, excluding objects
 already queued or currently fetching. This lets time-sensitive signals such as
-recency converge even when no sync/search/user signal touches a message.
-The batch then consumes dirty re-score rows, rebuilds each candidate's current
-signal set from message metadata plus `cache_message_signal`, updates
+recency converge even when no sync/search/user signal touches a message. Stale
+maintenance may use existing cache priority to order background work, but its
+`rescore_priority` stays below the local-signal band.
+The batch then consumes dirty re-score rows ordered by `rescore_priority DESC`,
+then `queued_at ASC`, rebuilds each candidate's current signal set from message
+metadata plus `cache_message_signal`, updates
 provider-aware `fetch_unit`, `value_bytes`, `fetch_bytes`, and
 `cache_object.priority`, and marks non-cached/non-fetching objects `wanted`.
 Unscored structural rows have `fetch_bytes = 0` and are not eligible for fetch
@@ -249,7 +255,7 @@ Important derived tables:
 - `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
 - `cache_object` stores scored optional-content child objects and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Every message has one structural body row; later layers add raw-message or attachment rows as policy decides. Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read scored wanted rows from this table and cached rows contribute to the configured cache budget.
 - `cache_message_signal` stores local cache utility signals that do not come from provider metadata, including search result visibility, local behavior scores, direct user boost, and pinned state.
-- `cache_rescore_queue` stores account/message pairs whose cache objects need priority re-scoring after signal changes. The runtime drains this queue before selecting fetch work.
+- `cache_rescore_queue` stores account/message pairs whose cache objects need priority re-scoring after signal changes. Rows include `reason`, `queued_at`, and `rescore_priority`; runtime workers drain high-priority signal work before low-priority structural/stale maintenance, then select fetch work from scored `cache_object` rows.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 
@@ -322,7 +328,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | cache-priority-size-aware | MUST | Optional cache priority uses fetch-unit bytes, so IMAP raw-message body fetches are penalized by combined message size |
 | cache-worker-budget | MUST | Cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
 | cache-object-parity | MUST | Every synced message has one structural body `cache_object` child row, and message deletion removes its cache object, cache signals, and rescore queue rows |
-| cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue`, and are applied by re-scoring before fetch selection |
+| cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue` with higher re-score priority than background maintenance, and are applied by re-scoring before fetch selection |
 | cache-stale-rescore | MUST | Cache maintenance periodically queues bounded oldest-first stale cache objects for re-scoring so recency and other time-sensitive utility signals converge |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |

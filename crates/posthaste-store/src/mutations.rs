@@ -1,5 +1,5 @@
 use super::*;
-use crate::cache::ensure_body_cache_object_tx;
+use crate::cache::{ensure_body_cache_object_tx, BACKGROUND_RESCORE_PRIORITY};
 use crate::projections::{
     assign_conversation_id_tx, delete_message_tx, normalized_subject,
     refresh_conversation_projection_tx, refresh_mailbox_counters_tx, refresh_thread_projection_tx,
@@ -312,7 +312,14 @@ pub(crate) fn apply_sync_batch_tx(
                 raw_ref.as_ref(),
             )?;
         }
-        ensure_body_cache_object_tx(tx, account_id, &message.id, body_present, "metadata-sync")?;
+        ensure_body_cache_object_tx(
+            tx,
+            account_id,
+            &message.id,
+            body_present,
+            "metadata-sync",
+            BACKGROUND_RESCORE_PRIORITY,
+        )?;
 
         affected_threads.insert(message.source_thread_id.clone());
         affected_conversations.insert(conversation_id.clone());
@@ -509,7 +516,14 @@ pub(crate) fn apply_message_body_tx(
         raw_ref,
     )?;
     replace_attachments_tx(tx, account_id, message_id, &body.attachments)?;
-    ensure_body_cache_object_tx(tx, account_id, message_id, true, "body-cached")?;
+    ensure_body_cache_object_tx(
+        tx,
+        account_id,
+        message_id,
+        true,
+        "body-cached",
+        BACKGROUND_RESCORE_PRIORITY,
+    )?;
     let event = insert_event_tx(
         tx,
         account_id,
