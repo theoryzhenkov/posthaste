@@ -136,6 +136,12 @@ When an unread selected message detail successfully loads, the client marks that
 
 `EmailFrame` renders wrapped `srcdoc` HTML inside a sandboxed iframe with `allow-same-origin`. It is full-height within the detail body container, so long newsletters scroll inside the iframe rather than forcing the entire right pane to expand. This fixed-height viewport was introduced to solve broken scrolling in long HTML emails.
 
+When a message has both sanitized HTML and plaintext body alternatives, the
+reader renders the HTML alternative. Plaintext is a fallback for messages
+without HTML. This matches normal mail-client behavior for
+`multipart/alternative` and prevents rendered Markdown email from appearing as
+its Markdown source when a provider also supplies the HTML part.
+
 The reader header, attachment strip, and plain text body must follow the L2 visual contract. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or turn the whole pane into a full-width white document viewer.
 
 ## Command Search
