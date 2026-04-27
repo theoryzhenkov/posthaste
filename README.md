@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-27
+reviewed: 2026-04-27
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-providers
@@ -45,6 +45,18 @@ just build-serve   # Build web assets plus the browser-localhost server binary
 just package-serve # Create target/distribute/posthaste-serve-*.tar.gz
 just serve         # Run `posthaste serve` against apps/web/dist
 ```
+
+OAuth provider secrets are read by the Nix dev shell from
+`secrets/oauth.yaml` when that SOPS file and `.age-key` are present. Supported
+keys:
+
+```yaml
+google_oauth_client_secret: "..."
+microsoft_oauth_client_secret: "..."
+```
+
+The shell exports these as Vite variables for local builds. Public OAuth client
+IDs remain in `apps/web/src/config/oauthProviders.json`.
 
 Tagged releases publish installable artifacts through GitHub Actions:
 
