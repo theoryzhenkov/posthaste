@@ -6,8 +6,8 @@ use base64::Engine;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, CsrfToken, ExtraTokenFields, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
+    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, ExtraTokenFields,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use posthaste_domain::{GatewayError, ProviderHint};
 use serde::{Deserialize, Serialize};
@@ -136,6 +136,8 @@ pub struct OAuthTokenSet {
     pub r#type: String,
     pub provider: ProviderHint,
     pub client_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_at: Option<String>,
@@ -202,6 +204,7 @@ pub struct PendingOAuthFlow {
     pub account_id: Option<posthaste_domain::AccountId>,
     pub profile: OAuthProviderProfile,
     pub client_id: String,
+    pub client_secret: Option<String>,
     pub redirect_uri: String,
     pub pkce_verifier: String,
     pub nonce: String,
@@ -240,9 +243,10 @@ impl OAuthTokenService {
         &self,
         profile: &OAuthProviderProfile,
         client_id: &str,
+        client_secret: Option<&str>,
         redirect_uri: &str,
     ) -> Result<OAuthAuthorizationSession, GatewayError> {
-        let client = oauth_client(profile, client_id, redirect_uri)?;
+        let client = oauth_client(profile, client_id, client_secret, redirect_uri)?;
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let nonce = CsrfToken::new_random();
         let mut request = client
@@ -271,13 +275,14 @@ impl OAuthTokenService {
         &self,
         profile: &OAuthProviderProfile,
         client_id: &str,
+        client_secret: Option<&str>,
         redirect_uri: &str,
         code: &str,
         pkce_verifier: &str,
         nonce: &str,
         now: OffsetDateTime,
     ) -> Result<OAuthExchangeResult, GatewayError> {
-        let client = oauth_client(profile, client_id, redirect_uri)?;
+        let client = oauth_client(profile, client_id, client_secret, redirect_uri)?;
         let token_response = client
             .exchange_code(AuthorizationCode::new(code.to_string()))
             .set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier.to_string()))
@@ -294,6 +299,7 @@ impl OAuthTokenService {
                 r#type: oauth_secret_type(),
                 provider: profile.provider.clone(),
                 client_id: client_id.to_string(),
+                client_secret: client_secret.map(ToString::to_string),
                 access_token: token_response.access_token().secret().to_string(),
                 refresh_token: token_response
                     .refresh_token()
@@ -331,7 +337,12 @@ impl OAuthTokenService {
                 token_set.provider
             ))
         })?;
-        let client = oauth_client(&profile, &token_set.client_id, "http://127.0.0.1/unused")?;
+        let client = oauth_client(
+            &profile,
+            &token_set.client_id,
+            token_set.client_secret.as_deref(),
+            "http://127.0.0.1/unused",
+        )?;
         let token_response = client
             .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
             .request_async(&self.http_client)
@@ -342,6 +353,7 @@ impl OAuthTokenService {
             r#type: oauth_secret_type(),
             provider: token_set.provider.clone(),
             client_id: token_set.client_id.clone(),
+            client_secret: token_set.client_secret.clone(),
             access_token: token_response.access_token().secret().to_string(),
             refresh_token: token_response
                 .refresh_token()
@@ -532,12 +544,19 @@ struct OpenIdProviderMetadata {
 fn oauth_client(
     profile: &OAuthProviderProfile,
     client_id: &str,
+    client_secret: Option<&str>,
     redirect_uri: &str,
 ) -> Result<OAuthClient, GatewayError> {
-    Ok(oauth2::Client::new(ClientId::new(client_id.to_string()))
+    let mut client = oauth2::Client::new(ClientId::new(client_id.to_string()))
         .set_auth_uri(AuthUrl::new(profile.auth_url.to_string()).map_err(invalid_oauth_url)?)
         .set_token_uri(TokenUrl::new(profile.token_url.to_string()).map_err(invalid_oauth_url)?)
-        .set_redirect_uri(RedirectUrl::new(redirect_uri.to_string()).map_err(invalid_oauth_url)?))
+        .set_redirect_uri(RedirectUrl::new(redirect_uri.to_string()).map_err(invalid_oauth_url)?);
+    if let Some(client_secret) = client_secret.filter(|secret| !secret.trim().is_empty()) {
+        client = client
+            .set_client_secret(ClientSecret::new(client_secret.trim().to_string()))
+            .set_auth_type(AuthType::RequestBody);
+    }
+    Ok(client)
 }
 
 fn decode_verified_openid_claims(
@@ -768,6 +787,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
             r#type: oauth_secret_type(),
             provider: ProviderHint::Gmail,
             client_id: "client".to_string(),
+            client_secret: Some("secret".to_string()),
             access_token: "access".to_string(),
             refresh_token: Some("refresh".to_string()),
             expires_at: Some(
@@ -807,6 +827,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
             .authorization_session(
                 &profile,
                 "client-id",
+                Some("client-secret"),
                 "http://127.0.0.1:12345/oauth/callback",
             )
             .expect("session");
@@ -931,6 +952,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
             account_id: Some(posthaste_domain::AccountId::from("gmail")),
             profile,
             client_id: "client-id".to_string(),
+            client_secret: Some("client-secret".to_string()),
             redirect_uri: "http://127.0.0.1:12345/v1/oauth/callback".to_string(),
             pkce_verifier: "verifier".to_string(),
             nonce: "nonce".to_string(),

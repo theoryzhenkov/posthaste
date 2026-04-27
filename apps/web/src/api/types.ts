@@ -196,6 +196,7 @@ export interface VerificationResponse {
 export interface StartProviderOAuthInput {
   provider: ProviderHint
   clientId: string
+  clientSecret?: string
   redirectUri: string
 }
 

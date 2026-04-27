@@ -8,7 +8,7 @@ import { Cloud, Mail, Plus, Settings2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { buildOAuthRedirectUri, startProviderOAuth } from '../../api/client'
 import type { AccountOverview, ProviderHint } from '../../api/types'
-import { providerOAuthClientIds } from '../../config/oauthProviders'
+import { providerOAuthClientCredentials } from '../../config/oauthProviders'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
@@ -231,7 +231,8 @@ function AccountSetupChoice({ onManual }: { onManual: () => void }) {
   )
   const startOAuthMutation = useMutation({
     mutationFn: async (provider: ProviderHint) => {
-      const clientId = providerOAuthClientIds[provider]?.trim()
+      const credentials = providerOAuthClientCredentials[provider]
+      const clientId = credentials?.clientId.trim()
       if (!clientId) {
         throw new Error(
           `${providerLabel(provider)} OAuth client ID is not configured`,
@@ -240,6 +241,7 @@ function AccountSetupChoice({ onManual }: { onManual: () => void }) {
       return startProviderOAuth({
         provider,
         clientId,
+        clientSecret: credentials?.clientSecret,
         redirectUri: buildOAuthRedirectUri(),
       })
     },
