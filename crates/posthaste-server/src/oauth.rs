@@ -1,6 +1,10 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
+#[cfg(test)]
 use base64::Engine;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, CsrfToken, ExtraTokenFields, PkceCodeChallenge,
     PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
@@ -12,6 +16,10 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
 
 const OAUTH_REFRESH_SKEW_SECONDS: i64 = 300;
+const OAUTH_JWKS_DEFAULT_CACHE_SECONDS: i64 = 3600;
+const OAUTH_JWKS_MAX_CACHE_SECONDS: i64 = 86_400;
+
+static OAUTH_JWKS_CACHE: OnceLock<Mutex<HashMap<&'static str, CachedJwks>>> = OnceLock::new();
 
 type OAuthTokenResponse =
     oauth2::StandardTokenResponse<OpenIdExtraTokenFields, oauth2::basic::BasicTokenType>;
@@ -79,6 +87,7 @@ pub struct OAuthProviderProfile {
     pub provider: ProviderHint,
     pub auth_url: &'static str,
     pub token_url: &'static str,
+    pub metadata_url: &'static str,
     pub scopes: &'static [&'static str],
     pub extra_authorization_params: &'static [(&'static str, &'static str)],
 }
@@ -90,6 +99,7 @@ impl OAuthProviderProfile {
                 provider: ProviderHint::Gmail,
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
                 token_url: "https://oauth2.googleapis.com/token",
+                metadata_url: "https://accounts.google.com/.well-known/openid-configuration",
                 scopes: &["openid", "email", "https://mail.google.com/"],
                 extra_authorization_params: &[("access_type", "offline"), ("prompt", "consent")],
             }),
@@ -97,6 +107,8 @@ impl OAuthProviderProfile {
                 provider: ProviderHint::Outlook,
                 auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
                 token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                metadata_url:
+                    "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
                 scopes: &[
                     "openid",
                     "email",
@@ -272,8 +284,9 @@ impl OAuthTokenService {
             .request_async(&self.http_client)
             .await
             .map_err(oauth_request_error)?;
-        let identity_email =
-            oauth_identity_email(&profile.provider, client_id, &token_response, nonce, now)?;
+        let identity_email = self
+            .oauth_identity_email(profile, client_id, &token_response, nonce, now)
+            .await?;
 
         Ok(OAuthExchangeResult {
             identity_email,
@@ -346,6 +359,153 @@ impl OAuthTokenService {
             updated_token_set: Some(updated),
         })
     }
+
+    async fn oauth_identity_email(
+        &self,
+        profile: &OAuthProviderProfile,
+        client_id: &str,
+        token_response: &OAuthTokenResponse,
+        expected_nonce: &str,
+        now: OffsetDateTime,
+    ) -> Result<String, GatewayError> {
+        let id_token = token_response
+            .extra_fields()
+            .id_token
+            .as_deref()
+            .ok_or_else(|| {
+                GatewayError::Rejected("OAuth response did not include id_token".to_string())
+            })?;
+        let claims = self
+            .verified_openid_claims(profile, client_id, id_token, expected_nonce, now)
+            .await?;
+
+        let email = claims
+            .email
+            .or(claims.preferred_username)
+            .or(claims.upn)
+            .map(|email| email.trim().to_string())
+            .filter(|email| email.contains('@'))
+            .ok_or_else(|| {
+                GatewayError::Rejected(
+                    "OAuth identity did not include an email address".to_string(),
+                )
+            })?;
+        Ok(email)
+    }
+
+    async fn verified_openid_claims(
+        &self,
+        profile: &OAuthProviderProfile,
+        client_id: &str,
+        id_token: &str,
+        expected_nonce: &str,
+        now: OffsetDateTime,
+    ) -> Result<OpenIdTokenClaims, GatewayError> {
+        let header = decode_header(id_token).map_err(invalid_openid_token)?;
+        if header.alg != Algorithm::RS256 {
+            return Err(GatewayError::Rejected(format!(
+                "OAuth identity token algorithm is not supported: {:?}",
+                header.alg
+            )));
+        }
+        let kid = header.kid.as_deref().ok_or_else(|| {
+            GatewayError::Rejected("OAuth identity token is missing key id".to_string())
+        })?;
+
+        let cached_jwks = self.jwks_for_profile(profile, now, false).await?;
+        match decode_verified_openid_claims(
+            &profile.provider,
+            client_id,
+            id_token,
+            kid,
+            &cached_jwks,
+            expected_nonce,
+            now,
+        ) {
+            Ok(claims) => Ok(claims),
+            Err(error)
+                if matches!(
+                    error,
+                    GatewayError::Rejected(ref message) if message.contains("signing key")
+                ) =>
+            {
+                let refreshed_jwks = self.jwks_for_profile(profile, now, true).await?;
+                decode_verified_openid_claims(
+                    &profile.provider,
+                    client_id,
+                    id_token,
+                    kid,
+                    &refreshed_jwks,
+                    expected_nonce,
+                    now,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn jwks_for_profile(
+        &self,
+        profile: &OAuthProviderProfile,
+        now: OffsetDateTime,
+        force_refresh: bool,
+    ) -> Result<JwkSet, GatewayError> {
+        let cache = OAUTH_JWKS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if !force_refresh {
+            if let Some(cached) = cache.lock().await.get(profile.metadata_url).cloned() {
+                if cached.expires_at > now {
+                    return Ok(cached.jwks);
+                }
+            }
+        }
+
+        let fetched = self.fetch_jwks(profile, now).await?;
+        cache
+            .lock()
+            .await
+            .insert(profile.metadata_url, fetched.clone());
+        Ok(fetched.jwks)
+    }
+
+    async fn fetch_jwks(
+        &self,
+        profile: &OAuthProviderProfile,
+        now: OffsetDateTime,
+    ) -> Result<CachedJwks, GatewayError> {
+        let metadata = self
+            .http_client
+            .get(profile.metadata_url)
+            .send()
+            .await
+            .map_err(oauth_request_error)?;
+        if !metadata.status().is_success() {
+            return Err(GatewayError::Network(format!(
+                "OAuth metadata request failed with {}",
+                metadata.status()
+            )));
+        }
+        let metadata_body = metadata.text().await.map_err(oauth_request_error)?;
+        let metadata: OpenIdProviderMetadata =
+            serde_json::from_str(&metadata_body).map_err(oauth_request_error)?;
+
+        let jwks_response = self
+            .http_client
+            .get(&metadata.jwks_uri)
+            .send()
+            .await
+            .map_err(oauth_request_error)?;
+        if !jwks_response.status().is_success() {
+            return Err(GatewayError::Network(format!(
+                "OAuth JWKS request failed with {}",
+                jwks_response.status()
+            )));
+        }
+        let expires_at = now + jwks_cache_duration(jwks_response.headers());
+        let jwks_body = jwks_response.text().await.map_err(oauth_request_error)?;
+        let jwks = serde_json::from_str(&jwks_body).map_err(oauth_request_error)?;
+
+        Ok(CachedJwks { jwks, expires_at })
+    }
 }
 
 pub struct OAuthExchangeResult {
@@ -356,6 +516,17 @@ pub struct OAuthExchangeResult {
 pub struct OAuthAccessToken {
     pub token: String,
     pub updated_token_set: Option<OAuthTokenSet>,
+}
+
+#[derive(Clone)]
+struct CachedJwks {
+    jwks: JwkSet,
+    expires_at: OffsetDateTime,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenIdProviderMetadata {
+    jwks_uri: String,
 }
 
 fn oauth_client(
@@ -369,33 +540,63 @@ fn oauth_client(
         .set_redirect_uri(RedirectUrl::new(redirect_uri.to_string()).map_err(invalid_oauth_url)?))
 }
 
-fn oauth_identity_email(
+fn decode_verified_openid_claims(
     provider: &ProviderHint,
     client_id: &str,
-    token_response: &OAuthTokenResponse,
+    id_token: &str,
+    kid: &str,
+    jwks: &JwkSet,
     expected_nonce: &str,
     now: OffsetDateTime,
-) -> Result<String, GatewayError> {
-    let id_token = token_response
-        .extra_fields()
-        .id_token
-        .as_deref()
-        .ok_or_else(|| {
-            GatewayError::Rejected("OAuth response did not include id_token".to_string())
-        })?;
-    let claims = openid_claims_from_id_token(id_token)?;
-    validate_openid_identity_claims(provider, client_id, &claims, expected_nonce, now)?;
+) -> Result<OpenIdTokenClaims, GatewayError> {
+    let jwk = jwks.find(kid).ok_or_else(|| {
+        GatewayError::Rejected("OAuth identity token signing key was not found".to_string())
+    })?;
+    let decoding_key = DecodingKey::from_jwk(jwk).map_err(invalid_openid_token)?;
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.validate_aud = false;
+    validation.required_spec_claims.clear();
+    let token_data = decode::<OpenIdTokenClaims>(id_token, &decoding_key, &validation)
+        .map_err(invalid_openid_token)?;
+    validate_openid_identity_claims(provider, client_id, &token_data.claims, expected_nonce, now)?;
+    Ok(token_data.claims)
+}
 
-    let email = claims
-        .email
-        .or(claims.preferred_username)
-        .or(claims.upn)
-        .map(|email| email.trim().to_string())
-        .filter(|email| email.contains('@'))
-        .ok_or_else(|| {
-            GatewayError::Rejected("OAuth identity did not include an email address".to_string())
+fn jwks_cache_duration(headers: &oauth2::http::HeaderMap) -> Duration {
+    let seconds = headers
+        .get(oauth2::http::header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .and_then(cache_control_max_age)
+        .unwrap_or(OAUTH_JWKS_DEFAULT_CACHE_SECONDS)
+        .clamp(1, OAUTH_JWKS_MAX_CACHE_SECONDS);
+    Duration::seconds(seconds)
+}
+
+fn cache_control_max_age(value: &str) -> Option<i64> {
+    value.split(',').find_map(|directive| {
+        directive
+            .trim()
+            .strip_prefix("max-age=")
+            .and_then(|seconds| seconds.parse::<i64>().ok())
+    })
+}
+
+#[cfg(test)]
+fn insecure_openid_claims_from_id_token(id_token: &str) -> Result<OpenIdTokenClaims, GatewayError> {
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| GatewayError::Rejected("OAuth identity token is not a JWT".to_string()))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|error| {
+            GatewayError::Rejected(format!("OAuth identity token payload is invalid: {error}"))
         })?;
-    Ok(email)
+    serde_json::from_slice(&bytes).map_err(|error| {
+        GatewayError::Rejected(format!("OAuth identity token claims are invalid: {error}"))
+    })
 }
 
 fn validate_openid_identity_claims(
@@ -459,21 +660,6 @@ fn openid_issuer_matches(provider: &ProviderHint, issuer: &str) -> bool {
     }
 }
 
-fn openid_claims_from_id_token(id_token: &str) -> Result<OpenIdTokenClaims, GatewayError> {
-    let payload = id_token
-        .split('.')
-        .nth(1)
-        .ok_or_else(|| GatewayError::Rejected("OAuth identity token is not a JWT".to_string()))?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|error| {
-            GatewayError::Rejected(format!("OAuth identity token payload is invalid: {error}"))
-        })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
-        GatewayError::Rejected(format!("OAuth identity token claims are invalid: {error}"))
-    })
-}
-
 fn expires_at_from_duration(
     now: OffsetDateTime,
     expires_in: Option<std::time::Duration>,
@@ -506,9 +692,48 @@ where
     }
 }
 
+fn invalid_openid_token<E>(error: E) -> GatewayError
+where
+    E: std::fmt::Display,
+{
+    GatewayError::Rejected(format!("OAuth identity token is invalid: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+    use jsonwebtoken::jwk::Jwk;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+
+    const TEST_RSA_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCptW7Vkr5e34U+
+tg+ktEDbz7DW+UsAqsLZGl9wgSjp06Y4zyUakTZXfifDaeaCGm/aCy+FCnhdiZ49
+zzXcASKqoHOHGd6ap/xdPhIbwF5QZSE6aX2pMGgJ/zMSn9uirfiAQMpDCikZOGf4
+9oOay6eW1tzcHDUA95QAVN60nK8FKH1yRD/1F1v6Wu0OsK8ablCyIBXkg7dXXKSF
+uyfwgoUGcrgMZDDzC4EomMd7hzSjRcqwqzh9wZeLzkY2/Abz7gyiypY0VtKykTqJ
+YNjjtIthj/hZ300Znuzpy9a03wE1eeSKIm10fNQW7ZZ29bk2yBaY5YpqMS6dZLwX
+21Hx6qnHAgMBAAECggEAPVN5fkcdcQY/zbYXuBKFH4mRY1XJsy+B4tdDZtHduYWI
+mx3L0CpqYzqM3vJNYHVyNu502RQ8A70fyEExOtPUNalupgMErImIyh8MhyfATTgG
+Rmfph3KdHgOw7omC4moQkzQWgxxQVrNJ6y8VxqHSaVEylX3B75wHyQjiQ40dN/Te
+QttxkTTaHYDUNwvaFEX/jsW1EKCcOaqkqCULmMIpQ3Wz8JMaYD6y9xDMbob3SKCx
+SsjqXz/CpcnqdVPr8hUWd3K4M1AG6ZcW4XgjOeaaOJr2N8QUg569AzzHaHzjeHqV
+gEXBChP1qBijiNORgMzvwk30GmCWVwQ2XoHhgeNmKQKBgQDuaNFFbcl0c83kOrAh
+nu5ie+VPBIz/QRoK1o9E0pjqFVSue9jHbM38uOavvnOB/FFUTzuC/+QzMgN8aAuu
+lDDXcmv5eaxuV5BcdPrXnR6/yhzMbgsAq6zV1EMN5iDuwGyo+ZbjVs1g1pTllT71
+rF6ZJStDzz7SxAnu0sc60eAe+QKBgQC2OvdM9L9oaS0eMHvK15eE38P9vFgPz1FV
++Cla6ASj1kAROcZfw8+13xjnTWXgAMy83YSwVs150tlUfmh5u4ozqhWeSnKtMfbm
+u3CpRLTDf5HBCGE7ZCpkEiMNk2kPVa0QjfQSMJzzyz9cyyy1wR10RaTK5rcMl2eC
+hMLNLF1+vwKBgQDKQ7EwNymQG+OU+tmNXJoggb6VIGZC9MeUZF4eZJGJH1m9wqKy
+5rOH8pL8jRbQM/IIFkSGKnU/nfHpLRikH2OklZXXjQvmfXGjjzd1j/6TdnSiV8YL
+5pp2u2O8Of68sBI/9ai27WDHBKZEdS96HKgRQ8CGAiDpjZpjvP18AK0leQKBgHNJ
+CK0J5ZHzgBSqTZa9H+FzAvYiUn/mA6nkrp0RTeYspCmBqItrQJvpwUKLx5iYSO5v
+IgPBVorspot60TO6PquCvdx/ct85Td8Y1CRyD/3iVd6OI51EOEFI7B4plPybkjp3
+4+IiGRlvCu30p5twyeaGLMQkg8eWfWin/ul4WMnXAoGAeU8NhPQs2A5aCgwyvFiy
+b6kcHjMRGGyc0rUmlID7GJDHoBzVs1oHQKyyrCPCKypvw3ZNzntWASN73imjTyV9
+bT/1ANJYOasdMeMHJxfTFCa0d2HR6JYy01mtiIgx4SN2u6za/H3xEaq96blpK2fV
+TaMgUWVodLXy+lMRbtUQ97M=
+-----END PRIVATE KEY-----"#;
 
     #[test]
     fn gmail_profile_uses_imap_smtp_mail_scope_and_offline_access() {
@@ -609,8 +834,8 @@ mod tests {
             })
             .to_string(),
         );
-        let claims =
-            openid_claims_from_id_token(&format!("header.{payload}.signature")).expect("claims");
+        let claims = insecure_openid_claims_from_id_token(&format!("header.{payload}.signature"))
+            .expect("claims");
 
         assert_eq!(claims.email.as_deref(), Some("user@example.test"));
         assert_eq!(claims.email_verified, Some(true));
@@ -650,6 +875,54 @@ mod tests {
         assert!(matches!(error, GatewayError::Rejected(message) if message.contains("audience")));
     }
 
+    #[test]
+    fn openid_claim_decoding_verifies_signature_with_matching_jwk() {
+        let (id_token, jwks) = signed_id_token("test-key", "expected-nonce");
+
+        let claims = decode_verified_openid_claims(
+            &ProviderHint::Gmail,
+            "client-id",
+            &id_token,
+            "test-key",
+            &jwks,
+            "expected-nonce",
+            OffsetDateTime::parse("2026-04-27T10:00:00Z", &Rfc3339).expect("now"),
+        )
+        .expect("signed token should verify");
+
+        assert_eq!(claims.email.as_deref(), Some("user@example.test"));
+    }
+
+    #[test]
+    fn openid_claim_decoding_rejects_tampered_signature() {
+        let (mut id_token, jwks) = signed_id_token("test-key", "expected-nonce");
+        id_token.push('a');
+
+        let error = decode_verified_openid_claims(
+            &ProviderHint::Gmail,
+            "client-id",
+            &id_token,
+            "test-key",
+            &jwks,
+            "expected-nonce",
+            OffsetDateTime::parse("2026-04-27T10:00:00Z", &Rfc3339).expect("now"),
+        )
+        .expect_err("tampered signature should be rejected");
+
+        assert!(matches!(error, GatewayError::Rejected(message) if message.contains("invalid")));
+    }
+
+    #[test]
+    fn jwks_cache_duration_uses_cache_control_max_age() {
+        let mut headers = oauth2::http::HeaderMap::new();
+        headers.insert(
+            oauth2::http::header::CACHE_CONTROL,
+            oauth2::http::HeaderValue::from_static("public, max-age=120"),
+        );
+
+        assert_eq!(jwks_cache_duration(&headers), Duration::seconds(120));
+    }
+
     #[tokio::test]
     async fn flow_store_removes_pending_state_once() {
         let store = OAuthFlowStore::default();
@@ -667,5 +940,28 @@ mod tests {
 
         assert!(store.remove("state").await.is_some());
         assert!(store.remove("state").await.is_none());
+    }
+
+    fn signed_id_token(kid: &str, nonce: &str) -> (String, JwkSet) {
+        let encoding_key =
+            EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY.as_bytes()).expect("RSA key");
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(kid.to_string());
+        let token = encode(
+            &header,
+            &serde_json::json!({
+                "aud": "client-id",
+                "email": "user@example.test",
+                "email_verified": true,
+                "exp": 2000000000,
+                "iss": "https://accounts.google.com",
+                "nonce": nonce,
+            }),
+            &encoding_key,
+        )
+        .expect("signed token");
+        let mut jwk = Jwk::from_encoding_key(&encoding_key, Algorithm::RS256).expect("jwk");
+        jwk.common.key_id = Some(kid.to_string());
+        (token, JwkSet { keys: vec![jwk] })
     }
 }
