@@ -200,6 +200,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             "/accounts/{account_id}/oauth/start",
             post(api::start_account_oauth),
         )
+        .route("/oauth/start", post(api::start_provider_oauth))
         .route("/oauth/callback", get(api::complete_account_oauth))
         .route("/accounts/{account_id}/enable", post(api::enable_account))
         .route("/accounts/{account_id}/disable", post(api::disable_account))

@@ -11,19 +11,20 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
-    AccountOverview, AccountSettings, AccountTransportOverview, AddToMailboxCommand, AppSettings,
-    AutomationAction, AutomationRule, CachedSenderAddress, CommandResult, ConversationCursor,
-    ConversationId, ConversationPage, ConversationSortField, ConversationSummary, ConversationView,
-    DomainEvent, EventFilter, GatewayError, Identity, ImapTransportSettings, MailboxId,
-    MailboxSummary, MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage,
-    MessageSortField, MessageSummary, ProviderAuthKind, ProviderHint, Recipient,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
-    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, SetKeywordsCommand,
-    SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition, SmartMailboxField,
-    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary,
-    SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    AccountOverview, AccountSettings, AccountTransportOverview, AccountTransportSettings,
+    AddToMailboxCommand, AppSettings, AutomationAction, AutomationRule, CachedSenderAddress,
+    CommandResult, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
+    ImapTransportSettings, MailboxId, MailboxSummary, MessageAttachment, MessageCursor,
+    MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, ProviderAuthKind,
+    ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest, ServiceError,
+    SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition,
+    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId,
+    SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
+    TransportSecurity, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,7 +32,9 @@ use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tracing::warn;
 
-use crate::oauth::{OAuthProviderProfile, OAuthTokenService, PendingOAuthFlow};
+use crate::oauth::{
+    OAuthExchangeResult, OAuthProviderProfile, OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
+};
 use crate::{sanitize, AppState};
 
 mod account_support;
@@ -257,6 +260,17 @@ pub struct SecretWriteRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOAuthRequest {
+    pub client_id: String,
+    pub redirect_uri: String,
+}
+
+/// Request body for `POST /v1/oauth/start`.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartProviderOAuthRequest {
+    pub provider: ProviderHint,
     pub client_id: String,
     pub redirect_uri: String,
 }
@@ -761,6 +775,51 @@ pub async fn verify_account(
     }))
 }
 
+/// POST /v1/oauth/start
+///
+/// Creates a backend-held PKCE authorization session for provider-first setup.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn start_provider_oauth(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StartProviderOAuthRequest>,
+) -> Result<Json<StartOAuthResponse>, ApiError> {
+    let profile = OAuthProviderProfile::for_provider(&request.provider).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_provider",
+            "provider does not support built-in OAuth",
+        )
+    })?;
+    let (client_id, redirect_uri) =
+        validate_oauth_start_request(request.client_id.as_str(), request.redirect_uri.as_str())?;
+
+    let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
+    let session = oauth
+        .authorization_session(&profile, client_id, redirect_uri)
+        .map_err(ServiceError::from)?;
+    state
+        .oauth_flows
+        .insert(
+            session.state.clone(),
+            PendingOAuthFlow {
+                account_id: None,
+                profile,
+                client_id: client_id.to_string(),
+                redirect_uri: redirect_uri.to_string(),
+                pkce_verifier: session.pkce_verifier,
+                nonce: session.nonce,
+            },
+        )
+        .await;
+
+    Ok(Json(StartOAuthResponse {
+        authorization_url: session.authorization_url,
+        state: session.state,
+        redirect_uri: session.redirect_uri,
+    }))
+}
+
 /// POST /v1/accounts/{account_id}/oauth/start
 ///
 /// Creates a backend-held PKCE authorization session for an existing account.
@@ -785,22 +844,8 @@ pub async fn start_account_oauth(
                 "account provider does not support built-in OAuth",
             )
         })?;
-    let client_id = request.client_id.trim();
-    if client_id.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_account",
-            "clientId is required",
-        ));
-    }
-    let redirect_uri = request.redirect_uri.trim();
-    if redirect_uri.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_account",
-            "redirectUri is required",
-        ));
-    }
+    let (client_id, redirect_uri) =
+        validate_oauth_start_request(request.client_id.as_str(), request.redirect_uri.as_str())?;
 
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
     let session = oauth
@@ -811,11 +856,12 @@ pub async fn start_account_oauth(
         .insert(
             session.state.clone(),
             PendingOAuthFlow {
-                account_id,
+                account_id: Some(account_id),
                 profile,
                 client_id: client_id.to_string(),
                 redirect_uri: redirect_uri.to_string(),
                 pkce_verifier: session.pkce_verifier,
+                nonce: session.nonce,
             },
         )
         .await;
@@ -829,8 +875,9 @@ pub async fn start_account_oauth(
 
 /// GET /v1/oauth/callback
 ///
-/// Exchanges a provider authorization code for a token set and stores it as the
-/// existing account's managed OS secret.
+/// Exchanges a provider authorization code for a token set. Provider-first
+/// flows create an account from the OIDC identity; existing-account flows
+/// store the token set as the account's managed OS secret.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
 pub async fn complete_account_oauth(
@@ -868,28 +915,181 @@ pub async fn complete_account_oauth(
             )
         })?;
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
-    let token_set = oauth
+    let exchange = oauth
         .exchange_authorization_code(
             &flow.profile,
             &flow.client_id,
             &flow.redirect_uri,
             code,
             &flow.pkce_verifier,
+            &flow.nonce,
             time::OffsetDateTime::now_utc(),
         )
         .await
         .map_err(ServiceError::from)?;
-    persist_oauth_token_set(&state, &flow.account_id, token_set).await?;
+    match flow.account_id {
+        Some(account_id) => {
+            persist_oauth_token_set(&state, &account_id, exchange.token_set).await?;
+        }
+        None => {
+            create_oauth_account_from_exchange(&state, &flow.profile, exchange).await?;
+        }
+    }
 
     Ok(Html(
         "<!doctype html><meta charset=\"utf-8\"><title>Posthaste OAuth</title><p>Authentication complete. You can return to Posthaste.</p>".to_string(),
     ))
 }
 
+fn validate_oauth_start_request<'a>(
+    client_id: &'a str,
+    redirect_uri: &'a str,
+) -> Result<(&'a str, &'a str), ApiError> {
+    let client_id = client_id.trim();
+    if client_id.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_oauth_request",
+            "clientId is required",
+        ));
+    }
+    let redirect_uri = redirect_uri.trim();
+    if redirect_uri.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_oauth_request",
+            "redirectUri is required",
+        ));
+    }
+    Ok((client_id, redirect_uri))
+}
+
+async fn create_oauth_account_from_exchange(
+    state: &Arc<AppState>,
+    profile: &OAuthProviderProfile,
+    exchange: OAuthExchangeResult,
+) -> Result<AccountId, ApiError> {
+    let identity_email = exchange.identity_email.trim().to_string();
+    let email_patterns = vec![identity_email.clone()];
+    let name = identity_email.clone();
+    let seed = generate_account_id_seed(&name, &email_patterns);
+    let mut account_id = AccountId::from(seed.as_str());
+    let mut suffix = 2;
+    while state
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
+        .is_some()
+    {
+        account_id = AccountId::from(format!("{seed}-{suffix}"));
+        suffix += 1;
+    }
+
+    let secret_ref = account_secret_ref(&account_id);
+    let timestamp = domain_now_iso8601().map_err(internal_error)?;
+    let account = oauth_account_settings(
+        account_id.clone(),
+        profile.provider.clone(),
+        name,
+        identity_email,
+        email_patterns,
+        secret_ref.clone(),
+        timestamp,
+    )?;
+    let encoded = exchange.token_set.encode().map_err(ServiceError::from)?;
+    state
+        .secret_store
+        .save(&secret_ref, &encoded)
+        .map_err(ServiceError::from)
+        .map_err(ApiError::from)?;
+
+    if let Err(error) = validate_account_settings(&account) {
+        delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
+        return Err(error);
+    }
+    if let Err(error) = state.service.save_source(&account) {
+        delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
+        return Err(ApiError::from_service_error(error));
+    }
+
+    state.supervisor.start_account(&account).await;
+    append_and_publish_account_event(state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
+        .map_err(store_error_to_api)?;
+    Ok(account_id)
+}
+
+fn oauth_account_settings(
+    account_id: AccountId,
+    provider: ProviderHint,
+    name: String,
+    identity_email: String,
+    email_patterns: Vec<String>,
+    secret_ref: SecretRef,
+    timestamp: String,
+) -> Result<AccountSettings, ApiError> {
+    let (imap, smtp) = oauth_provider_mail_transport(&provider)?;
+    Ok(AccountSettings {
+        id: account_id,
+        name,
+        full_name: None,
+        email_patterns,
+        driver: AccountDriver::ImapSmtp,
+        enabled: true,
+        appearance: None,
+        transport: AccountTransportSettings {
+            provider,
+            auth: ProviderAuthKind::OAuth2,
+            base_url: None,
+            username: Some(identity_email),
+            secret_ref: Some(secret_ref),
+            imap: Some(imap),
+            smtp: Some(smtp),
+        },
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+fn oauth_provider_mail_transport(
+    provider: &ProviderHint,
+) -> Result<(ImapTransportSettings, SmtpTransportSettings), ApiError> {
+    match provider {
+        ProviderHint::Gmail => Ok((
+            ImapTransportSettings {
+                host: "imap.gmail.com".to_string(),
+                port: 993,
+                security: TransportSecurity::Tls,
+            },
+            SmtpTransportSettings {
+                host: "smtp.gmail.com".to_string(),
+                port: 587,
+                security: TransportSecurity::StartTls,
+            },
+        )),
+        ProviderHint::Outlook => Ok((
+            ImapTransportSettings {
+                host: "outlook.office365.com".to_string(),
+                port: 993,
+                security: TransportSecurity::Tls,
+            },
+            SmtpTransportSettings {
+                host: "smtp.office365.com".to_string(),
+                port: 587,
+                security: TransportSecurity::StartTls,
+            },
+        )),
+        ProviderHint::Generic | ProviderHint::Icloud => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_provider",
+            "provider does not support built-in OAuth account creation",
+        )),
+    }
+}
+
 async fn persist_oauth_token_set(
     state: &Arc<AppState>,
     account_id: &AccountId,
-    token_set: crate::oauth::OAuthTokenSet,
+    token_set: OAuthTokenSet,
 ) -> Result<(), ApiError> {
     let mut account = state
         .service
@@ -2444,6 +2644,63 @@ mod tests {
                 color_hue: 245,
             }
         );
+    }
+
+    #[test]
+    fn provider_oauth_account_uses_identity_for_username_and_sender_address() {
+        let account = match oauth_account_settings(
+            AccountId::from("user-example-com"),
+            ProviderHint::Gmail,
+            "user@example.com".to_string(),
+            "user@example.com".to_string(),
+            vec!["user@example.com".to_string()],
+            SecretRef {
+                kind: SecretKind::Os,
+                key: "account:user-example-com".to_string(),
+            },
+            "2026-04-27T10:00:00Z".to_string(),
+        ) {
+            Ok(account) => account,
+            Err(error) => panic!(
+                "OAuth account settings should build, got {}",
+                error.into_response().status()
+            ),
+        };
+
+        assert_eq!(account.driver, AccountDriver::ImapSmtp);
+        assert_eq!(account.transport.auth, ProviderAuthKind::OAuth2);
+        assert_eq!(
+            account.transport.username.as_deref(),
+            Some("user@example.com")
+        );
+        assert_eq!(account.email_patterns, vec!["user@example.com"]);
+        assert!(validate_account_settings(&account).is_ok());
+    }
+
+    #[test]
+    fn provider_oauth_account_sets_known_mail_endpoints() {
+        let (gmail_imap, gmail_smtp) = match oauth_provider_mail_transport(&ProviderHint::Gmail) {
+            Ok(transport) => transport,
+            Err(error) => panic!(
+                "Gmail transport should build, got {}",
+                error.into_response().status()
+            ),
+        };
+        let (outlook_imap, outlook_smtp) =
+            match oauth_provider_mail_transport(&ProviderHint::Outlook) {
+                Ok(transport) => transport,
+                Err(error) => panic!(
+                    "Outlook transport should build, got {}",
+                    error.into_response().status()
+                ),
+            };
+
+        assert_eq!(gmail_imap.host, "imap.gmail.com");
+        assert_eq!(gmail_imap.security, TransportSecurity::Tls);
+        assert_eq!(gmail_smtp.host, "smtp.gmail.com");
+        assert_eq!(gmail_smtp.security, TransportSecurity::StartTls);
+        assert_eq!(outlook_imap.host, "outlook.office365.com");
+        assert_eq!(outlook_smtp.host, "smtp.office365.com");
     }
 
     fn imap_smtp_account(username: &str, email_patterns: Vec<&str>) -> AccountSettings {

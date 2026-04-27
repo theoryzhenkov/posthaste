@@ -38,6 +38,7 @@ In browser-localhost mode, `posthaste serve` serves the built React frontend on 
 | PATCH | `/accounts/{account_id}` | `patch_account` | `PatchAccountRequest` | `AccountOverview` |
 | DELETE | `/accounts/{account_id}` | `delete_account` | -- | `OkResponse` |
 | POST | `/accounts/{account_id}/verify` | `verify_account` | -- | `VerificationResponse` |
+| POST | `/oauth/start` | `start_provider_oauth` | `StartProviderOAuthRequest` | `StartOAuthResponse` |
 | POST | `/accounts/{account_id}/enable` | `enable_account` | -- | `OkResponse` |
 | POST | `/accounts/{account_id}/disable` | `disable_account` | -- | `OkResponse` |
 | POST | `/accounts/{account_id}/logo` | `upload_account_logo` | raw image bytes | `AccountOverview` |
@@ -189,7 +190,7 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 **Verify**: `POST /accounts/{id}/verify` attempts provider connection setup and returns whether the connection succeeded, the primary identity email when available, and whether push is supported.
 
-**OAuth**: `POST /accounts/{id}/oauth/start` starts an OAuth authorization-code flow for an existing account whose provider has a built-in profile. The request supplies a public OAuth `clientId` and loopback `redirectUri`; the backend stores the PKCE verifier and returns only the authorization URL, state, and redirect URI. `GET /oauth/callback` validates the one-time state, exchanges the authorization code, stores the token set as the account's OS-keyring secret, switches the account transport to `auth: oauth2`, restarts the supervisor runtime, and emits an `account.updated` event.
+**OAuth**: `POST /oauth/start` starts provider-first OAuth setup for a built-in provider. `POST /accounts/{id}/oauth/start` starts the same authorization-code flow for an existing account whose provider has a built-in profile. The request supplies a public OAuth `clientId` and loopback `redirectUri`; the backend stores the PKCE verifier and OIDC nonce, then returns only the authorization URL, state, and redirect URI. `GET /oauth/callback` validates the one-time state, exchanges the authorization code, checks the ID-token issuer, audience, expiry, nonce, and verified-email status, stores the token set as an OS-keyring secret, and either creates a new IMAP/SMTP account from the provider identity email or updates the existing account secret, switches the existing transport to `auth: oauth2`, restarts the supervisor runtime, and emits the matching `account.created` or `account.updated` event.
 
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
 
