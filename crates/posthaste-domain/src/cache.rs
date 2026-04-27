@@ -307,6 +307,8 @@ pub struct CacheRescoreCandidate {
     pub value_bytes: u64,
     pub fetch_bytes: u64,
     pub priority: f64,
+    pub message_size: i64,
+    pub has_attachment: bool,
     pub received_at: String,
     pub in_inbox: bool,
     pub unread: bool,
@@ -330,6 +332,9 @@ pub struct CachePriorityUpdate {
     pub message_id: String,
     pub layer: CacheLayer,
     pub object_id: Option<String>,
+    pub fetch_unit: CacheFetchUnit,
+    pub value_bytes: u64,
+    pub fetch_bytes: u64,
     pub priority: f64,
     pub reason: String,
 }
