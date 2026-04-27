@@ -3,14 +3,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    AccountId, AutomationBackfillJob, BlobId, CachedSenderAddress, CommandResult,
-    ConversationCursor, ConversationId, ConversationPage, ConversationSortField, ConversationView,
-    EventFilter, FetchedBody, Identity, ImapMailboxSyncState, ImapMessageLocation, MailboxId,
-    MailboxSummary, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, MutationOutcome, PushTransport, Recipient, ReplaceMailboxesCommand,
-    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncTrigger,
-    TagSummary, ThreadId, ThreadView,
+    AccountId, AutomationBackfillJob, BlobId, CacheCandidate, CacheFetchCandidate, CacheLayer,
+    CacheObjectState, CachedSenderAddress, CommandResult, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
+    ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
+    MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
+    PushTransport, Recipient, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
+    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor,
+    SyncObject, SyncProgress, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -399,6 +399,42 @@ pub trait SyncWriteStore: Send + Sync {
     ) -> Result<CommandResult, StoreError>;
 }
 
+/// Durable optional-content cache ledger boundary.
+pub trait CacheStore: Send + Sync {
+    /// Upsert scored cache candidates derived from synced metadata.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn upsert_cache_candidates(&self, candidates: &[CacheCandidate]) -> Result<(), StoreError>;
+
+    /// Return highest-priority fetch candidates for an account/layer.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn list_cache_fetch_candidates(
+        &self,
+        account_id: &AccountId,
+        layer: CacheLayer,
+        limit: usize,
+    ) -> Result<Vec<CacheFetchCandidate>, StoreError>;
+
+    /// Mark a candidate state transition in the cache ledger.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn mark_cache_object_state(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        layer: CacheLayer,
+        object_id: Option<&str>,
+        state: CacheObjectState,
+        error_code: Option<&str>,
+    ) -> Result<(), StoreError>;
+
+    /// Sum cached optional-content bytes for budget decisions.
+    ///
+    /// @spec docs/L1-sync#local-cache-planning
+    fn cache_used_bytes(&self) -> Result<u64, StoreError>;
+}
+
 /// Local message mutation persistence boundary.
 pub trait MessageCommandStore: Send + Sync {
     /// Apply a keyword mutation locally, updating the sync cursor.
@@ -550,6 +586,7 @@ pub trait MailStore:
     + ImapMessageLocationStore
     + MessageMailboxStore
     + SyncWriteStore
+    + CacheStore
     + MessageCommandStore
     + EventStore
     + SourceProjectionStore
@@ -571,6 +608,7 @@ impl<T> MailStore for T where
         + ImapMessageLocationStore
         + MessageMailboxStore
         + SyncWriteStore
+        + CacheStore
         + MessageCommandStore
         + EventStore
         + SourceProjectionStore

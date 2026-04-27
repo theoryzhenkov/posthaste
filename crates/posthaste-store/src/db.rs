@@ -174,6 +174,24 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 PRIMARY KEY (account_id, normalized_email)
             );
 
+            CREATE TABLE IF NOT EXISTS cache_object (
+                account_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                layer TEXT NOT NULL,
+                object_id TEXT NOT NULL DEFAULT '',
+                fetch_unit TEXT NOT NULL,
+                state TEXT NOT NULL,
+                value_bytes INTEGER NOT NULL DEFAULT 0,
+                fetch_bytes INTEGER NOT NULL DEFAULT 0,
+                priority REAL NOT NULL DEFAULT 0,
+                reason TEXT NOT NULL DEFAULT '',
+                last_scored_at TEXT NOT NULL,
+                last_accessed_at TEXT,
+                fetched_at TEXT,
+                error_code TEXT,
+                PRIMARY KEY (account_id, message_id, layer, object_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
             CREATE INDEX IF NOT EXISTS idx_message_account_received
@@ -204,6 +222,10 @@ pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
                 ON automation_backfill_job (account_id, status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_sender_address_cache_recent
                 ON sender_address_cache (last_used_at DESC, account_id);
+            CREATE INDEX IF NOT EXISTS idx_cache_fetch_candidates
+                ON cache_object (account_id, state, layer, priority DESC);
+            CREATE INDEX IF NOT EXISTS idx_cache_cached_bytes
+                ON cache_object (state, fetch_bytes);
             ",
         )
         .map_err(sql_to_store_error)?;

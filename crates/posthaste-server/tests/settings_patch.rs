@@ -170,6 +170,7 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
             automation_drafts: Vec::new(),
+            ..Default::default()
         })
         .expect("settings should save");
 
@@ -216,6 +217,7 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: vec![source_rule("primary")],
             automation_drafts: Vec::new(),
+            ..Default::default()
         })
         .expect("settings should save");
 
@@ -252,6 +254,7 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
             automation_drafts: Vec::new(),
+            ..Default::default()
         })
         .expect("settings should save");
     let mut draft = source_rule("primary");
@@ -323,6 +326,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
             automation_drafts: Vec::new(),
+            ..Default::default()
         })
         .expect("settings should save");
     let mut invalid_rule = source_rule("primary");
@@ -350,6 +354,7 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
             default_account_id: Some(AccountId::from("primary")),
             automation_rules: Vec::new(),
             automation_drafts: Vec::new(),
+            ..Default::default()
         }
     );
     let app_toml = harness.app_toml();

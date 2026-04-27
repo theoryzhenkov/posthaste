@@ -64,6 +64,7 @@ impl TomlConfigRepository {
             draft_automations: Vec::new(),
             daemon: Default::default(),
             logging: Default::default(),
+            cache: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;
 

@@ -1784,6 +1784,40 @@ mod tests {
         }
     }
 
+    impl crate::CacheStore for TestStore {
+        fn upsert_cache_candidates(
+            &self,
+            _candidates: &[crate::CacheCandidate],
+        ) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn list_cache_fetch_candidates(
+            &self,
+            _account_id: &AccountId,
+            _layer: crate::CacheLayer,
+            _limit: usize,
+        ) -> Result<Vec<crate::CacheFetchCandidate>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn mark_cache_object_state(
+            &self,
+            _account_id: &AccountId,
+            _message_id: &MessageId,
+            _layer: crate::CacheLayer,
+            _object_id: Option<&str>,
+            _state: crate::CacheObjectState,
+            _error_code: Option<&str>,
+        ) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn cache_used_bytes(&self) -> Result<u64, StoreError> {
+            Ok(0)
+        }
+    }
+
     impl MessageCommandStore for TestStore {
         fn set_keywords(
             &self,
@@ -2333,6 +2367,7 @@ mod tests {
                 default_account_id: None,
                 automation_rules: vec![sample_automation_rule()],
                 automation_drafts: Vec::new(),
+                ..Default::default()
             }),
             ..Default::default()
         });
@@ -2400,6 +2435,7 @@ mod tests {
                 default_account_id: None,
                 automation_rules: vec![sample_automation_rule()],
                 automation_drafts: Vec::new(),
+                ..Default::default()
             }),
             ..Default::default()
         });
@@ -2510,6 +2546,7 @@ mod tests {
                 default_account_id: Some(account.id.clone()),
                 automation_rules: Vec::new(),
                 automation_drafts: Vec::new(),
+                ..Default::default()
             }),
             ..Default::default()
         });

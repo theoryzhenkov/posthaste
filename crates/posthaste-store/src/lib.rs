@@ -1,3 +1,4 @@
+mod cache;
 /// SQLite-backed `MailStore` implementation: sync batch writes, lazy body
 /// fetching, conversation projections, smart mailbox queries, and event log.
 ///
@@ -17,7 +18,8 @@ use std::time::Instant;
 use hex::encode as hex_encode;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, synthesize_plain_text_raw_mime, AccountId,
-    AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore,
+    AutomationBackfillJob, AutomationBackfillJobStatus, AutomationBackfillStore, CacheCandidate,
+    CacheFetchCandidate, CacheFetchUnit, CacheLayer, CacheObjectState, CacheStore,
     CachedSenderAddress, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationReadStore, ConversationSortField, ConversationSummary, ConversationView,
     DomainEvent, EventFilter, EventStore, FetchedBody, ImapMailboxSyncState, ImapMessageLocation,
@@ -757,6 +759,11 @@ impl SourceDataStore for DatabaseStore {
             .map_err(sql_to_store_error)?;
             tx.execute(
                 "DELETE FROM sender_address_cache WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
+                "DELETE FROM cache_object WHERE account_id = ?1",
                 params![account_id.as_str()],
             )
             .map_err(sql_to_store_error)?;
