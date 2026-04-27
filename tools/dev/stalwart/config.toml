@@ -17,6 +17,16 @@ bind = "%{env:POSTHASTE_STALWART_IMAP_BIND}%"
 protocol = "smtp"
 bind = "%{env:POSTHASTE_STALWART_SMTP_BIND}%"
 
+[session.auth]
+mechanisms = [{ if = "listener = 'smtp'", then = "[plain, login]" }, { else = false }]
+require = [{ if = "listener = 'smtp'", then = true }, { else = false }]
+allow-plain-text = true
+must-match-sender = true
+
+[session.auth.errors]
+total = 3
+wait = "5s"
+
 [storage]
 data = "rocksdb"
 fts = "rocksdb"
