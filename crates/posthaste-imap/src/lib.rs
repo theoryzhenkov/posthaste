@@ -13,6 +13,7 @@ mod discovery;
 mod error;
 mod fetch;
 mod gateway;
+mod idle;
 mod mailbox;
 mod message;
 mod mutation;
@@ -36,6 +37,7 @@ pub use fetch::{
     ImapChangedSinceSnapshot, ImapMailboxHeaderSnapshot, ImapMailboxUidDeltaSnapshot,
 };
 pub use gateway::LiveImapSmtpGateway;
+pub use idle::imap_idle_event_stream;
 pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
 pub use message::{
     imap_flag_keywords, imap_header_message_record, ImapFetchedHeader, ImapMappedHeader,

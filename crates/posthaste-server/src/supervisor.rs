@@ -12,7 +12,8 @@ use posthaste_domain::{
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
-    ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig,
+    imap_idle_event_stream, ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway,
+    SmtpConnectionConfig,
 };
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
@@ -621,18 +622,50 @@ async fn build_connection(
                 auth = ?imap_config.auth,
                 "connecting account gateway"
             );
-            let gateway =
-                LiveImapSmtpGateway::connect(imap_config, smtp_config, Some(shared.store.clone()))
-                    .await
-                    .map_err(imap_adapter_error)?;
+            let gateway = LiveImapSmtpGateway::connect(
+                imap_config.clone(),
+                smtp_config,
+                Some(shared.store.clone()),
+            )
+            .await
+            .map_err(imap_adapter_error)?;
+            let idle_mailbox_name = gateway
+                .discovery()
+                .mailboxes
+                .iter()
+                .find(|mailbox| mailbox.selectable && mailbox.role == Some("inbox"))
+                .or_else(|| {
+                    gateway
+                        .discovery()
+                        .mailboxes
+                        .iter()
+                        .find(|mailbox| mailbox.selectable)
+                })
+                .map(|mailbox| mailbox.name.clone());
             info!(
                 account_id = %account.id,
                 mailbox_count = gateway.discovery().mailboxes.len(),
                 "IMAP discovery complete"
             );
+            let push_events = if gateway.discovery().capabilities.supports_idle() {
+                idle_mailbox_name.map(|mailbox_name| {
+                    info!(
+                        account_id = %account.id,
+                        mailbox_name,
+                        "IMAP IDLE push hint enabled"
+                    );
+                    imap_idle_event_stream(account.id.clone(), imap_config, mailbox_name)
+                })
+            } else {
+                info!(
+                    account_id = %account.id,
+                    "IMAP IDLE unavailable; using periodic poll only"
+                );
+                None
+            };
             Ok(AccountConnection {
                 gateway: Arc::new(gateway),
-                push_events: None,
+                push_events,
             })
         }
     }

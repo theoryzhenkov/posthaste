@@ -3384,6 +3384,7 @@ dependencies = [
 name = "posthaste-imap"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "async-trait",
  "hex",
  "imap-client",
