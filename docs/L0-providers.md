@@ -67,11 +67,13 @@ for a mailbox is:
 
 The live implementation lives in the `posthaste-imap` adapter crate. Its first
 runtime boundary performs connection, authentication, capability discovery, and
-mailbox listing. Discovery results are synced as an authoritative mailbox
-snapshot. Message sync is mailbox-scoped: only mailboxes whose local state is
-missing or invalidated are fetched as full metadata snapshots, while mailboxes
-with valid UID state use UID-list reconciliation and fetch headers only for UIDs
-above the stored watermark. Lazy body fetches use stored IMAP locations and
+mailbox listing. Discovery results are cached on the live gateway and synced as
+an authoritative mailbox snapshot. Message sync is mailbox-scoped: only
+mailboxes whose local state is missing or invalidated are fetched as full
+metadata snapshots, while mailboxes with valid UID state use UID-list
+reconciliation and fetch headers only for UIDs above the stored watermark. A
+single authenticated IMAP client is reused across metadata planning and fetch
+inside each sync cycle. Lazy body fetches use stored IMAP locations and
 `BODY.PEEK[]`. Implemented mutations use conservative IMAP command paths, and
 remaining unsupported command surfaces are rejected explicitly.
 
@@ -86,14 +88,18 @@ chunked `UID FETCH` for `FLAGS`, `BODYSTRUCTURE`, `RFC822.HEADER`,
 `RFC822.SIZE`, `UID`, and, when CONDSTORE/QRESYNC is advertised, `MODSEQ`.
 `BODYSTRUCTURE` is used only for message-list attachment presence; body text,
 HTML, raw MIME, and attachment detail metadata remain lazy. Subsequent syncs
-with valid per-mailbox `UIDVALIDITY` state reconcile current mailbox UID
-descriptors against stored `ImapMessageLocation` rows, upsert current metadata,
-and delete local messages whose stored mailbox UID is no longer returned by the
-server. UID-watermark sync uses `UID SEARCH ALL` for the current UID listing and
-client-side filtering for new UIDs because IMAP UID ranges ending in `*` can
-match the highest existing UID even when the lower bound is above all assigned
-UIDs. QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for efficient flag and
-expunge reconciliation.
+with valid per-mailbox `UIDVALIDITY` state first use `STATUS` as a conservative
+skip preflight when the server does not expose CONDSTORE/QRESYNC. A mailbox is
+skipped only when `UIDVALIDITY` matches, `MESSAGES` matches the local
+`ImapMessageLocation` count, and `UIDNEXT` has not advanced past the stored
+highest UID watermark. If any check fails, current mailbox UID descriptors are
+reconciled against stored `ImapMessageLocation` rows, current metadata is
+upserted, and local messages whose stored mailbox UID is no longer returned by
+the server are deleted. UID-watermark sync uses `UID SEARCH ALL` for the current
+UID listing and client-side filtering for new UIDs because IMAP UID ranges
+ending in `*` can match the highest existing UID even when the lower bound is
+above all assigned UIDs. QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for
+efficient flag and expunge reconciliation.
 
 The driver prefers IMAP extensions when advertised:
 
@@ -103,10 +109,13 @@ The driver prefers IMAP extensions when advertised:
 - MOVE and UIDPLUS for better mutation reconciliation
 
 Every extension has a correctness-preserving fallback. IDLE is only a hint; the
-periodic poll remains authoritative. If delta state cannot be trusted, the
-driver performs a full snapshot for that mailbox and deletes stale local rows by
-stored IMAP location. Account-wide message replacement is reserved for adapter
-instances that lack access to the local store.
+runtime keeps one selected-mailbox IDLE watcher when advertised, prefers INBOX
+for that watcher, and treats IDLE returns as sync triggers. The periodic poll
+remains authoritative for missed events and unobserved mailboxes. If delta state
+cannot be trusted, the driver performs a full snapshot for that mailbox and
+deletes stale local rows by stored IMAP location. Account-wide message
+replacement is reserved for adapter instances that lack access to the local
+store.
 
 The IMAP sync planner chooses the strongest safe mailbox strategy from server
 capabilities and stored cursor state:
@@ -144,6 +153,8 @@ source informs the implementation.
 | Capability normalization | `posthaste_domain::ImapCapabilities`, `normalize_imap_capabilities` | RFC 9051 capabilities and IMAP4rev2 baseline: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-types` capability variants: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
 | Mailbox LIST and roles | `map_imap_mailbox`, `imap_special_use_role` | RFC 6154 SPECIAL-USE attributes: <https://www.rfc-editor.org/rfc/rfc6154.html>; `imap-client` LIST task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/list.rs> |
 | SELECT/EXAMINE state | `examine_imap_mailbox`, `ExamineStateTask`, `selected_mailbox_from_examine`, `ImapSelectedMailbox` | RFC 9051 SELECT/EXAMINE response codes including `UIDVALIDITY` and `UIDNEXT`: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 requires CONDSTORE servers to return `HIGHESTMODSEQ` for successful SELECT/EXAMINE unless `NOMODSEQ` applies: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` SELECT task provides the base response handling but does not expose `HIGHESTMODSEQ`, so Posthaste adds a local EXAMINE task over `imap-types` response codes: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/select.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
+| No-op mailbox preflight | `status_imap_mailbox`, `StatusTask`, `mailbox_status_proves_unchanged` | RFC 9051 STATUS data items `MESSAGES`, `UIDNEXT`, and `UIDVALIDITY`, including the warning that clients should not assume many consecutive STATUS commands are fast: <https://datatracker.ietf.org/doc/html/rfc9051#section-6.3.11> |
+| IMAP push hint | `imap_idle_event_stream`, supervisor IMAP push wiring | RFC 2177 IDLE capability use, DONE termination, unsolicited EXISTS/EXPUNGE, and 29-minute reissue guidance: <https://datatracker.ietf.org/doc/html/rfc2177>; RFC 5465 NOTIFY is the broader notification extension but is not assumed by the generic driver: <https://datatracker.ietf.org/doc/html/rfc5465>; Gmail advertises `IDLE` in IMAP CAPABILITY with `X-GM-EXT-1`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
 | Mailbox sync planning and baseline delta reconciliation | `plan_imap_mailbox_sync`, `LiveImapSmtpGateway::sync`, `fetch_mailbox_headers_after_uid`, `imap_delta_sync_batch` | RFC 4549 disconnected-client synchronization uses `UIDVALIDITY`, new UID discovery, and current UID/FLAGS descriptor comparison to remove local cache entries no longer returned by the server: <https://datatracker.ietf.org/doc/html/rfc4549>; RFC 9051 UID semantics and FETCH/SEARCH commands, including the rule that UID ranges with `*` can include the highest UID even if the other endpoint is higher than any assigned UID: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 CONDSTORE/QRESYNC `HIGHESTMODSEQ`, `CHANGEDSINCE`, `ENABLE QRESYNC`, and `VANISHED (EARLIER)` define the stronger MODSEQ delta path and the rule that `VANISHED` is only allowed on `UID FETCH` with `CHANGEDSINCE`: <https://datatracker.ietf.org/doc/html/rfc7162>; ImapFlow exposes QRESYNC/VANISHED and `changedSince`/modseq behavior for this stronger path: <https://imapflow.com/docs/>, <https://imapflow.com/docs/guides/fetching-messages>, <https://imapflow.com/docs/api/imapflow-client/>; node-imap exposes `changedsince`, `modseq`, and `highestmodseq` for CONDSTORE-style sync: <https://github.com/mscdex/node-imap> |
 | Message identity and UID reuse | `imap_message_id`, `ImapMessageLocation` | RFC 9051 UID and UIDVALIDITY semantics: <https://www.rfc-editor.org/rfc/rfc9051.html> |
 | Gmail identity/labels | `ImapProviderFeatures`, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
