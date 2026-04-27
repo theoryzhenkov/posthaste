@@ -351,32 +351,13 @@ impl CacheStore for DatabaseStore {
                     ],
                 )
                 .map_err(sql_to_store_error)?;
-                let cache_object_count: i64 = tx
-                    .query_row(
-                        "SELECT COUNT(*)
-                         FROM cache_object
-                         WHERE account_id = ?1 AND message_id = ?2",
-                        params![update.account_id.as_str(), update.message_id.as_str()],
-                        |row| row.get(0),
-                    )
-                    .map_err(sql_to_store_error)?;
-                if cache_object_count == 0 {
-                    continue;
-                }
-                tx.execute(
-                    "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
-                         VALUES (?1, ?2, ?3, ?4)
-                         ON CONFLICT(account_id, message_id) DO UPDATE SET
-                            reason = excluded.reason,
-                            queued_at = excluded.queued_at",
-                    params![
-                        update.account_id.as_str(),
-                        update.message_id.as_str(),
-                        update.reason.as_str(),
-                        now.as_str(),
-                    ],
-                )
-                .map_err(sql_to_store_error)?;
+                ensure_body_cache_object_tx(
+                    tx,
+                    &AccountId::from(update.account_id.as_str()),
+                    &MessageId::from(update.message_id.as_str()),
+                    false,
+                    update.reason.as_str(),
+                )?;
             }
             Ok(())
         })
@@ -863,18 +844,18 @@ mod tests {
     }
 
     #[test]
-    fn signal_updates_without_cache_objects_do_not_block_rescore_queue() -> Result<(), StoreError> {
+    fn signal_updates_materialize_missing_body_cache_objects() -> Result<(), StoreError> {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
-        insert_message_metadata(&store, "already-cached", "2026-04-27T00:00:00Z")?;
+        insert_message_metadata(&store, "missing", "2026-04-27T00:00:00Z")?;
         insert_message_metadata(&store, "wanted", "2026-04-27T00:00:00Z")?;
         store.upsert_cache_candidates(&[candidate("wanted", 0.5, 4096)])?;
 
         store.record_cache_signal_updates(&[
             CacheSignalUpdate {
                 account_id: "primary".to_string(),
-                message_id: "already-cached".to_string(),
+                message_id: "missing".to_string(),
                 reason: "search-visible".to_string(),
                 search: None,
                 thread_activity: None,
@@ -898,8 +879,12 @@ mod tests {
 
         let candidates = store.list_cache_rescore_candidates(&account, 10)?;
 
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].message_id, "wanted");
+        let mut message_ids = candidates
+            .iter()
+            .map(|candidate| candidate.message_id.as_str())
+            .collect::<Vec<_>>();
+        message_ids.sort_unstable();
+        assert_eq!(message_ids, vec!["missing", "wanted"]);
         Ok(())
     }
 }
