@@ -7,6 +7,7 @@
 //! @spec docs/L1-jmap
 //! @spec docs/L0-api
 
+pub mod cache;
 mod config;
 mod imap;
 mod model;
