@@ -1,5 +1,8 @@
 use super::*;
 
+const BODY_CACHE_OBJECT_ID: &str = "";
+const BODY_STRUCTURAL_REPAIR_REASON: &str = "body-structural";
+
 fn cache_object_id_key(object_id: Option<&str>) -> &str {
     object_id.unwrap_or("")
 }
@@ -66,6 +69,145 @@ fn optional_i64_to_u64(value: Option<i64>, column: usize) -> Result<Option<u64>,
             )),
         )
     })
+}
+
+fn body_exists_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<bool, StoreError> {
+    tx.query_row(
+        "SELECT 1 FROM message_body WHERE account_id = ?1 AND message_id = ?2",
+        params![account_id.as_str(), message_id.as_str()],
+        |_row| Ok(()),
+    )
+    .optional()
+    .map_err(sql_to_store_error)
+    .map(|row| row.is_some())
+}
+
+pub(crate) fn ensure_body_cache_object_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+    body_cached_hint: bool,
+    reason: &str,
+) -> Result<(), StoreError> {
+    let now = now_iso8601()?;
+    let body_cached = body_cached_hint || body_exists_tx(tx, account_id, message_id)?;
+    let state = if body_cached {
+        CacheObjectState::Cached
+    } else {
+        CacheObjectState::Wanted
+    };
+    let fetched_at = body_cached.then_some(now.as_str());
+    tx.execute(
+        "INSERT INTO cache_object (
+            account_id, message_id, layer, object_id, fetch_unit, state,
+            value_bytes, fetch_bytes, priority, reason, last_scored_at, fetched_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0, ?7, ?8, ?9)
+         ON CONFLICT(account_id, message_id, layer, object_id) DO UPDATE SET
+            state = CASE
+                WHEN excluded.state = 'cached' THEN 'cached'
+                ELSE cache_object.state
+            END,
+            fetched_at = CASE
+                WHEN excluded.state = 'cached' THEN COALESCE(cache_object.fetched_at, excluded.fetched_at)
+                ELSE cache_object.fetched_at
+            END,
+            error_code = CASE
+                WHEN excluded.state = 'cached' THEN NULL
+                ELSE cache_object.error_code
+            END",
+        params![
+            account_id.as_str(),
+            message_id.as_str(),
+            CacheLayer::Body.as_str(),
+            BODY_CACHE_OBJECT_ID,
+            CacheFetchUnit::BodyOnly.as_str(),
+            state.as_str(),
+            reason,
+            now.as_str(),
+            fetched_at,
+        ],
+    )
+    .map_err(sql_to_store_error)?;
+    tx.execute(
+        "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(account_id, message_id) DO UPDATE SET
+            reason = excluded.reason,
+            queued_at = excluded.queued_at",
+        params![
+            account_id.as_str(),
+            message_id.as_str(),
+            reason,
+            now.as_str(),
+        ],
+    )
+    .map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Result<(), StoreError> {
+    let now = now_iso8601()?;
+    connection
+        .execute(
+            "INSERT INTO cache_rescore_queue (account_id, message_id, reason, queued_at)
+             SELECT m.account_id, m.id, ?1, ?2
+             FROM message m
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM cache_object co
+                WHERE co.account_id = m.account_id
+                  AND co.message_id = m.id
+                  AND co.layer = 'body'
+                  AND co.object_id = ''
+             )
+             ON CONFLICT(account_id, message_id) DO UPDATE SET
+                reason = excluded.reason,
+                queued_at = excluded.queued_at",
+            params![BODY_STRUCTURAL_REPAIR_REASON, now.as_str()],
+        )
+        .map_err(sql_to_store_error)?;
+    let repaired = connection
+        .execute(
+            "INSERT INTO cache_object (
+                account_id, message_id, layer, object_id, fetch_unit, state,
+                value_bytes, fetch_bytes, priority, reason, last_scored_at, fetched_at
+             )
+             SELECT
+                m.account_id,
+                m.id,
+                'body',
+                '',
+                'body_only',
+                CASE WHEN mb.message_id IS NULL THEN 'wanted' ELSE 'cached' END,
+                0,
+                0,
+                0,
+                ?1,
+                ?2,
+                CASE WHEN mb.message_id IS NULL THEN NULL ELSE ?2 END
+             FROM message m
+             LEFT JOIN message_body mb
+               ON mb.account_id = m.account_id
+              AND mb.message_id = m.id
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM cache_object co
+                WHERE co.account_id = m.account_id
+                  AND co.message_id = m.id
+                  AND co.layer = 'body'
+                  AND co.object_id = ''
+             )",
+            params![BODY_STRUCTURAL_REPAIR_REASON, now.as_str()],
+        )
+        .map_err(sql_to_store_error)?;
+    if repaired > 0 {
+        debug!(repaired, "repaired missing structural body cache objects");
+    }
+    Ok(())
 }
 
 impl CacheStore for DatabaseStore {
@@ -226,6 +368,8 @@ impl CacheStore for DatabaseStore {
                     co.value_bytes,
                     co.fetch_bytes,
                     co.priority,
+                    m.size,
+                    m.has_attachment,
                     m.received_at,
                     EXISTS (
                         SELECT 1
@@ -264,9 +408,9 @@ impl CacheStore for DatabaseStore {
         let rows = statement
             .query_map(params![account_id.as_str(), limit as i64], |row| {
                 let object_id: String = row.get(3)?;
-                let search_total_messages = optional_i64_to_u64(row.get(16)?, 16)?;
-                let search_result_count = optional_i64_to_u64(row.get(17)?, 17)?;
-                let search_result_rank = optional_i64_to_u64(row.get(18)?, 18)?;
+                let search_total_messages = optional_i64_to_u64(row.get(18)?, 18)?;
+                let search_result_count = optional_i64_to_u64(row.get(19)?, 19)?;
+                let search_result_rank = optional_i64_to_u64(row.get(20)?, 20)?;
                 let search = match (
                     search_total_messages,
                     search_result_count,
@@ -313,17 +457,19 @@ impl CacheStore for DatabaseStore {
                         )
                     })?,
                     priority: row.get(8)?,
-                    received_at: row.get(9)?,
-                    in_inbox: row.get::<_, i64>(10)? != 0,
-                    unread: row.get::<_, i64>(11)? == 0,
-                    flagged: row.get::<_, i64>(12)? != 0,
-                    thread_activity: row.get(13)?,
-                    sender_affinity: row.get(14)?,
-                    local_behavior: row.get(15)?,
+                    message_size: row.get(9)?,
+                    has_attachment: row.get::<_, i64>(10)? != 0,
+                    received_at: row.get(11)?,
+                    in_inbox: row.get::<_, i64>(12)? != 0,
+                    unread: row.get::<_, i64>(13)? == 0,
+                    flagged: row.get::<_, i64>(14)? != 0,
+                    thread_activity: row.get(15)?,
+                    sender_affinity: row.get(16)?,
+                    local_behavior: row.get(17)?,
                     search,
-                    direct_user_boost: row.get(19)?,
-                    pinned: row.get::<_, i64>(20)? != 0,
-                    signal_reason: row.get(21)?,
+                    direct_user_boost: row.get(21)?,
+                    pinned: row.get::<_, i64>(22)? != 0,
+                    signal_reason: row.get(23)?,
                 })
             })
             .map_err(sql_to_store_error)?;
@@ -340,9 +486,12 @@ impl CacheStore for DatabaseStore {
             for update in updates {
                 tx.execute(
                     "UPDATE cache_object
-                     SET priority = ?5,
-                         reason = ?6,
-                         last_scored_at = ?7,
+                     SET fetch_unit = ?5,
+                         value_bytes = ?6,
+                         fetch_bytes = ?7,
+                         priority = ?8,
+                         reason = ?9,
+                         last_scored_at = ?10,
                          state = CASE
                             WHEN state IN ('cached', 'fetching') THEN state
                             ELSE 'wanted'
@@ -360,6 +509,9 @@ impl CacheStore for DatabaseStore {
                         update.message_id.as_str(),
                         update.layer.as_str(),
                         cache_object_id_key(update.object_id.as_deref()),
+                        update.fetch_unit.as_str(),
+                        u64_to_i64(update.value_bytes)?,
+                        u64_to_i64(update.fetch_bytes)?,
                         update.priority,
                         update.reason.as_str(),
                         now.as_str(),
@@ -391,7 +543,7 @@ impl CacheStore for DatabaseStore {
             .prepare(
                 "SELECT account_id, message_id, layer, object_id, fetch_unit, fetch_bytes, priority
                  FROM cache_object
-                 WHERE account_id = ?1 AND layer = ?2 AND state = 'wanted'
+                 WHERE account_id = ?1 AND layer = ?2 AND state = 'wanted' AND fetch_bytes > 0
                  ORDER BY priority DESC, last_scored_at ASC
                  LIMIT ?3",
             )
@@ -542,6 +694,9 @@ mod tests {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
+        insert_message_metadata(&store, "low", "2026-04-27T00:00:00Z")?;
+        insert_message_metadata(&store, "high", "2026-04-27T00:00:01Z")?;
+        insert_message_metadata(&store, "middle", "2026-04-27T00:00:02Z")?;
         store.upsert_cache_candidates(&[
             candidate("low", 0.5, 100),
             candidate("high", 2.0, 200),
@@ -565,6 +720,8 @@ mod tests {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
+        insert_message_metadata(&store, "one", "2026-04-27T00:00:00Z")?;
+        insert_message_metadata(&store, "two", "2026-04-27T00:00:01Z")?;
         store.upsert_cache_candidates(&[candidate("one", 1.0, 128), candidate("two", 2.0, 256)])?;
 
         store.mark_cache_object_state(
@@ -632,6 +789,7 @@ mod tests {
         let root = temp_root();
         let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
         let account = AccountId::from("primary");
+        insert_message_metadata(&store, "message-1", "2026-04-27T00:00:00Z")?;
         store.upsert_cache_candidates(&[candidate("message-1", 0.5, 4096)])?;
         store.mark_cache_object_state(
             &account,
@@ -647,6 +805,9 @@ mod tests {
             message_id: "message-1".to_string(),
             layer: CacheLayer::Body,
             object_id: None,
+            fetch_unit: CacheFetchUnit::BodyOnly,
+            value_bytes: 4096,
+            fetch_bytes: 4096,
             priority: 2.0,
             reason: "search-visible".to_string(),
         }])?;

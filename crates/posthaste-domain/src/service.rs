@@ -168,11 +168,15 @@ fn nonnegative_message_size(size: i64) -> u64 {
 }
 
 fn estimated_body_bytes(message: &MessageRecord) -> u64 {
-    let metadata_size = nonnegative_message_size(message.size);
+    estimated_body_bytes_from_metadata(message.size, message.has_attachment)
+}
+
+fn estimated_body_bytes_from_metadata(size: i64, has_attachment: bool) -> u64 {
+    let metadata_size = nonnegative_message_size(size);
     if metadata_size == 0 {
         return 64 * 1024;
     }
-    if message.has_attachment {
+    if has_attachment {
         metadata_size.min(256 * 1024).max(16 * 1024)
     } else {
         metadata_size.max(4 * 1024)
@@ -187,9 +191,17 @@ fn body_fetch_unit(account: &AccountSettings) -> CacheFetchUnit {
 }
 
 fn body_fetch_bytes(account: &AccountSettings, message: &MessageRecord) -> u64 {
+    body_fetch_bytes_from_metadata(account, message.size, message.has_attachment)
+}
+
+fn body_fetch_bytes_from_metadata(
+    account: &AccountSettings,
+    size: i64,
+    has_attachment: bool,
+) -> u64 {
     match body_fetch_unit(account) {
-        CacheFetchUnit::RawMessage => nonnegative_message_size(message.size).max(4 * 1024),
-        CacheFetchUnit::BodyOnly => estimated_body_bytes(message),
+        CacheFetchUnit::RawMessage => nonnegative_message_size(size).max(4 * 1024),
+        CacheFetchUnit::BodyOnly => estimated_body_bytes_from_metadata(size, has_attachment),
         CacheFetchUnit::AttachmentBlob => unreachable!("body cache never fetches attachment blobs"),
     }
 }
@@ -198,7 +210,12 @@ fn visible_rank_direct_boost(rank: u64) -> f64 {
     0.8 / ((rank + 1) as f64).sqrt()
 }
 
-fn rescore_candidate_signals(candidate: &CacheRescoreCandidate) -> CacheCandidateSignals {
+fn rescore_candidate_signals(
+    candidate: &CacheRescoreCandidate,
+    fetch_unit: CacheFetchUnit,
+    value_bytes: u64,
+    fetch_bytes: u64,
+) -> CacheCandidateSignals {
     CacheCandidateSignals {
         message: CacheMessageSignals {
             age_days: message_age_days(&candidate.received_at),
@@ -211,9 +228,9 @@ fn rescore_candidate_signals(candidate: &CacheRescoreCandidate) -> CacheCandidat
             search: candidate.search.clone(),
         },
         layer: candidate.layer,
-        fetch_unit: candidate.fetch_unit,
-        value_bytes: candidate.value_bytes,
-        fetch_bytes: candidate.fetch_bytes,
+        fetch_unit,
+        value_bytes,
+        fetch_bytes,
         inline_attachment: false,
         opened_attachment: false,
         direct_user_boost: candidate.direct_user_boost,
@@ -876,16 +893,49 @@ impl MailService {
             return Ok(outcome);
         }
 
+        let account = self.config.get_source(account_id)?;
+        if account.is_none()
+            && candidates
+                .iter()
+                .any(|candidate| candidate.layer == CacheLayer::Body)
+        {
+            return Err(StoreError::NotFound(format!("source:{}", account_id.as_str())).into());
+        }
         let updates = candidates
             .iter()
             .map(|candidate| {
-                let signals = rescore_candidate_signals(candidate);
+                let (fetch_unit, value_bytes, fetch_bytes) = match (&account, candidate.layer) {
+                    (Some(account), CacheLayer::Body) => {
+                        let fetch_unit = body_fetch_unit(account);
+                        (
+                            fetch_unit,
+                            estimated_body_bytes_from_metadata(
+                                candidate.message_size,
+                                candidate.has_attachment,
+                            ),
+                            body_fetch_bytes_from_metadata(
+                                account,
+                                candidate.message_size,
+                                candidate.has_attachment,
+                            ),
+                        )
+                    }
+                    _ => (
+                        candidate.fetch_unit,
+                        candidate.value_bytes,
+                        candidate.fetch_bytes,
+                    ),
+                };
+                let signals =
+                    rescore_candidate_signals(candidate, fetch_unit, value_bytes, fetch_bytes);
                 let score = score_cache_candidate(&signals);
                 trace!(
                     account_id = %account_id,
                     message_id = candidate.message_id.as_str(),
                     layer = candidate.layer.as_str(),
-                    fetch_unit = candidate.fetch_unit.as_str(),
+                    fetch_unit = fetch_unit.as_str(),
+                    value_bytes,
+                    fetch_bytes,
                     old_priority = candidate.priority,
                     new_priority = score.priority,
                     utility = score.utility,
@@ -900,6 +950,9 @@ impl MailService {
                     message_id: candidate.message_id.clone(),
                     layer: candidate.layer,
                     object_id: candidate.object_id.clone(),
+                    fetch_unit,
+                    value_bytes,
+                    fetch_bytes,
                     priority: score.priority,
                     reason: candidate.signal_reason.clone(),
                 }
@@ -2722,6 +2775,8 @@ mod tests {
             value_bytes: 32 * 1024,
             fetch_bytes: 32 * 1024,
             priority: 1.0,
+            message_size: 32 * 1024,
+            has_attachment: false,
             received_at: crate::RFC3339_EPOCH.to_string(),
             in_inbox: true,
             unread: true,
@@ -3098,7 +3153,10 @@ mod tests {
             cache_rescore_candidates: Mutex::new(vec![sample_cache_rescore_candidate("message-1")]),
             ..Default::default()
         });
-        let config = Arc::new(TestConfig::default());
+        let config = Arc::new(TestConfig {
+            sources: vec![sample_source()],
+            ..Default::default()
+        });
         let service = MailService::new(store.clone(), config);
 
         let outcome = service
@@ -3115,6 +3173,42 @@ mod tests {
         assert_eq!(updates[0].message_id, "message-1");
         assert_eq!(updates[0].reason, "search-visible");
         assert!(updates[0].priority > 1.0);
+    }
+
+    // spec: docs/L1-sync#cache-priority-size-aware
+    #[test]
+    fn cache_rescore_batch_rebuilds_imap_body_fetch_cost_from_metadata() {
+        let mut account = sample_source();
+        account.driver = AccountDriver::ImapSmtp;
+        let account_id = account.id.clone();
+        let mut candidate = sample_cache_rescore_candidate("message-1");
+        candidate.fetch_unit = CacheFetchUnit::BodyOnly;
+        candidate.value_bytes = 0;
+        candidate.fetch_bytes = 0;
+        candidate.message_size = 12 * 1024 * 1024;
+        candidate.has_attachment = true;
+        let store = Arc::new(TestStore {
+            cache_rescore_candidates: Mutex::new(vec![candidate]),
+            ..Default::default()
+        });
+        let config = Arc::new(TestConfig {
+            sources: vec![account],
+            ..Default::default()
+        });
+        let service = MailService::new(store.clone(), config);
+
+        let outcome = service
+            .process_cache_rescore_batch(&account_id, 10)
+            .expect("rescore should succeed");
+
+        assert_eq!(outcome.updated, 1);
+        let updates = store
+            .cache_priority_updates
+            .lock()
+            .expect("cache priority updates lock poisoned");
+        assert_eq!(updates[0].fetch_unit, CacheFetchUnit::RawMessage);
+        assert_eq!(updates[0].value_bytes, 256 * 1024);
+        assert_eq!(updates[0].fetch_bytes, 12 * 1024 * 1024);
     }
 
     #[tokio::test]
