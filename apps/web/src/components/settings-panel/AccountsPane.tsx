@@ -3,9 +3,11 @@
  *
  * @spec docs/L1-api#account-crud-lifecycle
  */
-import type { UseMutationResult } from '@tanstack/react-query'
-import { Plus, UserPlus } from 'lucide-react'
-import type { AccountOverview } from '../../api/types'
+import { useMutation, type UseMutationResult } from '@tanstack/react-query'
+import { Cloud, Mail, Plus, Settings2, UserPlus } from 'lucide-react'
+import { useState } from 'react'
+import { buildOAuthRedirectUri, startProviderOAuth } from '../../api/client'
+import type { AccountOverview, ProviderHint } from '../../api/types'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { Button } from '../ui/button'
@@ -57,18 +59,26 @@ export function AccountsPane({
   >
   commandError: string | null
 }) {
+  const [isManualCreate, setIsManualCreate] = useState(false)
+  const handleBackToAccounts = () => {
+    setIsManualCreate(false)
+    onBackToAccounts()
+  }
+
   if (selectedAccountId !== null) {
     return (
       <section className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
         <SettingsPage>
           <SettingsBackButton
             ariaLabel="Back to accounts"
-            onClick={onBackToAccounts}
+            onClick={handleBackToAccounts}
           >
             Accounts
           </SettingsBackButton>
 
-          {selectedAccountId === 'new' || editingAccount ? (
+          {selectedAccountId === 'new' && !isManualCreate ? (
+            <AccountSetupChoice onManual={() => setIsManualCreate(true)} />
+          ) : selectedAccountId === 'new' || editingAccount ? (
             <AccountEditor
               key={editorKey}
               editorTarget={selectedAccountId}
@@ -211,4 +221,119 @@ function AccountsEmptyState({
       }
     />
   )
+}
+
+const providerOAuthClientIds: Partial<Record<ProviderHint, string>> = {
+  gmail: import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? '',
+  outlook: import.meta.env.VITE_MICROSOFT_OAUTH_CLIENT_ID?.trim() ?? '',
+}
+
+function AccountSetupChoice({ onManual }: { onManual: () => void }) {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [startedProvider, setStartedProvider] = useState<ProviderHint | null>(
+    null,
+  )
+  const startOAuthMutation = useMutation({
+    mutationFn: async (provider: ProviderHint) => {
+      const clientId = providerOAuthClientIds[provider]?.trim()
+      if (!clientId) {
+        throw new Error(
+          `${providerLabel(provider)} OAuth client ID is not configured`,
+        )
+      }
+      return startProviderOAuth({
+        provider,
+        clientId,
+        redirectUri: buildOAuthRedirectUri(),
+      })
+    },
+    onSuccess: (session, provider) => {
+      setErrorMessage(null)
+      setStartedProvider(provider)
+      window.open(session.authorizationUrl, '_blank', 'noopener,noreferrer')
+    },
+    onError: (error: Error) => {
+      setStartedProvider(null)
+      setErrorMessage(error.message)
+    },
+  })
+
+  return (
+    <div className="pb-8">
+      <SettingsPageHeader
+        title="New account"
+        description="Choose a provider, or configure the connection manually."
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ProviderButton
+          icon={<Mail size={17} strokeWidth={1.8} />}
+          label="Google"
+          disabled={startOAuthMutation.isPending}
+          onClick={() => startOAuthMutation.mutate('gmail')}
+        />
+        <ProviderButton
+          icon={<Cloud size={17} strokeWidth={1.8} />}
+          label="Outlook"
+          disabled={startOAuthMutation.isPending}
+          onClick={() => startOAuthMutation.mutate('outlook')}
+        />
+        <ProviderButton
+          icon={<Settings2 size={17} strokeWidth={1.8} />}
+          label="Manual"
+          disabled={startOAuthMutation.isPending}
+          onClick={onManual}
+        />
+      </div>
+
+      {startedProvider && (
+        <p className="mt-4 text-[12px] text-muted-foreground">
+          {providerLabel(startedProvider)} authorization opened in your browser.
+        </p>
+      )}
+      {errorMessage && (
+        <p className="mt-4 text-[12px] text-destructive">{errorMessage}</p>
+      )}
+    </div>
+  )
+}
+
+function ProviderButton({
+  icon,
+  label,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={disabled}
+      onClick={onClick}
+      className="h-12 justify-start rounded-md border-border bg-bg-elev px-4 text-[13px]"
+    >
+      <span className="flex size-7 items-center justify-center rounded-md bg-background text-muted-foreground">
+        {icon}
+      </span>
+      {label}
+    </Button>
+  )
+}
+
+function providerLabel(provider: ProviderHint): string {
+  switch (provider) {
+    case 'gmail':
+      return 'Google'
+    case 'outlook':
+      return 'Outlook'
+    case 'icloud':
+      return 'iCloud'
+    case 'generic':
+      return 'Provider'
+  }
 }

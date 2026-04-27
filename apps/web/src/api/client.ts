@@ -32,6 +32,8 @@ import type {
   SidebarResponse,
   SmartMailbox,
   SmartMailboxSummary,
+  StartOAuthResponse,
+  StartProviderOAuthInput,
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
@@ -79,6 +81,11 @@ export function buildMessageAttachmentUrl(
 
 export function buildAccountLogoUrl(imageId: string): string {
   return `${BASE_URL}/account-assets/logos/${encodeURIComponent(imageId)}`
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export function buildOAuthRedirectUri(): string {
+  return `${BASE_URL}/oauth/callback`
 }
 
 /** Parse a non-OK response into a structured {@link ApiError}. */
@@ -201,6 +208,13 @@ export async function verifyAccount(
   return request<VerificationResponse>(`/accounts/${accountId}/verify`, {
     method: 'POST',
   })
+}
+
+/** @spec docs/L1-api#account-crud-lifecycle */
+export async function startProviderOAuth(
+  input: StartProviderOAuthInput,
+): Promise<StartOAuthResponse> {
+  return jsonRequest<StartOAuthResponse>('/oauth/start', 'POST', input)
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
