@@ -544,9 +544,8 @@ async fn build_connection(
             let imap_config =
                 ImapConnectionConfig::from_account_transport(&account.transport, secret.clone())
                     .map_err(imap_adapter_error)?;
-            let smtp_config =
-                SmtpConnectionConfig::from_account_transport(&account.transport, secret)
-                    .map_err(imap_adapter_error)?;
+            let smtp_config = SmtpConnectionConfig::from_account_settings(account, secret)
+                .map_err(imap_adapter_error)?;
             let gateway =
                 LiveImapSmtpGateway::connect(imap_config, smtp_config, Some(shared.store.clone()))
                     .await
@@ -569,6 +568,7 @@ fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         ImapAdapterError::MissingTransport
         | ImapAdapterError::MissingSmtpTransport
         | ImapAdapterError::MissingUsername
+        | ImapAdapterError::MissingSmtpSenderEmail
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)

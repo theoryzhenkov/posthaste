@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
@@ -185,8 +185,11 @@ security = "start_tls"
 
 `provider` is a setup hint for presets and provider-specific behavior; it does
 not replace the explicit `driver`. IMAP/SMTP accounts require `username`,
-`secret_ref`, `[transport.imap]`, and `[transport.smtp]`. The secret may be a
-password, app-specific password, or OAuth token depending on `auth`.
+`secret_ref`, `[transport.imap]`, and `[transport.smtp]`. SMTP AUTH uses
+`transport.username`; the RFC 5322 sender identity uses `full_name` and the
+first concrete address in `email_patterns`, falling back to `username` only
+when it is itself an email address. The secret may be a password, app-specific
+password, or OAuth token depending on `auth`.
 
 `SourceToml` converts bidirectionally to `AccountSettings`. Missing `created_at`/`updated_at` default to `RFC3339_EPOCH`.
 

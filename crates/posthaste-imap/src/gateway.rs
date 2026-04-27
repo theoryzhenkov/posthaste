@@ -31,7 +31,6 @@ use crate::{
 pub struct LiveImapSmtpGateway {
     config: ImapConnectionConfig,
     smtp_config: SmtpConnectionConfig,
-    username: String,
     discovery: DiscoveredImapAccount,
     store: Option<Arc<dyn MailStore>>,
 }
@@ -50,12 +49,10 @@ impl LiveImapSmtpGateway {
         smtp_config: SmtpConnectionConfig,
         store: Option<Arc<dyn MailStore>>,
     ) -> Result<Self, ImapAdapterError> {
-        let username = config.username.clone();
         let discovery = discover_imap_account(&config).await?;
         Ok(Self {
             config,
             smtp_config,
-            username,
             discovery,
             store,
         })
@@ -422,13 +419,15 @@ impl MailGateway for LiveImapSmtpGateway {
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
         Ok(Identity {
             id: "imap-smtp-default".to_string(),
-            name: self
-                .username
-                .split('@')
-                .next()
-                .unwrap_or(self.username.as_str())
-                .to_string(),
-            email: self.username.clone(),
+            name: self.smtp_config.sender_name.clone().unwrap_or_else(|| {
+                self.smtp_config
+                    .sender_email
+                    .split('@')
+                    .next()
+                    .unwrap_or(self.smtp_config.sender_email.as_str())
+                    .to_string()
+            }),
+            email: self.smtp_config.sender_email.clone(),
         })
     }
 
@@ -524,11 +523,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn fetch_identity_uses_configured_username() {
+    async fn fetch_identity_uses_configured_sender_identity() {
         let gateway = LiveImapSmtpGateway {
             config: test_config(),
             smtp_config: test_smtp_config(),
-            username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
                 mailboxes: Vec::new(),
@@ -542,7 +540,7 @@ mod tests {
             .expect("identity");
 
         assert_eq!(identity.email, "alice@example.test");
-        assert_eq!(identity.name, "alice");
+        assert_eq!(identity.name, "Alice Example");
     }
 
     #[tokio::test]
@@ -550,7 +548,6 @@ mod tests {
         let gateway = LiveImapSmtpGateway {
             config: test_config(),
             smtp_config: test_smtp_config(),
-            username: "alice@example.test".to_string(),
             discovery: DiscoveredImapAccount {
                 capabilities: posthaste_domain::ImapCapabilities::default(),
                 mailboxes: Vec::new(),
@@ -582,7 +579,9 @@ mod tests {
             host: "smtp.example.test".to_string(),
             port: 587,
             security: posthaste_domain::TransportSecurity::StartTls,
-            username: "alice@example.test".to_string(),
+            sender_name: Some("Alice Example".to_string()),
+            sender_email: "alice@example.test".to_string(),
+            username: "alice-login".to_string(),
             secret: "secret".to_string(),
             auth: posthaste_domain::ProviderAuthKind::Password,
             provider: posthaste_domain::ProviderHint::Generic,
@@ -595,6 +594,7 @@ fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         ImapAdapterError::MissingTransport
         | ImapAdapterError::MissingSmtpTransport
         | ImapAdapterError::MissingUsername
+        | ImapAdapterError::MissingSmtpSenderEmail
         | ImapAdapterError::MissingSecret
         | ImapAdapterError::InvalidMailboxName(_)
         | ImapAdapterError::MissingSelectData(_)
