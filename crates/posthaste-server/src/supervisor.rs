@@ -30,8 +30,10 @@ const AUTOMATION_BACKFILL_INITIAL_DELAY: Duration = Duration::from_secs(10);
 const AUTOMATION_BACKFILL_INTERVAL: Duration = Duration::from_secs(15);
 const CACHE_WORKER_BATCH_SIZE: usize = 3;
 const CACHE_RESCORE_BATCH_SIZE: usize = 100;
+const CACHE_STALE_RESCORE_BATCH_SIZE: usize = 100;
 const CACHE_BACKGROUND_PRESSURE: f64 = 0.0;
 const CACHE_INTERACTIVE_PRESSURE: f64 = 1.0;
+const CACHE_STALE_RESCORE_AFTER: Duration = Duration::from_secs(6 * 60 * 60);
 const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
 const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -396,6 +398,31 @@ async fn process_cache_maintenance_batch(
     gateway: Option<SharedGateway>,
     interactive_pressure: f64,
 ) {
+    match shared.service.queue_stale_cache_rescore_batch(
+        account_id,
+        CACHE_STALE_RESCORE_AFTER,
+        CACHE_STALE_RESCORE_BATCH_SIZE,
+    ) {
+        Ok(queued) => {
+            if queued > 0 {
+                debug!(
+                    account_id = %account_id,
+                    queued,
+                    stale_after_seconds = CACHE_STALE_RESCORE_AFTER.as_secs(),
+                    batch_size = CACHE_STALE_RESCORE_BATCH_SIZE,
+                    "stale cache rescore candidates queued"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                account_id = %account_id,
+                error = %error,
+                "stale cache rescore queueing failed"
+            );
+        }
+    }
+
     match shared
         .service
         .process_cache_rescore_batch(account_id, CACHE_RESCORE_BATCH_SIZE)

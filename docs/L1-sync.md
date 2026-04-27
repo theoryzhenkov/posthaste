@@ -139,9 +139,13 @@ does not, the candidate must beat the lowest-priority evictable cached object.
 Admission is never allowed when it would cross the hard cap.
 
 Metadata sync only records cache candidates; it does not fetch optional content.
-The account runtime runs cache maintenance while a gateway is connected. A
-maintenance batch first consumes dirty re-score rows, rebuilds each candidate's
-current signal set from message metadata plus `cache_message_signal`, updates
+The account runtime runs cache maintenance while a gateway is connected. Each
+maintenance batch first queues a bounded oldest-first set of stale cache objects
+whose `last_scored_at` is older than the runtime threshold, excluding objects
+already queued or currently fetching. This lets time-sensitive signals such as
+recency converge even when no sync/search/user signal touches a message.
+The batch then consumes dirty re-score rows, rebuilds each candidate's current
+signal set from message metadata plus `cache_message_signal`, updates
 provider-aware `fetch_unit`, `value_bytes`, `fetch_bytes`, and
 `cache_object.priority`, and marks non-cached/non-fetching objects `wanted`.
 Unscored structural rows have `fetch_bytes = 0` and are not eligible for fetch
@@ -319,6 +323,7 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | cache-worker-budget | MUST | Cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
 | cache-object-parity | MUST | Every synced message has one structural body `cache_object` child row, and message deletion removes its cache object, cache signals, and rescore queue rows |
 | cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue`, and are applied by re-scoring before fetch selection |
+| cache-stale-rescore | MUST | Cache maintenance periodically queues bounded oldest-first stale cache objects for re-scoring so recency and other time-sensitive utility signals converge |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
