@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use posthaste_domain::{
-    now_iso8601, plan_imap_mailbox_sync, AccountId, BlobId, FetchedBody, GatewayError, Identity,
-    ImapMailboxSyncPlan, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity,
-    MailGateway, MailStore, MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
+    now_iso8601, plan_imap_mailbox_sync, plan_imap_move, AccountId, BlobId, FetchedBody,
+    GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
+    ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
+    MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
 };
 use tracing::warn;
 
@@ -18,9 +19,10 @@ use crate::{
     imap_attachment_bytes_from_raw_mime, imap_condstore_delta_sync_batch, imap_delta_sync_batch,
     imap_full_sync_batch, imap_mailbox_replacement_delta,
     imap_mailbox_state_from_changed_since_snapshot, imap_mailbox_state_from_header_snapshot,
-    mark_imap_message_deleted_by_location, parse_imap_attachment_blob_id, smtp_sent_copy_strategy,
-    submit_smtp_message, DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig,
-    ImapMappedHeader, SmtpConnectionConfig, SmtpSentCopyStrategy,
+    mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
+    parse_imap_attachment_blob_id, smtp_sent_copy_strategy, submit_smtp_message,
+    DiscoveredImapAccount, ImapAdapterError, ImapConnectionConfig, ImapMappedHeader,
+    SmtpConnectionConfig, SmtpSentCopyStrategy,
 };
 
 /// Live IMAP/SMTP gateway after successful IMAP discovery.
@@ -109,6 +111,22 @@ fn unsupported(operation: &str) -> GatewayError {
     GatewayError::Rejected(format!(
         "IMAP/SMTP {operation} is not implemented yet; discovery is available"
     ))
+}
+
+fn simple_imap_move_mailboxes<'a>(
+    capabilities: &ImapCapabilities,
+    delta: &'a crate::ImapMailboxReplacementDelta,
+) -> Option<(&'a MailboxId, &'a MailboxId)> {
+    if matches!(
+        plan_imap_move(capabilities),
+        ImapMoveStrategy::CopyDeleteThenResync
+    ) || delta.add.len() != 1
+        || delta.remove.len() != 1
+    {
+        return None;
+    }
+
+    Some((&delta.remove[0], &delta.add[0]))
 }
 
 #[async_trait]
@@ -336,12 +354,38 @@ impl MailGateway for LiveImapSmtpGateway {
         let locations = store
             .list_imap_message_locations(account_id, message_id)
             .map_err(store_error_to_gateway)?;
+        let delta = imap_mailbox_replacement_delta(&current_mailbox_ids, mailbox_ids);
+
+        if let Some((source_mailbox_id, target_mailbox_id)) =
+            simple_imap_move_mailboxes(&self.discovery.capabilities, &delta)
+        {
+            let source_location = locations
+                .iter()
+                .find(|location| &location.mailbox_id == source_mailbox_id)
+                .ok_or_else(|| {
+                    imap_error_to_gateway(ImapAdapterError::MissingMessageLocation(
+                        source_mailbox_id.to_string(),
+                    ))
+                })?;
+            let source_mailbox_name = self.mailbox_name_for_id(account_id, source_mailbox_id)?;
+            let target_mailbox_name = self.mailbox_name_for_id(account_id, target_mailbox_id)?;
+            move_imap_message_to_mailbox_by_location(
+                &self.config,
+                &source_mailbox_name,
+                source_location,
+                &target_mailbox_name,
+            )
+            .await
+            .map_err(imap_error_to_gateway)?;
+
+            return Ok(MutationOutcome { cursor: None });
+        }
+
         let source_location = locations.first().cloned().ok_or_else(|| {
             GatewayError::Rejected(format!("missing IMAP location for message {message_id}"))
         })?;
         let source_mailbox_name =
             self.mailbox_name_for_id(account_id, &source_location.mailbox_id)?;
-        let delta = imap_mailbox_replacement_delta(&current_mailbox_ids, mailbox_ids);
 
         for mailbox_id in &delta.add {
             let target_mailbox_name = self.mailbox_name_for_id(account_id, mailbox_id)?;
@@ -561,6 +605,51 @@ mod tests {
             .expect_err("body fetch is not implemented");
 
         assert!(matches!(error, GatewayError::Rejected(message) if message.contains("discovery")));
+    }
+
+    #[test]
+    fn simple_move_uses_uid_move_when_server_supports_move() {
+        let delta = crate::ImapMailboxReplacementDelta {
+            add: vec![MailboxId::from("archive")],
+            remove: vec![MailboxId::from("inbox")],
+        };
+
+        let planned = simple_imap_move_mailboxes(&ImapCapabilities::from_tokens(["MOVE"]), &delta)
+            .map(|(source, target)| (source.clone(), target.clone()));
+
+        assert_eq!(
+            planned,
+            Some((MailboxId::from("inbox"), MailboxId::from("archive")))
+        );
+    }
+
+    #[test]
+    fn simple_move_falls_back_when_move_is_unavailable() {
+        let delta = crate::ImapMailboxReplacementDelta {
+            add: vec![MailboxId::from("archive")],
+            remove: vec![MailboxId::from("inbox")],
+        };
+
+        let planned =
+            simple_imap_move_mailboxes(&ImapCapabilities::from_tokens(["IMAP4rev1"]), &delta);
+
+        assert!(planned.is_none());
+    }
+
+    #[test]
+    fn simple_move_does_not_apply_to_copy_or_multi_mailbox_changes() {
+        let copy_delta = crate::ImapMailboxReplacementDelta {
+            add: vec![MailboxId::from("archive")],
+            remove: Vec::new(),
+        };
+        let multi_delta = crate::ImapMailboxReplacementDelta {
+            add: vec![MailboxId::from("archive"), MailboxId::from("project")],
+            remove: vec![MailboxId::from("inbox")],
+        };
+        let capabilities = ImapCapabilities::from_tokens(["MOVE", "UIDPLUS"]);
+
+        assert!(simple_imap_move_mailboxes(&capabilities, &copy_delta).is_none());
+        assert!(simple_imap_move_mailboxes(&capabilities, &multi_delta).is_none());
     }
 
     fn test_config() -> ImapConnectionConfig {

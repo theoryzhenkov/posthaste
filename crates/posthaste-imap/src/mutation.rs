@@ -75,6 +75,28 @@ pub async fn copy_imap_message_to_mailbox_by_location(
         .map_err(ImapAdapterError::from)
 }
 
+/// Move one IMAP message to another mailbox with UID MOVE.
+///
+/// `imap-client` exposes MOVE success but not COPYUID output. Even when the
+/// server supports UIDPLUS, the adapter validates the source UID before MOVE
+/// and relies on the next sync to discover the destination UID location.
+///
+/// @spec docs/L1-api#message-commands
+pub async fn move_imap_message_to_mailbox_by_location(
+    config: &ImapConnectionConfig,
+    source_mailbox_name: &str,
+    location: &ImapMessageLocation,
+    target_mailbox_name: &str,
+) -> Result<(), ImapAdapterError> {
+    let mut client = connect_authenticated_client(config).await?;
+    select_validated_mailbox(&mut client, source_mailbox_name, location).await?;
+    verify_uid_fetch_response(&mut client, location).await?;
+    client
+        .uid_move(uid_sequence_set(location)?, target_mailbox_name)
+        .await
+        .map_err(ImapAdapterError::from)
+}
+
 /// Mark one IMAP message as `\Deleted` without issuing broad EXPUNGE.
 ///
 /// This avoids the RFC 6851/RFC 4315 footgun where plain EXPUNGE can remove

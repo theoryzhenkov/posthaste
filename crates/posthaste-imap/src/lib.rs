@@ -43,7 +43,8 @@ pub use message::{
 pub use mutation::{
     apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
     expunge_imap_message_by_location, imap_flags_for_keywords, imap_mailbox_replacement_delta,
-    mark_imap_message_deleted_by_location, ImapMailboxReplacementDelta,
+    mark_imap_message_deleted_by_location, move_imap_message_to_mailbox_by_location,
+    ImapMailboxReplacementDelta,
 };
 pub use smtp::{
     append_smtp_sent_copy, build_smtp_message, render_smtp_markdown, send_smtp_message,
