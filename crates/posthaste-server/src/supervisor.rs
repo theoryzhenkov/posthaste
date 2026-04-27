@@ -648,19 +648,35 @@ async fn build_connection(
                 "IMAP discovery complete"
             );
             let push_events = if gateway.discovery().capabilities.supports_idle() {
-                idle_mailbox_name.map(|mailbox_name| {
+                if let Some(mailbox_name) = idle_mailbox_name {
                     info!(
                         account_id = %account.id,
                         mailbox_name,
                         "IMAP IDLE push hint enabled"
                     );
-                    imap_idle_event_stream(account.id.clone(), imap_config, mailbox_name)
-                })
+                    Some(imap_idle_event_stream(
+                        account.id.clone(),
+                        imap_config,
+                        mailbox_name,
+                    ))
+                } else {
+                    warn!(
+                        account_id = %account.id,
+                        "IMAP IDLE advertised but no selectable mailbox is available"
+                    );
+                    shared
+                        .set_push_status(&account.id, PushStatus::Unsupported)
+                        .await;
+                    None
+                }
             } else {
                 info!(
                     account_id = %account.id,
                     "IMAP IDLE unavailable; using periodic poll only"
                 );
+                shared
+                    .set_push_status(&account.id, PushStatus::Unsupported)
+                    .await;
                 None
             };
             Ok(AccountConnection {
