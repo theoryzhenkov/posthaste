@@ -185,11 +185,11 @@ security = "start_tls"
 
 `provider` is a setup hint for presets and provider-specific behavior; it does
 not replace the explicit `driver`. IMAP/SMTP accounts require `username`,
-`secret_ref`, `[transport.imap]`, and `[transport.smtp]`. SMTP AUTH uses
-`transport.username`; the RFC 5322 sender identity uses `full_name` and the
-first concrete address in `email_patterns`, falling back to `username` only
-when it is itself an email address. The secret may be a password, app-specific
-password, or OAuth token depending on `auth`.
+`secret_ref`, `[transport.imap]`, `[transport.smtp]`, and at least one concrete
+sender address in `email_patterns`. SMTP AUTH uses `transport.username`; the
+RFC 5322 sender identity uses `full_name` and the first concrete address in
+`email_patterns`. The secret may be a password, app-specific password, or OAuth
+token depending on `auth`.
 
 `SourceToml` converts bidirectionally to `AccountSettings`. Missing `created_at`/`updated_at` default to `RFC3339_EPOCH`.
 

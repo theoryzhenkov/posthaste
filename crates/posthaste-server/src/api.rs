@@ -2091,7 +2091,7 @@ mod tests {
     }
 
     #[test]
-    fn imap_smtp_account_requires_sender_email_when_username_is_not_email() {
+    fn imap_smtp_account_requires_sender_email_pattern() {
         let account = imap_smtp_account("alice-login", vec!["*@example.com"]);
 
         let error = validate_account_settings(&account).expect_err("validation should fail");
@@ -2102,17 +2102,21 @@ mod tests {
     }
 
     #[test]
-    fn imap_smtp_account_allows_login_name_with_sender_email_pattern() {
+    fn imap_smtp_account_allows_username_with_sender_email_pattern() {
         let account = imap_smtp_account("alice-login", vec!["alice@example.com"]);
 
         assert!(validate_account_settings(&account).is_ok());
     }
 
     #[test]
-    fn imap_smtp_account_allows_email_username_as_sender_fallback() {
+    fn imap_smtp_account_rejects_email_username_without_sender_email_pattern() {
         let account = imap_smtp_account("alice@example.com", Vec::new());
 
-        assert!(validate_account_settings(&account).is_ok());
+        let error = validate_account_settings(&account).expect_err("validation should fail");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, "invalid_account");
+        assert!(error.body.message.contains("sender email"));
     }
 
     #[test]
