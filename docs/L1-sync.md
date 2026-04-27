@@ -34,6 +34,15 @@ For each cycle, the engine loads stored cursors from SQLite, then syncs mailbox 
 
 The runtime emits INFO-level structured progress logs for sync start, provider discovery, mailbox/message fetch phases, store writes, and sync completion/failure. Each sync cycle has a `sync_id` span field so nested gateway and store events can be queried as one operation. IMAP sync logs per-mailbox planning decisions, conservative STATUS no-op skips, per-mailbox header fetch start/completion, and chunked header fetch progress; JMAP full snapshots log ID discovery and metadata chunk progress. These diagnostics are intentionally backend logs first; user-facing progress UI consumes a smaller account progress model rather than raw log lines.
 
+While a sync is running, the supervisor stores compact user-facing progress in
+`AccountRuntimeOverview.syncProgress`. Progress contains the sync ID, trigger,
+start timestamp, stage (`connecting`, `discovering`, `planning`, `fetching`,
+`storing`, or `waiting`), a short detail string, and optional mailbox/message
+counts. Gateways report provider-specific phases through this stable model:
+JMAP reports discovery and mailbox/message fetch phases, while IMAP reports
+capability discovery, mailbox planning, per-mailbox no-op skips, and mailbox
+fetch phases. The supervisor clears progress on success or failure.
+
 ## State management
 
 State strings are per-type, per-account, and stored in `sync_cursor`. The engine reads them on startup and after every successful cycle.
@@ -139,6 +148,12 @@ This matters because the frontend keeps many pages cached while live updates kee
 
 These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. The frontend consumes that ordered stream and decides whether to invalidate or merge.
 
+Account runtime transitions emit `account.status_changed`. Its payload includes
+`status`, `push`, `lastSyncAt`, `lastSyncError`, `lastSyncErrorCode`, and
+`syncProgress`, using the same camelCase enum values as REST responses. Progress
+updates reuse this event so clients can update account settings and list rows
+without polling logs.
+
 ## Automation actions
 
 After a sync batch is written, global automation rules evaluate matching synced message records from that batch. Rules have explicit triggers, smart-mailbox-style conditions, and typed actions. Account and mailbox targeting is expressed as ordinary conditions. The backend still evaluates each rule inside the current account runtime and adds the current `source_id` plus the synced message IDs to the internal query before applying actions through that account's gateway. The initial settings UI creates an account-conditioned rule equivalent to:
@@ -185,3 +200,4 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |
 | automation-backfill-durable | MUST | Automation backfill progress is stored in SQLite and completed jobs for the same rule fingerprint do not rerun after restart |
+| sync-progress-runtime | SHOULD | Running account syncs expose compact user-facing progress and clear it on success or failure |

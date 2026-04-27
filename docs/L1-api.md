@@ -180,6 +180,12 @@ Each SSE event has `id` set to the event's sequence number and `data` set to the
 
 The stream sends keepalive comments at the default Axum interval to prevent connection timeout.
 
+`account.status_changed` events include the account runtime fields `status`,
+`push`, `lastSyncAt`, `lastSyncError`, `lastSyncErrorCode`, and
+`syncProgress`. These values use the same JSON shape as `AccountOverview`, so
+clients may patch cached account rows directly instead of refetching on every
+progress tick.
+
 ## Account CRUD lifecycle
 
 **Create**: `POST /accounts` accepts account name, optional full name, email address/pattern ownership, provider driver, transport details, and a secret instruction. If `id` is omitted, the backend derives an internal unique ID from the first email pattern or account name. The endpoint applies the secret instruction, validates required fields, persists to config, starts the supervisor runtime, and emits an `account.created` event. JMAP accounts require a base URL and configured secret; username is optional for bearer-token auth. IMAP/SMTP accounts require username, configured secret, explicit IMAP and SMTP endpoints, and a concrete sender address via `emailPatterns`.
@@ -195,6 +201,13 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
 
 **Transport and connection variants**: Account create/patch transport JSON uses camelCase. Common input fields are `provider`, `auth`, `username`, `secret`, and optional JMAP `baseUrl`. IMAP/SMTP account input also includes `imap` and `smtp` endpoint objects with `host`, `port`, and `security` (`tls`, `startTls`, or `plain`). `PATCH /accounts/{id}` sparse-merges the transport object and preserves omitted sub-fields. `AccountOverview` exposes this as a `connection` variant tagged by `kind`: `manualCredentials` for password/app-password accounts with editable server credentials, or `managedOAuth` for provider-owned OAuth accounts whose endpoint and credential details are managed by the OAuth flow.
+
+**Runtime progress**: `AccountOverview` includes `syncProgress` while a sync is
+running and `null` otherwise. The object contains `syncId`, `trigger`,
+`startedAt`, `stage`, `detail`, and optional `mailboxName`, `mailboxIndex`,
+`mailboxCount`, `messageCount`, and `totalCount`. The values are user-facing
+progress hints, not a complete execution trace; backend logs remain the detailed
+diagnostic source.
 
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 
@@ -238,6 +251,7 @@ The API never returns secret values. Responses include `SecretStatus` with `stor
 | cursor-opaque | MUST | Conversation cursors are opaque to clients; format is not part of the contract |
 | camelcase-json | MUST | All response bodies use camelCase keys |
 | sse-resume | MUST | SSE clients can resume from `afterSeq` without replaying history |
+| status-event-runtime-payload | SHOULD | `account.status_changed` carries account runtime fields, including sync progress, in the same JSON shape as `AccountOverview` |
 | html-sanitized | MUST | Message body HTML is sanitized in Rust before reaching the response |
 | secret-redacted | MUST | Secret values are never included in API responses |
 | sparse-merge | MUST | PATCH endpoints preserve omitted fields rather than nulling them |

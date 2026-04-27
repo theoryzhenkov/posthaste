@@ -41,6 +41,7 @@ import {
   formFromAccount,
   normalizeAccountInitials,
 } from './helpers'
+import { SyncProgressMeter } from './SyncProgressMeter'
 import { FeedbackBanner, Field, StatusDot } from './shared'
 import { SettingsFooter, SettingsPageHeader, SettingsSection } from './shared'
 import type { EditorTarget } from './types'
@@ -208,6 +209,12 @@ export function AccountEditor({
           ) : null
         }
       />
+
+      {existingAccount?.syncProgress && (
+        <div className="-mt-4 mb-4">
+          <SyncProgressMeter account={existingAccount} />
+        </div>
+      )}
 
       {existingAccount?.lastSyncError && (
         <div className="mt-4">

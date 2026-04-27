@@ -130,6 +130,26 @@ export interface AccountOverview {
   lastSyncAt: string | null
   lastSyncError: string | null
   lastSyncErrorCode: string | null
+  syncProgress: SyncProgress | null
+}
+
+export interface SyncProgress {
+  syncId: string
+  trigger: 'startup' | 'poll' | 'push' | 'manual'
+  startedAt: string
+  stage:
+    | 'connecting'
+    | 'discovering'
+    | 'planning'
+    | 'fetching'
+    | 'storing'
+    | 'waiting'
+  detail: string
+  mailboxName: string | null
+  mailboxIndex: number | null
+  mailboxCount: number | null
+  messageCount: number | null
+  totalCount: number | null
 }
 
 /** @spec docs/L1-api#compose */

@@ -94,6 +94,7 @@ impl MailGateway for StaticGateway {
         &self,
         _account_id: &AccountId,
         _cursors: &[SyncCursor],
+        _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         Ok(self
             .batch
@@ -203,12 +204,22 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
 
     harness
         .service
-        .sync_account(&AccountId::from("jmap"), SyncTrigger::Manual, &jmap_gateway)
+        .sync_account(
+            &AccountId::from("jmap"),
+            SyncTrigger::Manual,
+            &jmap_gateway,
+            None,
+        )
         .await
         .expect("JMAP sync should apply");
     harness
         .service
-        .sync_account(&AccountId::from("imap"), SyncTrigger::Manual, &imap_gateway)
+        .sync_account(
+            &AccountId::from("imap"),
+            SyncTrigger::Manual,
+            &imap_gateway,
+            None,
+        )
         .await
         .expect("IMAP sync should apply");
 

@@ -321,3 +321,38 @@ export function statusTone(status: AccountOverview['status']): string {
       return 'text-zinc-600 border-zinc-500/30 bg-zinc-500/10'
   }
 }
+
+export function syncProgressLabel(account: AccountOverview): string | null {
+  const progress = account.syncProgress
+  if (!progress) {
+    return null
+  }
+
+  const parts = [progress.detail]
+  if (progress.mailboxName) {
+    parts.push(progress.mailboxName)
+  }
+  if (progress.mailboxIndex && progress.mailboxCount) {
+    parts.push(`${progress.mailboxIndex}/${progress.mailboxCount}`)
+  }
+  if (progress.messageCount !== null) {
+    parts.push(`${progress.messageCount} messages`)
+  }
+
+  return parts.join(' · ')
+}
+
+export function syncProgressPercent(account: AccountOverview): number | null {
+  const progress = account.syncProgress
+  if (!progress?.mailboxIndex || !progress.mailboxCount) {
+    return null
+  }
+
+  return Math.min(
+    100,
+    Math.max(
+      0,
+      Math.round((progress.mailboxIndex / progress.mailboxCount) * 100),
+    ),
+  )
+}

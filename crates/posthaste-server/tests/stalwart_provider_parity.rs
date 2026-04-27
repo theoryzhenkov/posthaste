@@ -494,6 +494,7 @@ async fn sync_pair(
             &AccountId::from("jmap-stalwart"),
             SyncTrigger::Manual,
             jmap_gateway,
+            None,
         )
         .await
         .expect("JMAP sync should succeed");
@@ -503,6 +504,7 @@ async fn sync_pair(
             &AccountId::from("imap-stalwart"),
             SyncTrigger::Manual,
             imap_gateway,
+            None,
         )
         .await
         .expect("IMAP sync should succeed");

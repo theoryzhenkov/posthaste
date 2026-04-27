@@ -156,7 +156,7 @@ Search syntax and backend execution are defined by [L1-search](L1-search.md). Th
 
 Settings opens through the shared `SurfaceHost` as a focused settings surface. On web, the host renders the settings panel over the app; on desktop, the same serializable descriptor can be mapped to a native settings window.
 
-The connected accounts list and main sidebar account headers use the account's configured mark as the leading visual identity. Account health is shown separately as a small status dot next to the account name, not as the row's primary icon.
+The connected accounts list and main sidebar account headers use the account's configured mark as the leading visual identity. Account health is shown separately as a small status dot next to the account name, not as the row's primary icon. When `AccountOverview.syncProgress` is present, the connected accounts list and account editor show the current phase as a compact label with a progress meter. The UI renders backend-provided detail text and mailbox counters, but it does not parse raw logs.
 
 Settings detail pages use shared settings primitives: a centered `SettingsPage`, quiet `SettingsPageHeader`, `SettingsSection` rows with label columns and whitespace, and `SettingsFooter` rows aligned with form content. Nested cards, divider lines, and tabbed subviews are avoided unless a card represents a concrete selectable/list item or nested rule-builder object.
 

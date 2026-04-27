@@ -11,6 +11,7 @@ import type { AccountOverview, ProviderHint } from '../../api/types'
 import { providerOAuthClientCredentials } from '../../config/oauthProviders'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
+import { SyncProgressMeter } from './SyncProgressMeter'
 import { Button } from '../ui/button'
 import {
   SettingsBackButton,
@@ -190,6 +191,7 @@ function AccountListRow({
             {sublabel}
           </span>
         )}
+        <SyncProgressMeter account={account} compact />
       </span>
       <span className="text-[12px] text-muted-foreground group-hover:text-foreground">
         Edit
