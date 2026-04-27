@@ -1,6 +1,15 @@
 import type { ProviderHint } from '../api/types'
+import oauthProviderConfig from './oauthProviders.json'
+
+interface OAuthProviderConfig {
+  oauthClientId?: string
+}
+
+const providers = oauthProviderConfig as Partial<
+  Record<ProviderHint, OAuthProviderConfig>
+>
 
 export const providerOAuthClientIds: Partial<Record<ProviderHint, string>> = {
-  gmail:
-    '566558128440-om75tfh2q7o61n0p08eqpfoa6ahgciag.apps.googleusercontent.com',
+  gmail: providers.gmail?.oauthClientId?.trim() ?? '',
+  outlook: providers.outlook?.oauthClientId?.trim() ?? '',
 }
