@@ -261,6 +261,7 @@ pub struct SecretWriteRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StartOAuthRequest {
     pub client_id: String,
+    pub client_secret: Option<String>,
     pub redirect_uri: String,
 }
 
@@ -272,6 +273,7 @@ pub struct StartOAuthRequest {
 pub struct StartProviderOAuthRequest {
     pub provider: ProviderHint,
     pub client_id: String,
+    pub client_secret: Option<String>,
     pub redirect_uri: String,
 }
 
@@ -791,12 +793,15 @@ pub async fn start_provider_oauth(
             "provider does not support built-in OAuth",
         )
     })?;
-    let (client_id, redirect_uri) =
-        validate_oauth_start_request(request.client_id.as_str(), request.redirect_uri.as_str())?;
+    let (client_id, client_secret, redirect_uri) = validate_oauth_start_request(
+        request.client_id.as_str(),
+        request.client_secret.as_deref(),
+        request.redirect_uri.as_str(),
+    )?;
 
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
     let session = oauth
-        .authorization_session(&profile, client_id, redirect_uri)
+        .authorization_session(&profile, client_id, client_secret, redirect_uri)
         .map_err(ServiceError::from)?;
     state
         .oauth_flows
@@ -806,6 +811,7 @@ pub async fn start_provider_oauth(
                 account_id: None,
                 profile,
                 client_id: client_id.to_string(),
+                client_secret: client_secret.map(ToString::to_string),
                 redirect_uri: redirect_uri.to_string(),
                 pkce_verifier: session.pkce_verifier,
                 nonce: session.nonce,
@@ -844,12 +850,15 @@ pub async fn start_account_oauth(
                 "account provider does not support built-in OAuth",
             )
         })?;
-    let (client_id, redirect_uri) =
-        validate_oauth_start_request(request.client_id.as_str(), request.redirect_uri.as_str())?;
+    let (client_id, client_secret, redirect_uri) = validate_oauth_start_request(
+        request.client_id.as_str(),
+        request.client_secret.as_deref(),
+        request.redirect_uri.as_str(),
+    )?;
 
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
     let session = oauth
-        .authorization_session(&profile, client_id, redirect_uri)
+        .authorization_session(&profile, client_id, client_secret, redirect_uri)
         .map_err(ServiceError::from)?;
     state
         .oauth_flows
@@ -859,6 +868,7 @@ pub async fn start_account_oauth(
                 account_id: Some(account_id),
                 profile,
                 client_id: client_id.to_string(),
+                client_secret: client_secret.map(ToString::to_string),
                 redirect_uri: redirect_uri.to_string(),
                 pkce_verifier: session.pkce_verifier,
                 nonce: session.nonce,
@@ -919,6 +929,7 @@ pub async fn complete_account_oauth(
         .exchange_authorization_code(
             &flow.profile,
             &flow.client_id,
+            flow.client_secret.as_deref(),
             &flow.redirect_uri,
             code,
             &flow.pkce_verifier,
@@ -943,8 +954,9 @@ pub async fn complete_account_oauth(
 
 fn validate_oauth_start_request<'a>(
     client_id: &'a str,
+    client_secret: Option<&'a str>,
     redirect_uri: &'a str,
-) -> Result<(&'a str, &'a str), ApiError> {
+) -> Result<(&'a str, Option<&'a str>, &'a str), ApiError> {
     let client_id = client_id.trim();
     if client_id.is_empty() {
         return Err(ApiError::new(
@@ -961,7 +973,13 @@ fn validate_oauth_start_request<'a>(
             "redirectUri is required",
         ));
     }
-    Ok((client_id, redirect_uri))
+    Ok((
+        client_id,
+        client_secret
+            .map(str::trim)
+            .filter(|client_secret| !client_secret.is_empty()),
+        redirect_uri,
+    ))
 }
 
 async fn create_oauth_account_from_exchange(
