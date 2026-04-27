@@ -6,6 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::Html;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use posthaste_domain::{
@@ -30,13 +31,14 @@ use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tracing::warn;
 
+use crate::oauth::{OAuthProviderProfile, OAuthTokenService, PendingOAuthFlow};
 use crate::{sanitize, AppState};
 
 mod account_support;
 mod cursor_support;
 
 use account_support::{
-    account_overview, append_and_publish_account_event, apply_account_patch,
+    account_overview, account_secret_ref, append_and_publish_account_event, apply_account_patch,
     apply_secret_instruction, default_account_appearance, delete_managed_secret,
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
     normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
@@ -247,6 +249,39 @@ pub struct SecretWriteRequest {
     #[serde(default)]
     pub mode: SecretWriteMode,
     pub password: Option<String>,
+}
+
+/// Request body for `POST /v1/accounts/{account_id}/oauth/start`.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartOAuthRequest {
+    pub client_id: String,
+    pub redirect_uri: String,
+}
+
+/// Response body for `POST /v1/accounts/{account_id}/oauth/start`.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartOAuthResponse {
+    pub authorization_url: String,
+    pub state: String,
+    pub redirect_uri: String,
+}
+
+/// Query parameters for the loopback OAuth redirect endpoint.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthCallbackQuery {
+    pub state: String,
+    pub code: Option<String>,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
 }
 
 /// Request body for `POST /v1/accounts`.
@@ -724,6 +759,180 @@ pub async fn verify_account(
         identity_email: result.identity.map(|identity| identity.email),
         push_supported: result.push_supported,
     }))
+}
+
+/// POST /v1/accounts/{account_id}/oauth/start
+///
+/// Creates a backend-held PKCE authorization session for an existing account.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn start_account_oauth(
+    State(state): State<Arc<AppState>>,
+    Path(account_id): Path<String>,
+    Json(request): Json<StartOAuthRequest>,
+) -> Result<Json<StartOAuthResponse>, ApiError> {
+    let account_id = AccountId::from(account_id.as_str());
+    let account = state
+        .service
+        .get_source(&account_id)
+        .map_err(ApiError::from_service_error)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let profile =
+        OAuthProviderProfile::for_provider(&account.transport.provider).ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_account",
+                "account provider does not support built-in OAuth",
+            )
+        })?;
+    let client_id = request.client_id.trim();
+    if client_id.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            "clientId is required",
+        ));
+    }
+    let redirect_uri = request.redirect_uri.trim();
+    if redirect_uri.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_account",
+            "redirectUri is required",
+        ));
+    }
+
+    let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
+    let session = oauth
+        .authorization_session(&profile, client_id, redirect_uri)
+        .map_err(ServiceError::from)?;
+    state
+        .oauth_flows
+        .insert(
+            session.state.clone(),
+            PendingOAuthFlow {
+                account_id,
+                profile,
+                client_id: client_id.to_string(),
+                redirect_uri: redirect_uri.to_string(),
+                pkce_verifier: session.pkce_verifier,
+            },
+        )
+        .await;
+
+    Ok(Json(StartOAuthResponse {
+        authorization_url: session.authorization_url,
+        state: session.state,
+        redirect_uri: session.redirect_uri,
+    }))
+}
+
+/// GET /v1/oauth/callback
+///
+/// Exchanges a provider authorization code for a token set and stores it as the
+/// existing account's managed OS secret.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+pub async fn complete_account_oauth(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> Result<Html<String>, ApiError> {
+    if let Some(error) = query.error {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "oauth_denied",
+            query.error_description.unwrap_or(error),
+        ));
+    }
+    let code = query
+        .code
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_oauth_callback",
+                "OAuth callback is missing code",
+            )
+        })?;
+    let flow = state
+        .oauth_flows
+        .remove(&query.state)
+        .await
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_oauth_callback",
+                "OAuth callback state is unknown or already used",
+            )
+        })?;
+    let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
+    let token_set = oauth
+        .exchange_authorization_code(
+            &flow.profile,
+            &flow.client_id,
+            &flow.redirect_uri,
+            code,
+            &flow.pkce_verifier,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .map_err(ServiceError::from)?;
+    persist_oauth_token_set(&state, &flow.account_id, token_set).await?;
+
+    Ok(Html(
+        "<!doctype html><meta charset=\"utf-8\"><title>Posthaste OAuth</title><p>Authentication complete. You can return to Posthaste.</p>".to_string(),
+    ))
+}
+
+async fn persist_oauth_token_set(
+    state: &Arc<AppState>,
+    account_id: &AccountId,
+    token_set: crate::oauth::OAuthTokenSet,
+) -> Result<(), ApiError> {
+    let mut account = state
+        .service
+        .get_source(account_id)
+        .map_err(ApiError::from_service_error)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let previous_secret_ref = account.transport.secret_ref.clone();
+    let secret_ref = previous_secret_ref
+        .as_ref()
+        .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
+        .cloned()
+        .unwrap_or_else(|| account_secret_ref(&account.id));
+    let encoded = token_set.encode().map_err(ServiceError::from)?;
+
+    match previous_secret_ref.as_ref() {
+        Some(existing) if existing == &secret_ref => state
+            .secret_store
+            .update(&secret_ref, &encoded)
+            .map_err(ServiceError::from)
+            .map_err(ApiError::from)?,
+        _ => {
+            delete_managed_secret(state.as_ref(), previous_secret_ref.as_ref())?;
+            state
+                .secret_store
+                .save(&secret_ref, &encoded)
+                .map_err(ServiceError::from)
+                .map_err(ApiError::from)?;
+        }
+    }
+
+    account.transport.auth = ProviderAuthKind::OAuth2;
+    account.transport.secret_ref = Some(secret_ref);
+    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
+    validate_account_settings(&account)?;
+    state
+        .service
+        .save_source(&account)
+        .map_err(ApiError::from_service_error)?;
+    state.supervisor.start_account(&account).await;
+    append_and_publish_account_event(state, account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+        .map_err(store_error_to_api)?;
+
+    Ok(())
 }
 
 /// POST /v1/accounts/{account_id}/enable

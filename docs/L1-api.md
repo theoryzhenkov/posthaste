@@ -189,6 +189,8 @@ The stream sends keepalive comments at the default Axum interval to prevent conn
 
 **Verify**: `POST /accounts/{id}/verify` attempts provider connection setup and returns whether the connection succeeded, the primary identity email when available, and whether push is supported.
 
+**OAuth**: `POST /accounts/{id}/oauth/start` starts an OAuth authorization-code flow for an existing account whose provider has a built-in profile. The request supplies a public OAuth `clientId` and loopback `redirectUri`; the backend stores the PKCE verifier and returns only the authorization URL, state, and redirect URI. `GET /oauth/callback` validates the one-time state, exchanges the authorization code, stores the token set as the account's OS-keyring secret, switches the account transport to `auth: oauth2`, restarts the supervisor runtime, and emits an `account.updated` event.
+
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
 
 **Transport**: Account transport JSON uses camelCase. Common fields are `provider`, `auth`, `username`, `secret`, and optional JMAP `baseUrl`. IMAP/SMTP accounts also include `imap` and `smtp` endpoint objects with `host`, `port`, and `security` (`tls`, `startTls`, or `plain`). `PATCH /accounts/{id}` sparse-merges the transport object and preserves omitted sub-fields.

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use oauth2::basic::BasicClient;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
@@ -7,6 +9,7 @@ use posthaste_domain::{GatewayError, ProviderHint};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
+use tokio::sync::Mutex;
 
 const OAUTH_REFRESH_SKEW_SECONDS: i64 = 300;
 
@@ -118,8 +121,33 @@ fn oauth_secret_type() -> String {
 pub struct OAuthAuthorizationSession {
     pub authorization_url: String,
     pub state: String,
+    #[serde(skip_serializing)]
     pub pkce_verifier: String,
     pub redirect_uri: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PendingOAuthFlow {
+    pub account_id: posthaste_domain::AccountId,
+    pub profile: OAuthProviderProfile,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub pkce_verifier: String,
+}
+
+#[derive(Default)]
+pub struct OAuthFlowStore {
+    flows: Mutex<HashMap<String, PendingOAuthFlow>>,
+}
+
+impl OAuthFlowStore {
+    pub async fn insert(&self, state: String, flow: PendingOAuthFlow) {
+        self.flows.lock().await.insert(state, flow);
+    }
+
+    pub async fn remove(&self, state: &str) -> Option<PendingOAuthFlow> {
+        self.flows.lock().await.remove(state)
+    }
 }
 
 #[derive(Clone)]
@@ -399,5 +427,23 @@ mod tests {
         assert!(session.authorization_url.contains("access_type=offline"));
         assert!(!session.state.is_empty());
         assert!(!session.pkce_verifier.is_empty());
+    }
+
+    #[tokio::test]
+    async fn flow_store_removes_pending_state_once() {
+        let store = OAuthFlowStore::default();
+        let profile = OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile");
+        let flow = PendingOAuthFlow {
+            account_id: posthaste_domain::AccountId::from("gmail"),
+            profile,
+            client_id: "client-id".to_string(),
+            redirect_uri: "http://127.0.0.1:12345/v1/oauth/callback".to_string(),
+            pkce_verifier: "verifier".to_string(),
+        };
+
+        store.insert("state".to_string(), flow).await;
+
+        assert!(store.remove("state").await.is_some());
+        assert!(store.remove("state").await.is_none());
     }
 }

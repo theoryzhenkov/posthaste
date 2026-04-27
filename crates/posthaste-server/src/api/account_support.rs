@@ -524,7 +524,7 @@ fn account_color_hue(account: &AccountSettings) -> u16 {
 }
 
 /// Build the default OS keyring secret reference for an account (`account:{id}`).
-fn account_secret_ref(account_id: &AccountId) -> SecretRef {
+pub(super) fn account_secret_ref(account_id: &AccountId) -> SecretRef {
     SecretRef {
         kind: SecretKind::Os,
         key: format!("account:{}", account_id.as_str()),

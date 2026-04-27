@@ -28,6 +28,7 @@ use tracing::{info, info_span};
 use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::resolve_roots;
+use crate::oauth::OAuthFlowStore;
 use crate::secret::SystemSecretStore;
 use crate::supervisor::AccountSupervisor;
 
@@ -42,6 +43,7 @@ pub struct AppState {
     pub supervisor: Arc<AccountSupervisor>,
     pub event_sender: broadcast::Sender<DomainEvent>,
     pub account_logo_root: PathBuf,
+    pub oauth_flows: Arc<OAuthFlowStore>,
 }
 
 impl AppState {
@@ -151,6 +153,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor,
         event_sender,
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
+        oauth_flows: Arc::new(OAuthFlowStore::default()),
     });
 
     // Build CORS layer: always include the configured origin, plus any extras.
@@ -193,6 +196,11 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
                 .delete(api::delete_account),
         )
         .route("/accounts/{account_id}/verify", post(api::verify_account))
+        .route(
+            "/accounts/{account_id}/oauth/start",
+            post(api::start_account_oauth),
+        )
+        .route("/oauth/callback", get(api::complete_account_oauth))
         .route("/accounts/{account_id}/enable", post(api::enable_account))
         .route("/accounts/{account_id}/disable", post(api::disable_account))
         .route(
