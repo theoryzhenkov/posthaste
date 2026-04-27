@@ -94,12 +94,13 @@ search_context =
 
 The first implemented candidate source is baseline sync-time scoring. It uses
 metadata available in the synced message record: recency, Inbox membership,
-unread state, flagged state, and fetch size. The scorer type already accepts
-search, thread-activity, sender-affinity, and local-behavior signals, but those
-signals require separate event paths that are not part of the baseline sync
-candidate generation. Search result visibility, opening/starred thread behavior,
-and thread-level activity should update cache candidates through a later
-re-score path rather than waiting for another remote sync.
+unread state, flagged state, and fetch size. Local user/app activity then updates
+message-level signals separately from metadata sync. Search result visibility is
+the first signal producer: visible ranked results write search context and a
+rank-decayed direct user boost into `cache_message_signal`, enqueue the message
+in `cache_rescore_queue`, and wake the account runtime for cache maintenance.
+Opening/starred thread behavior and thread-level activity should use the same
+signal queue instead of adding fetch-specific shortcuts.
 
 Layer weights are `1.0` for bodies, `0.45` for raw messages, and `0.25` for
 attachment blobs. Attachment blobs receive object modifiers for inline
@@ -126,16 +127,21 @@ does not, the candidate must beat the lowest-priority evictable cached object.
 Admission is never allowed when it would cross the hard cap.
 
 Metadata sync only records cache candidates; it does not fetch optional content.
-The account runtime runs a low-priority body cache worker while a gateway is
-connected. Each worker batch scans a bounded priority-ordered window of wanted
-body candidates, admits only candidates that fit the current background budget,
-marks them `fetching`, fetches through the same gateway body path as lazy open,
-applies the body to the local store, and marks the cache object `cached`.
-Scanning more rows than the fetch-attempt cap prevents one large over-budget
-message from starving smaller candidates behind it. Gateway failures mark the
-object `failed` with the service error code and do not fail the whole runtime.
-Eviction and attachment-blob workers are later policy layers, not part of the
-first worker slice.
+The account runtime runs cache maintenance while a gateway is connected. A
+maintenance batch first consumes dirty re-score rows, rebuilds each candidate's
+current signal set from message metadata plus `cache_message_signal`, updates
+`cache_object.priority`, and marks non-cached/non-fetching objects `wanted`.
+It then scans a bounded priority-ordered window of wanted body candidates,
+admits only candidates that fit the current budget, marks them `fetching`,
+fetches through the same gateway body path as lazy open, applies the body to the
+local store, and marks the cache object `cached`. Periodic maintenance uses
+background pressure; interactive maintenance triggered by visible search results
+may use the burst space between the soft and hard caps. Scanning more rows than
+the fetch-attempt cap prevents one large over-budget message from starving
+smaller candidates behind it. Gateway failures mark the object `failed` with the
+service error code and do not fail the whole runtime. Eviction and
+attachment-blob workers are later policy layers, not part of the first worker
+slice.
 
 ## State management
 
@@ -203,6 +209,8 @@ The runtime schema is centered around raw message state plus locally derived pro
 - `automation_backfill_job`
 - `sender_address_cache`
 - `cache_object`
+- `cache_message_signal`
+- `cache_rescore_queue`
 
 Important derived tables:
 
@@ -221,6 +229,8 @@ Important derived tables:
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 - `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
 - `cache_object` stores scored optional-content candidates and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read wanted rows from this table and cached rows contribute to the configured cache budget.
+- `cache_message_signal` stores local cache utility signals that do not come from provider metadata, including search result visibility, local behavior scores, direct user boost, and pinned state.
+- `cache_rescore_queue` stores account/message pairs whose cache objects need priority re-scoring after signal changes. The runtime drains this queue before selecting fetch work.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 
@@ -288,10 +298,11 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | state-atomic | MUST | State strings persisted in same SQLite transaction as data via apply_sync_batch |
 | snapshot-authoritative | MUST | Full mailbox snapshots prune stale local mailboxes when they disappear remotely |
 | message-snapshot-authoritative | MUST | Full email snapshots prune stale local messages when they disappear remotely |
-| body-lazy | MUST | Metadata sync does not fetch email bodies; bodies are fetched by lazy open or the background cache worker after metadata is committed |
+| body-lazy | MUST | Metadata sync does not fetch email bodies; bodies are fetched by lazy open or cache maintenance after metadata is committed |
 | fallback-resync | MUST | On cannotCalculateChanges, engine performs full resync for the affected type |
 | cache-priority-size-aware | MUST | Optional cache priority uses fetch-unit bytes, so IMAP raw-message body fetches are penalized by combined message size |
-| cache-worker-budget | MUST | Background cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
+| cache-worker-budget | MUST | Cache workers fetch only candidates admitted under the current cache budget and mark fetch failures in the cache ledger |
+| cache-signal-rescore | MUST | Local cache utility signals update `cache_message_signal`, enqueue `cache_rescore_queue`, and are applied by re-scoring before fetch selection |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
