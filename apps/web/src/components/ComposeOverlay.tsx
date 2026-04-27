@@ -20,9 +20,15 @@ import {
   fetchAccounts,
   fetchIdentity,
   fetchReplyContext,
+  fetchSenderAddresses,
   sendMessage,
 } from '@/api/client'
-import type { AccountOverview, Recipient, SendMessageInput } from '@/api/types'
+import type {
+  AccountOverview,
+  CachedSenderAddress,
+  Recipient,
+  SendMessageInput,
+} from '@/api/types'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
@@ -64,14 +70,6 @@ interface FromAddressOption {
   email: string
   origin: 'configured' | 'identity' | 'cached'
 }
-
-interface CachedFromAddress {
-  sourceId: string
-  name: string | null
-  email: string
-}
-
-const FROM_CACHE_KEY = 'posthaste.fromAddressCache.v1'
 
 function formatRecipient(recipient: Recipient): string {
   return recipient.name
@@ -133,47 +131,6 @@ function wildcardMatchesEmail(pattern: string, email: string): boolean {
   return trimmed.startsWith('*@') && normalizedEmail.endsWith(trimmed.slice(1))
 }
 
-function readFromCache(): CachedFromAddress[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(FROM_CACHE_KEY) ?? '[]')
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-    return parsed.filter(
-      (item): item is CachedFromAddress =>
-        typeof item?.sourceId === 'string' &&
-        typeof item?.email === 'string' &&
-        (item.name === null || typeof item.name === 'string'),
-    )
-  } catch {
-    return []
-  }
-}
-
-function writeFromCache(addresses: CachedFromAddress[]) {
-  try {
-    localStorage.setItem(FROM_CACHE_KEY, JSON.stringify(addresses.slice(0, 40)))
-  } catch {
-    // Cache persistence is opportunistic and must not fail a successful send.
-  }
-}
-
-function rememberFromAddress(sourceId: string, from: Recipient) {
-  const email = from.email.trim()
-  if (!isConcreteEmailPattern(email)) {
-    return
-  }
-  const next = [
-    { sourceId, name: from.name, email },
-    ...readFromCache().filter(
-      (item) =>
-        item.sourceId !== sourceId ||
-        item.email.toLowerCase() !== email.toLowerCase(),
-    ),
-  ]
-  writeFromCache(next)
-}
-
 function optionLabel(option: FromAddressOption): string {
   return option.name ? `${option.name} <${option.email}>` : option.email
 }
@@ -182,6 +139,7 @@ function accountFromOptions(
   accounts: AccountOverview[],
   identity: Recipient | null,
   identitySourceId: string,
+  cachedSenders: CachedSenderAddress[],
 ): FromAddressOption[] {
   const byAccount = new Map(accounts.map((account) => [account.id, account]))
   const options: FromAddressOption[] = []
@@ -208,7 +166,7 @@ function accountFromOptions(
     })
   }
 
-  for (const cached of readFromCache()) {
+  for (const cached of cachedSenders) {
     const account = byAccount.get(cached.sourceId)
     if (!account) {
       continue
@@ -243,6 +201,10 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
+  })
+  const senderAddressQuery = useQuery({
+    queryKey: queryKeys.senderAddresses,
+    queryFn: fetchSenderAddresses,
   })
   const replyContextQuery = useQuery({
     queryKey:
@@ -361,8 +323,14 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         accountsQuery.data ?? [],
         fromIdentity,
         intent.sourceId,
+        senderAddressQuery.data ?? [],
       ),
-    [accountsQuery.data, fromIdentity, intent.sourceId],
+    [
+      accountsQuery.data,
+      fromIdentity,
+      intent.sourceId,
+      senderAddressQuery.data,
+    ],
   )
   const displayedFromOptions = useMemo(() => {
     const needle = form.from.trim().toLowerCase()
@@ -418,12 +386,12 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   const sendMutation = useMutation({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
       sendMessage(variables.sourceId, variables.input),
-    onSuccess: async (_data, variables) => {
-      if (variables.input.from) {
-        rememberFromAddress(variables.sourceId, variables.input.from)
-      }
+    onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.senderAddresses,
+        }),
         queryClient.invalidateQueries({ queryKey: ['conversations'] }),
       ])
       toast('Message sent')

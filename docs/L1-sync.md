@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-27
+reviewed: 2026-04-27
 depends:
   - path: docs/L0-sync
   - path: docs/L1-jmap
@@ -90,6 +90,7 @@ The runtime schema is centered around raw message state plus locally derived pro
 - `event_log`
 - `source_projection`
 - `automation_backfill_job`
+- `sender_address_cache`
 
 Important derived tables:
 
@@ -106,6 +107,7 @@ Important derived tables:
   message identity so provider-stable IDs such as Gmail `X-GM-MSGID` can
   deduplicate messages across labels while retaining per-mailbox UIDs.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
+- `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 

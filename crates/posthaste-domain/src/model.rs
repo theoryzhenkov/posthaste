@@ -1198,6 +1198,18 @@ pub struct Recipient {
     pub email: String,
 }
 
+/// Locally cached sender address that previously passed provider submission.
+///
+/// @spec docs/L1-compose#sender-selection
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedSenderAddress {
+    pub source_id: AccountId,
+    pub name: Option<String>,
+    pub email: String,
+    pub last_used_at: String,
+}
+
 /// Pre-computed reply/forward metadata fetched from the gateway.
 ///
 /// @spec docs/L1-jmap#methods-used
