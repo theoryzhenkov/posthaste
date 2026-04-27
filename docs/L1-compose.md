@@ -113,11 +113,11 @@ ComposeSession {
 
 The `From` field is editable text with suggestions, not a closed enum. Suggested
 values come from configured account `email_patterns`, provider identities, and
-locally cached free-form senders that previously succeeded. A selected sender
+backend-cached free-form senders that previously succeeded. A selected sender
 also selects the account used to submit the message. Free-form addresses are
 allowed so catch-all domains such as `*@example.com` can send from
 `anything@example.com`; the provider remains authoritative by accepting or
-rejecting the send. The local cache is updated only after a successful send.
+rejecting the send. The backend cache is updated only after a successful send.
 
 ## Reply quoting
 
@@ -152,7 +152,7 @@ ComposeError
 ## Invariants
 
 - Markdown source is always preserved as the text/plain part
-- The sender is explicit in the compose request; configured identities and local cache entries are suggestions, not the full allowed set
+- The sender is explicit in the compose request; configured identities and backend cache entries are suggestions, not the full allowed set
 - HTML output contains no external resource references
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
 - Send uses EmailSubmission/set. Server-side draft cleanup or Sent placement is requested through `onSuccessUpdateEmail` and the implicit Email/set response is handled as part of the same JMAP operation.

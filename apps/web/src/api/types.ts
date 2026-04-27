@@ -116,6 +116,14 @@ export interface AccountOverview {
   lastSyncErrorCode: string | null
 }
 
+/** @spec docs/L1-api#compose */
+export interface CachedSenderAddress {
+  sourceId: string
+  name: string | null
+  email: string
+  lastUsedAt: string
+}
+
 /** @spec docs/L1-api#account-crud-lifecycle */
 export type AccountAppearance =
   | {

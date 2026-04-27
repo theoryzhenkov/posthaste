@@ -1376,15 +1376,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        AutomationBackfillStore, ConfigError, ConfigSnapshot, ConversationReadStore, DomainEvent,
-        EventFilter, EventStore, FetchedBody, GatewayError, ImapMailboxSyncState,
-        ImapMessageLocation, ImapMessageLocationStore, ImapSyncStateStore, MailboxReadStore,
-        MessageCommandStore, MessageDetail, MessageDetailStore, MessageListStore,
-        MessageMailboxStore, MutationOutcome, PushTransport, SmartMailboxCondition,
-        SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxKind,
-        SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxStore,
-        SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError, SyncBatch,
-        SyncCursor, SyncStateStore, SyncWriteStore,
+        AutomationBackfillStore, CachedSenderAddress, ConfigError, ConfigSnapshot,
+        ConversationReadStore, DomainEvent, EventFilter, EventStore, FetchedBody, GatewayError,
+        ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore, ImapSyncStateStore,
+        MailboxReadStore, MessageCommandStore, MessageDetail, MessageDetailStore, MessageListStore,
+        MessageMailboxStore, MutationOutcome, PushTransport, Recipient, SenderAddressCacheStore,
+        SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+        SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+        SmartMailboxStore, SmartMailboxValue, SourceDataStore, SourceProjectionStore, StoreError,
+        SyncBatch, SyncCursor, SyncStateStore, SyncWriteStore,
     };
 
     struct TestConfig {
@@ -1888,6 +1888,20 @@ mod tests {
                 .lock()
                 .expect("source data deletes lock poisoned")
                 .push(account_id.to_string());
+            Ok(())
+        }
+    }
+
+    impl SenderAddressCacheStore for TestStore {
+        fn list_sender_address_cache(&self) -> Result<Vec<CachedSenderAddress>, StoreError> {
+            Ok(Vec::new())
+        }
+
+        fn remember_sender_address(
+            &self,
+            _account_id: &AccountId,
+            _sender: &Recipient,
+        ) -> Result<(), StoreError> {
             Ok(())
         }
     }

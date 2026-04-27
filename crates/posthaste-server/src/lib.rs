@@ -247,6 +247,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             "/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
             get(api::get_message_attachment),
         )
+        .route("/sender-addresses", get(api::list_sender_addresses))
         .route("/sources/{source_id}/identity", get(api::get_identity))
         .route(
             "/sources/{source_id}/messages/{message_id}/reply-context",
