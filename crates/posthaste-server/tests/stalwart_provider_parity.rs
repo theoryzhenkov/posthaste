@@ -56,8 +56,8 @@ impl Harness {
             .save_source(&AccountSettings {
                 id: AccountId::from(id),
                 name: name.to_string(),
-                full_name: None,
-                email_patterns: Vec::new(),
+                full_name: Some("Dev Account".to_string()),
+                email_patterns: vec!["dev@example.org".to_string()],
                 driver,
                 enabled: true,
                 appearance: None,
@@ -235,6 +235,8 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
             host: "127.0.0.1".to_string(),
             port: stalwart.smtp_port,
             security: TransportSecurity::Plain,
+            sender_name: Some("Dev Account".to_string()),
+            sender_email: stalwart.email(),
             username: "dev".to_string(),
             secret: stalwart.password.clone(),
             auth: ProviderAuthKind::Password,
@@ -403,6 +405,43 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
     assert!(
         sent_labels.contains("sent") || sent_labels.contains("inbox"),
         "self-send should be visible in sent or inbox after sync"
+    );
+
+    harness
+        .service
+        .send_message(
+            &AccountId::from("imap-stalwart"),
+            &SendMessageRequest {
+                to: vec![Recipient {
+                    name: Some("Dev Account".to_string()),
+                    email: stalwart.email(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "SMTP parity self-send".to_string(),
+                body: "Sent through the IMAP/SMTP gateway.".to_string(),
+                in_reply_to: None,
+                references: None,
+            },
+            &imap_gateway,
+        )
+        .await
+        .expect("SMTP send should succeed");
+    sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
+
+    assert_eq!(
+        normalized_messages(&harness, "jmap-stalwart"),
+        normalized_messages(&harness, "imap-stalwart")
+    );
+    assert!(
+        maybe_message_by_subject(&harness, "jmap-stalwart", "SMTP parity self-send").is_some(),
+        "SMTP self-send should be visible through JMAP after sync"
+    );
+    let smtp_sent_labels =
+        mailbox_labels_for_subject(&harness, "imap-stalwart", "SMTP parity self-send");
+    assert!(
+        smtp_sent_labels.contains("sent") || smtp_sent_labels.contains("inbox"),
+        "SMTP self-send should be visible in sent or inbox after sync"
     );
 }
 
