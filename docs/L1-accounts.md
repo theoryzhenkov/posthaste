@@ -112,13 +112,20 @@ negated = false
 kind = "apply_tag"
 tag = ""
 
+[cache]
+soft_cap_bytes = 1073741824
+hard_cap_bytes = 2147483648
+cache_bodies = true
+cache_raw_messages = false
+cache_attachments = false
+
 [daemon]
 bind = "127.0.0.1:2525"         # optional, daemon bind address
 cors_origin = "http://localhost:5173"  # optional, CORS origin
 poll_interval_seconds = 300     # optional, sync poll interval
 ```
 
-`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `daemon` section is only read at startup and not exposed through the API.
+`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `cache` section configures optional-content cache caps and layer eligibility; `hard_cap_bytes` is normalized to at least `soft_cap_bytes`. The `daemon` section is only read at startup and not exposed through the API.
 
 ### sources/{id}.toml
 
