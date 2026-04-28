@@ -32,16 +32,13 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bun run check
-      - run: bun run test
-      - run: bun run build
+      - run: bun --cwd=apps/web run check
+      - run: bun --cwd=apps/web run test
+      - run: bun --cwd=apps/web run build
 
   docs:
     runs-on: ubuntu-latest

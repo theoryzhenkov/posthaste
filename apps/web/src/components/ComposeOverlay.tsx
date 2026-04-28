@@ -9,9 +9,11 @@ import { ChevronDown, Loader2, Mail, Reply, Send } from 'lucide-react'
 import {
   useCallback,
   useEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
+  Suspense,
   type SetStateAction,
 } from 'react'
 import { toast } from 'sonner'
@@ -33,12 +35,15 @@ import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
 import { FloatingPanel } from './FloatingPanel'
-import {
-  MarkdownComposerEditor,
-  type MarkdownComposerEditorHandle,
-} from './MarkdownComposerEditor'
+import type { MarkdownComposerEditorHandle } from './MarkdownComposerEditor'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+
+const MarkdownComposerEditor = lazy(() =>
+  import('./MarkdownComposerEditor').then((module) => ({
+    default: module.MarkdownComposerEditor,
+  })),
+)
 
 export type ComposeIntent =
   | { kind: 'new'; sourceId: string }
@@ -627,12 +632,21 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
             Preparing reply...
           </div>
         ) : (
-          <MarkdownComposerEditor
-            ref={bodyRef}
-            value={form.body}
-            onChange={handleBodyChange}
-            placeholder="Write Markdown"
-          />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={16} className="animate-spin" />
+                Loading editor...
+              </div>
+            }
+          >
+            <MarkdownComposerEditor
+              ref={bodyRef}
+              value={form.body}
+              onChange={handleBodyChange}
+              placeholder="Write Markdown"
+            />
+          </Suspense>
         )}
       </div>
 

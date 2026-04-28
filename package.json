@@ -1,0 +1,25 @@
+{
+  "name": "posthaste",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.11",
+  "workspaces": [
+    "apps/web",
+    "apps/site"
+  ],
+  "scripts": {
+    "web:dev": "bun --cwd=apps/web run dev",
+    "web:build": "bun --cwd=apps/web run build",
+    "web:check": "bun --cwd=apps/web run check",
+    "web:test": "bun --cwd=apps/web run test",
+    "site:dev": "bun --cwd=apps/site run dev",
+    "site:build": "bun --cwd=apps/site run build",
+    "site:check": "bun --cwd=apps/site run check",
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.10.1"
+  }
+}

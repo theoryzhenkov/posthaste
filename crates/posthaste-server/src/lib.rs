@@ -279,6 +279,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             "/sources/{source_id}/messages",
             get(api::list_source_messages),
         )
+        .route("/messages/search", get(api::search_messages))
         .route(
             "/sources/{source_id}/messages/{message_id}",
             get(api::get_message),

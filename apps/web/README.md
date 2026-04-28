@@ -6,9 +6,9 @@ React 19 + Vite frontend for the local PostHaste server. The app talks only to t
 
 ```bash
 bun install
-bun run dev
-bun run build
-bun run check
+bun --cwd=apps/web run dev
+bun --cwd=apps/web run build
+bun --cwd=apps/web run check
 ```
 
 ## Architecture

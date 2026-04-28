@@ -308,13 +308,28 @@ fn ensure_column(
     Ok(())
 }
 
-/// Configures WAL journal mode, foreign-key enforcement, and a 5-second busy timeout.
+const SQLITE_CACHE_SIZE_KIB: i64 = -65_536;
+const SQLITE_MMAP_SIZE_BYTES: i64 = 256 * 1024 * 1024;
+
+/// Configures WAL journal mode, foreign-key enforcement, and read-heavy cache tuning.
 pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .map_err(sql_to_store_error)?;
     connection
         .pragma_update(None, "journal_mode", "wal")
+        .map_err(sql_to_store_error)?;
+    connection
+        .pragma_update(None, "synchronous", "NORMAL")
+        .map_err(sql_to_store_error)?;
+    connection
+        .pragma_update(None, "cache_size", SQLITE_CACHE_SIZE_KIB)
+        .map_err(sql_to_store_error)?;
+    connection
+        .pragma_update(None, "temp_store", "MEMORY")
+        .map_err(sql_to_store_error)?;
+    connection
+        .pragma_update(None, "mmap_size", SQLITE_MMAP_SIZE_BYTES)
         .map_err(sql_to_store_error)?;
     connection
         .busy_timeout(Duration::from_secs(5))

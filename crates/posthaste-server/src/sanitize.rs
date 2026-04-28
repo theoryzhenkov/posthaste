@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use ammonia::Builder;
+
+static EMAIL_SANITIZER: LazyLock<Builder<'static>> = LazyLock::new(build_email_sanitizer);
 
 /// Sanitize raw email HTML for safe rendering in an iframe.
 ///
@@ -9,6 +12,11 @@ use ammonia::Builder;
 ///
 /// @spec docs/L1-api#message-body-sanitization
 pub fn sanitize_email_html(raw_html: &str) -> String {
+    let sanitized = EMAIL_SANITIZER.clean(raw_html).to_string();
+    strip_tracking_pixels(&sanitized)
+}
+
+fn build_email_sanitizer() -> Builder<'static> {
     let tags: HashSet<&str> = [
         "a",
         "b",
@@ -113,16 +121,14 @@ pub fn sanitize_email_html(raw_html: &str) -> String {
 
     let url_schemes: HashSet<&str> = ["https", "http", "mailto", "cid"].into_iter().collect();
 
-    let sanitized = Builder::default()
+    let mut builder = Builder::default();
+    builder
         .tags(tags)
         .tag_attributes(tag_attributes)
         .url_schemes(url_schemes)
         .link_rel(Some("noopener noreferrer"))
-        .add_tag_attributes("a", ["target"])
-        .clean(raw_html)
-        .to_string();
-
-    strip_tracking_pixels(&sanitized)
+        .add_tag_attributes("a", ["target"]);
+    builder
 }
 
 /// Remove 1x1 tracking pixel images and images with disallowed src schemes.

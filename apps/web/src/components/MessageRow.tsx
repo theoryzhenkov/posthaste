@@ -7,6 +7,7 @@
  * @spec docs/L1-ui#messagelist
  */
 import { Archive, Eye, EyeOff, MailOpen, Star, Trash2 } from 'lucide-react'
+import { memo, useCallback } from 'react'
 import type { MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
@@ -28,7 +29,7 @@ interface MessageRowProps {
   message: MessageSummary
   isSelected: boolean
   isStriped: boolean
-  onSelect: () => void
+  onSelectMessage: (message: MessageSummary) => void
   columns: ColumnId[]
   layout: ThreadListLayout
   actions: EmailActions
@@ -40,16 +41,19 @@ interface MessageRowProps {
  *
  * @spec docs/L1-ui#messagelist
  */
-export function MessageRow({
+export const MessageRow = memo(function MessageRow({
   message,
   isSelected,
   isStriped,
-  onSelect,
+  onSelectMessage,
   columns,
   layout,
   actions,
 }: MessageRowProps) {
   const messageRef = { messageId: message.id, sourceId: message.sourceId }
+  const handleSelect = useCallback(() => {
+    onSelectMessage(message)
+  }, [message, onSelectMessage])
   const row = (
     <button
       className={cn(
@@ -64,8 +68,8 @@ export function MessageRow({
             : 'bg-[var(--list-zebra)] text-panel-foreground hover:bg-[var(--list-hover)]'),
       )}
       style={layout.gridStyle}
-      onClick={onSelect}
-      onContextMenu={onSelect}
+      onClick={handleSelect}
+      onContextMenu={handleSelect}
       type="button"
     >
       {columns.map((columnId) => {
@@ -91,7 +95,7 @@ export function MessageRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">
-        <ContextMenuItem onSelect={onSelect}>
+        <ContextMenuItem onSelect={handleSelect}>
           <MailOpen size={14} />
           Open
         </ContextMenuItem>
@@ -118,4 +122,4 @@ export function MessageRow({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})

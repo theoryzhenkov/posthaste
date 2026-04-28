@@ -1,9 +1,11 @@
 # Desktop (Tauri) recipes
 
+set working-directory := '../..'
+
 # Run tauri alone (backend embedded, vite via beforeDevCommand). Does NOT start stalwart.
-dev:
-    cargo tauri dev
+dev *args:
+    bun run tauri dev {{args}}
 
 # Build for release
-build:
-    cargo tauri build
+build *args:
+    bun run tauri build {{args}}

@@ -541,6 +541,30 @@ export async function fetchSourceMessages(
   )
 }
 
+/** @spec docs/L1-api#endpoint-table */
+export async function fetchSearchMessages(
+  q: string,
+  input?: Omit<MessagePageInput, 'q'>,
+): Promise<MessagePage> {
+  const params = new URLSearchParams({ q })
+  if (input?.limit !== undefined) {
+    params.set('limit', String(input.limit))
+  }
+  if (input?.cursor) {
+    params.set('cursor', input.cursor)
+  }
+  if (input?.sort) {
+    params.set('sort', input.sort)
+  }
+  if (input?.sortDir) {
+    params.set('sortDir', input.sortDir)
+  }
+  return request<MessagePage>(`/messages/search?${params.toString()}`, {
+    signal: input?.signal,
+    operation: input?.operation,
+  })
+}
+
 /** @spec docs/L1-api#compose */
 export async function fetchIdentity(sourceId: string): Promise<Identity> {
   return request<Identity>(`/sources/${sourceId}/identity`)

@@ -35,3 +35,9 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
+
+[profile.test]
+# Keep file/line information for panics and backtraces, but avoid full DWARF in
+# every integration-test executable. The full debug profile makes parallel
+# `cargo test` links memory-heavy on constrained Linux dev VMs.
+debug = "line-tables-only"

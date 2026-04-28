@@ -3,15 +3,18 @@ FROM oven/bun:1.3.11-alpine AS build
 WORKDIR /app
 
 COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/site/package.json apps/site/package.json
 RUN bun install --frozen-lockfile
 
-COPY . .
+COPY apps/site apps/site
+WORKDIR /app/apps/site
 RUN bun run build
 
 FROM nginx:1.29-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY apps/site/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/site/dist /usr/share/nginx/html
 
 EXPOSE 80
 

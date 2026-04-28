@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-api
   - path: docs/L0-providers
@@ -22,46 +22,46 @@ In browser-localhost mode, `posthaste serve` serves the built React frontend on 
 
 ### Settings
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/settings` | `get_settings` | -- | `AppSettings` |
-| PATCH | `/settings` | `patch_settings` | `PatchSettingsRequest` | `AppSettings` |
-| POST | `/automation-rules:preview` | `preview_automation_rule` | `PreviewAutomationRuleRequest` | `AutomationRulePreviewResponse` |
+| Method | Path                        | Handler                   | Request                        | Response                        |
+| ------ | --------------------------- | ------------------------- | ------------------------------ | ------------------------------- |
+| GET    | `/settings`                 | `get_settings`            | --                             | `AppSettings`                   |
+| PATCH  | `/settings`                 | `patch_settings`          | `PatchSettingsRequest`         | `AppSettings`                   |
+| POST   | `/automation-rules:preview` | `preview_automation_rule` | `PreviewAutomationRuleRequest` | `AutomationRulePreviewResponse` |
 
 ### Accounts
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/accounts` | `list_accounts` | -- | `AccountOverview[]` |
-| POST | `/accounts` | `create_account` | `CreateAccountRequest` | `AccountOverview` |
-| GET | `/accounts/{account_id}` | `get_account` | -- | `AccountOverview` |
-| PATCH | `/accounts/{account_id}` | `patch_account` | `PatchAccountRequest` | `AccountOverview` |
-| DELETE | `/accounts/{account_id}` | `delete_account` | -- | `OkResponse` |
-| POST | `/accounts/{account_id}/verify` | `verify_account` | -- | `VerificationResponse` |
-| POST | `/oauth/start` | `start_provider_oauth` | `StartProviderOAuthRequest` | `StartOAuthResponse` |
-| POST | `/accounts/{account_id}/enable` | `enable_account` | -- | `OkResponse` |
-| POST | `/accounts/{account_id}/disable` | `disable_account` | -- | `OkResponse` |
-| POST | `/accounts/{account_id}/logo` | `upload_account_logo` | raw image bytes | `AccountOverview` |
-| GET | `/account-assets/logos/{image_id}` | `get_account_logo` | -- | image bytes |
+| Method | Path                               | Handler                | Request                     | Response               |
+| ------ | ---------------------------------- | ---------------------- | --------------------------- | ---------------------- |
+| GET    | `/accounts`                        | `list_accounts`        | --                          | `AccountOverview[]`    |
+| POST   | `/accounts`                        | `create_account`       | `CreateAccountRequest`      | `AccountOverview`      |
+| GET    | `/accounts/{account_id}`           | `get_account`          | --                          | `AccountOverview`      |
+| PATCH  | `/accounts/{account_id}`           | `patch_account`        | `PatchAccountRequest`       | `AccountOverview`      |
+| DELETE | `/accounts/{account_id}`           | `delete_account`       | --                          | `OkResponse`           |
+| POST   | `/accounts/{account_id}/verify`    | `verify_account`       | --                          | `VerificationResponse` |
+| POST   | `/oauth/start`                     | `start_provider_oauth` | `StartProviderOAuthRequest` | `StartOAuthResponse`   |
+| POST   | `/accounts/{account_id}/enable`    | `enable_account`       | --                          | `OkResponse`           |
+| POST   | `/accounts/{account_id}/disable`   | `disable_account`      | --                          | `OkResponse`           |
+| POST   | `/accounts/{account_id}/logo`      | `upload_account_logo`  | raw image bytes             | `AccountOverview`      |
+| GET    | `/account-assets/logos/{image_id}` | `get_account_logo`     | --                          | image bytes            |
 
 ### Smart mailboxes
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/smart-mailboxes` | `list_smart_mailboxes` | -- | `SmartMailboxSummary[]` |
-| POST | `/smart-mailboxes` | `create_smart_mailbox` | `CreateSmartMailboxRequest` | `SmartMailbox` |
-| GET | `/smart-mailboxes/{id}` | `get_smart_mailbox` | -- | `SmartMailbox` |
-| PATCH | `/smart-mailboxes/{id}` | `patch_smart_mailbox` | `PatchSmartMailboxRequest` | `SmartMailbox` |
-| DELETE | `/smart-mailboxes/{id}` | `delete_smart_mailbox` | -- | `OkResponse` |
-| POST | `/smart-mailboxes:reset-defaults` | `reset_default_smart_mailboxes` | -- | `SmartMailboxSummary[]` |
-| GET | `/smart-mailboxes/{id}/messages` | `list_smart_mailbox_messages` | `ListSmartMailboxMessagesQuery` | `MessagePageResponse` |
-| GET | `/smart-mailboxes/{id}/conversations` | `list_smart_mailbox_conversations` | `ListConversationsQuery` | `ConversationPageResponse` |
+| Method | Path                                  | Handler                            | Request                         | Response                   |
+| ------ | ------------------------------------- | ---------------------------------- | ------------------------------- | -------------------------- |
+| GET    | `/smart-mailboxes`                    | `list_smart_mailboxes`             | --                              | `SmartMailboxSummary[]`    |
+| POST   | `/smart-mailboxes`                    | `create_smart_mailbox`             | `CreateSmartMailboxRequest`     | `SmartMailbox`             |
+| GET    | `/smart-mailboxes/{id}`               | `get_smart_mailbox`                | --                              | `SmartMailbox`             |
+| PATCH  | `/smart-mailboxes/{id}`               | `patch_smart_mailbox`              | `PatchSmartMailboxRequest`      | `SmartMailbox`             |
+| DELETE | `/smart-mailboxes/{id}`               | `delete_smart_mailbox`             | --                              | `OkResponse`               |
+| POST   | `/smart-mailboxes:reset-defaults`     | `reset_default_smart_mailboxes`    | --                              | `SmartMailboxSummary[]`    |
+| GET    | `/smart-mailboxes/{id}/messages`      | `list_smart_mailbox_messages`      | `ListSmartMailboxMessagesQuery` | `MessagePageResponse`      |
+| GET    | `/smart-mailboxes/{id}/conversations` | `list_smart_mailbox_conversations` | `ListConversationsQuery`        | `ConversationPageResponse` |
 
 ### Navigation
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/sidebar` | `get_sidebar` | -- | `SidebarResponse` |
+| Method | Path       | Handler       | Request | Response          |
+| ------ | ---------- | ------------- | ------- | ----------------- |
+| GET    | `/sidebar` | `get_sidebar` | --      | `SidebarResponse` |
 
 `SidebarResponse` includes smart mailbox summaries, real tag summaries derived
 from non-system JMAP keywords, and enabled account mailbox trees. Tag counts are
@@ -70,23 +70,24 @@ merged across enabled accounts and exclude system keywords such as `$seen` and
 
 ### Conversations and messages
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/views/conversations` | `list_conversations` | `ListConversationsQuery` | `ConversationPageResponse` |
-| GET | `/views/conversations/{id}` | `get_conversation` | -- | `ConversationView` |
-| GET | `/sources/{source_id}/mailboxes` | `list_mailboxes` | -- | `MailboxSummary[]` |
-| PATCH | `/sources/{source_id}/mailboxes/{mailbox_id}` | `patch_mailbox` | `PatchMailboxRequest` | `MailboxSummary[]` |
-| GET | `/sources/{source_id}/messages` | `list_source_messages` | `ListSourceMessagesQuery` | `MessagePageResponse` |
-| GET | `/sources/{source_id}/messages/{id}` | `get_message` | -- | `MessageDetail` |
+| Method | Path                                          | Handler                | Request                   | Response                   |
+| ------ | --------------------------------------------- | ---------------------- | ------------------------- | -------------------------- |
+| GET    | `/views/conversations`                        | `list_conversations`   | `ListConversationsQuery`  | `ConversationPageResponse` |
+| GET    | `/views/conversations/{id}`                   | `get_conversation`     | --                        | `ConversationView`         |
+| GET    | `/messages/search`                            | `search_messages`      | `SearchMessagesQuery`     | `MessagePageResponse`      |
+| GET    | `/sources/{source_id}/mailboxes`              | `list_mailboxes`       | --                        | `MailboxSummary[]`         |
+| PATCH  | `/sources/{source_id}/mailboxes/{mailbox_id}` | `patch_mailbox`        | `PatchMailboxRequest`     | `MailboxSummary[]`         |
+| GET    | `/sources/{source_id}/messages`               | `list_source_messages` | `ListSourceMessagesQuery` | `MessagePageResponse`      |
+| GET    | `/sources/{source_id}/messages/{id}`          | `get_message`          | --                        | `MessageDetail`            |
 
 ### Compose
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| GET | `/sender-addresses` | `list_sender_addresses` | -- | `CachedSenderAddress[]` |
-| GET | `/sources/{source_id}/identity` | `get_identity` | -- | `Identity` |
-| GET | `/sources/{source_id}/messages/{id}/reply-context` | `get_reply_context` | -- | `ReplyContext` |
-| POST | `/sources/{source_id}/commands/send` | `send_message` | `SendMessageRequest` | `OkResponse` |
+| Method | Path                                               | Handler                 | Request              | Response                |
+| ------ | -------------------------------------------------- | ----------------------- | -------------------- | ----------------------- |
+| GET    | `/sender-addresses`                                | `list_sender_addresses` | --                   | `CachedSenderAddress[]` |
+| GET    | `/sources/{source_id}/identity`                    | `get_identity`          | --                   | `Identity`              |
+| GET    | `/sources/{source_id}/messages/{id}/reply-context` | `get_reply_context`     | --                   | `ReplyContext`          |
+| POST   | `/sources/{source_id}/commands/send`               | `send_message`          | `SendMessageRequest` | `OkResponse`            |
 
 `SendMessageRequest` includes optional `from: Recipient`. When present, the
 backend uses that sender address for the outgoing RFC 5322 `From` field. The
@@ -99,21 +100,21 @@ across accounts for compose autosuggest.
 
 ### Message commands
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| POST | `/sources/{sid}/commands/messages/{mid}/set-keywords` | `set_keywords` | `SetKeywordsCommand` | `CommandResult` |
-| POST | `/sources/{sid}/commands/messages/{mid}/add-to-mailbox` | `add_to_mailbox` | `AddToMailboxCommand` | `CommandResult` |
-| POST | `/sources/{sid}/commands/messages/{mid}/remove-from-mailbox` | `remove_from_mailbox` | `RemoveFromMailboxCommand` | `CommandResult` |
-| POST | `/sources/{sid}/commands/messages/{mid}/replace-mailboxes` | `replace_mailboxes` | `ReplaceMailboxesCommand` | `CommandResult` |
-| POST | `/sources/{sid}/commands/messages/{mid}/destroy` | `destroy_message` | -- | `CommandResult` |
+| Method | Path                                                         | Handler               | Request                    | Response        |
+| ------ | ------------------------------------------------------------ | --------------------- | -------------------------- | --------------- |
+| POST   | `/sources/{sid}/commands/messages/{mid}/set-keywords`        | `set_keywords`        | `SetKeywordsCommand`       | `CommandResult` |
+| POST   | `/sources/{sid}/commands/messages/{mid}/add-to-mailbox`      | `add_to_mailbox`      | `AddToMailboxCommand`      | `CommandResult` |
+| POST   | `/sources/{sid}/commands/messages/{mid}/remove-from-mailbox` | `remove_from_mailbox` | `RemoveFromMailboxCommand` | `CommandResult` |
+| POST   | `/sources/{sid}/commands/messages/{mid}/replace-mailboxes`   | `replace_mailboxes`   | `ReplaceMailboxesCommand`  | `CommandResult` |
+| POST   | `/sources/{sid}/commands/messages/{mid}/destroy`             | `destroy_message`     | --                         | `CommandResult` |
 
 ### Sync and events
 
-| Method | Path | Handler | Request | Response |
-|--------|------|---------|---------|----------|
-| POST | `/sources/{source_id}/commands/sync` | `trigger_sync` | -- | `{ ok, eventCount }` |
-| POST | `/config:reload` | `reload_config` | -- | `OkResponse` |
-| GET | `/events` | `stream_events` | `EventsQuery` | SSE stream |
+| Method | Path                                 | Handler         | Request       | Response             |
+| ------ | ------------------------------------ | --------------- | ------------- | -------------------- |
+| POST   | `/sources/{source_id}/commands/sync` | `trigger_sync`  | --            | `{ ok, eventCount }` |
+| POST   | `/config:reload`                     | `reload_config` | --            | `OkResponse`         |
+| GET    | `/events`                            | `stream_events` | `EventsQuery` | SSE stream           |
 
 ## Error format
 
@@ -125,17 +126,17 @@ All error responses are JSON objects with three fields:
 
 ### Error code mapping
 
-| `ServiceError` code | HTTP status |
-|---------------------|-------------|
-| `not_found` | 404 |
-| `conflict`, `state_mismatch` | 409 |
-| `auth_error` | 401 |
-| `gateway_unavailable` | 503 |
-| `network_error` | 502 |
-| `gateway_rejected`, `secret_unavailable`, `secret_unsupported` | 400 |
-| `config_validation`, `config_parse` | 400 |
-| `config_io` | 500 |
-| (other) | 500 |
+| `ServiceError` code                                            | HTTP status |
+| -------------------------------------------------------------- | ----------- |
+| `not_found`                                                    | 404         |
+| `conflict`, `state_mismatch`                                   | 409         |
+| `auth_error`                                                   | 401         |
+| `gateway_unavailable`                                          | 503         |
+| `network_error`                                                | 502         |
+| `gateway_rejected`, `secret_unavailable`, `secret_unsupported` | 400         |
+| `config_validation`, `config_parse`                            | 400         |
+| `config_io`                                                    | 500         |
+| (other)                                                        | 500         |
 
 Request validation errors use handler-specific codes: `invalid_account`, `invalid_secret`, `invalid_cursor`, `invalid_limit`, `invalid_query`, `invalid_compose`, `invalid_mailbox`.
 
@@ -147,15 +148,15 @@ Request validation errors use handler-specific codes: `invalid_account`, `invali
 
 Conversation and message list endpoints accept `limit`, `cursor`, `sort`, `sortDir`, and `q` query parameters. The default limit is 100; the maximum is 250. A limit of 0 or above 250 returns `invalid_limit`.
 
-Message list endpoints return `MessagePageResponse { items, nextCursor }`. They accept `q` as the same search query text used by the command/search panel. For source message lists, `q` is ANDed with the selected source and optional mailbox. For smart-mailbox message lists, `q` is ANDed with the saved smart-mailbox rule. Invalid query text returns `invalid_query`.
+Message list endpoints return `MessagePageResponse { items, nextCursor }`. They accept `q` as the same search query text used by the command/search panel. For source message lists, `q` is ANDed with the selected source and optional mailbox. For smart-mailbox message lists, `q` is ANDed with the saved smart-mailbox rule. `GET /messages/search` requires `q` and searches across all sources without issuing one request per source. Invalid query text returns `invalid_query`.
 
 ### Sort parameters
 
-| Param | Type | Default | Values |
-|-------|------|---------|--------|
-| `sort` | `ConversationSortField?` | `date` | `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment` |
-| `sort` | `MessageSortField?` | `date` | `date`, `from`, `subject`, `source`, `flagged`, `attachment` |
-| `sortDir` | `SortDirection?` | `desc` | `asc`, `desc` |
+| Param     | Type                     | Default | Values                                                                     |
+| --------- | ------------------------ | ------- | -------------------------------------------------------------------------- |
+| `sort`    | `ConversationSortField?` | `date`  | `date`, `from`, `subject`, `source`, `threadSize`, `flagged`, `attachment` |
+| `sort`    | `MessageSortField?`      | `date`  | `date`, `from`, `subject`, `source`, `flagged`, `attachment`               |
+| `sortDir` | `SortDirection?`         | `desc`  | `asc`, `desc`                                                              |
 
 The backend sorts conversations by `(sort_key, conversation_id)` and messages by `(sort_key, source_id, message_id)` in the requested direction. For example, `sort=from&sortDir=asc` orders by sender ascending, breaking ties by stable IDs.
 
@@ -167,12 +168,12 @@ The cursor is an opaque string. Conversation cursors encode the active sort valu
 
 `GET /v1/events` opens a Server-Sent Events stream. Query parameters:
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `accountId` | string? | Filter events to a single account |
-| `topic` | string? | Filter by event topic |
-| `mailboxId` | string? | Filter by mailbox |
-| `afterSeq` | integer? | Resume from this sequence number (exclusive) |
+| Param       | Type     | Description                                  |
+| ----------- | -------- | -------------------------------------------- |
+| `accountId` | string?  | Filter events to a single account            |
+| `topic`     | string?  | Filter by event topic                        |
+| `mailboxId` | string?  | Filter by mailbox                            |
+| `afterSeq`  | integer? | Resume from this sequence number (exclusive) |
 
 When `afterSeq` is provided, the backend replays matching events from the `event_log` table (backlog) before switching to the live broadcast stream. This allows the frontend to reconnect without missing events.
 
@@ -225,11 +226,11 @@ Account secrets are opaque authentication material. For JMAP accounts this may b
 
 Secrets use a tri-state write mode:
 
-| Mode | Behavior |
-|------|----------|
-| `keep` | Preserve existing `secret_ref`; no secret value allowed |
+| Mode      | Behavior                                                                                       |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `keep`    | Preserve existing `secret_ref`; no secret value allowed                                        |
 | `replace` | Store the submitted secret value in OS keyring under `account:{id}` key; secret value required |
-| `clear` | Delete managed OS secret; no secret value allowed |
+| `clear`   | Delete managed OS secret; no secret value allowed                                              |
 
 The API never returns secret values. Responses include `SecretStatus` with `storage` (os/env), `configured` (bool), and `label` (env var name for env-type, redacted for os-type).
 
@@ -247,14 +248,14 @@ The API never returns secret values. Responses include `SecretStatus` with `stor
 
 ## Assertions
 
-| ID | Sev. | Assertion |
-|----|------|-----------|
-| error-format | MUST | All error responses are JSON with `code`, `message`, `details` fields |
-| cursor-opaque | MUST | Conversation cursors are opaque to clients; format is not part of the contract |
-| camelcase-json | MUST | All response bodies use camelCase keys |
-| sse-resume | MUST | SSE clients can resume from `afterSeq` without replaying history |
+| ID                           | Sev.   | Assertion                                                                                                                     |
+| ---------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| error-format                 | MUST   | All error responses are JSON with `code`, `message`, `details` fields                                                         |
+| cursor-opaque                | MUST   | Conversation cursors are opaque to clients; format is not part of the contract                                                |
+| camelcase-json               | MUST   | All response bodies use camelCase keys                                                                                        |
+| sse-resume                   | MUST   | SSE clients can resume from `afterSeq` without replaying history                                                              |
 | status-event-runtime-payload | SHOULD | `account.status_changed` carries account runtime fields, including sync progress, in the same JSON shape as `AccountOverview` |
-| html-sanitized | MUST | Message body HTML is sanitized in Rust before reaching the response |
-| secret-redacted | MUST | Secret values are never included in API responses |
-| sparse-merge | MUST | PATCH endpoints preserve omitted fields rather than nulling them |
-| limit-bounds | MUST | Conversation and message limits are between 1 and 250; invalid values return 400 |
+| html-sanitized               | MUST   | Message body HTML is sanitized in Rust before reaching the response                                                           |
+| secret-redacted              | MUST   | Secret values are never included in API responses                                                                             |
+| sparse-merge                 | MUST   | PATCH endpoints preserve omitted fields rather than nulling them                                                              |
+| limit-bounds                 | MUST   | Conversation and message limits are between 1 and 250; invalid values return 400                                              |

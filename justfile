@@ -15,6 +15,10 @@ default:
 setup:
     ./setup.sh
 
+# Install JavaScript workspace dependencies
+install:
+    bun install
+
 # Format all code
 fmt:
     just backend fmt

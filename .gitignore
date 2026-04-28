@@ -16,6 +16,7 @@ result
 # build output
 /target/
 /crates/target/
+/node_modules/
 /apps/desktop/target/
 /apps/web/dist/
 /apps/web/.vite/

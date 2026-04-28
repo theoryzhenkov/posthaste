@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   useCallback,
   useEffect,
@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 
-import { fetchSidebar, fetchSourceMessages } from '@/api/client'
+import { fetchSearchMessages, fetchSidebar } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
 import {
   commandPaletteEntryValue,
@@ -56,6 +56,7 @@ interface CommandPaletteProps {
 }
 
 const COMMAND_PANEL_STORAGE_KEY = 'posthaste.commandPalette.panelOffset'
+const EMPTY_MESSAGE_RESULTS: MessageSummary[] = []
 
 export function CommandPalette({
   hasSelectedMessage,
@@ -92,35 +93,23 @@ export function CommandPalette({
     queryKey: ['sidebar'],
     queryFn: fetchSidebar,
   })
-  const sourceMessageQueries = useQueries({
-    queries: (sidebar?.sources ?? []).map((source) => ({
-      queryKey: [
-        ...queryKeys.messagesRoot,
-        'source-search',
-        source.id,
-        debouncedServerQuery,
-      ] as const,
-      queryFn: ({ signal }) =>
-        fetchSourceMessages(source.id, null, {
-          q: debouncedServerQuery,
-          limit: 8,
-          signal,
-          operation: searchPreviewOperation,
-        }),
-      enabled: debouncedServerQuery.length > 0,
-    })),
+  const searchMessagesQuery = useQuery({
+    queryKey: [
+      ...queryKeys.messagesRoot,
+      'global-search',
+      debouncedServerQuery,
+    ] as const,
+    queryFn: ({ signal }) =>
+      fetchSearchMessages(debouncedServerQuery, {
+        limit: 8,
+        signal,
+        operation: searchPreviewOperation,
+      }),
+    enabled: debouncedServerQuery.length > 0,
   })
-  const fetchedSourceMessages = useMemo(
-    () => sourceMessageQueries.flatMap((source) => source.data?.items ?? []),
-    [sourceMessageQueries],
-  )
   const canPreviewSearch =
-    debouncedServerQuery.length > 0 &&
-    sourceMessageQueries.length > 0 &&
-    sourceMessageQueries.every((source) => source.isSuccess)
-  const hasPreviewSearchError = sourceMessageQueries.some(
-    (source) => source.isError,
-  )
+    debouncedServerQuery.length > 0 && searchMessagesQuery.isSuccess
+  const hasPreviewSearchError = searchMessagesQuery.isError
   const canPreviewCurrentQuery =
     serverQuery.length > 0 && debouncedServerQuery === serverQuery
 
@@ -146,15 +135,8 @@ export function CommandPalette({
     onPreviewSearch,
   ])
 
-  const cachedMessages = useMemo(() => {
-    const deduped = new Map<string, MessageSummary>()
-    for (const message of fetchedSourceMessages) {
-      deduped.set(`${message.sourceId}:${message.id}`, message)
-    }
-    return [...deduped.values()].sort((left, right) =>
-      right.receivedAt.localeCompare(left.receivedAt),
-    )
-  }, [fetchedSourceMessages])
+  const cachedMessages =
+    searchMessagesQuery.data?.items ?? EMPTY_MESSAGE_RESULTS
 
   const replaceQuery = useCallback((nextQuery: string) => {
     setQuery(nextQuery)

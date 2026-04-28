@@ -170,6 +170,7 @@ without closing the panel. Query language help is rendered in the same panel and
 uses the same floating-panel behavior as commands and keyboard shortcuts.
 
 Search syntax and backend execution are defined by [L1-search](L1-search.md). The visual treatment is defined by L2.
+Message result previews use the global message search endpoint so the palette does not issue one search request per account.
 
 ## Settings And Overlays
 

@@ -95,6 +95,19 @@ pub struct ListSourceMessagesQuery {
     pub q: Option<String>,
 }
 
+/// Query parameters for global message search.
+///
+/// @spec docs/L1-api#conversations-and-messages
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesQuery {
+    pub q: String,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+    pub sort: Option<MessageSortField>,
+    pub sort_dir: Option<SortDirection>,
+}
+
 /// Query parameters for smart-mailbox message listing.
 ///
 /// @spec docs/L1-api#smart-mailboxes
@@ -236,6 +249,25 @@ async fn record_search_cache_visibility(
             );
         }
     }
+}
+
+fn spawn_search_cache_visibility(
+    state: Arc<AppState>,
+    page: MessagePage,
+    scope_rule: SmartMailboxRule,
+    result_rule: SmartMailboxRule,
+    operation_id: Option<String>,
+) {
+    tokio::spawn(async move {
+        record_search_cache_visibility(
+            &state,
+            &page,
+            &scope_rule,
+            &result_rule,
+            operation_id.as_deref(),
+        )
+        .await;
+    });
 }
 
 /// Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
@@ -1401,14 +1433,13 @@ pub async fn list_source_messages(
             )
             .map_err(ApiError::from_service_error)?;
         let operation_id = observability::operation_id_from_headers(&headers);
-        record_search_cache_visibility(
-            &state,
-            &page,
-            &scoped_rule,
-            &result_rule,
-            operation_id.as_deref(),
-        )
-        .await;
+        spawn_search_cache_visibility(
+            Arc::clone(&state),
+            page.clone(),
+            scoped_rule,
+            result_rule,
+            operation_id,
+        );
         return Ok(Json(message_page_response(page)));
     }
     let page = state
@@ -1423,6 +1454,35 @@ pub async fn list_source_messages(
         )
         .map_err(ApiError::from_service_error)?;
     Ok(Json(message_page_response(page)))
+}
+
+/// GET /v1/messages/search
+///
+/// Returns a global, paginated message search page without source fan-out.
+///
+/// @spec docs/L1-api#conversations-and-messages
+/// @spec docs/L1-api#cursor-pagination
+pub async fn search_messages(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SearchMessagesQuery>,
+) -> Result<Json<MessagePageResponse>, ApiError> {
+    let limit = message_limit(query.limit)?;
+    let cursor = parse_message_cursor(query.cursor.as_deref())?;
+    let sort_field = query.sort.unwrap_or_default();
+    let sort_direction = query.sort_dir.unwrap_or_default();
+    let rule = parse_optional_search_rule(Some(query.q.as_str()))?.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+            "search query must not be empty",
+        )
+    })?;
+    state
+        .service
+        .query_message_page_by_rule(&rule, limit, cursor.as_ref(), sort_field, sort_direction)
+        .map(message_page_response)
+        .map(Json)
+        .map_err(ApiError::from_service_error)
 }
 
 /// GET /v1/sidebar

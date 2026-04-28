@@ -43,7 +43,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install frontend dependencies
-        working-directory: apps/web
         run: bun install --frozen-lockfile
 
       - name: Install Linux desktop dependencies
@@ -64,22 +63,16 @@ jobs:
             rpm \
             wget
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
       - name: Build browser-localhost package
         shell: bash
         run: |
-          cd apps/web
-          bun run build
-          cd ../..
+          bun --cwd=apps/web run build
           cargo build --release --bin posthaste
           POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
 
       - name: Build desktop bundles
         shell: bash
-        working-directory: apps/desktop
-        run: cargo tauri build --ci --no-sign
+        run: bun run tauri build --ci --no-sign
 
       - name: Collect desktop bundles
         shell: bash
