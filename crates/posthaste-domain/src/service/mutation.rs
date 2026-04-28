@@ -1,5 +1,5 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandResult, MailGateway, MessageId,
+    AccountId, AddToMailboxCommand, CommandResult, GatewayError, MailGateway, MessageId,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand,
     SyncObject,
 };
@@ -29,7 +29,7 @@ impl MailService {
         let expected_state = self
             .sync_state
             .get_cursor(account_id, SyncObject::Message)?;
-        let outcome = match mutation {
+        let mutation_result = match mutation {
             MessageMutation::SetKeywords(command) => {
                 gateway
                     .set_keywords(
@@ -38,7 +38,7 @@ impl MailService {
                         expected_state.as_ref().map(|cursor| cursor.state.as_str()),
                         command,
                     )
-                    .await?
+                    .await
             }
             MessageMutation::ReplaceMailboxes(command) => {
                 gateway
@@ -48,7 +48,7 @@ impl MailService {
                         expected_state.as_ref().map(|cursor| cursor.state.as_str()),
                         &command.mailbox_ids,
                     )
-                    .await?
+                    .await
             }
             MessageMutation::Destroy => {
                 gateway
@@ -57,8 +57,17 @@ impl MailService {
                         message_id,
                         expected_state.as_ref().map(|cursor| cursor.state.as_str()),
                     )
-                    .await?
+                    .await
             }
+        };
+        let outcome = match mutation_result {
+            Ok(outcome) => outcome,
+            Err(GatewayError::StateMismatch) => {
+                self.refresh_after_message_state_mismatch(account_id, gateway)
+                    .await?;
+                return Err(GatewayError::StateMismatch.into());
+            }
+            Err(error) => return Err(error.into()),
         };
 
         match mutation {
@@ -81,6 +90,17 @@ impl MailService {
             ),
         }
         .map_err(Into::into)
+    }
+
+    async fn refresh_after_message_state_mismatch(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+    ) -> Result<(), ServiceError> {
+        let cursors = self.sync_state.get_sync_cursors(account_id)?;
+        let batch = gateway.sync(account_id, &cursors, None).await?;
+        self.sync_writer.apply_sync_batch(account_id, &batch)?;
+        Ok(())
     }
 
     /// Add/remove JMAP keywords on a message.

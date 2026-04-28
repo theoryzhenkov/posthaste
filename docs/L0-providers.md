@@ -98,8 +98,10 @@ skip preflight only when stored `HIGHESTMODSEQ` state is available. A mailbox is
 skipped only when `UIDVALIDITY`, `MESSAGES`, and `HIGHESTMODSEQ` still match the
 local state. If MODSEQ is unavailable or any check fails, current mailbox
 metadata is fetched, current locations are reconciled against stored
-`ImapMessageLocation` rows, current metadata is upserted, and local messages
-whose stored mailbox UID is no longer returned by the server are deleted.
+`ImapMessageLocation` rows, current metadata is upserted, and local locations
+whose stored mailbox UID is no longer returned by the server are removed. The
+canonical local message is deleted only when no provider-observed location
+remains.
 QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for efficient flag and
 expunge reconciliation.
 

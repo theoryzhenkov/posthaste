@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use crate::{
     cache::{CacheFetchUnit, CachePolicy},
-    imap::{ImapMailboxSyncState, ImapMessageLocation},
+    imap::{ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationKey},
     ConfigError,
 };
 
@@ -1154,6 +1154,12 @@ pub struct SyncBatch {
     pub messages: Vec<MessageRecord>,
     pub imap_mailbox_states: Vec<ImapMailboxSyncState>,
     pub imap_message_locations: Vec<ImapMessageLocation>,
+    /// IMAP location keys that disappeared from a mailbox-scoped delta.
+    ///
+    /// This is distinct from `deleted_message_ids`: one vanished IMAP UID can
+    /// mean a Gmail label was removed while the canonical message still exists
+    /// in another mailbox location.
+    pub deleted_imap_message_locations: Vec<ImapMessageLocationKey>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
     pub deleted_message_ids: Vec<MessageId>,
     /// When true, mailboxes are a full snapshot (from full resync fallback).

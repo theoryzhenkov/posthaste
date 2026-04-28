@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,9 +13,9 @@ use posthaste_domain::{
     SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, SyncTrigger, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_imap::{
-    imap_body_from_raw_mime, imap_full_sync_batch, imap_header_message_record,
-    imap_mailbox_state_from_header_snapshot, map_imap_mailbox, ImapFetchedHeader,
-    ImapMailboxHeaderSnapshot,
+    imap_body_from_raw_mime, imap_condstore_delta_sync_batch, imap_full_sync_batch,
+    imap_header_message_record, imap_mailbox_state_from_header_snapshot, map_imap_mailbox,
+    ImapFetchedHeader, ImapMailboxHeaderSnapshot,
 };
 use posthaste_store::DatabaseStore;
 
@@ -31,6 +32,7 @@ fn temp_root() -> PathBuf {
 
 struct Harness {
     service: MailService,
+    store: Arc<DatabaseStore>,
 }
 
 impl Harness {
@@ -49,7 +51,8 @@ impl Harness {
         );
         let config = Arc::new(config_repo);
         Self {
-            service: MailService::new(database_store, config),
+            service: MailService::new(database_store.clone(), config),
+            store: database_store,
         }
     }
 
@@ -73,15 +76,19 @@ impl Harness {
 
 #[derive(Clone)]
 struct StaticGateway {
-    batch: Arc<Mutex<Option<SyncBatch>>>,
+    batches: Arc<Mutex<VecDeque<SyncBatch>>>,
     body: FetchedBody,
     blob: Vec<u8>,
 }
 
 impl StaticGateway {
     fn new(batch: SyncBatch, body: FetchedBody, blob: Vec<u8>) -> Self {
+        Self::from_batches(vec![batch], body, blob)
+    }
+
+    fn from_batches(batches: Vec<SyncBatch>, body: FetchedBody, blob: Vec<u8>) -> Self {
         Self {
-            batch: Arc::new(Mutex::new(Some(batch))),
+            batches: Arc::new(Mutex::new(VecDeque::from(batches))),
             body,
             blob,
         }
@@ -97,11 +104,11 @@ impl MailGateway for StaticGateway {
         _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         Ok(self
-            .batch
+            .batches
             .lock()
-            .expect("batch lock poisoned")
-            .take()
-            .expect("sync should be called once"))
+            .expect("batches lock poisoned")
+            .pop_front()
+            .expect("sync should have a queued batch"))
     }
 
     async fn fetch_message_body(
@@ -289,6 +296,130 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
     assert_eq!(jmap_blob, imap_blob);
 }
 
+// spec: docs/L0-testing#provider-observation-contracts
+#[tokio::test]
+async fn imap_single_label_vanish_converges_like_jmap_mailbox_removal() {
+    let harness = Harness::new();
+    harness.save_account("jmap-labels", "JMAP Labels", AccountDriver::Jmap);
+    harness.save_account("imap-labels", "IMAP Labels", AccountDriver::ImapSmtp);
+    let imap_initial = imap_gmail_label_sync_batch();
+    let imap_locations = imap_initial.imap_message_locations.clone();
+    let jmap_gateway = StaticGateway::from_batches(
+        vec![jmap_label_initial_batch(), jmap_label_removed_batch()],
+        empty_body(),
+        Vec::new(),
+    );
+    let imap_gateway = StaticGateway::from_batches(
+        vec![
+            imap_initial,
+            imap_single_label_vanished_batch(imap_locations),
+        ],
+        empty_body(),
+        Vec::new(),
+    );
+
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("jmap-labels"),
+            SyncTrigger::Manual,
+            &jmap_gateway,
+            None,
+        )
+        .await
+        .expect("initial JMAP sync should apply");
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("imap-labels"),
+            SyncTrigger::Manual,
+            &imap_gateway,
+            None,
+        )
+        .await
+        .expect("initial IMAP sync should apply");
+
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("jmap-labels"),
+            SyncTrigger::Manual,
+            &jmap_gateway,
+            None,
+        )
+        .await
+        .expect("JMAP mailbox removal should apply");
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("imap-labels"),
+            SyncTrigger::Manual,
+            &imap_gateway,
+            None,
+        )
+        .await
+        .expect("IMAP single-label vanish should apply");
+
+    assert_eq!(
+        maybe_mailbox_roles_for_subject(&harness, "jmap-labels", "Label parity"),
+        Some(vec!["archive".to_string()])
+    );
+    assert_eq!(
+        maybe_mailbox_roles_for_subject(&harness, "imap-labels", "Label parity"),
+        Some(vec!["archive".to_string()])
+    );
+    assert_eq!(
+        imap_location_count_for_subject(&harness, "imap-labels", "Label parity"),
+        1
+    );
+}
+
+// spec: docs/L0-testing#provider-observation-contracts
+#[tokio::test]
+async fn imap_flag_delta_updates_keywords_without_losing_existing_mailboxes() {
+    let harness = Harness::new();
+    harness.save_account("imap-flags", "IMAP Flags", AccountDriver::ImapSmtp);
+    let initial = imap_gmail_label_sync_batch();
+    let locations = initial.imap_message_locations.clone();
+    let gateway = StaticGateway::from_batches(
+        vec![initial, imap_gmail_flagged_delta_batch(locations)],
+        empty_body(),
+        Vec::new(),
+    );
+
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("imap-flags"),
+            SyncTrigger::Manual,
+            &gateway,
+            None,
+        )
+        .await
+        .expect("initial IMAP sync should apply");
+    harness
+        .service
+        .sync_account(
+            &AccountId::from("imap-flags"),
+            SyncTrigger::Manual,
+            &gateway,
+            None,
+        )
+        .await
+        .expect("IMAP flag delta should apply");
+
+    let message = message_by_subject(&harness, "imap-flags", "Label parity");
+    assert!(message.is_flagged);
+    assert_eq!(
+        maybe_mailbox_roles_for_subject(&harness, "imap-flags", "Label parity"),
+        Some(vec!["archive".to_string(), "inbox".to_string()])
+    );
+    assert_eq!(
+        imap_location_count_for_subject(&harness, "imap-flags", "Label parity"),
+        2
+    );
+}
+
 fn jmap_sync_batch() -> SyncBatch {
     SyncBatch {
         mailboxes: vec![MailboxRecord {
@@ -320,6 +451,7 @@ fn jmap_sync_batch() -> SyncBatch {
         }],
         imap_mailbox_states: Vec::new(),
         imap_message_locations: Vec::new(),
+        deleted_imap_message_locations: Vec::new(),
         deleted_mailbox_ids: Vec::new(),
         deleted_message_ids: Vec::new(),
         replace_all_mailboxes: true,
@@ -336,6 +468,73 @@ fn jmap_sync_batch() -> SyncBatch {
                 updated_at: "2026-04-25T12:00:00Z".to_string(),
             },
         ],
+    }
+}
+
+fn jmap_label_initial_batch() -> SyncBatch {
+    jmap_label_batch(
+        vec![
+            MailboxId::from("jmap-inbox"),
+            MailboxId::from("jmap-archive"),
+        ],
+        "jmap-label-state-1",
+    )
+}
+
+fn jmap_label_removed_batch() -> SyncBatch {
+    jmap_label_batch(vec![MailboxId::from("jmap-archive")], "jmap-label-state-2")
+}
+
+fn jmap_label_batch(mailbox_ids: Vec<MailboxId>, state: &str) -> SyncBatch {
+    SyncBatch {
+        mailboxes: vec![
+            MailboxRecord {
+                id: MailboxId::from("jmap-inbox"),
+                name: "Inbox".to_string(),
+                role: Some("inbox".to_string()),
+                unread_emails: 0,
+                total_emails: 1,
+            },
+            MailboxRecord {
+                id: MailboxId::from("jmap-archive"),
+                name: "Archive".to_string(),
+                role: Some("archive".to_string()),
+                unread_emails: 0,
+                total_emails: 1,
+            },
+        ],
+        messages: vec![MessageRecord {
+            id: MessageId::from("jmap-label-message"),
+            source_thread_id: ThreadId::from("jmap-label-thread"),
+            remote_blob_id: None,
+            subject: Some("Label parity".to_string()),
+            from_name: Some("Alice".to_string()),
+            from_email: Some("alice@example.test".to_string()),
+            preview: None,
+            received_at: "2026-04-25T12:00:00Z".to_string(),
+            has_attachment: false,
+            size: 256,
+            mailbox_ids,
+            keywords: vec!["$seen".to_string()],
+            body_html: None,
+            body_text: None,
+            raw_mime: None,
+            rfc_message_id: Some("<label-parity@example.test>".to_string()),
+            in_reply_to: None,
+            references: Vec::new(),
+        }],
+        imap_mailbox_states: Vec::new(),
+        imap_message_locations: Vec::new(),
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: Vec::new(),
+        replace_all_mailboxes: true,
+        replace_all_messages: false,
+        cursors: vec![SyncCursor {
+            object_type: SyncObject::Message,
+            state: state.to_string(),
+            updated_at: "2026-04-25T12:00:00Z".to_string(),
+        }],
     }
 }
 
@@ -387,6 +586,245 @@ fn imap_sync_batch() -> SyncBatch {
         )],
         "2026-04-25T12:00:00Z".to_string(),
     )
+}
+
+fn imap_gmail_label_sync_batch() -> SyncBatch {
+    let inbox = posthaste_domain::ImapSelectedMailbox {
+        mailbox_id: posthaste_imap::imap_mailbox_id("INBOX"),
+        mailbox_name: "INBOX".to_string(),
+        uid_validity: posthaste_domain::ImapUidValidity(11),
+        uid_next: None,
+        highest_modseq: Some(posthaste_domain::ImapModSeq(900)),
+    };
+    let archive = posthaste_domain::ImapSelectedMailbox {
+        mailbox_id: posthaste_imap::imap_mailbox_id("[Gmail]/All Mail"),
+        mailbox_name: "[Gmail]/All Mail".to_string(),
+        uid_validity: posthaste_domain::ImapUidValidity(12),
+        uid_next: None,
+        highest_modseq: Some(posthaste_domain::ImapModSeq(901)),
+    };
+    let inbox_header = imap_label_header(&inbox, posthaste_domain::ImapUid(101), &["\\Seen"]);
+    let archive_header = imap_label_header(&archive, posthaste_domain::ImapUid(202), &["\\Seen"]);
+    let inbox_snapshot = ImapMailboxHeaderSnapshot {
+        selected: inbox,
+        headers: vec![inbox_header.clone()],
+    };
+    let archive_snapshot = ImapMailboxHeaderSnapshot {
+        selected: archive,
+        headers: vec![archive_header.clone()],
+    };
+
+    imap_full_sync_batch(
+        &AccountId::from("imap-labels"),
+        posthaste_imap::DiscoveredImapAccount {
+            capabilities: posthaste_domain::ImapCapabilities::from_tokens([
+                "IMAP4rev1",
+                "CONDSTORE",
+                "QRESYNC",
+                "X-GM-EXT-1",
+            ]),
+            mailboxes: vec![
+                map_imap_mailbox("INBOX", ["\\Inbox"]),
+                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+            ],
+        },
+        vec![inbox_header, archive_header],
+        vec![
+            imap_mailbox_state_from_header_snapshot(
+                &inbox_snapshot,
+                "2026-04-25T12:00:00Z".to_string(),
+            ),
+            imap_mailbox_state_from_header_snapshot(
+                &archive_snapshot,
+                "2026-04-25T12:00:00Z".to_string(),
+            ),
+        ],
+        "2026-04-25T12:00:00Z".to_string(),
+    )
+}
+
+fn imap_gmail_flagged_delta_batch(
+    locations: Vec<posthaste_domain::ImapMessageLocation>,
+) -> SyncBatch {
+    let archive = posthaste_domain::ImapSelectedMailbox {
+        mailbox_id: posthaste_imap::imap_mailbox_id("[Gmail]/All Mail"),
+        mailbox_name: "[Gmail]/All Mail".to_string(),
+        uid_validity: posthaste_domain::ImapUidValidity(12),
+        uid_next: None,
+        highest_modseq: Some(posthaste_domain::ImapModSeq(1102)),
+    };
+    let changed_header = imap_label_header(
+        &archive,
+        posthaste_domain::ImapUid(202),
+        &["\\Seen", "\\Flagged"],
+    );
+
+    imap_condstore_delta_sync_batch(
+        &AccountId::from("imap-flags"),
+        posthaste_imap::DiscoveredImapAccount {
+            capabilities: posthaste_domain::ImapCapabilities::from_tokens([
+                "IMAP4rev1",
+                "CONDSTORE",
+                "QRESYNC",
+                "X-GM-EXT-1",
+            ]),
+            mailboxes: vec![
+                map_imap_mailbox("INBOX", ["\\Inbox"]),
+                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+            ],
+        },
+        vec![changed_header],
+        vec![posthaste_domain::ImapMailboxSyncState {
+            mailbox_id: archive.mailbox_id.clone(),
+            mailbox_name: archive.mailbox_name,
+            uid_validity: archive.uid_validity,
+            highest_uid: Some(posthaste_domain::ImapUid(202)),
+            highest_modseq: archive.highest_modseq,
+            updated_at: "2026-04-25T12:01:00Z".to_string(),
+        }],
+        locations,
+        Vec::new(),
+        "2026-04-25T12:01:00Z".to_string(),
+    )
+}
+
+fn imap_single_label_vanished_batch(
+    locations: Vec<posthaste_domain::ImapMessageLocation>,
+) -> SyncBatch {
+    let vanished = locations
+        .iter()
+        .find(|location| location.mailbox_id == posthaste_imap::imap_mailbox_id("INBOX"))
+        .map(|location| {
+            (
+                location.mailbox_id.clone(),
+                location.uid_validity,
+                location.uid,
+            )
+        })
+        .expect("initial fixture should have an INBOX location");
+
+    imap_condstore_delta_sync_batch(
+        &AccountId::from("imap-labels"),
+        posthaste_imap::DiscoveredImapAccount {
+            capabilities: posthaste_domain::ImapCapabilities::from_tokens([
+                "IMAP4rev1",
+                "CONDSTORE",
+                "QRESYNC",
+                "X-GM-EXT-1",
+            ]),
+            mailboxes: vec![
+                map_imap_mailbox("INBOX", ["\\Inbox"]),
+                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+            ],
+        },
+        Vec::new(),
+        Vec::new(),
+        locations,
+        vec![vanished],
+        "2026-04-25T12:01:00Z".to_string(),
+    )
+}
+
+fn imap_label_header(
+    selected: &posthaste_domain::ImapSelectedMailbox,
+    uid: posthaste_domain::ImapUid,
+    flags: &[&str],
+) -> posthaste_imap::ImapMappedHeader {
+    imap_header_message_record(
+        selected,
+        ImapFetchedHeader {
+            mailbox_id: selected.mailbox_id.clone(),
+            uid,
+            modseq: Some(posthaste_domain::ImapModSeq(900 + uid.0 as u64)),
+            flags: flags.iter().map(|flag| (*flag).to_string()).collect(),
+            rfc822_size: 256,
+            has_attachment: false,
+            headers: concat!(
+                "From: Alice <alice@example.test>\r\n",
+                "Date: Sat, 25 Apr 2026 12:00:00 +0000\r\n",
+                "Subject: Label parity\r\n",
+                "Message-ID: <label-parity@example.test>\r\n",
+                "\r\n",
+            )
+            .as_bytes()
+            .to_vec(),
+            updated_at: "2026-04-25T12:00:00Z".to_string(),
+        },
+    )
+    .expect("IMAP label header should map")
+}
+
+fn maybe_mailbox_roles_for_subject(
+    harness: &Harness,
+    account_id: &str,
+    subject: &str,
+) -> Option<Vec<String>> {
+    let mailboxes = harness
+        .service
+        .list_mailboxes(&AccountId::from(account_id))
+        .expect("mailboxes should list")
+        .into_iter()
+        .map(|mailbox| {
+            (
+                mailbox.id,
+                mailbox
+                    .role
+                    .unwrap_or_else(|| mailbox.name.to_ascii_lowercase()),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let message = harness
+        .service
+        .list_messages(&AccountId::from(account_id), None)
+        .expect("messages should list")
+        .into_iter()
+        .find(|message| message.subject.as_deref() == Some(subject))?;
+    let mut roles = message
+        .mailbox_ids
+        .iter()
+        .map(|mailbox_id| {
+            mailboxes
+                .get(mailbox_id)
+                .cloned()
+                .unwrap_or_else(|| mailbox_id.to_string())
+        })
+        .collect::<Vec<_>>();
+    roles.sort();
+    Some(roles)
+}
+
+fn message_by_subject(
+    harness: &Harness,
+    account_id: &str,
+    subject: &str,
+) -> posthaste_domain::MessageSummary {
+    harness
+        .service
+        .list_messages(&AccountId::from(account_id), None)
+        .expect("messages should list")
+        .into_iter()
+        .find(|message| message.subject.as_deref() == Some(subject))
+        .unwrap_or_else(|| panic!("message with subject {subject:?} should exist"))
+}
+
+fn imap_location_count_for_subject(harness: &Harness, account_id: &str, subject: &str) -> usize {
+    use posthaste_domain::ImapMessageLocationStore;
+
+    let message = message_by_subject(harness, account_id, subject);
+    harness
+        .store
+        .list_imap_message_locations(&AccountId::from(account_id), &message.id)
+        .expect("IMAP locations should list")
+        .len()
+}
+
+fn empty_body() -> FetchedBody {
+    FetchedBody {
+        body_html: None,
+        body_text: None,
+        raw_mime: None,
+        attachments: Vec::new(),
+    }
 }
 
 fn parity_body() -> FetchedBody {

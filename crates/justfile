@@ -18,12 +18,12 @@ build-release:
 
 # Run tests
 test *args:
-    cargo test {{args}}
+    cargo test --workspace --exclude posthaste-desktop {{args}}
 
 # Run clippy + check
 check:
     bash tools/dev/logs/check-rust-contract.sh
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --exclude posthaste-desktop --all-targets -- -D warnings
 
 # Format code
 fmt:

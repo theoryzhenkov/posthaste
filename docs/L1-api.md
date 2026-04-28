@@ -5,6 +5,7 @@ modified: 2026-04-28
 reviewed: 2026-04-28
 depends:
   - path: docs/L0-api
+  - path: docs/L0-testing
   - path: docs/L0-providers
   - path: docs/L1-sync
   - path: docs/L1-jmap

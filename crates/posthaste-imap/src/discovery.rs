@@ -2,8 +2,8 @@ use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::FlagNameAttribute;
 use imap_client::imap_types::mailbox::Mailbox;
 use posthaste_domain::{
-    imap_special_use_role, AccountTransportSettings, ImapCapabilities, MailboxId, MailboxRole,
-    ProviderAuthKind, TransportSecurity,
+    imap_special_use_role, AccountTransportSettings, ImapCapabilities, ImapProviderProfile,
+    MailboxId, MailboxRole, ProviderAuthKind, TransportSecurity,
 };
 
 use crate::ImapAdapterError;
@@ -54,6 +54,12 @@ impl ImapConnectionConfig {
 pub struct DiscoveredImapAccount {
     pub capabilities: ImapCapabilities,
     pub mailboxes: Vec<DiscoveredImapMailbox>,
+}
+
+impl DiscoveredImapAccount {
+    pub fn provider_profile(&self) -> ImapProviderProfile {
+        ImapProviderProfile::from_capabilities(&self.capabilities)
+    }
 }
 
 /// Mailbox metadata from IMAP LIST, normalized for Posthaste.
