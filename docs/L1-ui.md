@@ -202,6 +202,8 @@ alternative.
 
 Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }`, `{ kind: "attachment", params, disposition: "focused" }`, or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Browser overlays form a history-backed surface stack: opening an attachment from a focused message pushes a child surface, and Esc or the close button pops only the top surface before returning to the parent message. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, `o` opens or focuses one stable `message-*` window per exact source/message ID, and attachment previews open or focus one stable `attachment-*` window per exact source/message/attachment ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 
+Surface route parameters own visible navigation state inside focused surfaces. Settings category and drill-in state, including account editors, smart-mailbox editors, source-mailbox editors, and create flows, are encoded in the settings surface descriptor. Component state may hold ephemeral form or pending-operation state, but server/cache refreshes must not replay initial route parameters or otherwise change visible navigation unless they are explicitly correcting an invalid route.
+
 ## Keyboard shortcuts
 
 | Key                    | Action                                                                        |

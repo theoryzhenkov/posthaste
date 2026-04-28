@@ -41,6 +41,20 @@ export function openWebSurface(surface: SurfaceDescriptor): void {
   window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
+export function replaceWebSurface(surface: SurfaceDescriptor): void {
+  const route = surfaceRoute(surface)
+  const depth = Math.max(
+    1,
+    currentSurfaceDepth(window.location, window.history.state),
+  )
+  window.history.replaceState(
+    surfaceHistoryState(route, depth),
+    '',
+    surfaceUrl(window.location, route),
+  )
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
 export function closeWebSurface(): void {
   if (isSurfaceHistoryState(window.history.state)) {
     window.history.back()

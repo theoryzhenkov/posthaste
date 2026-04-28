@@ -54,8 +54,11 @@ import {
 import { mailKeys, type MailSelection } from './mailState'
 import { queryKeys } from './queryKeys'
 import {
+  accountSettingsSurface,
   messageSurfaceFromSelection,
+  settingsCategorySurface,
   settingsSurface,
+  smartMailboxSettingsSurface,
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
 } from './surfaces'
@@ -228,7 +231,7 @@ function MailClient({
   }, [selectedMessage])
 
   const handleMissingComposeSource = useCallback(() => {
-    openFocusedSurface(settingsSurface({ category: 'accounts' }))
+    openFocusedSurface(settingsCategorySurface('accounts'))
   }, [])
   const {
     closeCompose,
@@ -279,13 +282,14 @@ function MailClient({
       category?: SettingsSurfaceCategory,
       options?: { accountId?: string | null; smartMailboxId?: string | null },
     ) => {
-      openFocusedSurface(
-        settingsSurface({
-          category,
-          accountId: options?.accountId,
-          smartMailboxId: options?.smartMailboxId,
-        }),
-      )
+      const surface = options?.accountId
+        ? accountSettingsSurface(options.accountId)
+        : options?.smartMailboxId
+          ? smartMailboxSettingsSurface(options.smartMailboxId)
+          : category
+            ? settingsCategorySurface(category)
+            : settingsSurface()
+      openFocusedSurface(surface)
       setIsCommandPaletteOpen(false)
     },
     [],

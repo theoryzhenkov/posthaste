@@ -6,6 +6,7 @@ import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
 import { closeCurrentSurfaceWindow, isTauriRuntime } from '@/desktop'
+import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
 import { AttachmentSurface } from './AttachmentSurface'
 import { MessageDetail } from './MessageDetail'
 import { SettingsPanel } from './SettingsPanel'
@@ -53,10 +54,9 @@ export function FocusedSurface({
       <SettingsPanel
         accounts={accountsQuery.data ?? []}
         activeAccountId={null}
-        initialAccountId={surface.params.accountId}
-        initialCategory={surface.params.category}
-        initialSmartMailboxId={surface.params.smartMailboxId}
+        surface={surface}
         onActiveAccountChange={() => {}}
+        onNavigate={replaceFocusedSurface}
         onClose={
           canClose
             ? (onClose ?? (() => void closeCurrentSurfaceWindow()))

@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
-import { isTauriRuntime, openDesktopSurface, openWebSurface } from '@/desktop'
 import {
-  settingsSurface,
+  isTauriRuntime,
+  openDesktopSurface,
+  openWebSurface,
+  replaceWebSurface,
+} from '@/desktop'
+import {
+  settingsCategorySurface,
   surfaceFromLocation,
   type SurfaceDescriptor,
 } from '@/surfaces'
@@ -44,6 +49,10 @@ export function openFocusedSurface(surface: SurfaceDescriptor): void {
   openWebSurface(surface)
 }
 
+export function replaceFocusedSurface(surface: SurfaceDescriptor): void {
+  replaceWebSurface(surface)
+}
+
 export function useEffectiveSurface({
   routeSurface,
   shouldForceSettings,
@@ -54,12 +63,12 @@ export function useEffectiveSurface({
   const shouldRenderForcedSettings = shouldForceSettings && !isTauriRuntime()
   const effectiveSurface =
     shouldRenderForcedSettings && routeSurface?.kind !== 'settings'
-      ? settingsSurface({ category: 'accounts' })
+      ? settingsCategorySurface('accounts')
       : routeSurface
 
   useEffect(() => {
     if (shouldForceSettings && isTauriRuntime()) {
-      openFocusedSurface(settingsSurface({ category: 'accounts' }))
+      openFocusedSurface(settingsCategorySurface('accounts'))
     }
   }, [shouldForceSettings])
 
