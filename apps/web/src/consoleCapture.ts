@@ -6,6 +6,24 @@
  * Call `installConsoleCapture()` once at app startup, only in Tauri context.
  */
 import { invoke } from '@tauri-apps/api/core'
+import { LOG_EVENTS, type LogEvent } from './logEvents'
+
+interface FrontendLogPayload {
+  [key: string]: unknown
+  level: string
+  domain: string
+  message: string
+  event: LogEvent
+  requestId: string | null
+  operationId: string | null
+  operationKind: string | null
+  operationSource: string | null
+  sessionId: string | null
+}
+
+function forwardFrontendLog(payload: FrontendLogPayload): void {
+  invoke('log_from_frontend', { entry: payload }).catch(() => {})
+}
 
 const CONSOLE_LEVEL_MAP: Record<string, string> = {
   log: 'info',
@@ -48,30 +66,32 @@ export function installConsoleCapture(): void {
     ) => {
       original.apply(console, args)
       if (args.length === 1 && isPinoObject(args[0])) return
-      invoke('log_from_frontend', {
+      forwardFrontendLog({
         level,
         domain: 'webview',
         message: formatArgs(args),
+        event: LOG_EVENTS.frontendConsoleOutput,
         requestId: null,
         operationId: null,
         operationKind: null,
         operationSource: null,
         sessionId: null,
-      }).catch(() => {})
+      })
     }
   }
 
   window.addEventListener('error', (event) => {
-    invoke('log_from_frontend', {
+    forwardFrontendLog({
       level: 'error',
       domain: 'webview',
       message: `Uncaught ${event.error?.stack ?? event.message}`,
+      event: LOG_EVENTS.frontendErrorUncaught,
       requestId: null,
       operationId: null,
       operationKind: null,
       operationSource: null,
       sessionId: null,
-    }).catch(() => {})
+    })
   })
 
   window.addEventListener('unhandledrejection', (event) => {
@@ -80,15 +100,16 @@ export function installConsoleCapture(): void {
       reason instanceof Error
         ? (reason.stack ?? reason.message)
         : String(reason)
-    invoke('log_from_frontend', {
+    forwardFrontendLog({
       level: 'error',
       domain: 'webview',
       message: `Unhandled rejection: ${message}`,
+      event: LOG_EVENTS.frontendErrorUnhandledRejection,
       requestId: null,
       operationId: null,
       operationKind: null,
       operationSource: null,
       sessionId: null,
-    }).catch(() => {})
+    })
   })
 }

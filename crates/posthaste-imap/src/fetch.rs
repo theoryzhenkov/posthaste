@@ -17,7 +17,7 @@ use imap_client::imap_types::sequence::SequenceSet;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
 use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid};
-use tracing::{debug, info};
+use posthaste_observability::{events, ph_debug, ph_info};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
@@ -116,7 +116,8 @@ pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
     // not depend on provider-specific ordering or duplicate behavior.
     uids.sort_unstable();
     uids.dedup();
-    info!(
+    ph_info!(
+        events::IMAP_MAILBOX_UID_SEARCH_COMPLETED,
         mailbox_id = %selected.mailbox_id,
         uid_count = uids.len(),
         fetch_modseq,
@@ -182,7 +183,8 @@ pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
         .into_iter()
         .filter(|uid| uid.get() > after_uid.0)
         .collect::<Vec<_>>();
-    info!(
+    ph_info!(
+        events::IMAP_MAILBOX_UID_DELTA_SEARCH_COMPLETED,
         mailbox_id = %selected.mailbox_id,
         uid_count = current_uids.len(),
         new_uid_count = new_uids.len(),
@@ -245,7 +247,8 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
         let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
         uids.sort_unstable();
         uids.dedup();
-        info!(
+        ph_info!(
+            events::IMAP_MAILBOX_UID_SEARCH_COMPLETED,
             mailbox_id = %selected.mailbox_id,
             uid_count = uids.len(),
             fetch_modseq = true,
@@ -318,7 +321,8 @@ pub(crate) async fn fetch_selected_mailbox_headers(
             let fetched = fetched_header_from_items(selected, items, updated_at.clone())?;
             records.push(imap_header_message_record(selected, fetched)?);
         }
-        info!(
+        ph_info!(
+            events::IMAP_MAILBOX_HEADER_FETCH_PROGRESS,
             mailbox_id = %selected.mailbox_id,
             chunk_index = chunk_index + 1,
             chunk_count,
@@ -329,7 +333,8 @@ pub(crate) async fn fetch_selected_mailbox_headers(
     }
 
     records.sort_by_key(|record| record.location.uid);
-    debug!(
+    ph_debug!(
+        events::IMAP_MAILBOX_HEADER_FETCH_SORTED,
         mailbox_id = %selected.mailbox_id,
         fetched_count = records.len(),
         "IMAP mailbox header fetch sorted"

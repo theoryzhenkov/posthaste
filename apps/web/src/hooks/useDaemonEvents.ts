@@ -11,6 +11,7 @@ import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { buildEventsUrl } from '../api/client'
 import { syncLogger } from '../logger'
+import { LOG_EVENTS } from '../logEvents'
 import type { DomainEvent } from '../api/types'
 import { applyDomainEvent } from '../domainCache'
 import { shouldSuppressLocalEcho } from '../mailState'
@@ -52,7 +53,7 @@ export function useDaemonEvents() {
         payload = JSON.parse(event.data) as DomainEvent
       } catch (error) {
         syncLogger.warn(
-          { error, raw: event.data },
+          { event: LOG_EVENTS.daemonEventMalformed, error, raw: event.data },
           'ignoring malformed daemon event',
         )
         return

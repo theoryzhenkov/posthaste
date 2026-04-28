@@ -128,6 +128,7 @@ pub async fn reset_default_smart_mailboxes(
 pub async fn list_smart_mailbox_messages(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
+    headers: HeaderMap,
     Query(query): Query<ListSmartMailboxMessagesQuery>,
 ) -> Result<Json<MessagePageResponse>, ApiError> {
     let limit = message_limit(query.limit)?;
@@ -152,7 +153,15 @@ pub async fn list_smart_mailbox_messages(
                 sort_direction,
             )
             .map_err(ApiError::from_service_error)?;
-        record_search_cache_visibility(&state, &page, &scope_rule, &result_rule).await;
+        let operation_id = observability::operation_id_from_headers(&headers);
+        record_search_cache_visibility(
+            &state,
+            &page,
+            &scope_rule,
+            &result_rule,
+            operation_id.as_deref(),
+        )
+        .await;
         return Ok(Json(message_page_response(page)));
     }
 

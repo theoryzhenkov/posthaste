@@ -1,3 +1,7 @@
+use posthaste_observability::{
+    events, ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
+    ph_forwarded_warn, ph_info,
+};
 use posthaste_server::ServerConfig;
 use serde::Deserialize;
 use tauri::webview::WebviewWindow;
@@ -56,17 +60,121 @@ struct SettingsSurfaceParams {
     smart_mailbox_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrontendLogEntry {
+    level: String,
+    domain: String,
+    message: String,
+    event: Option<String>,
+    request_id: Option<String>,
+    operation_id: Option<String>,
+    operation_kind: Option<String>,
+    operation_source: Option<String>,
+    session_id: Option<String>,
+}
+
 /// Receive a log entry from the frontend and emit it through the backend's
 /// tracing subscriber so it lands in the same log files with rotation.
 #[tauri::command]
-fn log_from_frontend(level: &str, domain: &str, message: &str) {
+fn log_from_frontend(entry: FrontendLogEntry) {
+    let level = entry.level.as_str();
+    let domain = entry.domain.as_str();
+    let message = entry.message.as_str();
+    let request_id = log_token(entry.request_id);
+    let event = log_token(entry.event);
+    let operation_id = log_token(entry.operation_id);
+    let operation_kind = log_token(entry.operation_kind);
+    let operation_source = log_token(entry.operation_source);
+    let session_id = log_token(entry.session_id);
+    let process_id = std::process::id();
     match level {
-        "error" => tracing::error!(target: "frontend", domain, "{message}"),
-        "warn" => tracing::warn!(target: "frontend", domain, "{message}"),
-        "info" => tracing::info!(target: "frontend", domain, "{message}"),
-        "debug" => tracing::debug!(target: "frontend", domain, "{message}"),
-        _ => tracing::trace!(target: "frontend", domain, "{message}"),
+        "error" => ph_forwarded_error!(
+            target: "frontend",
+            event: event.as_str(),
+            source = "frontend",
+            process_id,
+            process_role = "webview",
+            domain,
+            request_id = request_id.as_str(),
+            operation_id = operation_id.as_str(),
+            operation_kind = operation_kind.as_str(),
+            operation_source = operation_source.as_str(),
+            session_id = session_id.as_str(),
+            "{message}"
+        ),
+        "warn" => ph_forwarded_warn!(
+            target: "frontend",
+            event: event.as_str(),
+            source = "frontend",
+            process_id,
+            process_role = "webview",
+            domain,
+            request_id = request_id.as_str(),
+            operation_id = operation_id.as_str(),
+            operation_kind = operation_kind.as_str(),
+            operation_source = operation_source.as_str(),
+            session_id = session_id.as_str(),
+            "{message}"
+        ),
+        "info" => ph_forwarded_info!(
+            target: "frontend",
+            event: event.as_str(),
+            source = "frontend",
+            process_id,
+            process_role = "webview",
+            domain,
+            request_id = request_id.as_str(),
+            operation_id = operation_id.as_str(),
+            operation_kind = operation_kind.as_str(),
+            operation_source = operation_source.as_str(),
+            session_id = session_id.as_str(),
+            "{message}"
+        ),
+        "debug" => ph_forwarded_debug!(
+            target: "frontend",
+            event: event.as_str(),
+            source = "frontend",
+            process_id,
+            process_role = "webview",
+            domain,
+            request_id = request_id.as_str(),
+            operation_id = operation_id.as_str(),
+            operation_kind = operation_kind.as_str(),
+            operation_source = operation_source.as_str(),
+            session_id = session_id.as_str(),
+            "{message}"
+        ),
+        _ => ph_forwarded_trace!(
+            target: "frontend",
+            event: event.as_str(),
+            source = "frontend",
+            process_id,
+            process_role = "webview",
+            domain,
+            request_id = request_id.as_str(),
+            operation_id = operation_id.as_str(),
+            operation_kind = operation_kind.as_str(),
+            operation_source = operation_source.as_str(),
+            session_id = session_id.as_str(),
+            "{message}"
+        ),
     }
+}
+
+fn log_token(value: Option<String>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    let value = value.trim();
+    if value.is_empty() || value.len() > 128 || !value.chars().all(is_safe_log_token) {
+        return String::new();
+    }
+    value.to_string()
+}
+
+fn is_safe_log_token(value: char) -> bool {
+    value.is_ascii_alphanumeric() || matches!(value, '_' | '-' | '.' | ':')
 }
 
 #[tauri::command]
@@ -122,7 +230,11 @@ pub fn run() {
             };
             let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
             let port = handle.addr.port();
-            tracing::info!(addr = %handle.addr, "embedded backend started");
+            ph_info!(
+                events::DESKTOP_BACKEND_STARTED,
+                addr = %handle.addr,
+                "embedded backend started"
+            );
             app.manage(handle);
             app.manage(EmbeddedBackend { port });
 
@@ -346,5 +458,20 @@ mod tests {
             surface_route(&surface),
             "/surface/settings?category=accounts&accountId=primary"
         );
+    }
+
+    #[test]
+    fn log_token_accepts_short_ascii_metadata() {
+        assert_eq!(
+            log_token(Some(" mail.search:preview_1 ".to_string())),
+            "mail.search:preview_1"
+        );
+    }
+
+    #[test]
+    fn log_token_rejects_unsafe_metadata() {
+        assert_eq!(log_token(Some("mail search".to_string())), "");
+        assert_eq!(log_token(Some("mail/search".to_string())), "");
+        assert_eq!(log_token(Some("x".repeat(129))), "");
     }
 }

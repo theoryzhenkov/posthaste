@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use posthaste_observability::{events, ph_warn};
 use serde_json::json;
-use tracing::warn;
 
 use crate::{
     AccountId, AccountSettings, AppSettings, AutomationBackfillStore, CacheStore, CommandResult,
@@ -606,7 +606,8 @@ impl MailService {
                 &settings.cache_policy,
                 &batch.messages,
             ) {
-                warn!(
+                ph_warn!(
+                    events::DOMAIN_CACHE_CANDIDATE_POST_SYNC_FAILED,
                     account_id = %account_id,
                     error = %error,
                     "post-sync body cache candidate update failed after sync batch commit"
@@ -620,7 +621,8 @@ impl MailService {
         {
             Ok(events) => events,
             Err(error) => {
-                warn!(
+                ph_warn!(
+                    events::DOMAIN_AUTOMATION_POST_SYNC_FAILED,
                     account_id = %account_id,
                     error = %error,
                     "post-sync automation failed after sync batch commit"

@@ -243,9 +243,12 @@ fn repair_missing_body_cache_objects_tx(tx: &Transaction<'_>) -> Result<(), Stor
         )
         .map_err(sql_to_store_error)?;
     if pruned_queue > 0 || pruned_signals > 0 || pruned_objects > 0 {
-        debug!(
+        ph_debug!(
+            events::STORE_CACHE_ORPHANS_PRUNED,
             pruned_queue,
-            pruned_signals, pruned_objects, "pruned orphan cache child rows"
+            pruned_signals,
+            pruned_objects,
+            "pruned orphan cache child rows"
         );
     }
     let sql = format!(
@@ -308,7 +311,11 @@ fn repair_missing_body_cache_objects_tx(tx: &Transaction<'_>) -> Result<(), Stor
         )
         .map_err(sql_to_store_error)?;
     if repaired > 0 {
-        debug!(repaired, "repaired missing structural body cache objects");
+        ph_debug!(
+            events::STORE_CACHE_STRUCTURAL_BODY_REPAIRED,
+            repaired,
+            "repaired missing structural body cache objects"
+        );
     }
     Ok(())
 }

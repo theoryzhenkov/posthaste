@@ -25,17 +25,17 @@ use posthaste_domain::{
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
     EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
+use posthaste_observability::{events, ph_warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
-use tracing::warn;
 
 use crate::oauth::{
     OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthProviderProfile, OAuthTokenService,
     OAuthTokenSet, PendingOAuthFlow,
 };
-use crate::{sanitize, AppState};
+use crate::{observability, sanitize, AppState};
 
 mod account_support;
 mod cursor_support;
@@ -183,11 +183,13 @@ async fn record_search_cache_visibility(
     page: &MessagePage,
     scope_rule: &SmartMailboxRule,
     result_rule: &SmartMailboxRule,
+    operation_id: Option<&str>,
 ) {
     let total_messages = match state.service.count_messages_by_rule(scope_rule) {
         Ok((_, total)) => total.max(0) as u64,
         Err(error) => {
-            warn!(
+            ph_warn!(
+                events::CACHE_SEARCH_VISIBILITY_SCOPE_COUNT_FAILED,
                 error = %error,
                 "skipping cache search visibility signals because scope count failed"
             );
@@ -197,7 +199,8 @@ async fn record_search_cache_visibility(
     let result_count = match state.service.count_messages_by_rule(result_rule) {
         Ok((_, total)) => total.max(0) as u64,
         Err(error) => {
-            warn!(
+            ph_warn!(
+                events::CACHE_SEARCH_VISIBILITY_RESULT_COUNT_FAILED,
                 error = %error,
                 "skipping cache search visibility signals because result count failed"
             );
@@ -211,7 +214,8 @@ async fn record_search_cache_visibility(
         {
             Ok(account_ids) => account_ids,
             Err(error) => {
-                warn!(
+                ph_warn!(
+                    events::CACHE_SEARCH_VISIBILITY_RECORD_FAILED,
                     error = %error,
                     "failed to record cache search visibility signals"
                 );
@@ -221,10 +225,11 @@ async fn record_search_cache_visibility(
     for account_id in account_ids {
         if let Err(error) = state
             .supervisor
-            .trigger_cache_maintenance(&account_id)
+            .trigger_cache_maintenance(&account_id, operation_id.map(str::to_string))
             .await
         {
-            warn!(
+            ph_warn!(
+                events::CACHE_MAINTENANCE_TRIGGER_FAILED,
                 account_id = %account_id,
                 error = %error,
                 "failed to trigger cache maintenance after search visibility signal"
@@ -1374,6 +1379,7 @@ pub async fn patch_mailbox(
 pub async fn list_source_messages(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
+    headers: HeaderMap,
     Query(query): Query<ListSourceMessagesQuery>,
 ) -> Result<Json<MessagePageResponse>, ApiError> {
     let mailbox_id = query.mailbox_id.map(MailboxId);
@@ -1394,7 +1400,15 @@ pub async fn list_source_messages(
                 sort_direction,
             )
             .map_err(ApiError::from_service_error)?;
-        record_search_cache_visibility(&state, &page, &scoped_rule, &result_rule).await;
+        let operation_id = observability::operation_id_from_headers(&headers);
+        record_search_cache_visibility(
+            &state,
+            &page,
+            &scoped_rule,
+            &result_rule,
+            operation_id.as_deref(),
+        )
+        .await;
         return Ok(Json(message_page_response(page)));
     }
     let page = state
@@ -1654,7 +1668,8 @@ pub async fn send_message(
         .map_err(ApiError::from_service_error)?;
     if let Some(sender) = &request.from {
         if let Err(error) = state.store.remember_sender_address(&account_id, sender) {
-            warn!(
+            ph_warn!(
+                events::SEND_SENDER_CACHE_UPDATE_FAILED,
                 source_id = %account_id,
                 sender = %sender.email,
                 error = %error,
@@ -1667,7 +1682,8 @@ pub async fn send_message(
         .trigger_account_sync(&account_id, SyncTrigger::Manual)
         .await
     {
-        warn!(
+        ph_warn!(
+            events::SEND_FOLLOWUP_SYNC_TRIGGER_FAILED,
             source_id = %account_id,
             error = %error,
             "send accepted but follow-up sync trigger failed"

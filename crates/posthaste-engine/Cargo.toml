@@ -9,13 +9,13 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 jmap-client = { workspace = true }
 posthaste-domain = { path = "../posthaste-domain" }
+posthaste-observability = { path = "../posthaste-observability" }
 pulldown-cmark = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
 url = "2.5.8"
 
 [dev-dependencies]

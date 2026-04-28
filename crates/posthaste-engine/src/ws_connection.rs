@@ -5,9 +5,8 @@ use jmap_client::client_ws::CorrelatedWs;
 use jmap_client::core::request::Request;
 use jmap_client::core::response::{Response, TaggedMethodResponse};
 use jmap_client::PushObject;
+use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use tokio::sync::RwLock;
-
-use tracing::{debug, info, warn};
 
 use crate::live::map_gateway_error;
 use posthaste_domain::GatewayError;
@@ -79,21 +78,24 @@ impl SharedWsConnection {
             return Ok(());
         }
         let target_url = self.ws_url();
-        debug!(
+        ph_debug!(
+            events::JMAP_WEBSOCKET_CONNECTION_OPENING,
             target_url = target_url.as_deref(),
             "opening WebSocket connection"
         );
-        let ws = self
-            .client
-            .connect_ws_correlated()
-            .await
-            .map_err(|error| {
-                let mapped = map_gateway_error(error);
-                warn!(target_url = target_url.as_deref(), error = %mapped, "WebSocket connection failed");
-                mapped
-            })?;
+        let ws = self.client.connect_ws_correlated().await.map_err(|error| {
+            let mapped = map_gateway_error(error);
+            ph_warn!(
+                events::JMAP_WEBSOCKET_CONNECTION_FAILED,
+                target_url = target_url.as_deref(),
+                error = %mapped,
+                "WebSocket connection failed"
+            );
+            mapped
+        })?;
         *guard = WsConnectionState::Connected(Arc::new(ws));
-        info!(
+        ph_info!(
+            events::JMAP_WEBSOCKET_CONNECTION_ESTABLISHED,
             target_url = target_url.as_deref(),
             "WebSocket connection established"
         );

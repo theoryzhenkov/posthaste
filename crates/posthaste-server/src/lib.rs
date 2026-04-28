@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod logging;
 pub mod oauth;
+pub mod observability;
 pub mod push;
 pub mod sanitize;
 pub mod secret;
@@ -19,12 +20,13 @@ use axum::Router;
 use dotenvy::dotenv;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
+use posthaste_observability::{events, ph_info};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
-use tracing::{info, info_span};
+use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::resolve_roots;
@@ -104,7 +106,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
             config::import_bootstrap(bootstrap_path, &config_repo)
                 .expect("failed to import bootstrap template");
-            info!(
+            ph_info!(
+                events::CONFIG_BOOTSTRAP_IMPORTED,
                 path = %bootstrap_path.display(),
                 "imported bootstrap template"
             );
@@ -112,7 +115,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             config_repo
                 .initialize_defaults()
                 .expect("failed to initialize default config");
-            info!("initialized default config");
+            ph_info!(
+                events::CONFIG_DEFAULT_INITIALIZED,
+                "initialized default config"
+            );
         }
     }
 
@@ -167,14 +173,38 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
 
-    let trace_layer =
-        TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+    let trace_layer = TraceLayer::new_for_http()
+        .make_span_with(|request: &axum::http::Request<_>| {
+            let context = observability::RequestLogContext::from_headers(request.headers());
             info_span!(
                 "http.request",
                 method = %request.method(),
                 path = %request.uri().path(),
+                request_id = %context.request_id,
+                operation_id = context.operation_id.as_deref().unwrap_or(""),
+                operation_kind = context.operation_kind.as_deref().unwrap_or(""),
+                operation_source = context.operation_source.as_deref().unwrap_or(""),
+                session_id = context.session_id.as_deref().unwrap_or(""),
+                process_id = std::process::id(),
+                process_role = "backend",
+                status = field::Empty,
+                latency_ms = field::Empty,
             )
-        });
+        })
+        .on_response(
+            |response: &axum::http::Response<_>, latency: Duration, span: &Span| {
+                let latency_ms = latency.as_millis() as u64;
+                span.record("status", response.status().as_u16());
+                span.record("latency_ms", latency_ms);
+                ph_info!(
+                    parent: span,
+                    events::HTTP_REQUEST_COMPLETED,
+                    status = response.status().as_u16(),
+                    latency_ms,
+                    "http request completed"
+                );
+            },
+        );
 
     let api = Router::new()
         .route(
@@ -315,7 +345,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .await
         .expect("failed to bind server listener");
     let addr = listener.local_addr().expect("failed to get local address");
-    info!(
+    ph_info!(
+        events::SERVER_LISTENING,
         address = %addr,
         config_root = %roots.config_root.display(),
         "posthaste listening"

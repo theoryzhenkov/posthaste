@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use posthaste_domain::{
     AccountId, PushEventStream, PushStreamEvent, PushTransport, ResilientPushConfig,
 };
-use tracing::{debug, warn};
+use posthaste_observability::{events, ph_debug, ph_warn};
 
 /// Which transport is currently being used by the resilient stream.
 enum ActiveTransport {
@@ -76,11 +76,17 @@ pub fn resilient_push_stream(
                     consecutive_failures += 1;
                 }
                 Ok(None) => {
-                    debug!(account_id = %account_id, transport = transport.name(), "transport unsupported by server");
+                    ph_debug!(
+                        events::PUSH_TRANSPORT_UNSUPPORTED,
+                        account_id = %account_id,
+                        transport = transport.name(),
+                        "transport unsupported by server"
+                    );
                     consecutive_failures += 1;
                 }
                 Err(error) => {
-                    warn!(
+                    ph_warn!(
+                        events::PUSH_TRANSPORT_OPEN_FAILED,
                         account_id = %account_id,
                         transport = transport.name(),
                         error = %error,
@@ -101,7 +107,8 @@ pub fn resilient_push_stream(
                 if let Some(ref fb) = fallback {
                     match active {
                         ActiveTransport::Primary => {
-                            warn!(
+                            ph_warn!(
+                                events::PUSH_FALLBACK_TRIGGERED,
                                 account_id = %account_id,
                                 from = primary.name(),
                                 to = fb.name(),
@@ -119,7 +126,8 @@ pub fn resilient_push_stream(
                         }
                         ActiveTransport::Fallback => {
                             // Fallback also exhausted, cycle back to primary
-                            warn!(
+                            ph_warn!(
+                                events::PUSH_FALLBACK_CYCLED_TO_PRIMARY,
                                 account_id = %account_id,
                                 from = fb.name(),
                                 to = primary.name(),
@@ -135,7 +143,8 @@ pub fn resilient_push_stream(
                 }
             }
 
-            debug!(
+            ph_debug!(
+                events::PUSH_RECONNECT_BACKOFF,
                 account_id = %account_id,
                 delay_ms = current_delay.as_millis(),
                 attempt = consecutive_failures,

@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "check": "eslint . && tsc -b && prettier . --check",
+    "build": "bun run typecheck && vite build",
+    "check": "bun run logging:check && eslint . && tsc -b && prettier . --check",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint .",
     "test": "bun test",
-    "typecheck": "tsc -b",
+    "logging:check": "bun scripts/check-logging-contract.ts",
+    "typecheck": "bun run logging:check && tsc -b",
     "preview": "vite preview",
     "tauri": "tauri"
   },

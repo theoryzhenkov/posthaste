@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use posthaste_observability::{events, ph_info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling;
 use tracing_subscriber::layer::SubscriberExt;
@@ -30,6 +31,8 @@ pub fn init(state_root: &Path, config_level: &str) -> WorkerGuard {
     let json_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_target(true)
+        .with_current_span(true)
+        .with_span_list(true)
         .with_writer(non_blocking)
         .with_filter(file_filter);
 
@@ -37,6 +40,14 @@ pub fn init(state_root: &Path, config_level: &str) -> WorkerGuard {
         .with(stderr_layer)
         .with(json_layer)
         .init();
+
+    ph_info!(
+        events::LOGGING_INITIALIZED,
+        process_id = std::process::id(),
+        process_role = "backend",
+        log_dir = %log_dir.display(),
+        "logging initialized"
+    );
 
     guard
 }

@@ -17,10 +17,11 @@ use posthaste_imap::{
     imap_idle_event_stream, ImapAdapterError, ImapConnectionConfig, LiveImapSmtpGateway,
     SmtpConnectionConfig,
 };
+use posthaste_observability::{events, ph_debug, ph_error, ph_info, ph_warn};
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{info_span, Instrument};
 use uuid::Uuid;
 
 use crate::oauth::{OAuthTokenService, OAuthTokenSet};
@@ -74,6 +75,7 @@ enum RuntimeCommand {
     },
     CacheMaintenance {
         interactive_pressure: f64,
+        operation_id: Option<String>,
     },
 }
 
@@ -161,7 +163,11 @@ impl AccountSupervisor {
     pub async fn start_account(&self, account: &AccountSettings) {
         self.stop_account(&account.id).await;
         if !account.enabled {
-            info!(account_id = %account.id, "account disabled, skipping runtime");
+            ph_info!(
+                events::SUPERVISOR_ACCOUNT_DISABLED,
+                account_id = %account.id,
+                "account disabled, skipping runtime"
+            );
             self.shared
                 .set_runtime_overview(
                     &account.id,
@@ -175,7 +181,12 @@ impl AccountSupervisor {
             return;
         }
 
-        info!(account_id = %account.id, driver = ?account.driver, "starting account runtime");
+        ph_info!(
+            events::SUPERVISOR_ACCOUNT_RUNTIME_STARTED,
+            account_id = %account.id,
+            driver = ?account.driver,
+            "starting account runtime"
+        );
         let (command_tx, command_rx) = mpsc::channel(32);
         let shared = self.shared.clone();
         let account = account.clone();
@@ -196,7 +207,11 @@ impl AccountSupervisor {
     /// Stop the runtime task and remove the gateway for an account.
     pub async fn stop_account(&self, account_id: &AccountId) {
         if let Some(runtime) = self.runtimes.write().await.remove(account_id.as_str()) {
-            info!(account_id = %account_id, "stopping account runtime");
+            ph_info!(
+                events::SUPERVISOR_ACCOUNT_RUNTIME_STOPPED,
+                account_id = %account_id,
+                "stopping account runtime"
+            );
             runtime.handle.abort();
         }
         self.shared.remove_gateway(account_id).await;
@@ -204,7 +219,11 @@ impl AccountSupervisor {
 
     /// Stop the runtime and clear runtime overview state for a deleted account.
     pub async fn remove_account(&self, account_id: &AccountId) {
-        info!(account_id = %account_id, "removing account");
+        ph_info!(
+            events::SUPERVISOR_ACCOUNT_REMOVED,
+            account_id = %account_id,
+            "removing account"
+        );
         self.stop_account(account_id).await;
         self.shared
             .runtime_overviews
@@ -257,6 +276,7 @@ impl AccountSupervisor {
     pub async fn trigger_cache_maintenance(
         &self,
         account_id: &AccountId,
+        operation_id: Option<String>,
     ) -> Result<(), ServiceError> {
         let runtimes = self.runtimes.read().await;
         let runtime = runtimes
@@ -266,6 +286,7 @@ impl AccountSupervisor {
             .command_tx
             .send(RuntimeCommand::CacheMaintenance {
                 interactive_pressure: CACHE_INTERACTIVE_PRESSURE,
+                operation_id,
             })
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
@@ -365,6 +386,7 @@ async fn run_account_runtime(
                     &account_id,
                     connection.gateway(),
                     CACHE_BACKGROUND_PRESSURE,
+                    None,
                 ).await;
             }
             Some(command) = command_rx.recv() => {
@@ -408,8 +430,16 @@ async fn handle_cache_tick(
     account_id: &AccountId,
     gateway: Option<SharedGateway>,
     interactive_pressure: f64,
+    operation_id: Option<&str>,
 ) {
-    process_cache_maintenance_batch(shared, account_id, gateway, interactive_pressure).await;
+    process_cache_maintenance_batch(
+        shared,
+        account_id,
+        gateway,
+        interactive_pressure,
+        operation_id,
+    )
+    .await;
 }
 
 async fn handle_runtime_command(
@@ -430,12 +460,14 @@ async fn handle_runtime_command(
         }
         RuntimeCommand::CacheMaintenance {
             interactive_pressure,
+            operation_id,
         } => {
             handle_cache_tick(
                 shared,
                 account_id,
                 connection.gateway(),
                 interactive_pressure,
+                operation_id.as_deref(),
             )
             .await;
             false
@@ -452,7 +484,8 @@ async fn handle_push_event(
 ) -> bool {
     match event {
         PushStreamEvent::Notification(ref notification) => {
-            debug!(
+            ph_debug!(
+                events::PUSH_NOTIFICATION_RECEIVED,
                 account_id = %account_id,
                 changed = ?notification.changed,
                 "push notification received"
@@ -465,21 +498,38 @@ async fn handle_push_event(
             true
         }
         PushStreamEvent::Connected { transport } => {
-            info!(account_id = %account_id, transport, "push connected");
+            ph_info!(
+                events::PUSH_CONNECTED,
+                account_id = %account_id,
+                transport,
+                "push connected"
+            );
             shared
                 .set_push_status(account_id, PushStatus::Connected)
                 .await;
             false
         }
         PushStreamEvent::Disconnected { transport, reason } => {
-            warn!(account_id = %account_id, transport, reason = %reason, "push disconnected");
+            ph_warn!(
+                events::PUSH_DISCONNECTED,
+                account_id = %account_id,
+                transport,
+                reason = %reason,
+                "push disconnected"
+            );
             shared
                 .handle_push_disconnect(account_id, &format!("{transport}: {reason}"))
                 .await;
             false
         }
         PushStreamEvent::Fallback { from, to } => {
-            warn!(account_id = %account_id, from, to, "push falling back");
+            ph_warn!(
+                events::PUSH_FALLING_BACK,
+                account_id = %account_id,
+                from,
+                to,
+                "push falling back"
+            );
             shared
                 .handle_push_disconnect(account_id, &format!("falling back from {from} to {to}"))
                 .await;
@@ -493,24 +543,31 @@ async fn process_cache_maintenance_batch(
     account_id: &AccountId,
     gateway: Option<SharedGateway>,
     interactive_pressure: f64,
+    operation_id: Option<&str>,
 ) {
+    let operation_id = operation_id.unwrap_or("");
+    let is_interactive = !operation_id.is_empty();
     let started = Instant::now();
     let lease = {
         let mut governor = shared.cache_resources.lock().await;
         governor.grant(started, interactive_pressure)
     };
     let mut feedback = CacheMaintenanceFeedback::default();
-    debug!(
-        account_id = %account_id,
-        interactive_pressure,
-        stale_rescore_limit = lease.stale_rescore_limit,
-        rescore_limit = lease.rescore_limit,
-        fetch_request_limit = lease.fetch.request_limit,
-        fetch_byte_limit = lease.fetch.byte_limit,
-        network_rate_multiplier = lease.network_rate_multiplier,
-        in_backoff = lease.in_backoff,
-        "cache maintenance resource lease granted"
-    );
+    if is_interactive || lease.in_backoff {
+        ph_debug!(
+            events::CACHE_MAINTENANCE_LEASE_GRANTED,
+            account_id = %account_id,
+            operation_id,
+            interactive_pressure,
+            stale_rescore_limit = lease.stale_rescore_limit,
+            rescore_limit = lease.rescore_limit,
+            fetch_request_limit = lease.fetch.request_limit,
+            fetch_byte_limit = lease.fetch.byte_limit,
+            network_rate_multiplier = lease.network_rate_multiplier,
+            in_backoff = lease.in_backoff,
+            "cache maintenance resource lease granted"
+        );
+    }
 
     if lease.stale_rescore_limit > 0 {
         match shared.service.queue_stale_cache_rescore_batch(
@@ -521,8 +578,10 @@ async fn process_cache_maintenance_batch(
             Ok(queued) => {
                 feedback.stale_rescore_queued = queued;
                 if queued > 0 {
-                    debug!(
+                    ph_debug!(
+                        events::CACHE_RESCORE_STALE_QUEUED,
                         account_id = %account_id,
+                        operation_id,
                         queued,
                         stale_after_seconds = CACHE_STALE_RESCORE_AFTER.as_secs(),
                         lease_limit = lease.stale_rescore_limit,
@@ -532,8 +591,10 @@ async fn process_cache_maintenance_batch(
             }
             Err(error) => {
                 feedback.had_error = true;
-                warn!(
+                ph_warn!(
+                    events::CACHE_RESCORE_STALE_QUEUE_FAILED,
                     account_id = %account_id,
+                    operation_id,
                     error = %error,
                     "stale cache rescore queueing failed"
                 );
@@ -549,8 +610,10 @@ async fn process_cache_maintenance_batch(
             Ok(outcome) => {
                 feedback.rescore_scanned = outcome.scanned;
                 if outcome.updated > 0 {
-                    debug!(
+                    ph_debug!(
+                        events::CACHE_RESCORE_COMPLETED,
                         account_id = %account_id,
+                        operation_id,
                         scanned = outcome.scanned,
                         updated = outcome.updated,
                         skipped = outcome.skipped,
@@ -561,8 +624,10 @@ async fn process_cache_maintenance_batch(
             }
             Err(error) => {
                 feedback.had_error = true;
-                warn!(
+                ph_warn!(
+                    events::CACHE_RESCORE_FAILED,
                     account_id = %account_id,
+                    operation_id,
                     error = %error,
                     "cache rescore batch failed"
                 );
@@ -572,12 +637,16 @@ async fn process_cache_maintenance_batch(
 
     match (gateway, lease.fetch.has_fetch_budget()) {
         (None, true) => {
-            debug!(
-                account_id = %account_id,
-                fetch_request_limit = lease.fetch.request_limit,
-                fetch_byte_limit = lease.fetch.byte_limit,
-                "cache worker skipped because no gateway is connected"
-            );
+            if is_interactive {
+                ph_debug!(
+                    events::CACHE_FETCH_SKIPPED_NO_GATEWAY,
+                    account_id = %account_id,
+                    operation_id,
+                    fetch_request_limit = lease.fetch.request_limit,
+                    fetch_byte_limit = lease.fetch.byte_limit,
+                    "cache worker skipped because no gateway is connected"
+                );
+            }
         }
         (Some(gateway), true) => {
             match shared
@@ -594,8 +663,10 @@ async fn process_cache_maintenance_batch(
                         shared.publish_events(&outcome.events);
                     }
                     if outcome.attempted > 0 || outcome.cached > 0 || outcome.failed > 0 {
-                        info!(
+                        ph_info!(
+                            events::CACHE_FETCH_COMPLETED,
                             account_id = %account_id,
+                            operation_id,
                             scanned = outcome.scanned,
                             attempted = outcome.attempted,
                             attempted_bytes = outcome.attempted_bytes,
@@ -607,25 +678,33 @@ async fn process_cache_maintenance_batch(
                             "cache worker batch completed"
                         );
                     } else if outcome.skipped > 0 {
-                        debug!(
+                        ph_debug!(
+                            events::CACHE_FETCH_SKIPPED_BUDGET,
                             account_id = %account_id,
+                            operation_id,
                             scanned = outcome.scanned,
                             skipped = outcome.skipped,
                             "cache worker skipped candidates outside current resource/cache budget"
                         );
                     } else {
-                        debug!(
-                            account_id = %account_id,
-                            scanned = outcome.scanned,
-                            "cache worker batch completed without fetch work"
-                        );
+                        if is_interactive {
+                            ph_debug!(
+                                events::CACHE_FETCH_NO_WORK,
+                                account_id = %account_id,
+                                operation_id,
+                                scanned = outcome.scanned,
+                                "cache worker batch completed without fetch work"
+                            );
+                        }
                     }
                 }
                 Err(error) => {
                     feedback.had_error = true;
                     feedback.had_fetch_error = true;
-                    warn!(
+                    ph_warn!(
+                        events::CACHE_FETCH_FAILED,
                         account_id = %account_id,
+                        operation_id,
                         error = %error,
                         "cache worker batch failed"
                     );
@@ -633,11 +712,15 @@ async fn process_cache_maintenance_batch(
             }
         }
         _ => {
-            debug!(
-                account_id = %account_id,
-                in_backoff = lease.in_backoff,
-                "cache worker skipped because no fetch resource lease was granted"
-            );
+            if is_interactive || lease.in_backoff {
+                ph_debug!(
+                    events::CACHE_FETCH_SKIPPED_NO_LEASE,
+                    account_id = %account_id,
+                    operation_id,
+                    in_backoff = lease.in_backoff,
+                    "cache worker skipped because no fetch resource lease was granted"
+                );
+            }
         }
     }
 
@@ -645,21 +728,30 @@ async fn process_cache_maintenance_batch(
     let now = Instant::now();
     let mut governor = shared.cache_resources.lock().await;
     governor.record_feedback(now, &lease, feedback);
-    debug!(
-        account_id = %account_id,
-        stale_rescore_queued = feedback.stale_rescore_queued,
-        rescore_scanned = feedback.rescore_scanned,
-        fetch_attempted = feedback.fetch_attempted,
-        fetch_attempted_bytes = feedback.fetch_attempted_bytes,
-        fetch_cached = feedback.fetch_cached,
-        fetch_failed = feedback.fetch_failed,
-        elapsed_ms = feedback.elapsed.as_millis(),
-        had_error = feedback.had_error,
-        had_fetch_error = feedback.had_fetch_error,
-        network_rate_multiplier = governor.network_rate_multiplier(),
-        in_backoff = governor.is_in_backoff(now),
-        "cache maintenance resource feedback recorded"
-    );
+    let has_work = feedback.stale_rescore_queued > 0
+        || feedback.rescore_scanned > 0
+        || feedback.fetch_attempted > 0
+        || feedback.fetch_cached > 0
+        || feedback.fetch_failed > 0;
+    if is_interactive || has_work || feedback.had_error {
+        ph_debug!(
+            events::CACHE_MAINTENANCE_FEEDBACK_RECORDED,
+            account_id = %account_id,
+            operation_id,
+            stale_rescore_queued = feedback.stale_rescore_queued,
+            rescore_scanned = feedback.rescore_scanned,
+            fetch_attempted = feedback.fetch_attempted,
+            fetch_attempted_bytes = feedback.fetch_attempted_bytes,
+            fetch_cached = feedback.fetch_cached,
+            fetch_failed = feedback.fetch_failed,
+            elapsed_ms = feedback.elapsed.as_millis(),
+            had_error = feedback.had_error,
+            had_fetch_error = feedback.had_fetch_error,
+            network_rate_multiplier = governor.network_rate_multiplier(),
+            in_backoff = governor.is_in_backoff(now),
+            "cache maintenance resource feedback recorded"
+        );
+    }
 }
 
 fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interval {
@@ -711,7 +803,8 @@ async fn process_automation_backfill_batch(
             let events = outcome.events;
             let has_more = outcome.has_more;
             if !events.is_empty() {
-                info!(
+                ph_info!(
+                    events::SUPERVISOR_AUTOMATION_BACKFILL_COMPLETED,
                     account_id = %account_id,
                     event_count = events.len(),
                     has_more,
@@ -722,7 +815,8 @@ async fn process_automation_backfill_batch(
             has_more
         }
         Err(error) => {
-            warn!(
+            ph_warn!(
+                events::SUPERVISOR_AUTOMATION_BACKFILL_FAILED,
                 account_id = %account_id,
                 error = %error,
                 "automation backfill batch failed"
@@ -772,7 +866,8 @@ async fn process_sync_trigger_inner(
     let started_at = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(|error| GatewayError::Rejected(error.to_string()))?;
-    info!(
+    ph_info!(
+        events::SUPERVISOR_SYNC_STARTED,
         account_id = %account_id,
         sync_id = %sync_id,
         trigger = trigger.as_str(),
@@ -825,7 +920,8 @@ async fn process_sync_trigger_inner(
     match result {
         Ok(events) => {
             let event_count = events.len();
-            info!(
+            ph_info!(
+                events::SUPERVISOR_SYNC_COMPLETED,
                 account_id = %account_id,
                 sync_id = %sync_id,
                 trigger = trigger.as_str(),
@@ -843,7 +939,8 @@ async fn process_sync_trigger_inner(
             shared.remove_gateway(&account_id).await;
             connection.disconnect(); // tears down gateway + push stream together
             let stage = sync_failure_stage(&error);
-            error!(
+            ph_error!(
+                events::SUPERVISOR_SYNC_FAILED,
                 account_id = %account_id,
                 sync_id = %sync_id,
                 trigger = trigger.as_str(),
@@ -890,11 +987,19 @@ async fn ensure_connection(
     if connection.is_connected() {
         return Ok(());
     }
-    debug!(account_id = %account.id, "establishing connection");
+    ph_debug!(
+        events::SUPERVISOR_CONNECTION_ESTABLISHING,
+        account_id = %account.id,
+        "establishing connection"
+    );
     let conn = build_connection(account, shared).await?;
     shared.set_gateway(&account.id, conn.gateway.clone()).await;
     connection.set_connected(conn);
-    info!(account_id = %account.id, "connection established");
+    ph_info!(
+        events::SUPERVISOR_CONNECTION_ESTABLISHED,
+        account_id = %account.id,
+        "connection established"
+    );
     Ok(())
 }
 
@@ -926,7 +1031,8 @@ async fn build_connection(
             let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
                 GatewayError::Rejected("missing JMAP secret reference".to_string())
             })?;
-            info!(
+            ph_info!(
+                events::SUPERVISOR_GATEWAY_CONNECTING,
                 account_id = %account.id,
                 driver = "jmap",
                 target_url = url,
@@ -942,7 +1048,8 @@ async fn build_connection(
             let primary = transports.next();
             let fallback = transports.next();
 
-            info!(
+            ph_info!(
+                events::PUSH_TRANSPORT_NEGOTIATED,
                 account_id = %account.id,
                 primary = primary.as_ref().map(|t| t.name()),
                 fallback = fallback.as_ref().map(|t| t.name()),
@@ -978,7 +1085,8 @@ async fn build_connection(
                     .map_err(imap_adapter_error)?;
             let smtp_config = SmtpConnectionConfig::from_account_settings(account, secret)
                 .map_err(imap_adapter_error)?;
-            info!(
+            ph_info!(
+                events::SUPERVISOR_GATEWAY_CONNECTING,
                 account_id = %account.id,
                 driver = "imap_smtp",
                 imap_host = %imap_config.host,
@@ -1010,14 +1118,16 @@ async fn build_connection(
                         .find(|mailbox| mailbox.selectable)
                 })
                 .map(|mailbox| mailbox.name.clone());
-            info!(
+            ph_info!(
+                events::IMAP_DISCOVERY_COMPLETED,
                 account_id = %account.id,
                 mailbox_count = gateway.discovery().mailboxes.len(),
                 "IMAP discovery complete"
             );
             let push_events = if gateway.discovery().capabilities.supports_idle() {
                 if let Some(mailbox_name) = idle_mailbox_name {
-                    info!(
+                    ph_info!(
+                        events::IMAP_IDLE_PUSH_ENABLED,
                         account_id = %account.id,
                         mailbox_name,
                         "IMAP IDLE push hint enabled"
@@ -1028,7 +1138,8 @@ async fn build_connection(
                         mailbox_name,
                     ))
                 } else {
-                    warn!(
+                    ph_warn!(
+                        events::IMAP_IDLE_MAILBOX_MISSING,
                         account_id = %account.id,
                         "IMAP IDLE advertised but no selectable mailbox is available"
                     );
@@ -1038,7 +1149,8 @@ async fn build_connection(
                     None
                 }
             } else {
-                info!(
+                ph_info!(
+                    events::IMAP_IDLE_PERIODIC_POLL_ONLY,
                     account_id = %account.id,
                     "IMAP IDLE unavailable; using periodic poll only"
                 );

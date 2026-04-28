@@ -9,8 +9,7 @@ use posthaste_domain::{
     MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
     SyncBatch, SyncCursor,
 };
-
-use tracing::{debug, info, instrument};
+use posthaste_observability::{events, ph_debug, ph_info};
 
 /// Discover and connect to a JMAP server, returning a configured client.
 ///
@@ -20,13 +19,12 @@ use tracing::{debug, info, instrument};
 ///
 /// @spec docs/L1-jmap#session
 /// @spec docs/L1-jmap#authentication
-#[instrument(skip(secret))]
 pub async fn connect_jmap_client(
     url: &str,
     username: Option<&str>,
     secret: &str,
 ) -> Result<Arc<Client>, GatewayError> {
-    debug!("connecting to JMAP server");
+    ph_debug!(events::JMAP_SESSION_CONNECTING, "connecting to JMAP server");
     let host = url::Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(String::from))
@@ -45,7 +43,8 @@ pub async fn connect_jmap_client(
         .websocket_capabilities()
         .map(|caps| caps.supports_push())
         .unwrap_or(false);
-    info!(
+    ph_info!(
+        events::JMAP_SESSION_ESTABLISHED,
         api_url = session.api_url(),
         event_source_url = session.event_source_url(),
         ws_url = ws_url.as_deref(),
@@ -79,12 +78,18 @@ impl LiveJmapGateway {
             .map(|capabilities| capabilities.supports_push())
             .unwrap_or(false)
         {
-            debug!("WebSocket push capability available, creating shared connection");
+            ph_debug!(
+                events::JMAP_WEBSOCKET_CAPABILITY_AVAILABLE,
+                "WebSocket push capability available, creating shared connection"
+            );
             Some(Arc::new(crate::ws_connection::SharedWsConnection::new(
                 client.clone(),
             )))
         } else {
-            debug!("WebSocket push capability not advertised, WS transport disabled");
+            ph_debug!(
+                events::JMAP_WEBSOCKET_CAPABILITY_UNAVAILABLE,
+                "WebSocket push capability not advertised, WS transport disabled"
+            );
             None
         };
         Self { client, ws }

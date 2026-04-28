@@ -4,7 +4,7 @@ use async_stream::stream;
 use posthaste_domain::{
     now_iso8601, AccountId, PushEventStream, PushNotification, PushStreamEvent,
 };
-use tracing::{debug, warn};
+use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
@@ -37,7 +37,12 @@ pub fn imap_idle_event_stream(
                         let tag = client.enqueue_idle();
                         match client.idle(tag).await {
                             Ok(()) => {
-                                debug!(account_id = %account_id, mailbox_name, "IMAP IDLE returned");
+                                ph_debug!(
+                                    events::IMAP_IDLE_RETURNED,
+                                    account_id = %account_id,
+                                    mailbox_name,
+                                    "IMAP IDLE returned"
+                                );
                                 let received_at = match now_iso8601() {
                                     Ok(received_at) => received_at,
                                     Err(error) => {
@@ -56,7 +61,8 @@ pub fn imap_idle_event_stream(
                                 });
                             }
                             Err(error) => {
-                                warn!(
+                                ph_warn!(
+                                    events::IMAP_IDLE_DISCONNECTED,
                                     account_id = %account_id,
                                     mailbox_name,
                                     error = ?error,
@@ -72,7 +78,8 @@ pub fn imap_idle_event_stream(
                     }
                 }
                 Err(error) => {
-                    warn!(
+                    ph_warn!(
+                        events::IMAP_IDLE_CONNECT_FAILED,
                         account_id = %account_id,
                         mailbox_name,
                         error = %error,
