@@ -70,13 +70,17 @@ runtime boundary performs connection, authentication, capability discovery, and
 mailbox listing. Discovery results are cached on the live gateway and synced as
 an authoritative mailbox snapshot, with local mailbox role overrides layered on
 top for providers that do not expose mutable SPECIAL-USE metadata. Message sync
-is mailbox-scoped: only mailboxes whose local state is missing or invalidated
-are fetched as full metadata snapshots, while mailboxes with valid UID state use
-UID-list reconciliation and fetch headers only for UIDs above the stored
-watermark. A single authenticated IMAP client is reused across metadata planning
-and fetch inside each sync cycle. Lazy body fetches use stored IMAP locations
-and `BODY.PEEK[]`. Implemented mutations use conservative IMAP command paths,
-and remaining unsupported command surfaces are rejected explicitly.
+is mailbox-scoped. Mailboxes whose local state is missing or invalidated are
+fetched as full metadata snapshots. Mailboxes with valid MODSEQ state use
+QRESYNC or CONDSTORE deltas. Without MODSEQ, UID watermarks are not considered
+authoritative for keywords because flag-only changes can occur without UID or
+message-count changes, so the mailbox metadata snapshot is refreshed. Gmail IMAP
+also refreshes metadata snapshots under the current RFC `Message-ID`
+canonicalization fallback because label deduplication needs a complete
+observation set. A single authenticated IMAP client is reused across metadata
+planning and fetch inside each sync cycle. Lazy body fetches use stored IMAP
+locations and `BODY.PEEK[]`. Implemented mutations use conservative IMAP command
+paths, and remaining unsupported command surfaces are rejected explicitly.
 
 Mailbox message sync starts by examining the mailbox and mapping SELECT/EXAMINE
 state into `ImapSelectedMailbox`. `UIDVALIDITY` is required. `UIDNEXT` is used
@@ -90,17 +94,14 @@ chunked `UID FETCH` for `FLAGS`, `BODYSTRUCTURE`, `RFC822.HEADER`,
 `BODYSTRUCTURE` is used only for message-list attachment presence; body text,
 HTML, raw MIME, and attachment detail metadata remain lazy. Subsequent syncs
 with valid per-mailbox `UIDVALIDITY` state first use `STATUS` as a conservative
-skip preflight when the server does not expose CONDSTORE/QRESYNC. A mailbox is
-skipped only when `UIDVALIDITY` matches, `MESSAGES` matches the local
-`ImapMessageLocation` count, and `UIDNEXT` has not advanced past the stored
-highest UID watermark. If any check fails, current mailbox UID descriptors are
-reconciled against stored `ImapMessageLocation` rows, current metadata is
-upserted, and local messages whose stored mailbox UID is no longer returned by
-the server are deleted. UID-watermark sync uses `UID SEARCH ALL` for the current
-UID listing and client-side filtering for new UIDs because IMAP UID ranges
-ending in `*` can match the highest existing UID even when the lower bound is
-above all assigned UIDs. QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for
-efficient flag and expunge reconciliation.
+skip preflight only when stored `HIGHESTMODSEQ` state is available. A mailbox is
+skipped only when `UIDVALIDITY`, `MESSAGES`, and `HIGHESTMODSEQ` still match the
+local state. If MODSEQ is unavailable or any check fails, current mailbox
+metadata is fetched, current locations are reconciled against stored
+`ImapMessageLocation` rows, current metadata is upserted, and local messages
+whose stored mailbox UID is no longer returned by the server are deleted.
+QRESYNC mailboxes use `CHANGEDSINCE` and `VANISHED` for efficient flag and
+expunge reconciliation.
 
 The driver prefers IMAP extensions when advertised:
 
@@ -124,10 +125,9 @@ capabilities and stored cursor state:
 - QRESYNC delta when `QRESYNC`, `ENABLE`, stored MODSEQ, and selected
   `HIGHESTMODSEQ` are all present.
 - CONDSTORE flag delta when MODSEQ state exists but QRESYNC is unavailable.
-- UID range fetch inside the same `UIDVALIDITY` epoch when only UID state is
-  available.
-- Full authoritative snapshot on first sync, `UIDVALIDITY` changes, or missing
-  watermarks.
+- Full authoritative snapshot on first sync, `UIDVALIDITY` changes, missing
+  watermarks, unavailable flag-delta state, or provider canonicalization that
+  requires complete observations.
 
 Mutation planning follows the same rule: use the strongest server extension
 when available, but resync after commands whose result cannot be mapped
@@ -156,9 +156,9 @@ source informs the implementation.
 | SELECT/EXAMINE state | `examine_imap_mailbox`, `ExamineStateTask`, `selected_mailbox_from_examine`, `ImapSelectedMailbox` | RFC 9051 SELECT/EXAMINE response codes including `UIDVALIDITY` and `UIDNEXT`: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 requires CONDSTORE servers to return `HIGHESTMODSEQ` for successful SELECT/EXAMINE unless `NOMODSEQ` applies: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` SELECT task provides the base response handling but does not expose `HIGHESTMODSEQ`, so Posthaste adds a local EXAMINE task over `imap-types` response codes: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/select.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
 | No-op mailbox preflight | `status_imap_mailbox`, `StatusTask`, `mailbox_status_proves_unchanged` | RFC 9051 STATUS data items `MESSAGES`, `UIDNEXT`, and `UIDVALIDITY`, including the warning that clients should not assume many consecutive STATUS commands are fast: <https://datatracker.ietf.org/doc/html/rfc9051#section-6.3.11> |
 | IMAP push hint | `imap_idle_event_stream`, supervisor IMAP push wiring | RFC 2177 IDLE capability use, DONE termination, unsolicited EXISTS/EXPUNGE, and 29-minute reissue guidance: <https://datatracker.ietf.org/doc/html/rfc2177>; RFC 5465 NOTIFY is the broader notification extension but is not assumed by the generic driver: <https://datatracker.ietf.org/doc/html/rfc5465>; Gmail advertises `IDLE` in IMAP CAPABILITY with `X-GM-EXT-1`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
-| Mailbox sync planning and baseline delta reconciliation | `plan_imap_mailbox_sync`, `LiveImapSmtpGateway::sync`, `fetch_mailbox_headers_after_uid`, `imap_delta_sync_batch` | RFC 4549 disconnected-client synchronization uses `UIDVALIDITY`, new UID discovery, and current UID/FLAGS descriptor comparison to remove local cache entries no longer returned by the server: <https://datatracker.ietf.org/doc/html/rfc4549>; RFC 9051 UID semantics and FETCH/SEARCH commands, including the rule that UID ranges with `*` can include the highest UID even if the other endpoint is higher than any assigned UID: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 CONDSTORE/QRESYNC `HIGHESTMODSEQ`, `CHANGEDSINCE`, `ENABLE QRESYNC`, and `VANISHED (EARLIER)` define the stronger MODSEQ delta path and the rule that `VANISHED` is only allowed on `UID FETCH` with `CHANGEDSINCE`: <https://datatracker.ietf.org/doc/html/rfc7162>; ImapFlow exposes QRESYNC/VANISHED and `changedSince`/modseq behavior for this stronger path: <https://imapflow.com/docs/>, <https://imapflow.com/docs/guides/fetching-messages>, <https://imapflow.com/docs/api/imapflow-client/>; node-imap exposes `changedsince`, `modseq`, and `highestmodseq` for CONDSTORE-style sync: <https://github.com/mscdex/node-imap> |
+| Mailbox sync planning and baseline reconciliation | `plan_imap_mailbox_sync`, `LiveImapSmtpGateway::sync`, `imap_full_sync_batch`, `imap_delta_sync_batch` | RFC 4549 disconnected-client synchronization uses `UIDVALIDITY`, new UID discovery, and current UID/FLAGS descriptor comparison to remove local cache entries no longer returned by the server: <https://datatracker.ietf.org/doc/html/rfc4549>; RFC 9051 UID semantics and FETCH/SEARCH commands, including the rule that UID ranges with `*` can include the highest UID even if the other endpoint is higher than any assigned UID: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 CONDSTORE/QRESYNC `HIGHESTMODSEQ`, `CHANGEDSINCE`, `ENABLE QRESYNC`, and `VANISHED (EARLIER)` define the stronger MODSEQ delta path and the rule that `VANISHED` is only allowed on `UID FETCH` with `CHANGEDSINCE`: <https://datatracker.ietf.org/doc/html/rfc7162>; ImapFlow exposes QRESYNC/VANISHED and `changedSince`/modseq behavior for this stronger path: <https://imapflow.com/docs/>, <https://imapflow.com/docs/guides/fetching-messages>, <https://imapflow.com/docs/api/imapflow-client/>; node-imap exposes `changedsince`, `modseq`, and `highestmodseq` for CONDSTORE-style sync: <https://github.com/mscdex/node-imap> |
 | Message identity and UID reuse | `imap_message_id`, `ImapMessageLocation` | RFC 9051 UID and UIDVALIDITY semantics: <https://www.rfc-editor.org/rfc/rfc9051.html> |
-| Gmail identity/labels | `ImapProviderFeatures`, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
+| Gmail identity/labels | `ImapProviderFeatures`, `posthaste_imap::sync` Gmail canonicalization, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; current typed FETCH support maps Gmail duplicate observations through RFC `Message-ID` until vendor-specific FETCH items are exposed |
 | Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Lazy body fetch/parsing | `fetch_message_body_by_location`, `fetched_body_from_items`, `imap_body_from_raw_mime` | RFC 9051 `BODY.PEEK[]` does not implicitly set `\Seen` and UIDs are valid only in a `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first`/FETCH task behavior: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` body and attachment APIs: <https://docs.rs/mail-parser/0.11.2/mail_parser/struct.Message.html>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Attachment blob download | `LiveImapSmtpGateway::download_blob`, `fetch_raw_message_by_location`, `imap_attachment_bytes_from_raw_mime`, `parse_imap_attachment_blob_id` | RFC 9051 `BODY.PEEK[]` fetches message bytes without the `\Seen` side effect and the stored UID is valid only within the selected mailbox `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first` uses UID FETCH and returns FETCH items from server responses: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` resolves attachment ordinals and decoded part contents: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/header.rs> |
@@ -180,12 +180,17 @@ from RFC 5322 headers (`Message-ID`, `References`, `In-Reply-To`) and a stable
 fallback for malformed messages. Provider-specific stable IDs may improve
 deduplication when available, for example Gmail's `X-GM-MSGID`.
 
-When a server advertises Gmail's `X-GM-EXT-1` capability, the IMAP driver uses
-`X-GM-MSGID` as the message identity, `X-GM-THRID` as the provider thread
-identity, and `X-GM-LABELS` as the label source. This avoids duplicating the
-same Gmail message when it appears through multiple labels exposed as IMAP
-mailboxes. Generic IMAP accounts continue to use `(mailbox, UIDVALIDITY, UID)`
-for message identity and RFC 5322 headers for conversation projection.
+When a server advertises Gmail's `X-GM-EXT-1` capability, the IMAP driver treats
+Gmail as a provider profile within the generic IMAP adapter. The current typed
+IMAP client does not expose vendor-specific `X-GM-*` FETCH data items, so the
+profile canonicalizes duplicate label observations by RFC `Message-ID` as the
+strongest identity available in the fetched metadata and retains every
+per-mailbox UID as an `ImapMessageLocation`. This avoids duplicating the same
+Gmail message when it appears through multiple labels exposed as IMAP mailboxes.
+`X-GM-MSGID`, `X-GM-THRID`, and `X-GM-LABELS` remain the preferred future source
+when the protocol layer can fetch and parse them. Generic IMAP accounts continue
+to use `(mailbox, UIDVALIDITY, UID)` for message identity and RFC 5322 headers
+for conversation projection.
 
 Message IDs stored in PostHaste remain opaque and driver-owned. IMAP IDs should
 be stable across sessions and include enough server state to avoid UID reuse
@@ -257,7 +262,7 @@ with servers that expose both protocols.
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
 | imap-mutation-plan-explicit | MUST | IMAP mutation strategy is selected from explicit capabilities and schedules resync when response state is insufficient |
 | imap-role-overrides-local | MUST | IMAP mailbox role assignments are local overrides over discovery, not remote SPECIAL-USE mutations |
-| gmail-extension-identity | SHOULD | Gmail IMAP accounts use X-GM-MSGID, X-GM-THRID, and X-GM-LABELS when X-GM-EXT-1 is advertised |
+| gmail-extension-identity | SHOULD | Gmail IMAP accounts canonicalize duplicate label observations under one local message identity; X-GM-MSGID, X-GM-THRID, and X-GM-LABELS are the preferred provider fields when the typed IMAP layer exposes them |
 | imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | oauth-refresh-runtime | MUST | OAuth access tokens are refreshed in the backend runtime before provider gateways receive XOAUTH2 credentials |

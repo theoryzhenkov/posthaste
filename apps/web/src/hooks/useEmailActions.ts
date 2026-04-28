@@ -220,6 +220,38 @@ function invalidateMessageScope(
   queryClient.invalidateQueries({ queryKey: ['conversations'] })
 }
 
+function invalidateKeywordMutationScope(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+  queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+  queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
+}
+
+async function cancelKeywordMutationQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  target: SourceMessageRef,
+  conversationId: string | null,
+) {
+  const cancellations = [
+    queryClient.cancelQueries({ queryKey: queryKeys.messagesRoot }),
+    queryClient.cancelQueries({
+      queryKey: mailKeys.message(target.sourceId, target.messageId),
+    }),
+  ]
+  if (conversationId) {
+    cancellations.push(
+      queryClient.cancelQueries({
+        queryKey: mailKeys.conversation(conversationId),
+      }),
+      queryClient.cancelQueries({
+        queryKey: mailKeys.conversationSummary(conversationId),
+      }),
+    )
+  }
+  await Promise.all(cancellations)
+}
+
 /**
  * Provides optimistic email action methods: `toggleRead`, `toggleFlag`,
  * `archive`, `trash`, and `deletePermanently`.
@@ -248,7 +280,7 @@ export function useEmailActions() {
         input.target.sourceId,
       )
     },
-    onMutate: (input): MutationContext => {
+    onMutate: async (input): Promise<MutationContext> => {
       setErrorMessage(null)
 
       const conversationId =
@@ -257,15 +289,23 @@ export function useEmailActions() {
       const snapshots: QuerySnapshot[] = []
       let incomplete = false
 
-      if (
-        conversationId &&
-        'optimisticKeywordPatch' in input &&
-        input.optimisticKeywordPatch
-      ) {
+      const optimisticKeywordPatch =
+        'optimisticKeywordPatch' in input
+          ? input.optimisticKeywordPatch
+          : undefined
+      if (optimisticKeywordPatch) {
+        await cancelKeywordMutationQueries(
+          queryClient,
+          input.target,
+          conversationId,
+        )
+      }
+
+      if (conversationId && optimisticKeywordPatch) {
         const optimisticResult = applyKeywordPatch(
           queryClient,
           { ...input.target, conversationId },
-          input.optimisticKeywordPatch,
+          optimisticKeywordPatch,
         )
         snapshots.push(...optimisticResult.snapshots)
         incomplete = optimisticResult.incomplete
@@ -295,8 +335,7 @@ export function useEmailActions() {
         if (!merged) {
           context.incomplete = true
         }
-        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-        queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+        invalidateKeywordMutationScope(queryClient)
         return
       }
 

@@ -261,8 +261,9 @@ Important derived tables:
   validity and delta state are mailbox-scoped.
 - `imap_message_location` stores the mailbox UID locations that make an IMAP
   message addressable for fetch and mutation commands. This is separate from
-  message identity so provider-stable IDs such as Gmail `X-GM-MSGID` can
-  deduplicate messages across labels while retaining per-mailbox UIDs.
+  message identity so provider-stable IDs, or the Gmail IMAP profile's current
+  RFC `Message-ID` canonical fallback, can deduplicate messages across labels
+  while retaining per-mailbox UIDs.
 - `mailbox_role_override` stores user-assigned mailbox roles for providers such
   as IMAP/SMTP where SPECIAL-USE roles are discovered but not portably mutable.
   A row with `role = NULL` is an explicit local clear; absence of a row means
@@ -349,6 +350,8 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | cache-stale-rescore | MUST | Cache maintenance periodically queues bounded oldest-first stale cache objects for re-scoring so recency and other time-sensitive utility signals converge |
 | imap-state-per-mailbox | MUST | IMAP sync state is stored per account and mailbox, including UIDVALIDITY and optional MODSEQ |
 | imap-locations | MUST | IMAP message command locations are stored separately from local message identity |
+| imap-modseq-for-keyword-skip | MUST | IMAP mailbox sync may skip metadata fetch only when MODSEQ state proves flags are unchanged |
+| gmail-label-canonicalization | SHOULD | Gmail IMAP label observations are applied as one canonical local message with multiple IMAP locations |
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |

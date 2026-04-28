@@ -201,6 +201,8 @@ pub enum ImapFullSyncReason {
     InitialSync,
     UidValidityChanged,
     MissingUidWatermark,
+    FlagDeltaUnavailable,
+    ProviderCanonicalizationRequired,
 }
 
 /// IMAP mailbox sync strategy selected from stored state and server capabilities.
@@ -271,8 +273,9 @@ impl ImapMailboxSyncState {
 /// Select the strongest correctness-preserving sync mode available for one mailbox.
 ///
 /// QRESYNC and CONDSTORE are only usable when both the server advertises support
-/// and the local store has a previous MODSEQ. UID scanning is the baseline delta
-/// path, but only inside the same UIDVALIDITY epoch.
+/// and the local store has a previous MODSEQ. Without MODSEQ, UID watermarks can
+/// reconcile additions and expunges but cannot prove flag-only changes, so the
+/// driver must refresh the mailbox metadata snapshot.
 ///
 /// @spec docs/L0-providers#imap-delta-fallback
 pub fn plan_imap_mailbox_sync(
@@ -289,6 +292,12 @@ pub fn plan_imap_mailbox_sync(
     if !stored.is_valid_for(selected.uid_validity) {
         return ImapMailboxSyncPlan::FullSnapshot {
             reason: ImapFullSyncReason::UidValidityChanged,
+        };
+    }
+
+    if capabilities.supports_gmail_extensions() {
+        return ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::ProviderCanonicalizationRequired,
         };
     }
 
@@ -309,8 +318,10 @@ pub fn plan_imap_mailbox_sync(
         }
     }
 
-    if let Some(after_uid) = stored.highest_uid {
-        return ImapMailboxSyncPlan::FetchNewByUid { after_uid };
+    if stored.highest_uid.is_some() {
+        return ImapMailboxSyncPlan::FullSnapshot {
+            reason: ImapFullSyncReason::FlagDeltaUnavailable,
+        };
     }
 
     ImapMailboxSyncPlan::FullSnapshot {
@@ -516,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn planner_uses_uid_scan_when_modseq_is_unavailable() {
+    fn planner_uses_full_snapshot_when_flag_delta_is_unavailable() {
         let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1"]);
         let stored = stored_state();
 
@@ -528,8 +539,28 @@ mod tests {
 
         assert_eq!(
             plan,
-            ImapMailboxSyncPlan::FetchNewByUid {
-                after_uid: ImapUid(42),
+            ImapMailboxSyncPlan::FullSnapshot {
+                reason: ImapFullSyncReason::FlagDeltaUnavailable,
+            }
+        );
+    }
+
+    #[test]
+    fn planner_uses_full_snapshot_for_gmail_label_canonicalization() {
+        let capabilities =
+            ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC", "X-GM-EXT-1"]);
+        let stored = stored_state();
+
+        let plan = plan_imap_mailbox_sync(
+            &capabilities,
+            Some(&stored),
+            &selected_mailbox(ImapUidValidity(7)),
+        );
+
+        assert_eq!(
+            plan,
+            ImapMailboxSyncPlan::FullSnapshot {
+                reason: ImapFullSyncReason::ProviderCanonicalizationRequired,
             }
         );
     }
