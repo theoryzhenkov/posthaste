@@ -179,7 +179,7 @@ fn estimated_body_bytes_from_metadata(size: i64, has_attachment: bool) -> u64 {
         return 64 * 1024;
     }
     if has_attachment {
-        metadata_size.min(256 * 1024).max(16 * 1024)
+        metadata_size.clamp(16 * 1024, 256 * 1024)
     } else {
         metadata_size.max(4 * 1024)
     }

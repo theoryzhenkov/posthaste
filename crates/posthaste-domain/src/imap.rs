@@ -292,26 +292,21 @@ pub fn plan_imap_mailbox_sync(
         };
     }
 
-    if capabilities.supports_qresync()
-        && capabilities.supports_enable()
-        && stored.highest_modseq.is_some()
-        && selected.highest_modseq.is_some()
-    {
-        return ImapMailboxSyncPlan::QresyncDelta {
-            uid_validity: selected.uid_validity,
-            since_modseq: stored.highest_modseq.expect("checked above"),
-            after_uid: stored.highest_uid,
-        };
-    }
+    if let (Some(since_modseq), Some(_)) = (stored.highest_modseq, selected.highest_modseq) {
+        if capabilities.supports_qresync() && capabilities.supports_enable() {
+            return ImapMailboxSyncPlan::QresyncDelta {
+                uid_validity: selected.uid_validity,
+                since_modseq,
+                after_uid: stored.highest_uid,
+            };
+        }
 
-    if capabilities.supports_condstore()
-        && stored.highest_modseq.is_some()
-        && selected.highest_modseq.is_some()
-    {
-        return ImapMailboxSyncPlan::CondstoreDelta {
-            since_modseq: stored.highest_modseq.expect("checked above"),
-            after_uid: stored.highest_uid,
-        };
+        if capabilities.supports_condstore() {
+            return ImapMailboxSyncPlan::CondstoreDelta {
+                since_modseq,
+                after_uid: stored.highest_uid,
+            };
+        }
     }
 
     if let Some(after_uid) = stored.highest_uid {

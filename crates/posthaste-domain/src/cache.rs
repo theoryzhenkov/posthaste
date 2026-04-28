@@ -58,7 +58,7 @@ impl CacheLayer {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "body" => Some(Self::Body),
             "raw_message" => Some(Self::RawMessage),
@@ -88,7 +88,7 @@ impl CacheFetchUnit {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "body_only" => Some(Self::BodyOnly),
             "raw_message" => Some(Self::RawMessage),
@@ -122,7 +122,7 @@ impl CacheObjectState {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "wanted" => Some(Self::Wanted),
             "fetching" => Some(Self::Fetching),
