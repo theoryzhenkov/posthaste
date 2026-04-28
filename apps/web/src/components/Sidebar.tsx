@@ -29,8 +29,10 @@ import type {
 } from '../api/types'
 import { cn } from '../lib/utils'
 import {
+  mailboxRoleAccent,
   mailboxRoleFromName,
   renderMailboxRoleIcon,
+  smartMailboxAccent,
   smartMailboxFallbackIcon,
 } from '../mailboxRoles'
 import { queryKeys } from '../queryKeys'
@@ -80,35 +82,6 @@ function isUserTag(tag: TagSummary): boolean {
   return Boolean(name) && !name.startsWith('$')
 }
 
-function mailboxRoleAccent(role: Mailbox['role']): string {
-  switch (role) {
-    case 'inbox':
-      return '#2B7EC2'
-    case 'archive':
-      return '#3D8B6D'
-    case 'drafts':
-      return '#8B5CF6'
-    case 'sent':
-      return '#D96A42'
-    case 'junk':
-      return '#C5A100'
-    case 'trash':
-      return '#8A5B4B'
-    default:
-      return '#7E8691'
-  }
-}
-
-const SIDEBAR_ACCENT = {
-  blue: 'oklch(0.65 0.13 245)',
-  coral: 'oklch(0.68 0.17 45)',
-  sage: 'oklch(0.68 0.08 145)',
-  amber: 'oklch(0.78 0.13 78)',
-  violet: 'oklch(0.65 0.13 295)',
-  rose: 'oklch(0.70 0.15 12)',
-  muted: 'oklch(0.60 0.008 70)',
-} as const
-
 function fallbackAccountAppearance(
   sourceId: string,
   sourceName: string,
@@ -132,42 +105,6 @@ function smartMailboxIcon(name: string, size = 14): React.ReactNode {
     size,
     smartMailboxFallbackIcon(name),
   )
-}
-
-function smartMailboxAccent(name: string): string | undefined {
-  const normalized = name.trim().toLowerCase()
-  switch (normalized) {
-    case 'inbox':
-    case 'all inboxes':
-    case 'all mail':
-    case 'today':
-      return SIDEBAR_ACCENT.blue
-    case 'flagged':
-    case 'relevant':
-    case 'sent':
-    case 'follow-up':
-      return SIDEBAR_ACCENT.coral
-    case 'read later':
-    case 'read-later':
-    case 'junk':
-    case 'spam':
-      return SIDEBAR_ACCENT.amber
-    case 'bills':
-    case 'billing':
-    case 'drafts':
-      return SIDEBAR_ACCENT.violet
-    case 'newsletters':
-    case 'personal':
-      return SIDEBAR_ACCENT.sage
-    case 'trash':
-      return SIDEBAR_ACCENT.rose
-    case 'archive':
-      return SIDEBAR_ACCENT.blue
-    case 'work':
-      return SIDEBAR_ACCENT.blue
-    default:
-      return SIDEBAR_ACCENT.muted
-  }
 }
 
 function smartMailboxPriority(name: string): number {

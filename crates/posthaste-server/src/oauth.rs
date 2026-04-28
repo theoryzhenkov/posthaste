@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::OnceLock;
 
 #[cfg(test)]
@@ -9,7 +10,9 @@ use oauth2::{
     AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, ExtraTokenFields,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
-use posthaste_domain::{GatewayError, ProviderHint};
+use posthaste_domain::{
+    GatewayError, ImapTransportSettings, ProviderHint, SmtpTransportSettings, TransportSecurity,
+};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
@@ -90,6 +93,7 @@ pub struct OAuthProviderProfile {
     pub metadata_url: &'static str,
     pub scopes: &'static [&'static str],
     pub extra_authorization_params: &'static [(&'static str, &'static str)],
+    pub mail_transport: Option<OAuthProviderMailTransport>,
 }
 
 impl OAuthProviderProfile {
@@ -102,6 +106,18 @@ impl OAuthProviderProfile {
                 metadata_url: "https://accounts.google.com/.well-known/openid-configuration",
                 scopes: &["openid", "email", "https://mail.google.com/"],
                 extra_authorization_params: &[("access_type", "offline"), ("prompt", "consent")],
+                mail_transport: Some(OAuthProviderMailTransport {
+                    imap: OAuthProviderEndpoint {
+                        host: "imap.gmail.com",
+                        port: 993,
+                        security: TransportSecurity::Tls,
+                    },
+                    smtp: OAuthProviderEndpoint {
+                        host: "smtp.gmail.com",
+                        port: 587,
+                        security: TransportSecurity::StartTls,
+                    },
+                }),
             }),
             ProviderHint::Outlook => Some(Self {
                 provider: ProviderHint::Outlook,
@@ -117,10 +133,71 @@ impl OAuthProviderProfile {
                     "https://outlook.office.com/SMTP.Send",
                 ],
                 extra_authorization_params: &[],
+                mail_transport: Some(OAuthProviderMailTransport {
+                    imap: OAuthProviderEndpoint {
+                        host: "outlook.office365.com",
+                        port: 993,
+                        security: TransportSecurity::Tls,
+                    },
+                    smtp: OAuthProviderEndpoint {
+                        host: "smtp.office365.com",
+                        port: 587,
+                        security: TransportSecurity::StartTls,
+                    },
+                }),
             }),
             ProviderHint::Generic | ProviderHint::Icloud => None,
         }
     }
+
+    pub fn openid_issuer_matches(&self, issuer: &str) -> bool {
+        match self.provider {
+            ProviderHint::Gmail => {
+                issuer == "https://accounts.google.com" || issuer == "accounts.google.com"
+            }
+            ProviderHint::Outlook => {
+                issuer.starts_with("https://login.microsoftonline.com/")
+                    && issuer.ends_with("/v2.0")
+            }
+            ProviderHint::Generic | ProviderHint::Icloud => false,
+        }
+    }
+
+    pub fn default_mail_transport(&self) -> Option<(ImapTransportSettings, SmtpTransportSettings)> {
+        self.mail_transport
+            .as_ref()
+            .map(OAuthProviderMailTransport::to_settings)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OAuthProviderMailTransport {
+    pub imap: OAuthProviderEndpoint,
+    pub smtp: OAuthProviderEndpoint,
+}
+
+impl OAuthProviderMailTransport {
+    fn to_settings(&self) -> (ImapTransportSettings, SmtpTransportSettings) {
+        (
+            ImapTransportSettings {
+                host: self.imap.host.to_string(),
+                port: self.imap.port,
+                security: self.imap.security.clone(),
+            },
+            SmtpTransportSettings {
+                host: self.smtp.host.to_string(),
+                port: self.smtp.port,
+                security: self.smtp.security.clone(),
+            },
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OAuthProviderEndpoint {
+    pub host: &'static str,
+    pub port: u16,
+    pub security: TransportSecurity,
 }
 
 /// Serializable OAuth token bundle stored as the account secret value.
@@ -129,7 +206,7 @@ impl OAuthProviderProfile {
 /// and converted to a short-lived access token before opening XOAUTH2 sessions.
 ///
 /// @spec docs/L1-api#secret-management
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthTokenSet {
     #[serde(default = "oauth_secret_type")]
@@ -143,6 +220,27 @@ pub struct OAuthTokenSet {
     pub expires_at: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
+}
+
+impl fmt::Debug for OAuthTokenSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OAuthTokenSet")
+            .field("type", &self.r#type)
+            .field("provider", &self.provider)
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "[redacted]"),
+            )
+            .field("access_token", &"[redacted]")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field("expires_at", &self.expires_at)
+            .field("scopes", &self.scopes)
+            .finish()
+    }
 }
 
 impl OAuthTokenSet {
@@ -230,6 +328,17 @@ pub struct OAuthTokenService {
     http_client: oauth2::reqwest::Client,
 }
 
+pub struct OAuthAuthorizationCodeExchange<'a> {
+    pub profile: &'a OAuthProviderProfile,
+    pub client_id: &'a str,
+    pub client_secret: Option<&'a str>,
+    pub redirect_uri: &'a str,
+    pub code: &'a str,
+    pub pkce_verifier: &'a str,
+    pub nonce: &'a str,
+    pub now: OffsetDateTime,
+}
+
 impl OAuthTokenService {
     pub fn new() -> Result<Self, GatewayError> {
         let http_client = oauth2::reqwest::ClientBuilder::new()
@@ -273,15 +382,18 @@ impl OAuthTokenService {
 
     pub async fn exchange_authorization_code(
         &self,
-        profile: &OAuthProviderProfile,
-        client_id: &str,
-        client_secret: Option<&str>,
-        redirect_uri: &str,
-        code: &str,
-        pkce_verifier: &str,
-        nonce: &str,
-        now: OffsetDateTime,
+        request: OAuthAuthorizationCodeExchange<'_>,
     ) -> Result<OAuthExchangeResult, GatewayError> {
+        let OAuthAuthorizationCodeExchange {
+            profile,
+            client_id,
+            client_secret,
+            redirect_uri,
+            code,
+            pkce_verifier,
+            nonce,
+            now,
+        } = request;
         let client = oauth_client(profile, client_id, client_secret, redirect_uri)?;
         let token_response = client
             .exchange_code(AuthorizationCode::new(code.to_string()))
@@ -426,7 +538,7 @@ impl OAuthTokenService {
 
         let cached_jwks = self.jwks_for_profile(profile, now, false).await?;
         match decode_verified_openid_claims(
-            &profile.provider,
+            profile,
             client_id,
             id_token,
             kid,
@@ -435,15 +547,10 @@ impl OAuthTokenService {
             now,
         ) {
             Ok(claims) => Ok(claims),
-            Err(error)
-                if matches!(
-                    error,
-                    GatewayError::Rejected(ref message) if message.contains("signing key")
-                ) =>
-            {
+            Err(GatewayError::Rejected(ref message)) if message.contains("signing key") => {
                 let refreshed_jwks = self.jwks_for_profile(profile, now, true).await?;
                 decode_verified_openid_claims(
-                    &profile.provider,
+                    profile,
                     client_id,
                     id_token,
                     kid,
@@ -560,7 +667,7 @@ fn oauth_client(
 }
 
 fn decode_verified_openid_claims(
-    provider: &ProviderHint,
+    profile: &OAuthProviderProfile,
     client_id: &str,
     id_token: &str,
     kid: &str,
@@ -579,7 +686,7 @@ fn decode_verified_openid_claims(
     validation.required_spec_claims.clear();
     let token_data = decode::<OpenIdTokenClaims>(id_token, &decoding_key, &validation)
         .map_err(invalid_openid_token)?;
-    validate_openid_identity_claims(provider, client_id, &token_data.claims, expected_nonce, now)?;
+    validate_openid_identity_claims(profile, client_id, &token_data.claims, expected_nonce, now)?;
     Ok(token_data.claims)
 }
 
@@ -619,7 +726,7 @@ fn insecure_openid_claims_from_id_token(id_token: &str) -> Result<OpenIdTokenCla
 }
 
 fn validate_openid_identity_claims(
-    provider: &ProviderHint,
+    profile: &OAuthProviderProfile,
     client_id: &str,
     claims: &OpenIdTokenClaims,
     expected_nonce: &str,
@@ -637,7 +744,7 @@ fn validate_openid_identity_claims(
     if !claims
         .iss
         .as_deref()
-        .is_some_and(|issuer| openid_issuer_matches(provider, issuer))
+        .is_some_and(|issuer| profile.openid_issuer_matches(issuer))
     {
         return Err(GatewayError::Rejected(
             "OAuth identity token issuer did not match".to_string(),
@@ -665,18 +772,6 @@ fn validate_openid_identity_claims(
         ));
     }
     Ok(())
-}
-
-fn openid_issuer_matches(provider: &ProviderHint, issuer: &str) -> bool {
-    match provider {
-        ProviderHint::Gmail => {
-            issuer == "https://accounts.google.com" || issuer == "accounts.google.com"
-        }
-        ProviderHint::Outlook => {
-            issuer.starts_with("https://login.microsoftonline.com/") && issuer.ends_with("/v2.0")
-        }
-        ProviderHint::Generic | ProviderHint::Icloud => false,
-    }
 }
 
 fn expires_at_from_duration(
@@ -765,6 +860,13 @@ TaMgUWVodLXy+lMRbtUQ97M=
         assert!(profile
             .extra_authorization_params
             .contains(&("access_type", "offline")));
+        let (imap, smtp) = profile
+            .default_mail_transport()
+            .expect("Gmail profile should include mail endpoints");
+        assert_eq!(imap.host, "imap.gmail.com");
+        assert_eq!(imap.security, TransportSecurity::Tls);
+        assert_eq!(smtp.host, "smtp.gmail.com");
+        assert_eq!(smtp.security, TransportSecurity::StartTls);
     }
 
     #[test]
@@ -778,6 +880,43 @@ TaMgUWVodLXy+lMRbtUQ97M=
         assert!(profile
             .scopes
             .contains(&"https://outlook.office.com/SMTP.Send"));
+        let (imap, smtp) = profile
+            .default_mail_transport()
+            .expect("Outlook profile should include mail endpoints");
+        assert_eq!(imap.host, "outlook.office365.com");
+        assert_eq!(smtp.host, "smtp.office365.com");
+    }
+
+    #[test]
+    fn provider_profile_matches_openid_issuer() {
+        let gmail = OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile");
+        let outlook = OAuthProviderProfile::for_provider(&ProviderHint::Outlook).expect("profile");
+
+        assert!(gmail.openid_issuer_matches("https://accounts.google.com"));
+        assert!(gmail.openid_issuer_matches("accounts.google.com"));
+        assert!(outlook.openid_issuer_matches("https://login.microsoftonline.com/tenant-id/v2.0"));
+        assert!(!outlook.openid_issuer_matches("https://accounts.google.com"));
+    }
+
+    #[test]
+    fn token_set_debug_redacts_secret_values() {
+        let token_set = OAuthTokenSet {
+            r#type: oauth_secret_type(),
+            provider: ProviderHint::Gmail,
+            client_id: "client-id".to_string(),
+            client_secret: Some("client-secret-value".to_string()),
+            access_token: "access-token-value".to_string(),
+            refresh_token: Some("refresh-token-value".to_string()),
+            expires_at: Some("2026-04-27T10:00:00Z".to_string()),
+            scopes: vec!["https://mail.google.com/".to_string()],
+        };
+
+        let debug = format!("{token_set:?}");
+
+        assert!(!debug.contains("client-secret-value"));
+        assert!(!debug.contains("access-token-value"));
+        assert!(!debug.contains("refresh-token-value"));
+        assert!(debug.contains("[redacted]"));
     }
 
     #[test]
@@ -862,7 +1001,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
         assert_eq!(claims.email_verified, Some(true));
         assert_eq!(claims.nonce.as_deref(), Some("expected-nonce"));
         assert!(validate_openid_identity_claims(
-            &ProviderHint::Gmail,
+            &OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile"),
             "client-id",
             &claims,
             "expected-nonce",
@@ -885,7 +1024,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
         };
 
         let error = validate_openid_identity_claims(
-            &ProviderHint::Gmail,
+            &OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile"),
             "client-id",
             &claims,
             "expected-nonce",
@@ -901,7 +1040,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
         let (id_token, jwks) = signed_id_token("test-key", "expected-nonce");
 
         let claims = decode_verified_openid_claims(
-            &ProviderHint::Gmail,
+            &OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile"),
             "client-id",
             &id_token,
             "test-key",
@@ -920,7 +1059,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
         id_token.push('a');
 
         let error = decode_verified_openid_claims(
-            &ProviderHint::Gmail,
+            &OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile"),
             "client-id",
             &id_token,
             "test-key",

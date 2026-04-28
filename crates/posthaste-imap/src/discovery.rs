@@ -2,8 +2,8 @@ use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::FlagNameAttribute;
 use imap_client::imap_types::mailbox::Mailbox;
 use posthaste_domain::{
-    imap_special_use_role, AccountTransportSettings, ImapCapabilities, MailboxId, ProviderAuthKind,
-    TransportSecurity,
+    imap_special_use_role, AccountTransportSettings, ImapCapabilities, MailboxId, MailboxRole,
+    ProviderAuthKind, TransportSecurity,
 };
 
 use crate::ImapAdapterError;
@@ -162,7 +162,11 @@ pub fn map_imap_mailbox(
     let selectable = !attributes
         .iter()
         .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect"));
-    let role = imap_special_use_role(&name, attributes.iter().map(String::as_str));
+    let role = imap_special_use_role(&name, attributes.iter().map(String::as_str)).map(|role| {
+        MailboxRole::parse(role)
+            .map(MailboxRole::as_str)
+            .unwrap_or(role)
+    });
 
     DiscoveredImapMailbox {
         id: imap_mailbox_id(&name),
@@ -215,7 +219,7 @@ mod tests {
             mailbox.id,
             MailboxId::from("imap:mailbox:53656e74204974656d73")
         );
-        assert_eq!(mailbox.role, Some("sent"));
+        assert_eq!(mailbox.role, Some(MailboxRole::Sent.as_str()));
         assert!(mailbox.selectable);
     }
 

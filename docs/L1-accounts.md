@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
@@ -123,9 +123,48 @@ cache_attachments = false
 bind = "127.0.0.1:2525"         # optional, daemon bind address
 cors_origin = "http://localhost:5173"  # optional, CORS origin
 poll_interval_seconds = 300     # optional, sync poll interval
+
+[daemon.runtime.supervisor]      # optional, backend runtime tuning
+automation_backfill_batch_size = 10
+automation_backfill_initial_delay_seconds = 10
+automation_backfill_interval_seconds = 15
+cache_worker_initial_delay_seconds = 5
+cache_worker_interval_seconds = 2
+cache_stale_rescore_after_seconds = 21600
+cache_background_pressure = 0.0
+cache_interactive_pressure = 1.0
+command_channel_buffer_size = 32
+event_broadcast_buffer_size = 512
+
+[daemon.runtime.oauth]
+refresh_skew_seconds = 300
+jwks_default_cache_seconds = 3600
+jwks_max_cache_seconds = 86400
+
+[daemon.runtime.push]
+jmap_sse_ping_seconds = 60
+api_sse_keep_alive_seconds = 15
+resilient_initial_retry_delay_seconds = 5
+resilient_max_retry_delay_seconds = 120
+resilient_fallback_threshold = 3
+imap_idle_reconnect_delay_seconds = 30
+
+[daemon.runtime.sync]
+jmap_mailbox_changes_max_changes = 500
+jmap_email_changes_max_changes = 500
+jmap_email_get_chunk_size = 100
+jmap_full_email_get_chunk_size = 100
+imap_uid_fetch_chunk_size = 128
+api_default_page_size = 100
+api_max_page_size = 250
+store_message_value_chunk_size = 400
+
+[daemon.runtime.store]
+sqlite_busy_timeout_seconds = 5
+sender_address_cache_cap = 40
 ```
 
-`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `cache` section configures optional-content cache caps and layer eligibility; `hard_cap_bytes` is normalized to at least `soft_cap_bytes`. The `daemon` section is only read at startup and not exposed through the API.
+`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `cache` section configures optional-content cache caps and layer eligibility; `hard_cap_bytes` is normalized to at least `soft_cap_bytes`. The `daemon` section is only read at startup and not exposed through the API. `[daemon.runtime]` is optional and contains backend operational tunables only; missing fields use the current runtime defaults, and default runtime tuning is omitted when app settings are re-serialized.
 
 ### sources/{id}.toml
 

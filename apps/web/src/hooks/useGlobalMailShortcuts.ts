@@ -1,0 +1,166 @@
+import { useEffect } from 'react'
+
+import { isEditableKeyboardTarget } from '@/components/keyboard/inputTargets'
+import type { MailSelection } from '@/mailState'
+import type { SurfaceDescriptor } from '@/surfaces'
+
+export function useGlobalMailShortcuts({
+  effectiveSurface,
+  isCommandPaletteOpen,
+  isComposeOpen,
+  isSettingsSurfaceOpen,
+  isShortcutReferenceOpen,
+  isTagEditorOpen,
+  searchQuery,
+  selectedMessage,
+  onClearSearchQuery,
+  onClearSelectedMessage,
+  onCompose,
+  onOpenCommandPalette,
+  onOpenFocusedMessage,
+  onOpenSettings,
+  onOpenTagEditor,
+  onReply,
+  onToggleFlag,
+  onToggleShortcuts,
+}: {
+  effectiveSurface: SurfaceDescriptor | null
+  isCommandPaletteOpen: boolean
+  isComposeOpen: boolean
+  isSettingsSurfaceOpen: boolean
+  isShortcutReferenceOpen: boolean
+  isTagEditorOpen: boolean
+  searchQuery: string
+  selectedMessage: MailSelection | null
+  onClearSearchQuery: () => void
+  onClearSelectedMessage: () => void
+  onCompose: () => void
+  onOpenCommandPalette: () => void
+  onOpenFocusedMessage: () => void
+  onOpenSettings: () => void
+  onOpenTagEditor: () => void
+  onReply: () => void
+  onToggleFlag: () => void
+  onToggleShortcuts: () => void
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const isTypingTarget = isEditableKeyboardTarget(event.target)
+
+      if (effectiveSurface !== null) {
+        return
+      }
+
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key === 'k' || event.key === 'K')
+      ) {
+        event.preventDefault()
+        onOpenCommandPalette()
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+        event.preventDefault()
+        onOpenSettings()
+        return
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key === 'n' || event.key === 'N')
+      ) {
+        event.preventDefault()
+        onCompose()
+        return
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key === 'r' || event.key === 'R')
+      ) {
+        event.preventDefault()
+        onReply()
+        return
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === 'l'
+      ) {
+        event.preventDefault()
+        if (selectedMessage) {
+          onToggleFlag()
+        }
+        return
+      }
+      if (isTypingTarget) return
+      if (
+        event.key === 'Escape' &&
+        !isSettingsSurfaceOpen &&
+        !isCommandPaletteOpen &&
+        !isShortcutReferenceOpen &&
+        !isComposeOpen &&
+        effectiveSurface === null
+      ) {
+        if (selectedMessage) {
+          event.preventDefault()
+          onClearSelectedMessage()
+          return
+        }
+        if (searchQuery.trim()) {
+          event.preventDefault()
+          onClearSearchQuery()
+          return
+        }
+      }
+      if (event.key === '?') {
+        event.preventDefault()
+        onToggleShortcuts()
+        return
+      }
+      if (event.key === '/') {
+        event.preventDefault()
+        onOpenCommandPalette()
+        return
+      }
+      if (event.key.toLowerCase() === 'l' && selectedMessage) {
+        event.preventDefault()
+        onOpenTagEditor()
+        return
+      }
+      if (
+        event.key.toLowerCase() === 'o' &&
+        selectedMessage &&
+        !isSettingsSurfaceOpen &&
+        !isCommandPaletteOpen &&
+        !isShortcutReferenceOpen &&
+        !isComposeOpen &&
+        !isTagEditorOpen &&
+        effectiveSurface === null
+      ) {
+        event.preventDefault()
+        onOpenFocusedMessage()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    effectiveSurface,
+    isCommandPaletteOpen,
+    isComposeOpen,
+    isSettingsSurfaceOpen,
+    isShortcutReferenceOpen,
+    isTagEditorOpen,
+    onClearSearchQuery,
+    onClearSelectedMessage,
+    onCompose,
+    onOpenCommandPalette,
+    onOpenFocusedMessage,
+    onOpenSettings,
+    onOpenTagEditor,
+    onReply,
+    onToggleFlag,
+    onToggleShortcuts,
+    searchQuery,
+    selectedMessage,
+  ])
+}

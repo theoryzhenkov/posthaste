@@ -9,6 +9,8 @@ use posthaste_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::runtime::DaemonRuntimeTuning;
+
 // -- app.toml --
 
 /// TOML representation of the global `app.toml` config file.
@@ -82,6 +84,8 @@ pub struct DaemonToml {
     pub bind: Option<String>,
     pub cors_origin: Option<String>,
     pub poll_interval_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "DaemonRuntimeTuning::is_default")]
+    pub runtime: DaemonRuntimeTuning,
 }
 
 impl AppToml {
@@ -307,7 +311,7 @@ impl SourceToml {
     ///
     /// @spec docs/L1-accounts#toml-schema
     pub fn to_account_settings(&self) -> Result<AccountSettings, String> {
-        Ok(AccountSettings {
+        let settings = AccountSettings {
             id: AccountId::from(self.id.as_str()),
             name: self.name.clone(),
             full_name: self.full_name.clone(),
@@ -375,7 +379,9 @@ impl SourceToml {
                 .updated_at
                 .clone()
                 .unwrap_or_else(|| RFC3339_EPOCH.to_string()),
-        })
+        };
+        validate_source_settings(&settings)?;
+        Ok(settings)
     }
 
     /// Builds a `SourceToml` from domain `AccountSettings` for serialization.
@@ -503,6 +509,38 @@ fn convert_transport_security_to_toml(security: &TransportSecurity) -> Transport
         TransportSecurity::StartTls => TransportSecurityToml::StartTls,
         TransportSecurity::Plain => TransportSecurityToml::Plain,
     }
+}
+
+fn validate_source_settings(settings: &AccountSettings) -> Result<(), String> {
+    if !matches!(settings.driver, AccountDriver::ImapSmtp) {
+        return Ok(());
+    }
+    if settings
+        .transport
+        .username
+        .as_deref()
+        .map(str::trim)
+        .filter(|username| !username.is_empty())
+        .is_none()
+    {
+        return Err("imap_smtp source requires transport.username".to_string());
+    }
+    if settings.transport.secret_ref.is_none() {
+        return Err("imap_smtp source requires transport.secret_ref".to_string());
+    }
+    if settings.transport.imap.is_none() {
+        return Err("imap_smtp source requires transport.imap".to_string());
+    }
+    if settings.transport.smtp.is_none() {
+        return Err("imap_smtp source requires transport.smtp".to_string());
+    }
+    if !settings.email_patterns.iter().any(|pattern| {
+        let trimmed = pattern.trim();
+        !trimmed.contains('*') && trimmed.contains('@')
+    }) {
+        return Err("imap_smtp source requires a concrete sender email pattern".to_string());
+    }
+    Ok(())
 }
 
 fn convert_automation_rule(rule: &AutomationRuleToml) -> Result<AutomationRule, String> {
@@ -1014,6 +1052,29 @@ mod tests {
     }
 
     #[test]
+    fn imap_smtp_source_toml_requires_runtime_transport_fields() {
+        let parsed: SourceToml = toml::from_str(
+            r#"
+id = "icloud"
+name = "iCloud"
+email_patterns = ["*@icloud.com"]
+driver = "imap_smtp"
+
+[transport]
+provider = "icloud"
+auth = "app_password"
+"#,
+        )
+        .unwrap();
+
+        let error = parsed
+            .to_account_settings()
+            .expect_err("missing transport fields should be rejected");
+
+        assert!(error.contains("transport.username"));
+    }
+
+    #[test]
     fn default_smart_mailboxes_round_trip_through_toml() {
         for mailbox in default_smart_mailboxes() {
             let toml_struct = SmartMailboxToml::from_smart_mailbox(&mailbox);
@@ -1095,5 +1156,99 @@ mod tests {
         let round_tripped = parsed.to_app_settings().unwrap();
 
         assert_eq!(round_tripped, settings);
+    }
+
+    #[test]
+    fn app_toml_accepts_missing_daemon_runtime_for_compatibility() {
+        let parsed: AppToml = toml::from_str(
+            r#"
+            schema_version = 1
+
+            [daemon]
+            bind = "127.0.0.1:2525"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(parsed.daemon.bind.as_deref(), Some("127.0.0.1:2525"));
+        assert_eq!(parsed.daemon.runtime, DaemonRuntimeTuning::default());
+    }
+
+    #[test]
+    fn app_toml_daemon_runtime_round_trips() {
+        let input = r#"
+            schema_version = 1
+
+            [daemon]
+            bind = "127.0.0.1:2525"
+
+            [daemon.runtime.supervisor]
+            automation_backfill_batch_size = 20
+            command_channel_buffer_size = 64
+
+            [daemon.runtime.oauth]
+            refresh_skew_seconds = 600
+
+            [daemon.runtime.push]
+            api_sse_keep_alive_seconds = 30
+
+            [daemon.runtime.sync]
+            jmap_email_get_chunk_size = 50
+
+            [daemon.runtime.store]
+            sender_address_cache_cap = 80
+        "#;
+
+        let parsed: AppToml = toml::from_str(input).unwrap();
+        let serialized = toml::to_string_pretty(&parsed).unwrap();
+        let round_tripped: AppToml = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(round_tripped.daemon.runtime, parsed.daemon.runtime);
+        assert_eq!(
+            round_tripped
+                .daemon
+                .runtime
+                .supervisor
+                .automation_backfill_batch_size,
+            20
+        );
+        assert_eq!(round_tripped.daemon.runtime.oauth.refresh_skew_seconds, 600);
+        assert_eq!(
+            round_tripped.daemon.runtime.push.api_sse_keep_alive_seconds,
+            30
+        );
+        assert_eq!(
+            round_tripped.daemon.runtime.sync.jmap_email_get_chunk_size,
+            50
+        );
+        assert_eq!(
+            round_tripped.daemon.runtime.store.sender_address_cache_cap,
+            80
+        );
+    }
+
+    #[test]
+    fn app_settings_serialization_preserves_existing_daemon_runtime() {
+        let existing = AppToml {
+            schema_version: 1,
+            daemon: DaemonToml {
+                runtime: DaemonRuntimeTuning {
+                    store: crate::runtime::StoreRuntimeTuning {
+                        sender_address_cache_cap: 80,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let toml_struct = AppToml::from_app_settings(&AppSettings::default(), &existing);
+
+        assert_eq!(
+            toml_struct.daemon.runtime.store.sender_address_cache_cap,
+            80
+        );
     }
 }

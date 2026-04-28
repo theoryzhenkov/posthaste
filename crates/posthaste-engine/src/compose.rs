@@ -1,5 +1,5 @@
 use posthaste_domain::Recipient;
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 /// Render a Markdown string to a self-contained HTML document for email.
 ///
@@ -13,7 +13,11 @@ pub(crate) fn render_markdown(markdown: &str) -> String {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(markdown, options);
+    let parser = Parser::new_ext(markdown, options).filter_map(|event| match event {
+        Event::Html(html) | Event::InlineHtml(html) => Some(Event::Text(html)),
+        Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => None,
+        event => Some(event),
+    });
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     format!(
@@ -56,5 +60,23 @@ pub(crate) fn prefix_subject(prefix: &str, subject: &str) -> String {
         subject.to_string()
     } else {
         format!("{prefix} {subject}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_markdown_excludes_raw_html_and_markdown_images() {
+        let rendered = render_markdown(
+            "<script>alert(1)</script>\n\n![pixel](https://example.test/pixel.png)",
+        );
+
+        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!rendered.contains("<script>"));
+        assert!(!rendered.contains("<img"));
+        assert!(!rendered.contains("https://example.test/pixel.png"));
+        assert!(rendered.contains("pixel"));
     }
 }

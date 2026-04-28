@@ -321,3 +321,35 @@ export function smartMailboxDraftToRule(
     ),
   }
 }
+
+export function rewriteSmartMailboxLinkedRules(
+  rules: AutomationRule[],
+  smartMailbox: SmartMailbox,
+): AutomationRule[] {
+  let changed = false
+  const nextRules = rules.map((rule) => {
+    if (!isSmartMailboxLinkedRule(rule, smartMailbox.id)) {
+      return rule
+    }
+    changed = true
+    const accountId = extractAccountIdFromRule(rule, '')
+    return smartMailboxDraftToRule(
+      {
+        ...ruleToDraft(accountId, rule),
+        condition: actionConditionFromSmartMailboxRule(rule, accountId),
+      },
+      smartMailbox,
+    )
+  })
+  return changed ? nextRules : rules
+}
+
+export function removeSmartMailboxLinkedRules(
+  rules: AutomationRule[],
+  smartMailboxId: string,
+): AutomationRule[] {
+  const nextRules = rules.filter(
+    (rule) => !isSmartMailboxLinkedRule(rule, smartMailboxId),
+  )
+  return nextRules.length === rules.length ? rules : nextRules
+}

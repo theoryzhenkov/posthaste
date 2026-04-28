@@ -233,59 +233,83 @@ function removeRule(rules: AutomationRule[], ruleId: string) {
   return rules.filter((rule) => rule.id !== ruleId)
 }
 
-export function SmartMailboxAutomationFields({
+function linkedAutomationRuleItems({
+  rules,
+  drafts,
+  isLinkedRule,
+  accountIdForRule,
+  conditionForRule,
+}: {
+  rules: AutomationRule[]
+  drafts: AutomationRule[]
+  isLinkedRule: (rule: AutomationRule) => boolean
+  accountIdForRule: (rule: AutomationRule) => string
+  conditionForRule: (
+    rule: AutomationRule,
+    accountId: string,
+  ) => SmartMailboxRule
+}): AutomationRuleItem[] {
+  const mapItem =
+    (state: AutomationRuleState) =>
+    (rule: AutomationRule): AutomationRuleItem => {
+      const accountId = accountIdForRule(rule)
+      return {
+        state,
+        draft: {
+          ...ruleToDraft(accountId, rule),
+          condition: conditionForRule(rule, accountId),
+        },
+      }
+    }
+
+  return [
+    ...rules.filter(isLinkedRule).map(mapItem('active')),
+    ...drafts.filter(isLinkedRule).map(mapItem('draft')),
+  ]
+}
+
+function LinkedAutomationRuleFields({
   accounts,
+  mailboxesByAccount,
   settings,
-  smartMailbox,
-  disabledReason,
+  canEditAccount,
+  addLabel,
+  emptyText,
+  addDisabled = false,
+  disabledReason = null,
   onSaved,
+  itemsFromSettings,
+  createDraft,
+  draftToRule,
+  previewConditionForDraft,
 }: {
   accounts: AccountOverview[]
+  mailboxesByAccount?: Record<string, Mailbox[]>
   settings: AppSettings
-  smartMailbox: SmartMailbox
+  canEditAccount: boolean
+  addLabel: string
+  emptyText: string
+  addDisabled?: boolean
   disabledReason?: string | null
   onSaved: (settings: AppSettings) => Promise<void>
+  itemsFromSettings: (settings: AppSettings) => AutomationRuleItem[]
+  createDraft: () => AutomationRuleDraft | null
+  draftToRule: (draft: AutomationRuleDraft) => AutomationRule
+  previewConditionForDraft: (draft: AutomationRuleDraft) => SmartMailboxRule
 }) {
-  const fallbackAccountId = accounts[0]?.id ?? ''
-  const linkedItems = (sourceSettings: AppSettings): AutomationRuleItem[] => [
-    ...(sourceSettings.automationRules ?? [])
-      .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-      .map((rule): AutomationRuleItem => {
-        const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
-        return {
-          state: 'active',
-          draft: {
-            ...ruleToDraft(accountId, rule),
-            condition: actionConditionFromSmartMailboxRule(rule, accountId),
-          },
-        }
-      }),
-    ...(sourceSettings.automationDrafts ?? [])
-      .filter((rule) => isSmartMailboxLinkedRule(rule, smartMailbox.id))
-      .map((rule): AutomationRuleItem => {
-        const accountId = extractAccountIdFromRule(rule, fallbackAccountId)
-        return {
-          state: 'draft',
-          draft: {
-            ...ruleToDraft(accountId, rule),
-            condition: actionConditionFromSmartMailboxRule(rule, accountId),
-          },
-        }
-      }),
-  ]
   const [items, setItems] = useState<AutomationRuleItem[]>(() =>
-    linkedItems(settings),
+    itemsFromSettings(settings),
   )
   const persistMutation = useMutation({
     mutationFn: (input: Partial<AppSettings>) => patchSettings(input),
     onSuccess: async (savedSettings) => {
-      setItems(linkedItems(savedSettings))
+      setItems(itemsFromSettings(savedSettings))
       await onSaved(savedSettings)
     },
   })
 
   function persistItem(draft: AutomationRuleDraft) {
-    const rule = smartMailboxDraftToRule(draft, smartMailbox)
+    const rule = draftToRule(draft)
     const complete = isDraftComplete(draft)
     persistMutation.mutate({
       automationRules: complete
@@ -313,24 +337,20 @@ export function SmartMailboxAutomationFields({
       title="Actions"
       items={items}
       accounts={accounts}
-      canEditAccount
-      addLabel="Add action rule"
-      emptyText="No smart mailbox actions configured."
+      mailboxesByAccount={mailboxesByAccount}
+      canEditAccount={canEditAccount}
+      addLabel={addLabel}
+      emptyText={emptyText}
       savePending={persistMutation.isPending}
-      addDisabled={Boolean(disabledReason)}
+      addDisabled={addDisabled}
       disabledReason={disabledReason}
       errors={[persistMutation.error?.message ?? null]}
       onAdd={() => {
-        const account = accounts[0]
-        if (!account) {
+        const draft = createDraft()
+        if (!draft) {
           return null
         }
-        const draft = defaultDraft({
-          accountId: account.id,
-          name: `${smartMailbox.name} action`,
-          idPrefix: smartMailboxRulePrefix(smartMailbox.id),
-        })
-        const rule = smartMailboxDraftToRule(draft, smartMailbox)
+        const rule = draftToRule(draft)
         setItems((current) => [...current, { state: 'draft', draft }])
         persistMutation.mutate({
           automationDrafts: upsertRule(settings.automationDrafts ?? [], rule),
@@ -348,6 +368,60 @@ export function SmartMailboxAutomationFields({
       }
       onSaveItem={persistItem}
       onRemoveItem={removeItem}
+      previewConditionForDraft={previewConditionForDraft}
+    />
+  )
+}
+
+export function SmartMailboxAutomationFields({
+  accounts,
+  settings,
+  smartMailbox,
+  disabledReason,
+  onSaved,
+}: {
+  accounts: AccountOverview[]
+  settings: AppSettings
+  smartMailbox: SmartMailbox
+  disabledReason?: string | null
+  onSaved: (settings: AppSettings) => Promise<void>
+}) {
+  const fallbackAccountId = accounts[0]?.id ?? ''
+
+  return (
+    <LinkedAutomationRuleFields
+      accounts={accounts}
+      canEditAccount
+      settings={settings}
+      addLabel="Add action rule"
+      emptyText="No smart mailbox actions configured."
+      addDisabled={Boolean(disabledReason)}
+      disabledReason={disabledReason}
+      onSaved={onSaved}
+      itemsFromSettings={(sourceSettings) =>
+        linkedAutomationRuleItems({
+          rules: sourceSettings.automationRules ?? [],
+          drafts: sourceSettings.automationDrafts ?? [],
+          isLinkedRule: (rule) =>
+            isSmartMailboxLinkedRule(rule, smartMailbox.id),
+          accountIdForRule: (rule) =>
+            extractAccountIdFromRule(rule, fallbackAccountId),
+          conditionForRule: actionConditionFromSmartMailboxRule,
+        })
+      }
+      createDraft={() => {
+        const account = accounts[0]
+        if (!account) {
+          return null
+        }
+        const draft = defaultDraft({
+          accountId: account.id,
+          name: `${smartMailbox.name} action`,
+          idPrefix: smartMailboxRulePrefix(smartMailbox.id),
+        })
+        return draft
+      }}
+      draftToRule={(draft) => smartMailboxDraftToRule(draft, smartMailbox)}
       previewConditionForDraft={(draft) =>
         smartMailboxDraftToRule(draft, smartMailbox).condition
       }
@@ -369,108 +443,36 @@ export function SourceMailboxAutomationFields({
   onSaved: (settings: AppSettings) => Promise<void>
 }) {
   const linkedPrefix = sourceMailboxRulePrefix(account.id, mailbox.id)
-  const linkedItems = (sourceSettings: AppSettings): AutomationRuleItem[] => [
-    ...(sourceSettings.automationRules ?? [])
-      .filter((rule) => isSourceMailboxLinkedRule(rule, account.id, mailbox.id))
-      .map(
-        (rule): AutomationRuleItem => ({
-          state: 'active',
-          draft: {
-            ...ruleToDraft(account.id, rule),
-            condition: actionConditionFromSourceMailboxRule(
-              rule,
-              account.id,
-              mailbox.id,
-            ),
-          },
-        }),
-      ),
-    ...(sourceSettings.automationDrafts ?? [])
-      .filter((rule) => isSourceMailboxLinkedRule(rule, account.id, mailbox.id))
-      .map(
-        (rule): AutomationRuleItem => ({
-          state: 'draft',
-          draft: {
-            ...ruleToDraft(account.id, rule),
-            condition: actionConditionFromSourceMailboxRule(
-              rule,
-              account.id,
-              mailbox.id,
-            ),
-          },
-        }),
-      ),
-  ]
-  const [items, setItems] = useState<AutomationRuleItem[]>(() =>
-    linkedItems(settings),
-  )
-  const persistMutation = useMutation({
-    mutationFn: (input: Partial<AppSettings>) => patchSettings(input),
-    onSuccess: async (savedSettings) => {
-      setItems(linkedItems(savedSettings))
-      await onSaved(savedSettings)
-    },
-  })
-
-  function persistItem(draft: AutomationRuleDraft) {
-    const rule = sourceMailboxDraftToRule(draft, mailbox.id)
-    const complete = isDraftComplete(draft)
-    persistMutation.mutate({
-      automationRules: complete
-        ? upsertRule(settings.automationRules ?? [], rule)
-        : removeRule(settings.automationRules ?? [], rule.id),
-      automationDrafts: complete
-        ? removeRule(settings.automationDrafts ?? [], rule.id)
-        : upsertRule(settings.automationDrafts ?? [], rule),
-    })
-  }
-
-  function removeItem(draft: AutomationRuleDraft) {
-    const ruleId = draft.id.trim()
-    setItems((current) =>
-      current.filter((item) => item.draft.id.trim() !== ruleId),
-    )
-    persistMutation.mutate({
-      automationRules: removeRule(settings.automationRules ?? [], ruleId),
-      automationDrafts: removeRule(settings.automationDrafts ?? [], ruleId),
-    })
-  }
 
   return (
-    <AutomationRuleList
-      title="Actions"
-      items={items}
+    <LinkedAutomationRuleFields
       accounts={[account]}
       mailboxesByAccount={{ [account.id]: mailboxes }}
       canEditAccount={false}
+      settings={settings}
       addLabel="Add action rule"
       emptyText="No mailbox actions configured."
-      savePending={persistMutation.isPending}
-      errors={[persistMutation.error?.message ?? null]}
-      onAdd={() => {
+      onSaved={onSaved}
+      itemsFromSettings={(sourceSettings) =>
+        linkedAutomationRuleItems({
+          rules: sourceSettings.automationRules ?? [],
+          drafts: sourceSettings.automationDrafts ?? [],
+          isLinkedRule: (rule) =>
+            isSourceMailboxLinkedRule(rule, account.id, mailbox.id),
+          accountIdForRule: () => account.id,
+          conditionForRule: (rule) =>
+            actionConditionFromSourceMailboxRule(rule, account.id, mailbox.id),
+        })
+      }
+      createDraft={() => {
         const draft = defaultDraft({
           accountId: account.id,
           name: `${mailbox.name} action`,
           idPrefix: linkedPrefix,
         })
-        const rule = sourceMailboxDraftToRule(draft, mailbox.id)
-        setItems((current) => [...current, { state: 'draft', draft }])
-        persistMutation.mutate({
-          automationDrafts: upsertRule(settings.automationDrafts ?? [], rule),
-        })
-        return draft.id
+        return draft
       }}
-      onChange={(ruleId, patch) =>
-        setItems((current) =>
-          current.map((item) =>
-            item.draft.id === ruleId
-              ? { ...item, draft: { ...item.draft, ...patch } }
-              : item,
-          ),
-        )
-      }
-      onSaveItem={persistItem}
-      onRemoveItem={removeItem}
+      draftToRule={(draft) => sourceMailboxDraftToRule(draft, mailbox.id)}
       previewConditionForDraft={(draft) =>
         sourceMailboxDraftToRule(draft, mailbox.id).condition
       }
@@ -536,7 +538,7 @@ function AutomationRuleList({
           size="sm"
           variant="outline"
           className="rounded-md border-border bg-background"
-          disabled={accounts.length === 0 || addDisabled}
+          disabled={accounts.length === 0 || addDisabled || savePending}
           onClick={() => {
             const newRuleId = onAdd()
             if (newRuleId) {
@@ -762,6 +764,7 @@ function AutomationRuleEditor({
             variant="ghost"
             className="h-8 px-2 text-muted-foreground hover:text-destructive"
             onClick={onRemove}
+            disabled={savePending}
           >
             Remove
           </Button>

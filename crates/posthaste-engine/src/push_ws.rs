@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, AccountId, GatewayError, PushNotification, PushStream,
-    PushTransport,
-};
+use posthaste_domain::{AccountId, GatewayError, PushStream, PushTransport};
 
 use tracing::{debug, warn};
 
 use crate::live::map_gateway_error;
+use crate::push_common::convert_ws_push_object;
 use crate::ws_connection::SharedWsConnection;
 
 /// Push transport that reads JMAP state-change notifications from a shared WebSocket.
@@ -69,7 +67,7 @@ impl PushTransport for WsPushTransport {
             loop {
                 match ws.next_push().await {
                     Some(Ok(push)) => {
-                        match convert_push_object(&account_id, &server_account_id, push) {
+                        match convert_ws_push_object(&account_id, &server_account_id, push) {
                             Ok(Some(notification)) => yield Ok(notification),
                             Ok(None) => continue,
                             Err(error) => yield Err(error),
@@ -78,101 +76,17 @@ impl PushTransport for WsPushTransport {
                     Some(Err(error)) => {
                         let mapped = map_gateway_error(error);
                         warn!(account_id = %account_id, error = %mapped, "WS push stream error");
+                        ws.disconnect().await;
                         yield Err(mapped);
                         return;
                     }
                     None => {
                         debug!(account_id = %account_id, "WS push stream ended");
+                        ws.disconnect().await;
                         return;
                     }
                 }
             }
         })))
-    }
-}
-
-/// Convert a raw JMAP `PushObject` into a domain `PushNotification`.
-///
-/// Only `StateChange` variants are relevant; other push object types are ignored.
-/// WS push does not carry SSE-style checkpoint IDs, so the notification's
-/// `checkpoint` is always `None`.
-///
-/// @spec docs/L1-jmap#push
-fn convert_push_object(
-    account_id: &AccountId,
-    server_account_id: &str,
-    push: jmap_client::PushObject,
-) -> Result<Option<PushNotification>, GatewayError> {
-    match push {
-        jmap_client::PushObject::StateChange { mut changed } => {
-            let Some(entries) = changed.remove(server_account_id) else {
-                return Ok(None);
-            };
-            let changed_types = entries.into_keys().map(|dt| dt.to_string()).collect();
-            let received_at = domain_now_iso8601().map_err(GatewayError::Rejected)?;
-            Ok(Some(PushNotification {
-                account_id: account_id.clone(),
-                changed: changed_types,
-                received_at,
-                // WS push notifications don't carry SSE-style event IDs.
-                // The ResilientPushStream will pass the last SSE checkpoint
-                // (if any) on reconnect, but WS connections cannot resume
-                // from a checkpoint. A full delta sync after WS reconnect
-                // handles this correctly.
-                checkpoint: None,
-            }))
-        }
-        _ => Ok(None),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use posthaste_domain::AccountId;
-    use serde_json::json;
-
-    use super::convert_push_object;
-
-    #[test]
-    fn ws_push_filters_by_server_account_and_emits_local_account() {
-        let push = serde_json::from_value(json!({
-            "@type": "StateChange",
-            "changed": {
-                "server-account": {
-                    "Email": "state-1",
-                    "Mailbox": "state-2"
-                }
-            }
-        }))
-        .expect("push object");
-
-        let notification =
-            convert_push_object(&AccountId::from("local-account"), "server-account", push)
-                .expect("conversion")
-                .expect("notification");
-
-        assert_eq!(notification.account_id, AccountId::from("local-account"));
-        assert_eq!(notification.changed.len(), 2);
-        assert!(notification.changed.contains(&"Email".to_string()));
-        assert!(notification.changed.contains(&"Mailbox".to_string()));
-    }
-
-    #[test]
-    fn ws_push_ignores_other_server_accounts() {
-        let push = serde_json::from_value(json!({
-            "@type": "StateChange",
-            "changed": {
-                "other-server-account": {
-                    "Email": "state-1"
-                }
-            }
-        }))
-        .expect("push object");
-
-        let notification =
-            convert_push_object(&AccountId::from("local-account"), "server-account", push)
-                .expect("conversion");
-
-        assert!(notification.is_none());
     }
 }

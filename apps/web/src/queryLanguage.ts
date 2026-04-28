@@ -1,4 +1,5 @@
 import type { MessageSummary, SidebarResponse } from './api/types'
+import { KNOWN_MAILBOX_ROLES, SYSTEM_KEYWORD_PREFIX } from './domainVocabulary'
 
 export interface QueryPrefixDefinition {
   primary: string
@@ -173,7 +174,6 @@ const SPACED_VALUE_PREFIXES = new Set([
   'account',
 ])
 
-const MAILBOX_ROLES = ['inbox', 'archive', 'drafts', 'sent', 'junk', 'trash']
 const IS_VALUES = [
   'unread',
   'read',
@@ -253,7 +253,7 @@ function userTagCandidate(
   detail: string,
 ): ValueCandidate | null {
   const tag = value.trim()
-  if (!tag || tag.startsWith('$')) {
+  if (!tag || tag.startsWith(SYSTEM_KEYWORD_PREFIX)) {
     return null
   }
   return {
@@ -637,7 +637,7 @@ function candidatesForPrefix(
             keywords: `${mailbox.id} ${mailbox.role ?? ''}`,
           })),
         ) ?? []),
-        ...MAILBOX_ROLES.map((role) => ({
+        ...KNOWN_MAILBOX_ROLES.map((role) => ({
           value: role,
           label: role,
           detail: 'Mailbox role',

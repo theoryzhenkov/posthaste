@@ -1,31 +1,25 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
 import {
-  Archive,
-  Clock3,
-  CircleHelp,
-  ListFilter,
-  Keyboard,
-  MessageSquareText,
-  PenSquare,
-  Reply,
-  Settings,
-  SlidersHorizontal,
-  Tag,
-  User,
-  UserPlus,
-} from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 
 import { fetchSidebar, fetchSourceMessages } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
-import { useDebouncedValue } from '@/hooks/useDebouncedValue'
-import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
-import { queryKeys } from '@/queryKeys'
 import {
-  getQueryCompletions,
-  getQueryHelpEntries,
-  validateSearchQuery,
-} from '@/queryLanguage'
+  commandPaletteEntryValue,
+  NO_COMMAND_PALETTE_SELECTION,
+  type CommandPaletteEntry,
+  type SettingsCategory,
+  useCommandPaletteResults,
+} from '@/hooks/useCommandPaletteResults'
+import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { queryKeys } from '@/queryKeys'
+import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
 
 import { FloatingPanel } from './FloatingPanel'
@@ -37,31 +31,6 @@ import {
   CommandItem,
   CommandList,
 } from './ui/command'
-
-type SettingsCategory = 'general' | 'accounts' | 'mailboxes'
-
-type PaletteCommandId =
-  | 'compose'
-  | 'reply'
-  | 'archive'
-  | 'flag'
-  | 'snooze'
-  | 'newSmart'
-  | 'newRule'
-  | 'settings'
-  | 'shortcuts'
-  | 'account'
-
-type PaletteEntry = {
-  id: string
-  kind: 'command' | 'message' | 'contact' | 'mailbox' | 'query'
-  label: string
-  sub?: string
-  keywords: string
-  icon: React.ReactNode
-  closeOnSelect?: boolean
-  onSelect: () => void
-}
 
 interface CommandPaletteProps {
   hasSelectedMessage: boolean
@@ -85,123 +54,7 @@ interface CommandPaletteProps {
   onToggleFlag: () => void
 }
 
-function normalizeQuery(value: string): string {
-  return value.trim().toLowerCase()
-}
-
-function matchesQuery(query: string, text: string): boolean {
-  return query.length === 0 || text.toLowerCase().includes(query)
-}
-
-type SidebarData = Awaited<ReturnType<typeof fetchSidebar>>
-
-function resolveMessageMailbox(
-  sidebar: SidebarData | undefined,
-  message: MessageSummary,
-) {
-  const source = sidebar?.sources.find((item) => item.id === message.sourceId)
-  if (!source) {
-    return null
-  }
-
-  const mailbox =
-    message.mailboxIds
-      .map((mailboxId) =>
-        source.mailboxes.find((candidate) => candidate.id === mailboxId),
-      )
-      .find(Boolean) ?? null
-
-  return mailbox ? { mailbox, source } : null
-}
-
-function formatMessageSubline(
-  message: MessageSummary,
-  sidebar: SidebarData | undefined,
-): string {
-  const sender = message.fromName ?? message.fromEmail ?? 'Unknown'
-  const mailbox = resolveMessageMailbox(sidebar, message)
-  const location = mailbox
-    ? `${mailbox.source.name} / ${mailbox.mailbox.name}`
-    : message.sourceName
-  const received = new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(message.receivedAt))
-  return `${sender} · ${location} · ${received}`
-}
-
-const NO_SELECTION_VALUE = '__posthaste_no_selection__'
 const COMMAND_PANEL_STORAGE_KEY = 'posthaste.commandPalette.panelOffset'
-
-function entryValue(entry: PaletteEntry): string {
-  return `${entry.kind}:${entry.id}`
-}
-
-function commandIcon(id: PaletteCommandId): React.ReactNode {
-  switch (id) {
-    case 'compose':
-      return (
-        <PenSquare
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-    case 'reply':
-      return (
-        <Reply size={15} strokeWidth={1.7} className="text-muted-foreground" />
-      )
-    case 'archive':
-      return (
-        <Archive
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-    case 'flag':
-      return (
-        <Tag size={15} strokeWidth={1.7} className="text-muted-foreground" />
-      )
-    case 'snooze':
-      return (
-        <Clock3 size={15} strokeWidth={1.7} className="text-muted-foreground" />
-      )
-    case 'newSmart':
-    case 'newRule':
-      return (
-        <SlidersHorizontal
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-    case 'settings':
-      return (
-        <Settings
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-    case 'shortcuts':
-      return (
-        <Keyboard
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-    case 'account':
-      return (
-        <UserPlus
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      )
-  }
-}
 
 export function CommandPalette({
   hasSelectedMessage,
@@ -294,241 +147,11 @@ export function CommandPalette({
     )
   }, [fetchedSourceMessages])
 
-  const results = useMemo(() => {
-    const normalized = normalizeQuery(query)
-
-    const queryCompletions = getQueryCompletions(query, {
-      sidebar,
-      messages: cachedMessages,
-    }).map<PaletteEntry>((completion) => ({
-      id: completion.id,
-      kind: 'query',
-      label: completion.label,
-      sub: completion.detail,
-      keywords: `${completion.label} ${completion.detail}`,
-      icon: (
-        <ListFilter
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      ),
-      closeOnSelect: false,
-      onSelect: () => {
-        setQuery(completion.replacement)
-        setSelectedIndex(null)
-      },
-    }))
-
-    const queryHelp = getQueryHelpEntries(query).map<PaletteEntry>((entry) => ({
-      id: entry.id,
-      kind: 'query',
-      label: entry.label,
-      sub: entry.detail,
-      keywords: entry.keywords,
-      icon: (
-        <CircleHelp
-          size={15}
-          strokeWidth={1.7}
-          className="text-muted-foreground"
-        />
-      ),
-      closeOnSelect: false,
-      onSelect: () => {
-        setQuery(entry.replacement)
-        setSelectedIndex(null)
-      },
-    }))
-
-    const commands: PaletteEntry[] = [
-      {
-        id: 'compose',
-        kind: 'command' as const,
-        label: 'Compose new message',
-        keywords: 'compose new message draft',
-        icon: commandIcon('compose'),
-        onSelect: onCompose,
-      },
-      {
-        id: 'reply',
-        kind: 'command' as const,
-        label: 'Reply',
-        keywords: 'reply respond answer',
-        icon: commandIcon('reply'),
-        onSelect: onReply,
-      },
-      {
-        id: 'archive',
-        kind: 'command' as const,
-        label: 'Archive selected',
-        keywords: 'archive selected',
-        icon: commandIcon('archive'),
-        onSelect: onArchive,
-      },
-      {
-        id: 'flag',
-        kind: 'command' as const,
-        label: 'Flag message',
-        keywords: 'flag star selected',
-        icon: commandIcon('flag'),
-        onSelect: onToggleFlag,
-      },
-      {
-        id: 'snooze',
-        kind: 'command' as const,
-        label: 'Snooze…',
-        keywords: 'snooze later remind',
-        icon: commandIcon('snooze'),
-        onSelect: () => onPlaceholderAction('Snooze'),
-      },
-      {
-        id: 'newSmart',
-        kind: 'command' as const,
-        label: 'New smart mailbox…',
-        keywords: 'new smart mailbox create filter',
-        icon: commandIcon('newSmart'),
-        onSelect: () => onOpenSettings('mailboxes'),
-      },
-      {
-        id: 'newRule',
-        kind: 'command' as const,
-        label: 'New rule for mailbox…',
-        keywords: 'rule mailbox saved search',
-        icon: commandIcon('newRule'),
-        onSelect: () => onOpenSettings('mailboxes'),
-      },
-      {
-        id: 'settings',
-        kind: 'command' as const,
-        label: 'Open Settings',
-        keywords: 'settings preferences',
-        icon: commandIcon('settings'),
-        onSelect: () => onOpenSettings(),
-      },
-      {
-        id: 'shortcuts',
-        kind: 'command' as const,
-        label: 'Keyboard shortcuts',
-        keywords: 'keyboard shortcuts help',
-        icon: commandIcon('shortcuts'),
-        onSelect: onOpenShortcuts,
-      },
-      {
-        id: 'account',
-        kind: 'command' as const,
-        label: 'Add account…',
-        keywords: 'account add source login',
-        icon: commandIcon('account'),
-        onSelect: () => onOpenSettings('accounts'),
-      },
-    ].filter(
-      (entry) =>
-        matchesQuery(normalized, `${entry.label} ${entry.keywords}`) &&
-        (hasSelectedMessage ||
-          !['archive', 'flag', 'reply'].includes(entry.id)),
-    )
-
-    const messages = cachedMessages
-      .slice(0, 8)
-      .map<PaletteEntry>((message) => ({
-        id: `${message.sourceId}:${message.id}`,
-        kind: 'message',
-        label: message.subject ?? '(no subject)',
-        sub: formatMessageSubline(message, sidebar),
-        keywords: `${message.subject ?? ''} ${message.preview ?? ''} ${message.fromName ?? ''} ${message.fromEmail ?? ''}`,
-        icon: (
-          <MessageSquareText
-            size={15}
-            strokeWidth={1.7}
-            className="text-muted-foreground"
-          />
-        ),
-        onSelect: () => {
-          const mailbox = resolveMessageMailbox(sidebar, message)
-          if (mailbox) {
-            onSelectSourceMailbox(
-              message.sourceId,
-              mailbox.mailbox.id,
-              `${mailbox.source.name} / ${mailbox.mailbox.name}`,
-            )
-          }
-          onSelectMessage(message)
-        },
-      }))
-
-    const contacts = [
-      ...new Set(
-        cachedMessages
-          .map((message) => message.fromName ?? message.fromEmail)
-          .filter(Boolean),
-      ),
-    ]
-      .filter((contact): contact is string => Boolean(contact))
-      .filter((contact) => matchesQuery(normalized, contact))
-      .slice(0, 5)
-      .map<PaletteEntry>((contact) => ({
-        id: `contact:${contact}`,
-        kind: 'contact',
-        label: contact,
-        keywords: contact,
-        icon: (
-          <User size={15} strokeWidth={1.7} className="text-muted-foreground" />
-        ),
-        onSelect: () => onApplySearch(contact),
-      }))
-
-    const mailboxes: PaletteEntry[] = []
-    if (sidebar) {
-      for (const smartMailbox of sidebar.smartMailboxes) {
-        if (matchesQuery(normalized, smartMailbox.name)) {
-          mailboxes.push({
-            id: `smart:${smartMailbox.id}`,
-            kind: 'mailbox',
-            label: smartMailbox.name,
-            sub: 'Smart mailbox',
-            keywords: smartMailbox.name,
-            icon: renderMailboxRoleIcon(
-              null,
-              15,
-              smartMailboxFallbackIcon(smartMailbox.name),
-            ),
-            onSelect: () =>
-              onSelectSmartMailbox(smartMailbox.id, smartMailbox.name),
-          })
-        }
-      }
-      for (const source of sidebar.sources) {
-        for (const mailbox of source.mailboxes) {
-          const haystack = `${mailbox.name} ${source.name}`
-          if (matchesQuery(normalized, haystack)) {
-            mailboxes.push({
-              id: `${source.id}:${mailbox.id}`,
-              kind: 'mailbox',
-              label: mailbox.name,
-              sub: source.name,
-              keywords: haystack,
-              icon: renderMailboxRoleIcon(mailbox.role, 15),
-              onSelect: () =>
-                onSelectSourceMailbox(
-                  source.id,
-                  mailbox.id,
-                  `${source.name} / ${mailbox.name}`,
-                ),
-            })
-          }
-        }
-      }
-    }
-
-    return [
-      { label: 'Suggestions', items: queryCompletions },
-      { label: 'Messages', items: messages },
-      { label: 'Query Language', items: queryHelp },
-      { label: 'Commands', items: commands },
-      { label: 'Contacts', items: contacts },
-      { label: 'Mailboxes', items: mailboxes.slice(0, 6) },
-    ].filter((group) => group.items.length > 0)
-  }, [
+  const replaceQuery = useCallback((nextQuery: string) => {
+    setQuery(nextQuery)
+    setSelectedIndex(null)
+  }, [])
+  const results = useCommandPaletteResults({
     cachedMessages,
     hasSelectedMessage,
     onApplySearch,
@@ -537,6 +160,7 @@ export function CommandPalette({
     onOpenSettings,
     onOpenShortcuts,
     onPlaceholderAction,
+    onReplaceQuery: replaceQuery,
     onReply,
     onSelectMessage,
     onSelectSmartMailbox,
@@ -544,7 +168,7 @@ export function CommandPalette({
     onToggleFlag,
     query,
     sidebar,
-  ])
+  })
 
   const flatEntries = useMemo(
     () => results.flatMap((group) => group.items),
@@ -556,15 +180,15 @@ export function CommandPalette({
       : null
   const selectedValue =
     activeSelectedIndex === null
-      ? NO_SELECTION_VALUE
-      : entryValue(flatEntries[activeSelectedIndex])
+      ? NO_COMMAND_PALETTE_SELECTION
+      : commandPaletteEntryValue(flatEntries[activeSelectedIndex])
 
   function handleQueryChange(value: string) {
     setQuery(value)
     setSelectedIndex(null)
   }
 
-  function runEntry(entry: PaletteEntry) {
+  function runEntry(entry: CommandPaletteEntry) {
     entry.onSelect()
     if (entry.closeOnSelect !== false) {
       onClose()
@@ -581,7 +205,7 @@ export function CommandPalette({
     onClose()
   }
 
-  function handlePaletteKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  function handlePaletteKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const isDownKey =
       event.key === 'ArrowDown' ||
       (event.key === 'j' && (activeSelectedIndex !== null || event.ctrlKey))
@@ -654,7 +278,7 @@ export function CommandPalette({
       className="contents"
       onValueChange={(value) => {
         const nextIndex = flatEntries.findIndex(
-          (entry) => entryValue(entry) === value,
+          (entry) => commandPaletteEntryValue(entry) === value,
         )
         setSelectedIndex(nextIndex === -1 ? null : nextIndex)
       }}
@@ -681,7 +305,7 @@ export function CommandPalette({
           {flatEntries.length > 0 && (
             <CommandItem
               aria-hidden="true"
-              value={NO_SELECTION_VALUE}
+              value={NO_COMMAND_PALETTE_SELECTION}
               className="hidden"
               onSelect={() => setSelectedIndex(null)}
             />
@@ -695,7 +319,7 @@ export function CommandPalette({
               {group.items.map((item) => (
                 <CommandItem
                   key={item.id}
-                  value={entryValue(item)}
+                  value={commandPaletteEntryValue(item)}
                   className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
                   onSelect={() => {
                     runEntry(item)

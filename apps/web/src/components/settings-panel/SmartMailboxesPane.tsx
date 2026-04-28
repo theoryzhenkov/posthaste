@@ -14,8 +14,11 @@ import type {
   SmartMailboxSummary,
 } from '../../api/types'
 import { fetchMailboxes } from '../../api/client'
-import { brandAccents } from '../../design/tokens'
-import { renderMailboxRoleIcon } from '../../mailboxRoles'
+import {
+  mailboxRoleAccent,
+  renderMailboxRoleIcon,
+  smartMailboxAccent,
+} from '../../mailboxRoles'
 import { queryKeys } from '../../queryKeys'
 import { Button } from '../ui/button'
 import { SmartMailboxEditor } from './SmartMailboxEditor'
@@ -33,50 +36,6 @@ import type { SmartMailboxEditorTarget } from './types'
 export type MailboxEditorTarget =
   | { kind: 'smart'; id: SmartMailboxEditorTarget }
   | { kind: 'source'; accountId: string; mailboxId: string }
-
-const MAILBOX_ACCENTS = {
-  blue: brandAccents.blue,
-  coral: brandAccents.coral,
-  sage: brandAccents.sage,
-  amber: brandAccents.amber,
-  violet: brandAccents.violet,
-  rose: brandAccents.rose,
-  muted: 'oklch(0.60 0.008 70)',
-} as const
-
-function smartMailboxAccent(name: string): string {
-  const normalized = name.trim().toLowerCase()
-  switch (normalized) {
-    case 'inbox':
-    case 'all inboxes':
-    case 'all mail':
-    case 'today':
-    case 'archive':
-    case 'work':
-      return MAILBOX_ACCENTS.blue
-    case 'flagged':
-    case 'relevant':
-    case 'sent':
-    case 'follow-up':
-      return MAILBOX_ACCENTS.coral
-    case 'read later':
-    case 'read-later':
-    case 'junk':
-    case 'spam':
-      return MAILBOX_ACCENTS.amber
-    case 'bills':
-    case 'billing':
-    case 'drafts':
-      return MAILBOX_ACCENTS.violet
-    case 'newsletters':
-    case 'personal':
-      return MAILBOX_ACCENTS.sage
-    case 'trash':
-      return MAILBOX_ACCENTS.rose
-    default:
-      return MAILBOX_ACCENTS.muted
-  }
-}
 
 export function SmartMailboxesPane({
   smartMailboxes,
@@ -372,7 +331,7 @@ function SourceMailboxListSection({
         mailboxes.map((mailbox) => (
           <MailboxListRow
             key={mailbox.id}
-            accent={smartMailboxAccent(mailbox.role ?? mailbox.name)}
+            accent={mailboxRoleAccent(mailbox.role)}
             icon={renderMailboxRoleIcon(mailbox.role, 15)}
             label={mailbox.name}
             sublabel={`${mailbox.totalEmails} messages · ${mailbox.unreadEmails} unread`}

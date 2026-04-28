@@ -37,24 +37,12 @@ pub(crate) async fn sync_account(
     );
     report_progress(
         &progress,
-        SyncProgressStage::Discovering,
-        "Checking JMAP state",
-        None,
-        None,
-        None,
-        None,
-        None,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Discovering, "Checking JMAP state"),
     );
     let mailbox_start = Instant::now();
     report_progress(
         &progress,
-        SyncProgressStage::Fetching,
-        "Fetching mailboxes",
-        None,
-        None,
-        None,
-        None,
-        None,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching mailboxes"),
     );
     let mailbox_sync = fetch_mailbox_sync(client, mailbox_cursor).await?;
     info!(
@@ -71,13 +59,7 @@ pub(crate) async fn sync_account(
     let email_start = Instant::now();
     report_progress(
         &progress,
-        SyncProgressStage::Fetching,
-        "Fetching messages",
-        None,
-        None,
-        None,
-        None,
-        None,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching messages"),
     );
     let email_sync = fetch_email_sync(client, message_cursor).await?;
     info!(
@@ -104,28 +86,30 @@ pub(crate) async fn sync_account(
     })
 }
 
-fn report_progress(
-    reporter: &Option<SyncProgressReporter>,
+struct JmapSyncProgressUpdate {
     stage: SyncProgressStage,
-    detail: &str,
-    mailbox_name: Option<String>,
-    mailbox_index: Option<usize>,
-    mailbox_count: Option<usize>,
-    message_count: Option<usize>,
-    total_count: Option<usize>,
-) {
+    detail: &'static str,
+}
+
+impl JmapSyncProgressUpdate {
+    fn new(stage: SyncProgressStage, detail: &'static str) -> Self {
+        Self { stage, detail }
+    }
+}
+
+fn report_progress(reporter: &Option<SyncProgressReporter>, update: JmapSyncProgressUpdate) {
     if let Some(reporter) = reporter {
         reporter.report(SyncProgress {
             sync_id: String::new(),
             trigger: SyncTrigger::Manual,
             started_at: String::new(),
-            stage,
-            detail: detail.to_string(),
-            mailbox_name,
-            mailbox_index,
-            mailbox_count,
-            message_count,
-            total_count,
+            stage: update.stage,
+            detail: update.detail.to_string(),
+            mailbox_name: None,
+            mailbox_index: None,
+            mailbox_count: None,
+            message_count: None,
+            total_count: None,
         });
     }
 }

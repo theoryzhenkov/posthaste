@@ -11,9 +11,8 @@ import {
   useMutation,
   useQuery,
 } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
-import { useDefaultLayout } from 'react-resizable-panels'
 import { toast, Toaster } from 'sonner'
 import {
   fetchAccounts,
@@ -24,7 +23,7 @@ import {
 import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { CommandPalette } from './components/CommandPalette'
-import { ComposeOverlay, type ComposeIntent } from './components/ComposeOverlay'
+import { ComposeOverlay } from './components/ComposeOverlay'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
 import { ShortcutReference } from './components/ShortcutReference'
@@ -33,26 +32,30 @@ import { SurfaceHost } from './components/SurfaceHost'
 import { FocusedSurfaceDocument } from './components/FocusedSurface'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
-import {
-  closeWebSurface,
-  isTauriRuntime,
-  openDesktopSurface,
-  openWebSurface,
-} from './desktop'
+import { isTauriRuntime } from './desktop'
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from './components/ui/resizable'
+import { useAutoMarkRead } from './hooks/useAutoMarkRead'
+import { useComposeIntent } from './hooks/useComposeIntent'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
+import { useGlobalMailShortcuts } from './hooks/useGlobalMailShortcuts'
+import { useMailLayoutPersistence } from './hooks/useMailLayoutPersistence'
+import {
+  closeWebSurface,
+  openFocusedSurface,
+  useEffectiveSurface,
+  useRouteSurface,
+} from './hooks/useSurfaceRouting'
 import { mailKeys, type MailSelection } from './mailState'
 import { queryKeys } from './queryKeys'
 import {
   messageSurfaceFromSelection,
   settingsSurface,
-  surfaceFromLocation,
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
 } from './surfaces'
@@ -75,41 +78,6 @@ const DEFAULT_VIEW: SidebarSelection = {
   kind: 'smart-mailbox',
   id: 'default-inbox',
   name: 'Inbox',
-}
-const SHELL_PANEL_IDS = ['sidebar', 'mail-content']
-
-function useLocationSurface(): SurfaceDescriptor | null {
-  const [surface, setSurface] = useState<SurfaceDescriptor | null>(() =>
-    surfaceFromLocation(window.location),
-  )
-
-  useEffect(() => {
-    function syncSurface() {
-      setSurface(surfaceFromLocation(window.location))
-    }
-
-    window.addEventListener('hashchange', syncSurface)
-    window.addEventListener('popstate', syncSurface)
-    return () => {
-      window.removeEventListener('hashchange', syncSurface)
-      window.removeEventListener('popstate', syncSurface)
-    }
-  }, [])
-
-  return surface
-}
-
-function openFocusedSurface(surface: SurfaceDescriptor): void {
-  if (isTauriRuntime()) {
-    void openDesktopSurface(surface).catch((error: unknown) => {
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to open window',
-      )
-    })
-    return
-  }
-
-  openWebSurface(surface)
 }
 
 /**
@@ -134,9 +102,7 @@ function MailClient({
   )
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false)
-  const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const lastAutoSeenKeyRef = useRef<string | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const preparedSearchQuery = useMemo(
     () => prepareServerSearchQuery(searchQuery),
@@ -170,12 +136,14 @@ function MailClient({
     ? (selectedView ?? DEFAULT_VIEW)
     : null
   const shouldForceSettings = accounts.length === 0
-  const shouldRenderForcedSettings = shouldForceSettings && !isTauriRuntime()
-  const effectiveSurface =
-    shouldRenderForcedSettings && routeSurface?.kind !== 'settings'
-      ? settingsSurface({ category: 'accounts' })
-      : routeSurface
-  const isSettingsSurfaceOpen = effectiveSurface?.kind === 'settings'
+  const {
+    effectiveSurface,
+    isSettingsSurfaceOpen,
+    shouldRenderForcedSettings,
+  } = useEffectiveSurface({
+    routeSurface,
+    shouldForceSettings,
+  })
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
@@ -185,38 +153,15 @@ function MailClient({
     enabled: selectedMessage !== null,
   })
   const isMessageDetailOpen = selectedMessage !== null
-  const messagePanelIds = useMemo(
-    () =>
-      isMessageDetailOpen
-        ? ['message-list', 'message-detail']
-        : ['message-list'],
-    [isMessageDetailOpen],
-  )
 
   useDaemonEvents()
 
-  useEffect(() => {
-    if (shouldForceSettings && isTauriRuntime()) {
-      openFocusedSurface(settingsSurface({ category: 'accounts' }))
-    }
-  }, [shouldForceSettings])
-
   const {
-    defaultLayout: shellDefaultLayout,
-    onLayoutChanged: onShellLayoutChanged,
-  } = useDefaultLayout({
-    id: 'posthaste-shell-panels',
-    panelIds: SHELL_PANEL_IDS,
-    storage: localStorage,
-  })
-  const {
-    defaultLayout: messageDefaultLayout,
-    onLayoutChanged: onMessageLayoutChanged,
-  } = useDefaultLayout({
-    id: 'posthaste-message-panels',
-    panelIds: messagePanelIds,
-    storage: localStorage,
-  })
+    messageDefaultLayout,
+    onMessageLayoutChanged,
+    onShellLayoutChanged,
+    shellDefaultLayout,
+  } = useMailLayoutPersistence(isMessageDetailOpen)
   const actions = useEmailActions()
   const syncSourceMutation = useMutation({
     mutationFn: triggerSync,
@@ -232,29 +177,7 @@ function MailClient({
     },
   })
 
-  useEffect(() => {
-    if (!selectedMessage || !selectedMessageQuery.data) {
-      return
-    }
-    const selectionKey = `${selectedMessage.sourceId}:${selectedMessage.messageId}`
-    if (lastAutoSeenKeyRef.current === selectionKey) {
-      return
-    }
-    lastAutoSeenKeyRef.current = selectionKey
-
-    if (selectedMessageQuery.data.isRead) {
-      return
-    }
-
-    actions.markRead({
-      conversationId: selectedMessage.conversationId,
-      sourceId: selectedMessage.sourceId,
-      messageId: selectedMessage.messageId,
-      isFlagged: selectedMessageQuery.data.isFlagged,
-      isRead: selectedMessageQuery.data.isRead,
-      keywords: selectedMessageQuery.data.keywords,
-    })
-  }, [actions, selectedMessage, selectedMessageQuery.data])
+  useAutoMarkRead(selectedMessage, selectedMessageQuery.data, actions)
 
   const handleToggleFlag = useCallback(() => {
     if (!selectedMessage) {
@@ -304,161 +227,36 @@ function MailClient({
     openFocusedSurface(messageSurfaceFromSelection(selectedMessage))
   }, [selectedMessage])
 
-  const resolveComposeSourceId = useCallback(() => {
-    return (
-      selectedMessage?.sourceId ??
-      (effectiveView?.kind === 'source-mailbox'
-        ? effectiveView.sourceId
-        : null) ??
-      enabledAccounts[0]?.id ??
-      null
-    )
-  }, [effectiveView, enabledAccounts, selectedMessage])
-
-  const handleCompose = useCallback(() => {
-    const sourceId = resolveComposeSourceId()
-    if (!sourceId) {
-      openFocusedSurface(settingsSurface({ category: 'accounts' }))
-      return
-    }
-    setComposeIntent({ kind: 'new', sourceId })
-  }, [resolveComposeSourceId])
-
-  const handleReply = useCallback(() => {
-    if (!selectedMessage) {
-      return
-    }
-    setComposeIntent({
-      kind: 'reply',
-      sourceId: selectedMessage.sourceId,
-      messageId: selectedMessage.messageId,
-    })
-  }, [selectedMessage])
+  const handleMissingComposeSource = useCallback(() => {
+    openFocusedSurface(settingsSurface({ category: 'accounts' }))
+  }, [])
+  const {
+    closeCompose,
+    composeIntent,
+    openCompose: handleCompose,
+    replyToSelectedMessage: handleReply,
+  } = useComposeIntent({
+    enabledAccounts,
+    onMissingSource: handleMissingComposeSource,
+    selectedMessage,
+    selectedView: effectiveView,
+  })
 
   const handleClearSelectedMessage = useCallback(() => {
     setSelectedMessage(null)
   }, [])
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement
-      const isTypingTarget =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-
-      if (effectiveSurface !== null) {
-        return
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        (event.key === 'k' || event.key === 'K')
-      ) {
-        event.preventDefault()
-        setIsCommandPaletteOpen(true)
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
-        event.preventDefault()
-        openFocusedSurface(settingsSurface())
-        return
-      }
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        (event.key === 'n' || event.key === 'N')
-      ) {
-        event.preventDefault()
-        handleCompose()
-        return
-      }
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        (event.key === 'r' || event.key === 'R')
-      ) {
-        event.preventDefault()
-        handleReply()
-        return
-      }
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === 'l'
-      ) {
-        event.preventDefault()
-        if (selectedMessage) {
-          handleToggleFlag()
-        }
-        return
-      }
-      if (isTypingTarget) return
-      if (
-        event.key === 'Escape' &&
-        !isSettingsSurfaceOpen &&
-        !isCommandPaletteOpen &&
-        !showShortcuts &&
-        composeIntent === null &&
-        effectiveSurface === null
-      ) {
-        if (selectedMessage) {
-          event.preventDefault()
-          handleClearSelectedMessage()
-          return
-        }
-        if (searchQuery.trim()) {
-          event.preventDefault()
-          setSearchQuery('')
-          return
-        }
-      }
-      if (event.key === '?') {
-        event.preventDefault()
-        setShowShortcuts((prev) => !prev)
-        return
-      }
-      if (event.key === '/') {
-        event.preventDefault()
-        setIsCommandPaletteOpen(true)
-        return
-      }
-      if (event.key.toLowerCase() === 'l' && selectedMessage) {
-        event.preventDefault()
-        handleOpenTagEditor()
-        return
-      }
-      if (
-        event.key.toLowerCase() === 'o' &&
-        selectedMessage &&
-        !isSettingsSurfaceOpen &&
-        !isCommandPaletteOpen &&
-        !showShortcuts &&
-        composeIntent === null &&
-        !isTagEditorOpen &&
-        effectiveSurface === null
-      ) {
-        event.preventDefault()
-        handleOpenFocusedMessage()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    composeIntent,
-    effectiveSurface,
-    handleClearSelectedMessage,
-    handleCompose,
-    handleOpenFocusedMessage,
-    handleReply,
-    handleToggleFlag,
-    handleOpenTagEditor,
-    isCommandPaletteOpen,
-    isTagEditorOpen,
-    searchQuery,
-    selectedMessage,
-    isSettingsSurfaceOpen,
-    showShortcuts,
-  ])
+  const handleOpenCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(true)
+  }, [])
+  const handleCloseCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(false)
+  }, [])
+  const handleShowShortcuts = useCallback(() => {
+    setShowShortcuts(true)
+  }, [])
+  const handleToggleShortcuts = useCallback(() => {
+    setShowShortcuts((prev) => !prev)
+  }, [])
 
   const applySearchQuery = useCallback((query: string, append?: boolean) => {
     setSearchQuery((previousQuery) => {
@@ -492,6 +290,9 @@ function MailClient({
     },
     [],
   )
+  const handleOpenSettingsShortcut = useCallback(() => {
+    openFocusedSurface(settingsSurface())
+  }, [])
 
   const handleApplySearch = useCallback(
     (query: string) => {
@@ -512,6 +313,27 @@ function MailClient({
   const handleRejectSearchPreview = useCallback(() => {
     setSearchQuery('')
   }, [])
+
+  useGlobalMailShortcuts({
+    effectiveSurface,
+    isCommandPaletteOpen,
+    isComposeOpen: composeIntent !== null,
+    isSettingsSurfaceOpen,
+    isShortcutReferenceOpen: showShortcuts,
+    isTagEditorOpen,
+    onClearSearchQuery: handleRejectSearchPreview,
+    onClearSelectedMessage: handleClearSelectedMessage,
+    onCompose: handleCompose,
+    onOpenCommandPalette: handleOpenCommandPalette,
+    onOpenFocusedMessage: handleOpenFocusedMessage,
+    onOpenSettings: handleOpenSettingsShortcut,
+    onOpenTagEditor: handleOpenTagEditor,
+    onReply: handleReply,
+    onToggleFlag: handleToggleFlag,
+    onToggleShortcuts: handleToggleShortcuts,
+    searchQuery,
+    selectedMessage,
+  })
 
   function handleSelectMessage(message: MessageSummary) {
     setSelectedMessage({
@@ -570,11 +392,11 @@ function MailClient({
           setSearchQuery('')
         }}
         onCompose={handleCompose}
-        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenCommandPalette={handleOpenCommandPalette}
         onOpenFocusedMessage={handleOpenFocusedMessage}
         onPlaceholderAction={handlePlaceholderAction}
         onReply={handleReply}
-        onShowShortcuts={() => setShowShortcuts(true)}
+        onShowShortcuts={handleShowShortcuts}
         onTag={handleOpenTagEditor}
         onToggleFlag={handleToggleFlag}
         onToggleSettings={() => {
@@ -682,10 +504,10 @@ function MailClient({
           hasSelectedMessage={selectedMessage !== null}
           onApplySearch={handleApplySearch}
           onArchive={handleArchive}
-          onClose={() => setIsCommandPaletteOpen(false)}
+          onClose={handleCloseCommandPalette}
           onCompose={handleCompose}
           onOpenSettings={handleOpenSettings}
-          onOpenShortcuts={() => setShowShortcuts(true)}
+          onOpenShortcuts={handleShowShortcuts}
           onPlaceholderAction={handlePlaceholderAction}
           onPreviewSearch={handlePreviewSearch}
           onRejectSearchPreview={handleRejectSearchPreview}
@@ -709,10 +531,7 @@ function MailClient({
         />
       )}
       {composeIntent && (
-        <ComposeOverlay
-          intent={composeIntent}
-          onClose={() => setComposeIntent(null)}
-        />
+        <ComposeOverlay intent={composeIntent} onClose={closeCompose} />
       )}
       <SurfaceHost
         surface={effectiveSurface}
@@ -729,7 +548,7 @@ function MailClient({
  * @spec docs/L1-ui#component-hierarchy
  */
 export default function App() {
-  const routeSurface = useLocationSurface()
+  const routeSurface = useRouteSurface()
   const isStandaloneSurface = isTauriRuntime() && routeSurface !== null
 
   return (

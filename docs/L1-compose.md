@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-compose
   - path: docs/L1-jmap
@@ -97,7 +97,7 @@ ComposeSession {
     fn remove_attachment(id: FfiAttachmentId) -> Result<()>
 
     // Preview
-    fn render_preview() -> Result<String>  // returns HTML
+    fn render_preview(markdown: String) -> Result<String>  // returns HTML
 
     // Persistence
     fn save_draft() -> Result<()>          // creates/updates server draft
@@ -157,21 +157,21 @@ ComposeError
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
 - Send uses EmailSubmission/set. Server-side draft cleanup or Sent placement is requested through `onSuccessUpdateEmail` and the implicit Email/set response is handled as part of the same JMAP operation.
 - The compose session is a Rust object; the frontend interacts via REST API
-- `render_preview()` is called on text change (debounced) and returns HTML for WKWebView
+- The composer may render previews locally for responsiveness, but preview HTML must use the same Markdown extension set as send-time rendering
 - Attachments are uploaded before send, not inline with the email body
 
 ## Assertions
 
-| ID | Sev. | Assertion |
-|----|------|-----------|
-| markdown-preserved | MUST | The Markdown source is always the text/plain part of sent email |
-| html-self-contained | MUST | Rendered HTML contains no external resource references |
-| sender-explicit | MUST | The compose request carries the selected From address and does not restrict senders to a fixed local list |
-| draft-jmap | MUST | Drafts are stored on server via Email/set with $draft keyword |
-| send-submission | MUST | Sending uses EmailSubmission/set, not raw SMTP |
-| reply-threading | MUST | Replies set In-Reply-To and References headers correctly |
-| reply-quote | MUST | Reply body includes attribution line and > prefixed original text |
-| forward-attachments | SHOULD | Forward re-attaches original message attachments |
-| sig-delimiter | MUST | Signature is preceded by standard `-- ` delimiter line |
-| upload-before-send | MUST | All attachments are uploaded through the JMAP upload endpoint before EmailSubmission |
-| no-send-empty-to | MUST | send() returns NoRecipients error if To is empty |
+| ID                  | Sev.   | Assertion                                                                                                 |
+| ------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
+| markdown-preserved  | MUST   | The Markdown source is always the text/plain part of sent email                                           |
+| html-self-contained | MUST   | Rendered HTML contains no external resource references                                                    |
+| sender-explicit     | MUST   | The compose request carries the selected From address and does not restrict senders to a fixed local list |
+| draft-jmap          | MUST   | Drafts are stored on server via Email/set with $draft keyword                                             |
+| send-submission     | MUST   | Sending uses EmailSubmission/set, not raw SMTP                                                            |
+| reply-threading     | MUST   | Replies set In-Reply-To and References headers correctly                                                  |
+| reply-quote         | MUST   | Reply body includes attribution line and > prefixed original text                                         |
+| forward-attachments | SHOULD | Forward re-attaches original message attachments                                                          |
+| sig-delimiter       | MUST   | Signature is preceded by standard `-- ` delimiter line                                                    |
+| upload-before-send  | MUST   | All attachments are uploaded through the JMAP upload endpoint before EmailSubmission                      |
+| no-send-empty-to    | MUST   | send() returns NoRecipients error if To is empty                                                          |

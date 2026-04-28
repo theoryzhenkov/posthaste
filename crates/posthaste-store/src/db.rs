@@ -6,7 +6,7 @@ use std::time::Duration;
 ///
 /// @spec docs/L1-sync#sqlite-schema
 /// @spec docs/L0-accounts#the-invariant
-pub(crate) fn init_schema(connection: &Connection) -> Result<(), StoreError> {
+pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(
             "

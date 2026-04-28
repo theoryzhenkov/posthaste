@@ -19,6 +19,12 @@ import type {
   SourceMessageRef,
 } from '../api/types'
 import {
+  MAILBOX_ROLES,
+  SYSTEM_KEYWORD_PREFIX,
+  SYSTEM_KEYWORDS,
+  type SystemKeyword,
+} from '../domainVocabulary'
+import {
   applyKeywordPatch,
   deriveKeywordState,
   findConversationIdForMessage,
@@ -121,10 +127,10 @@ function synthesizeKeywords(
 
   const keywords: string[] = []
   if (message.isRead) {
-    keywords.push('$seen')
+    keywords.push(SYSTEM_KEYWORDS.Seen)
   }
   if (message.isFlagged) {
-    keywords.push('$flagged')
+    keywords.push(SYSTEM_KEYWORDS.Flagged)
   }
   return keywords
 }
@@ -150,7 +156,7 @@ function resolveKeywordState(
 
 function applyKeywordToggle(
   current: string[],
-  keyword: '$flagged' | '$seen',
+  keyword: SystemKeyword,
   enabled: boolean,
 ) {
   if (enabled) {
@@ -161,14 +167,20 @@ function applyKeywordToggle(
 
 function normalizeUserTag(tag: string): string | null {
   const normalized = tag.trim().replace(/\s+/g, ' ')
-  if (!normalized || normalized.startsWith('$') || normalized.includes('/')) {
+  if (
+    !normalized ||
+    normalized.startsWith(SYSTEM_KEYWORD_PREFIX) ||
+    normalized.includes('/')
+  ) {
     return null
   }
   return normalized
 }
 
 function userTagsFromKeywords(keywords: string[]): string[] {
-  return keywords.filter((keyword) => !keyword.startsWith('$'))
+  return keywords.filter(
+    (keyword) => !keyword.startsWith(SYSTEM_KEYWORD_PREFIX),
+  )
 }
 
 function uniqueUserTags(tags: string[]): string[] {
@@ -315,13 +327,13 @@ export function useEmailActions() {
       const previous = resolveKeywordState(queryClient, message)
       const nextKeywords = applyKeywordToggle(
         previous.keywords,
-        '$seen',
+        SYSTEM_KEYWORDS.Seen,
         !previous.isRead,
       )
       mutation.mutate({
         command: previous.isRead
-          ? { kind: 'setKeywords', add: [], remove: ['$seen'] }
-          : { kind: 'setKeywords', add: ['$seen'], remove: [] },
+          ? { kind: 'setKeywords', add: [], remove: [SYSTEM_KEYWORDS.Seen] }
+          : { kind: 'setKeywords', add: [SYSTEM_KEYWORDS.Seen], remove: [] },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),
@@ -336,9 +348,17 @@ export function useEmailActions() {
       if (previous.isRead) {
         return
       }
-      const nextKeywords = applyKeywordToggle(previous.keywords, '$seen', true)
+      const nextKeywords = applyKeywordToggle(
+        previous.keywords,
+        SYSTEM_KEYWORDS.Seen,
+        true,
+      )
       mutation.mutate({
-        command: { kind: 'setKeywords', add: ['$seen'], remove: [] },
+        command: {
+          kind: 'setKeywords',
+          add: [SYSTEM_KEYWORDS.Seen],
+          remove: [],
+        },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),
@@ -352,13 +372,13 @@ export function useEmailActions() {
       const previous = resolveKeywordState(queryClient, message)
       const nextKeywords = applyKeywordToggle(
         previous.keywords,
-        '$flagged',
+        SYSTEM_KEYWORDS.Flagged,
         !previous.isFlagged,
       )
       mutation.mutate({
         command: previous.isFlagged
-          ? { kind: 'setKeywords', add: [], remove: ['$flagged'] }
-          : { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+          ? { kind: 'setKeywords', add: [], remove: [SYSTEM_KEYWORDS.Flagged] }
+          : { kind: 'setKeywords', add: [SYSTEM_KEYWORDS.Flagged], remove: [] },
         conversationId: selection?.conversationId,
         optimisticKeywordPatch: {
           next: deriveKeywordState(nextKeywords),
@@ -378,7 +398,7 @@ export function useEmailActions() {
       const previousUserTags = userTagsFromKeywords(previous.keywords)
       const nextUserTags = uniqueUserTags(tags)
       const systemKeywords = previous.keywords.filter((keyword) =>
-        keyword.startsWith('$'),
+        keyword.startsWith(SYSTEM_KEYWORD_PREFIX),
       )
       const add = nextUserTags.filter(
         (tag) => !previousUserTags.some((current) => current === tag),
@@ -405,7 +425,7 @@ export function useEmailActions() {
         {
           conversationId:
             findConversationIdForMessage(queryClient, target) ?? undefined,
-          mailboxRole: 'archive',
+          mailboxRole: MAILBOX_ROLES.Archive,
           target,
         },
         {
@@ -419,7 +439,7 @@ export function useEmailActions() {
                     conversationId:
                       findConversationIdForMessage(queryClient, target) ??
                       undefined,
-                    mailboxRole: 'inbox',
+                    mailboxRole: MAILBOX_ROLES.Inbox,
                     target,
                   }),
               },
@@ -433,7 +453,7 @@ export function useEmailActions() {
         {
           conversationId:
             findConversationIdForMessage(queryClient, target) ?? undefined,
-          mailboxRole: 'trash',
+          mailboxRole: MAILBOX_ROLES.Trash,
           target,
         },
         {
@@ -447,7 +467,7 @@ export function useEmailActions() {
                     conversationId:
                       findConversationIdForMessage(queryClient, target) ??
                       undefined,
-                    mailboxRole: 'inbox',
+                    mailboxRole: MAILBOX_ROLES.Inbox,
                     target,
                   }),
               },

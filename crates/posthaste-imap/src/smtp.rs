@@ -8,7 +8,7 @@ use posthaste_domain::{
     AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient,
     SendMessageRequest, TransportSecurity,
 };
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 use crate::discovery::connect_authenticated_client;
 use crate::ImapAdapterError;
@@ -239,7 +239,11 @@ pub fn render_smtp_markdown(markdown: &str) -> String {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
-    let parser = Parser::new_ext(markdown, options);
+    let parser = Parser::new_ext(markdown, options).filter_map(|event| match event {
+        Event::Html(html) | Event::InlineHtml(html) => Some(Event::Text(html)),
+        Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => None,
+        event => Some(event),
+    });
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     format!(
@@ -352,6 +356,19 @@ mod tests {
         assert!(render_smtp_markdown(&request.body).contains("<strong>world</strong>"));
         assert!(!formatted.contains("Bcc:"));
         assert!(!formatted.contains("dana@example.test"));
+    }
+
+    #[test]
+    fn render_smtp_markdown_excludes_raw_html_and_markdown_images() {
+        let rendered = render_smtp_markdown(
+            "<script>alert(1)</script>\n\n![pixel](https://example.test/pixel.png)",
+        );
+
+        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!rendered.contains("<script>"));
+        assert!(!rendered.contains("<img"));
+        assert!(!rendered.contains("https://example.test/pixel.png"));
+        assert!(rendered.contains("pixel"));
     }
 
     #[test]

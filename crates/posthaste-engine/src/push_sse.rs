@@ -3,14 +3,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use jmap_client::client::Client;
-use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, AccountId, GatewayError, PushNotification, PushStream,
-    PushTransport,
-};
+use posthaste_domain::{AccountId, GatewayError, PushStream, PushTransport};
 
 use tracing::{debug, warn};
 
 use crate::live::map_gateway_error;
+use crate::push_common::convert_sse_push_notification;
 
 /// Push transport that reads JMAP state-change notifications via Server-Sent Events.
 ///
@@ -82,23 +80,10 @@ impl PushTransport for SsePushTransport {
             let server_account_id = server_account_id.clone();
             async move {
                 match event {
-                    Ok(jmap_client::event_source::PushNotification::StateChange(changes)) => {
-                        let entries = changes.changes(server_account_id.as_str())?;
-                        let changed = entries
-                            .map(|(data_type, _)| data_type.to_string())
-                            .collect::<Vec<_>>();
-                        let received_at = match domain_now_iso8601() {
-                            Ok(value) => value,
-                            Err(error) => return Some(Err(GatewayError::Rejected(error))),
-                        };
-                        Some(Ok(PushNotification {
-                            account_id,
-                            changed,
-                            received_at,
-                            checkpoint: changes.id().map(str::to_string),
-                        }))
+                    Ok(push) => {
+                        convert_sse_push_notification(&account_id, &server_account_id, push)
+                            .transpose()
                     }
-                    Ok(jmap_client::event_source::PushNotification::CalendarAlert(_)) => None,
                     Err(error) => Some(Err(map_gateway_error(error))),
                 }
             }

@@ -9,7 +9,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::{
-    cache::CachePolicy,
+    cache::{CacheFetchUnit, CachePolicy},
     imap::{ImapMailboxSyncState, ImapMessageLocation},
     ConfigError,
 };
@@ -117,6 +117,21 @@ pub const EVENT_TOPIC_SYNC_FAILED: &str = "sync.failed";
 /// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
 
+/// Event topic emitted when message keywords change.
+///
+/// @spec docs/L1-sync#event-propagation
+pub const EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED: &str = "message.keywords_changed";
+
+/// Event topic emitted when a message body is cached locally.
+///
+/// @spec docs/L1-sync#event-propagation
+pub const EVENT_TOPIC_MESSAGE_BODY_CACHED: &str = "message.body_cached";
+
+/// Event topic emitted when message mailbox membership changes.
+///
+/// @spec docs/L1-sync#event-propagation
+pub const EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED: &str = "message.mailboxes_changed";
+
 /// Event topic emitted when a new message arrives in a mailbox.
 ///
 /// @spec docs/L1-sync#event-propagation
@@ -183,12 +198,39 @@ pub enum AccountDriver {
     Mock,
 }
 
+/// Provider-level capabilities that affect domain planning.
+///
+/// @spec docs/L1-sync#local-cache-planning
+/// @spec docs/L1-jmap#push
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountDriverCapabilities {
+    pub cache_fetch_unit: CacheFetchUnit,
+    pub supports_push: bool,
+}
+
 impl AccountDriver {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Jmap => "jmap",
             Self::ImapSmtp => "imap_smtp",
             Self::Mock => "mock",
+        }
+    }
+
+    pub fn capabilities(&self) -> AccountDriverCapabilities {
+        match self {
+            Self::Jmap => AccountDriverCapabilities {
+                cache_fetch_unit: CacheFetchUnit::BodyOnly,
+                supports_push: true,
+            },
+            Self::ImapSmtp => AccountDriverCapabilities {
+                cache_fetch_unit: CacheFetchUnit::RawMessage,
+                supports_push: false,
+            },
+            Self::Mock => AccountDriverCapabilities {
+                cache_fetch_unit: CacheFetchUnit::BodyOnly,
+                supports_push: false,
+            },
         }
     }
 }
@@ -1368,29 +1410,82 @@ pub enum ServiceError {
     Config(#[from] crate::ConfigError),
 }
 
+/// Stable service error category for exhaustive API status mapping.
+///
+/// @spec docs/L1-api#error-code-mapping
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ServiceErrorKind {
+    GatewayUnavailable,
+    AuthError,
+    NetworkError,
+    StateMismatch,
+    CannotCalculateChanges,
+    GatewayRejected,
+    SecretUnavailable,
+    SecretUnsupported,
+    NotFound,
+    Conflict,
+    StorageFailure,
+    ConfigValidation,
+    ConfigIo,
+    ConfigParse,
+}
+
+impl ServiceErrorKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::GatewayUnavailable => "gateway_unavailable",
+            Self::AuthError => "auth_error",
+            Self::NetworkError => "network_error",
+            Self::StateMismatch => "state_mismatch",
+            Self::CannotCalculateChanges => "cannot_calculate_changes",
+            Self::GatewayRejected => "gateway_rejected",
+            Self::SecretUnavailable => "secret_unavailable",
+            Self::SecretUnsupported => "secret_unsupported",
+            Self::NotFound => "not_found",
+            Self::Conflict => "conflict",
+            Self::StorageFailure => "storage_failure",
+            Self::ConfigValidation => "config_validation",
+            Self::ConfigIo => "config_io",
+            Self::ConfigParse => "config_parse",
+        }
+    }
+}
+
 impl ServiceError {
+    /// Returns the stable category used for API status mapping.
+    ///
+    /// @spec docs/L1-api#error-code-mapping
+    pub fn kind(&self) -> ServiceErrorKind {
+        match self {
+            Self::Gateway(GatewayError::Unavailable(_)) => ServiceErrorKind::GatewayUnavailable,
+            Self::Gateway(GatewayError::Auth) => ServiceErrorKind::AuthError,
+            Self::Gateway(GatewayError::Network(_)) => ServiceErrorKind::NetworkError,
+            Self::Gateway(GatewayError::StateMismatch) => ServiceErrorKind::StateMismatch,
+            Self::Gateway(GatewayError::CannotCalculateChanges) => {
+                ServiceErrorKind::CannotCalculateChanges
+            }
+            Self::Gateway(GatewayError::Rejected(_)) => ServiceErrorKind::GatewayRejected,
+            Self::Secret(SecretStoreError::Unavailable(_)) => ServiceErrorKind::SecretUnavailable,
+            Self::Secret(SecretStoreError::Unsupported(_)) => ServiceErrorKind::SecretUnsupported,
+            Self::Store(StoreError::NotFound(_)) | Self::Config(ConfigError::NotFound(_)) => {
+                ServiceErrorKind::NotFound
+            }
+            Self::Store(StoreError::Conflict(_)) | Self::Config(ConfigError::Conflict(_)) => {
+                ServiceErrorKind::Conflict
+            }
+            Self::Store(StoreError::Failure(_)) => ServiceErrorKind::StorageFailure,
+            Self::Config(ConfigError::Validation(_)) => ServiceErrorKind::ConfigValidation,
+            Self::Config(ConfigError::Io(_)) => ServiceErrorKind::ConfigIo,
+            Self::Config(ConfigError::Parse(_)) => ServiceErrorKind::ConfigParse,
+        }
+    }
+
     /// Returns the error code string used in the JSON error response body.
     ///
     /// @spec docs/L1-api#error-code-mapping
     pub fn code(&self) -> &'static str {
-        match self {
-            Self::Gateway(GatewayError::Unavailable(_)) => "gateway_unavailable",
-            Self::Gateway(GatewayError::Auth) => "auth_error",
-            Self::Gateway(GatewayError::Network(_)) => "network_error",
-            Self::Gateway(GatewayError::StateMismatch) => "state_mismatch",
-            Self::Gateway(GatewayError::CannotCalculateChanges) => "cannot_calculate_changes",
-            Self::Gateway(GatewayError::Rejected(_)) => "gateway_rejected",
-            Self::Secret(SecretStoreError::Unavailable(_)) => "secret_unavailable",
-            Self::Secret(SecretStoreError::Unsupported(_)) => "secret_unsupported",
-            Self::Store(StoreError::NotFound(_)) => "not_found",
-            Self::Store(StoreError::Conflict(_)) => "conflict",
-            Self::Store(StoreError::Failure(_)) => "storage_failure",
-            Self::Config(ConfigError::NotFound(_)) => "not_found",
-            Self::Config(ConfigError::Conflict(_)) => "conflict",
-            Self::Config(ConfigError::Validation(_)) => "config_validation",
-            Self::Config(ConfigError::Io(_)) => "config_io",
-            Self::Config(ConfigError::Parse(_)) => "config_parse",
-        }
+        self.kind().code()
     }
 }
 
@@ -1414,6 +1509,96 @@ mod tests {
             storage: SecretStorage::Os,
             configured: true,
             label: None,
+        }
+    }
+
+    #[test]
+    fn message_event_topics_preserve_serialized_strings() {
+        assert_eq!(
+            EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
+            "message.keywords_changed"
+        );
+        assert_eq!(EVENT_TOPIC_MESSAGE_BODY_CACHED, "message.body_cached");
+        assert_eq!(
+            EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
+            "message.mailboxes_changed"
+        );
+    }
+
+    #[test]
+    fn account_driver_capabilities_match_cache_and_push_behavior() {
+        assert_eq!(
+            AccountDriver::Jmap.capabilities(),
+            AccountDriverCapabilities {
+                cache_fetch_unit: crate::CacheFetchUnit::BodyOnly,
+                supports_push: true,
+            }
+        );
+        assert_eq!(
+            AccountDriver::ImapSmtp.capabilities(),
+            AccountDriverCapabilities {
+                cache_fetch_unit: crate::CacheFetchUnit::RawMessage,
+                supports_push: false,
+            }
+        );
+        assert_eq!(
+            AccountDriver::Mock.capabilities(),
+            AccountDriverCapabilities {
+                cache_fetch_unit: crate::CacheFetchUnit::BodyOnly,
+                supports_push: false,
+            }
+        );
+    }
+
+    #[test]
+    fn service_error_kind_preserves_existing_codes() {
+        let cases = [
+            (
+                ServiceError::from(GatewayError::Auth),
+                ServiceErrorKind::AuthError,
+                "auth_error",
+            ),
+            (
+                ServiceError::from(GatewayError::StateMismatch),
+                ServiceErrorKind::StateMismatch,
+                "state_mismatch",
+            ),
+            (
+                ServiceError::from(GatewayError::Network("timeout".to_string())),
+                ServiceErrorKind::NetworkError,
+                "network_error",
+            ),
+            (
+                ServiceError::from(SecretStoreError::Unsupported("os".to_string())),
+                ServiceErrorKind::SecretUnsupported,
+                "secret_unsupported",
+            ),
+            (
+                ServiceError::from(StoreError::NotFound("message:1".to_string())),
+                ServiceErrorKind::NotFound,
+                "not_found",
+            ),
+            (
+                ServiceError::from(StoreError::Failure("disk full".to_string())),
+                ServiceErrorKind::StorageFailure,
+                "storage_failure",
+            ),
+            (
+                ServiceError::from(ConfigError::Validation("bad source".to_string())),
+                ServiceErrorKind::ConfigValidation,
+                "config_validation",
+            ),
+            (
+                ServiceError::from(ConfigError::Io("denied".to_string())),
+                ServiceErrorKind::ConfigIo,
+                "config_io",
+            ),
+        ];
+
+        for (error, kind, code) in cases {
+            assert_eq!(error.kind(), kind);
+            assert_eq!(error.code(), code);
+            assert_eq!(error.kind().code(), code);
         }
     }
 
