@@ -9,6 +9,7 @@ depends:
   - path: docs/L0-accounts
 dependents:
   - path: docs/L1-logging
+  - path: docs/L0-telemetry
 ---
 
 # Logging
@@ -39,7 +40,13 @@ In scope:
 Out of scope (for now):
 
 - Prometheus metrics or OpenTelemetry export
-- Anonymous remote telemetry upload or product analytics ingestion
+- Anonymous remote telemetry upload or product analytics ingestion, covered separately by [telemetry](L0-telemetry.md)
 - Crash / panic reporting service
 - Fine-grained SQL query tracing
 - In-app log viewer UI
+
+## Telemetry boundary
+
+Local logs are not a telemetry upload source. They intentionally include request, operation, session, process, and account-scoped diagnostic metadata so one local action can be queried after the fact. That context is useful for debugging and unsafe for anonymous aggregate collection.
+
+Telemetry may use the logging domain's event-naming discipline as design input, but it must emit separate telemetry events through a telemetry-safe registry and spool.

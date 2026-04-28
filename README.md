@@ -15,6 +15,7 @@ dependents:
   - path: docs/L0-ui
   - path: docs/L0-logging
   - path: docs/L0-testing
+  - path: docs/L0-telemetry
   - path: docs/L0-website
 ---
 
@@ -176,6 +177,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](docs/L0-api.md) [L1](docs/L1-api.md)
 - **logging** -- Structured tracing and logging across backend and frontend. [L0](docs/L0-logging.md) [L1](docs/L1-logging.md)
 - **testing** -- Red-first behavior contracts, provider observation matrix, and coverage standards. [L0](docs/L0-testing.md)
+- **telemetry** -- Opt-in beta health and performance collection, separate from local logs. [L0](docs/L0-telemetry.md) [L1](docs/L1-telemetry.md)
 
 ## MVP acceptance criteria
 

@@ -1,14 +1,15 @@
 ---
 scope: L0
 summary: "Multi-account scoping invariant and deferral rationale"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: README
   - path: docs/L0-jmap
   - path: docs/L0-sync
 dependents:
   - path: docs/L1-accounts
+  - path: docs/L0-telemetry
 ---
 
 # Accounts domain -- L0

@@ -55,6 +55,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **[Website](L0-website.md)** -- Public product showcase site and static Docker deployment
 - **[Accounts](L0-accounts.md)** -- Multi-account scoping (deferred, L0-only)
 - **[API](L0-api.md)** -- REST API + SSE boundary, Axum handlers, pagination, error mapping
+- **[Telemetry](L0-telemetry.md)** -- Opt-in beta health and performance collection, separate from local logs
 
 ## MVP acceptance criteria
 
