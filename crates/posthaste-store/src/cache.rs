@@ -18,7 +18,7 @@ fn i64_to_u64(value: i64) -> Result<u64, StoreError> {
 }
 
 fn parse_cache_layer(value: String) -> Result<CacheLayer, rusqlite::Error> {
-    CacheLayer::from_str(&value).ok_or_else(|| {
+    CacheLayer::parse(&value).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
@@ -31,7 +31,7 @@ fn parse_cache_layer(value: String) -> Result<CacheLayer, rusqlite::Error> {
 }
 
 fn parse_cache_fetch_unit(value: String) -> Result<CacheFetchUnit, rusqlite::Error> {
-    CacheFetchUnit::from_str(&value).ok_or_else(|| {
+    CacheFetchUnit::parse(&value).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
@@ -44,7 +44,7 @@ fn parse_cache_fetch_unit(value: String) -> Result<CacheFetchUnit, rusqlite::Err
 }
 
 fn parse_cache_object_state(value: String) -> Result<CacheObjectState, rusqlite::Error> {
-    CacheObjectState::from_str(&value).ok_or_else(|| {
+    CacheObjectState::parse(&value).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
