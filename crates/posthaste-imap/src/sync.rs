@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use posthaste_domain::{
     AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId,
-    MailboxRecord, MessageRecord, SyncBatch, SyncCursor, SyncObject,
+    MailboxRecord, MessageId, MessageRecord, SyncBatch, SyncCursor, SyncObject,
 };
 
 use crate::{
@@ -65,14 +67,8 @@ pub fn imap_full_sync_batch(
     mailbox_states: Vec<ImapMailboxSyncState>,
     updated_at: String,
 ) -> SyncBatch {
+    let (messages, locations) = messages_and_locations_for_batch(&discovery, headers);
     let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
-    let mut messages = Vec::with_capacity(headers.len());
-    let mut locations = Vec::with_capacity(headers.len());
-
-    for header in headers {
-        messages.push(header.message);
-        locations.push(header.location);
-    }
 
     batch.imap_mailbox_states = mailbox_states;
     batch.messages = messages;
@@ -94,9 +90,6 @@ pub fn imap_delta_sync_batch(
     local_locations: Vec<ImapMessageLocation>,
     updated_at: String,
 ) -> SyncBatch {
-    let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
-    let mut messages = Vec::with_capacity(headers.len());
-    let mut locations = Vec::with_capacity(headers.len());
     let remote_locations = headers
         .iter()
         .map(|header| {
@@ -106,7 +99,9 @@ pub fn imap_delta_sync_batch(
                 header.location.uid,
             )
         })
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
+    let (messages, locations) = messages_and_locations_for_batch(&discovery, headers);
+    let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
     let deleted_message_ids = local_locations
         .into_iter()
         .filter(|location| {
@@ -118,11 +113,6 @@ pub fn imap_delta_sync_batch(
         })
         .map(|location| location.message_id)
         .collect::<Vec<_>>();
-
-    for header in headers {
-        messages.push(header.message);
-        locations.push(header.location);
-    }
 
     batch.imap_mailbox_states = mailbox_states;
     batch.messages = messages;
@@ -146,13 +136,12 @@ pub fn imap_condstore_delta_sync_batch(
     vanished_uids: Vec<(MailboxId, ImapUidValidity, ImapUid)>,
     updated_at: String,
 ) -> SyncBatch {
+    let (messages, locations) = messages_and_locations_for_batch(&discovery, headers);
     let mut batch = imap_mailbox_sync_batch(account_id, discovery, updated_at.clone());
-    let mut messages = Vec::with_capacity(headers.len());
-    let mut locations = Vec::with_capacity(headers.len());
     let vanished_locations = vanished_uids
         .into_iter()
         .map(|(mailbox_id, uid_validity, uid)| (mailbox_id, uid_validity.0, uid))
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
     let deleted_message_ids = local_locations
         .into_iter()
         .filter(|location| {
@@ -164,11 +153,6 @@ pub fn imap_condstore_delta_sync_batch(
         })
         .map(|location| location.message_id)
         .collect::<Vec<_>>();
-
-    for header in headers {
-        messages.push(header.message);
-        locations.push(header.location);
-    }
 
     batch.imap_mailbox_states = mailbox_states;
     batch.messages = messages;
@@ -230,6 +214,107 @@ pub fn imap_mailbox_state_from_changed_since_snapshot(
     }
 
     state
+}
+
+fn messages_and_locations_for_batch(
+    discovery: &DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+) -> (Vec<MessageRecord>, Vec<ImapMessageLocation>) {
+    let headers = canonicalize_imap_headers(discovery, headers);
+    let mut messages_by_id = BTreeMap::<MessageId, MessageRecord>::new();
+    let mut locations = Vec::with_capacity(headers.len());
+
+    for header in headers {
+        messages_by_id
+            .entry(header.message.id.clone())
+            .or_insert(header.message);
+        locations.push(header.location);
+    }
+
+    (messages_by_id.into_values().collect(), locations)
+}
+
+fn canonicalize_imap_headers(
+    discovery: &DiscoveredImapAccount,
+    headers: Vec<ImapMappedHeader>,
+) -> Vec<ImapMappedHeader> {
+    if discovery.capabilities.supports_gmail_extensions() {
+        canonicalize_gmail_headers(headers)
+    } else {
+        headers
+    }
+}
+
+#[derive(Debug)]
+struct GmailCanonicalMessageGroup {
+    message: MessageRecord,
+    mailbox_ids: BTreeSet<MailboxId>,
+    keywords: BTreeSet<String>,
+    locations: Vec<ImapMessageLocation>,
+}
+
+impl GmailCanonicalMessageGroup {
+    fn new(message: MessageRecord) -> Self {
+        Self {
+            message,
+            mailbox_ids: BTreeSet::new(),
+            keywords: BTreeSet::new(),
+            locations: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, mapped: ImapMappedHeader) {
+        self.mailbox_ids.extend(mapped.message.mailbox_ids);
+        self.keywords.extend(mapped.message.keywords);
+        self.locations.push(mapped.location);
+    }
+
+    fn into_headers(mut self) -> Vec<ImapMappedHeader> {
+        self.message.mailbox_ids = self.mailbox_ids.into_iter().collect();
+        self.message.keywords = self.keywords.into_iter().collect();
+
+        self.locations
+            .into_iter()
+            .map(|location| ImapMappedHeader {
+                message: self.message.clone(),
+                location,
+            })
+            .collect()
+    }
+}
+
+fn canonicalize_gmail_headers(headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
+    let mut groups = BTreeMap::<MessageId, GmailCanonicalMessageGroup>::new();
+
+    for mut header in headers {
+        let canonical_id = gmail_canonical_message_id(&header.message);
+        header.message.id = canonical_id.clone();
+        header.location.message_id = canonical_id.clone();
+
+        groups
+            .entry(canonical_id)
+            .or_insert_with(|| GmailCanonicalMessageGroup::new(header.message.clone()))
+            .push(header);
+    }
+
+    groups
+        .into_values()
+        .flat_map(GmailCanonicalMessageGroup::into_headers)
+        .collect()
+}
+
+fn gmail_canonical_message_id(message: &MessageRecord) -> MessageId {
+    message
+        .rfc_message_id
+        .as_deref()
+        .filter(|message_id| !message_id.is_empty())
+        .map(|message_id| {
+            MessageId(format!(
+                "imap:gmail:rfc822msgid:{}",
+                hex::encode(message_id.as_bytes())
+            ))
+        })
+        .unwrap_or_else(|| message.id.clone())
 }
 
 fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
@@ -361,6 +446,149 @@ mod tests {
         assert_eq!(batch.imap_message_locations, vec![expected_location]);
         assert_eq!(batch.cursors[1].object_type, SyncObject::Message);
         assert!(batch.cursors[1].state.starts_with("imap-messages:"));
+    }
+
+    #[test]
+    fn gmail_sync_canonicalizes_one_message_observed_in_multiple_mailboxes() {
+        let sent = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:sent"),
+            mailbox_name: "[Gmail]/Sent Mail".to_string(),
+            uid_validity: ImapUidValidity(7),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let starred = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:starred"),
+            mailbox_name: "[Gmail]/Starred".to_string(),
+            uid_validity: ImapUidValidity(8),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let sent_header = imap_header_message_record(
+            &sent,
+            ImapFetchedHeader {
+                mailbox_id: sent.mailbox_id.clone(),
+                uid: ImapUid(12),
+                modseq: None,
+                flags: vec!["\\Seen".to_string()],
+                rfc822_size: 512,
+                has_attachment: false,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\nMessage-ID: <gmail-1@example.test>\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("sent header");
+        let starred_header = imap_header_message_record(
+            &starred,
+            ImapFetchedHeader {
+                mailbox_id: starred.mailbox_id.clone(),
+                uid: ImapUid(44),
+                modseq: None,
+                flags: vec!["\\Flagged".to_string()],
+                rfc822_size: 512,
+                has_attachment: false,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\nMessage-ID: <gmail-1@example.test>\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("starred header");
+
+        let batch = imap_full_sync_batch(
+            &AccountId::from("primary"),
+            DiscoveredImapAccount {
+                capabilities: ImapCapabilities::from_tokens(["IMAP4rev1", "X-GM-EXT-1"]),
+                mailboxes: vec![
+                    map_imap_mailbox("[Gmail]/Sent Mail", ["\\Sent"]),
+                    map_imap_mailbox("[Gmail]/Starred", ["\\Flagged"]),
+                ],
+            },
+            vec![sent_header, starred_header],
+            Vec::new(),
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert_eq!(batch.messages.len(), 1);
+        assert_eq!(
+            batch.messages[0].id.as_str(),
+            "imap:gmail:rfc822msgid:676d61696c2d31406578616d706c652e74657374"
+        );
+        assert_eq!(
+            batch.messages[0].mailbox_ids,
+            vec![
+                MailboxId::from("imap:mailbox:sent"),
+                MailboxId::from("imap:mailbox:starred")
+            ]
+        );
+        assert_eq!(batch.messages[0].keywords, vec!["$flagged", "$seen"]);
+        assert_eq!(batch.imap_message_locations.len(), 2);
+        assert!(batch
+            .imap_message_locations
+            .iter()
+            .all(|location| location.message_id == batch.messages[0].id));
+    }
+
+    #[test]
+    fn generic_imap_keeps_mailbox_uid_identity_even_with_shared_rfc_message_id() {
+        let inbox = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:inbox"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(7),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let archive = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:archive"),
+            mailbox_name: "Archive".to_string(),
+            uid_validity: ImapUidValidity(8),
+            uid_next: None,
+            highest_modseq: None,
+        };
+        let inbox_header = imap_header_message_record(
+            &inbox,
+            ImapFetchedHeader {
+                mailbox_id: inbox.mailbox_id.clone(),
+                uid: ImapUid(12),
+                modseq: None,
+                flags: Vec::new(),
+                rfc822_size: 512,
+                has_attachment: false,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\nMessage-ID: <copied@example.test>\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("inbox header");
+        let archive_header = imap_header_message_record(
+            &archive,
+            ImapFetchedHeader {
+                mailbox_id: archive.mailbox_id.clone(),
+                uid: ImapUid(44),
+                modseq: None,
+                flags: Vec::new(),
+                rfc822_size: 512,
+                has_attachment: false,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\nMessage-ID: <copied@example.test>\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+        )
+        .expect("archive header");
+
+        let batch = imap_full_sync_batch(
+            &AccountId::from("primary"),
+            DiscoveredImapAccount {
+                capabilities: ImapCapabilities::from_tokens(["IMAP4rev1"]),
+                mailboxes: vec![
+                    map_imap_mailbox("INBOX", ["\\Inbox"]),
+                    map_imap_mailbox("Archive", ["\\Archive"]),
+                ],
+            },
+            vec![inbox_header, archive_header],
+            Vec::new(),
+            "2026-04-25T00:00:00Z".to_string(),
+        );
+
+        assert_eq!(batch.messages.len(), 2);
+        assert_ne!(batch.messages[0].id, batch.messages[1].id);
+        assert_eq!(batch.imap_message_locations.len(), 2);
     }
 
     #[test]

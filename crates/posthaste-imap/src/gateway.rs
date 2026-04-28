@@ -1263,11 +1263,7 @@ fn mailbox_status_proves_unchanged(
         return status.highest_modseq == Some(stored_modseq);
     }
 
-    match (stored.highest_uid, status.uid_next) {
-        (Some(highest_uid), Some(uid_next)) => uid_next.0 <= highest_uid.0.saturating_add(1),
-        (None, Some(_)) => local_message_count == 0,
-        _ => false,
-    }
+    false
 }
 
 fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
@@ -1358,7 +1354,7 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_status_proves_noop_when_uidnext_and_count_match() {
+    fn mailbox_status_does_not_skip_without_modseq_even_when_uidnext_and_count_match() {
         let state = imap_mailbox_state(Some(ImapUid(42)));
         let status = ImapMailboxStatus {
             messages: Some(5),
@@ -1367,7 +1363,7 @@ mod tests {
             highest_modseq: None,
         };
 
-        assert!(mailbox_status_proves_unchanged(&state, 5, &status));
+        assert!(!mailbox_status_proves_unchanged(&state, 5, &status));
     }
 
     #[test]
@@ -1384,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_status_allows_empty_mailbox_without_uid_watermark() {
+    fn mailbox_status_does_not_skip_empty_mailbox_without_modseq() {
         let state = imap_mailbox_state(None);
         let status = ImapMailboxStatus {
             messages: Some(0),
@@ -1393,7 +1389,7 @@ mod tests {
             highest_modseq: None,
         };
 
-        assert!(mailbox_status_proves_unchanged(&state, 0, &status));
+        assert!(!mailbox_status_proves_unchanged(&state, 0, &status));
     }
 
     #[test]
