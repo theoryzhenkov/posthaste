@@ -7,6 +7,31 @@ export type SettingsSurfaceCategory =
   | 'accounts'
   | 'mailboxes'
 
+export const SettingsSurfaceTargetKind = {
+  Account: 'account',
+  NewAccount: 'newAccount',
+  SmartMailbox: 'smartMailbox',
+  NewSmartMailbox: 'newSmartMailbox',
+  SourceMailbox: 'sourceMailbox',
+} as const
+
+export type SettingsSurfaceTargetKind =
+  (typeof SettingsSurfaceTargetKind)[keyof typeof SettingsSurfaceTargetKind]
+
+export type SettingsSurfaceTarget =
+  | { kind: typeof SettingsSurfaceTargetKind.Account; accountId: string }
+  | { kind: typeof SettingsSurfaceTargetKind.NewAccount }
+  | {
+      kind: typeof SettingsSurfaceTargetKind.SmartMailbox
+      smartMailboxId: string
+    }
+  | { kind: typeof SettingsSurfaceTargetKind.NewSmartMailbox }
+  | {
+      kind: typeof SettingsSurfaceTargetKind.SourceMailbox
+      sourceAccountId: string
+      sourceMailboxId: string
+    }
+
 export interface MessageSurfaceDescriptor {
   kind: 'message'
   disposition: SurfaceDisposition
@@ -32,8 +57,7 @@ export interface SettingsSurfaceDescriptor {
   disposition: SurfaceDisposition
   params: {
     category?: SettingsSurfaceCategory
-    accountId?: string | null
-    smartMailboxId?: string | null
+    target?: SettingsSurfaceTarget | null
   }
 }
 
@@ -58,18 +82,69 @@ export function messageSurfaceFromSelection(
 
 export function settingsSurface(input?: {
   category?: SettingsSurfaceCategory
-  accountId?: string | null
-  smartMailboxId?: string | null
+  target?: SettingsSurfaceTarget | null
 }): SettingsSurfaceDescriptor {
+  const target = input?.target ?? null
+  const category = target ? categoryForSettingsTarget(target) : input?.category
+  const params: SettingsSurfaceDescriptor['params'] = {}
+  if (category) {
+    params.category = category
+  }
+  if (target) {
+    params.target = target
+  }
   return {
     kind: 'settings',
     disposition: 'focused',
-    params: {
-      category: input?.category,
-      accountId: input?.accountId ?? null,
-      smartMailboxId: input?.smartMailboxId ?? null,
-    },
+    params,
   }
+}
+
+export function settingsCategorySurface(
+  category: SettingsSurfaceCategory,
+): SettingsSurfaceDescriptor {
+  return settingsSurface({ category })
+}
+
+export function accountSettingsSurface(
+  accountId: string,
+): SettingsSurfaceDescriptor {
+  return settingsSurface({
+    target: { kind: SettingsSurfaceTargetKind.Account, accountId },
+  })
+}
+
+export function newAccountSettingsSurface(): SettingsSurfaceDescriptor {
+  return settingsSurface({
+    target: { kind: SettingsSurfaceTargetKind.NewAccount },
+  })
+}
+
+export function smartMailboxSettingsSurface(
+  smartMailboxId: string,
+): SettingsSurfaceDescriptor {
+  return settingsSurface({
+    target: { kind: SettingsSurfaceTargetKind.SmartMailbox, smartMailboxId },
+  })
+}
+
+export function newSmartMailboxSettingsSurface(): SettingsSurfaceDescriptor {
+  return settingsSurface({
+    target: { kind: SettingsSurfaceTargetKind.NewSmartMailbox },
+  })
+}
+
+export function sourceMailboxSettingsSurface(
+  sourceAccountId: string,
+  sourceMailboxId: string,
+): SettingsSurfaceDescriptor {
+  return settingsSurface({
+    target: {
+      kind: SettingsSurfaceTargetKind.SourceMailbox,
+      sourceAccountId,
+      sourceMailboxId,
+    },
+  })
 }
 
 export function attachmentSurface(input: {
@@ -85,14 +160,13 @@ export function attachmentSurface(input: {
 }
 
 export function surfaceRoute(surface: SurfaceDescriptor): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(surface.params)) {
-    if (value !== undefined && value !== null) {
-      params.set(key, value)
-    }
+  switch (surface.kind) {
+    case 'settings':
+      return settingsSurfaceRoute(surface)
+    case 'message':
+    case 'attachment':
+      return genericSurfaceRoute(surface)
   }
-  const query = params.toString()
-  return `/surface/${surface.kind}${query ? `?${query}` : ''}`
 }
 
 export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
@@ -130,11 +204,18 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
       if (category !== null && !isSettingsSurfaceCategory(category)) {
         return null
       }
-      return settingsSurface({
-        category: category ?? undefined,
-        accountId: url.searchParams.get('accountId'),
-        smartMailboxId: url.searchParams.get('smartMailboxId'),
-      })
+      const target = parseSettingsTarget(url.searchParams)
+      if (target === undefined) {
+        return null
+      }
+      if (
+        target &&
+        category &&
+        category !== categoryForSettingsTarget(target)
+      ) {
+        return null
+      }
+      return settingsSurface({ category: category ?? undefined, target })
     }
     default:
       return null
@@ -148,6 +229,103 @@ export function surfaceFromLocation(
   const route =
     hashRoute.length > 0 ? hashRoute : `${location.pathname}${location.search}`
   return parseSurfaceRoute(route)
+}
+
+function genericSurfaceRoute(
+  surface: MessageSurfaceDescriptor | AttachmentSurfaceDescriptor,
+): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(surface.params)) {
+    params.set(key, value)
+  }
+  const query = params.toString()
+  return `/surface/${surface.kind}${query ? `?${query}` : ''}`
+}
+
+function settingsSurfaceRoute(surface: SettingsSurfaceDescriptor): string {
+  const params = new URLSearchParams()
+  if (surface.params.category) {
+    params.set('category', surface.params.category)
+  }
+
+  const target = surface.params.target
+  if (target) {
+    params.set('targetKind', target.kind)
+    switch (target.kind) {
+      case SettingsSurfaceTargetKind.Account:
+        params.set('accountId', target.accountId)
+        break
+      case SettingsSurfaceTargetKind.NewAccount:
+        break
+      case SettingsSurfaceTargetKind.SmartMailbox:
+        params.set('smartMailboxId', target.smartMailboxId)
+        break
+      case SettingsSurfaceTargetKind.NewSmartMailbox:
+        break
+      case SettingsSurfaceTargetKind.SourceMailbox:
+        params.set('sourceAccountId', target.sourceAccountId)
+        params.set('sourceMailboxId', target.sourceMailboxId)
+        break
+    }
+  }
+
+  const query = params.toString()
+  return `/surface/settings${query ? `?${query}` : ''}`
+}
+
+function categoryForSettingsTarget(
+  target: SettingsSurfaceTarget,
+): SettingsSurfaceCategory {
+  switch (target.kind) {
+    case SettingsSurfaceTargetKind.Account:
+    case SettingsSurfaceTargetKind.NewAccount:
+      return 'accounts'
+    case SettingsSurfaceTargetKind.SmartMailbox:
+    case SettingsSurfaceTargetKind.NewSmartMailbox:
+    case SettingsSurfaceTargetKind.SourceMailbox:
+      return 'mailboxes'
+  }
+}
+
+function parseSettingsTarget(
+  params: URLSearchParams,
+): SettingsSurfaceTarget | null | undefined {
+  const targetKind = params.get('targetKind')
+  if (targetKind === null) {
+    return null
+  }
+
+  switch (targetKind) {
+    case SettingsSurfaceTargetKind.Account: {
+      const accountId = params.get('accountId')
+      return accountId
+        ? { kind: SettingsSurfaceTargetKind.Account, accountId }
+        : undefined
+    }
+    case SettingsSurfaceTargetKind.NewAccount:
+      return { kind: SettingsSurfaceTargetKind.NewAccount }
+    case SettingsSurfaceTargetKind.SmartMailbox: {
+      const smartMailboxId = params.get('smartMailboxId')
+      return smartMailboxId
+        ? { kind: SettingsSurfaceTargetKind.SmartMailbox, smartMailboxId }
+        : undefined
+    }
+    case SettingsSurfaceTargetKind.NewSmartMailbox:
+      return { kind: SettingsSurfaceTargetKind.NewSmartMailbox }
+    case SettingsSurfaceTargetKind.SourceMailbox: {
+      const sourceAccountId = params.get('sourceAccountId')
+      const sourceMailboxId = params.get('sourceMailboxId')
+      return sourceAccountId && sourceMailboxId
+        ? {
+            kind: SettingsSurfaceTargetKind.SourceMailbox,
+            sourceAccountId,
+            sourceMailboxId,
+          }
+        : undefined
+    }
+    default:
+      return undefined
+  }
 }
 
 function isSettingsSurfaceCategory(

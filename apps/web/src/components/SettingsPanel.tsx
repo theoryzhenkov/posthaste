@@ -14,7 +14,7 @@ import {
   Palette,
   Settings as SettingsIcon,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   deleteAccount,
   deleteSmartMailbox,
@@ -54,10 +54,22 @@ import {
 } from '../domainCache'
 import { cn } from '../lib/utils'
 import { queryKeys } from '../queryKeys'
+import {
+  accountSettingsSurface,
+  newAccountSettingsSurface,
+  newSmartMailboxSettingsSurface,
+  settingsCategorySurface,
+  smartMailboxSettingsSurface,
+  sourceMailboxSettingsSurface,
+  type SettingsSurfaceCategory,
+  type SettingsSurfaceDescriptor,
+  type SettingsSurfaceTarget,
+  SettingsSurfaceTargetKind,
+} from '../surfaces'
 import { Button } from './ui/button'
 import type { EditorTarget } from './settings-panel/types'
 
-type SettingsCategory = 'general' | 'appearance' | 'accounts' | 'mailboxes'
+type SettingsCategory = SettingsSurfaceCategory
 
 const SETTINGS_CATEGORIES = [
   {
@@ -90,14 +102,56 @@ const SETTINGS_CATEGORIES = [
   },
 ] as const
 
+function accountEditorTargetFromSettingsTarget(
+  target: SettingsSurfaceTarget | null,
+): EditorTarget | null {
+  if (!target) {
+    return null
+  }
+
+  switch (target.kind) {
+    case SettingsSurfaceTargetKind.Account:
+      return target.accountId
+    case SettingsSurfaceTargetKind.NewAccount:
+      return 'new'
+    case SettingsSurfaceTargetKind.SmartMailbox:
+    case SettingsSurfaceTargetKind.NewSmartMailbox:
+    case SettingsSurfaceTargetKind.SourceMailbox:
+      return null
+  }
+}
+
+function mailboxEditorTargetFromSettingsTarget(
+  target: SettingsSurfaceTarget | null,
+): MailboxEditorTarget | null {
+  if (!target) {
+    return null
+  }
+
+  switch (target.kind) {
+    case SettingsSurfaceTargetKind.SmartMailbox:
+      return { kind: 'smart', id: target.smartMailboxId }
+    case SettingsSurfaceTargetKind.NewSmartMailbox:
+      return { kind: 'smart', id: 'new' }
+    case SettingsSurfaceTargetKind.SourceMailbox:
+      return {
+        kind: 'source',
+        accountId: target.sourceAccountId,
+        mailboxId: target.sourceMailboxId,
+      }
+    case SettingsSurfaceTargetKind.Account:
+    case SettingsSurfaceTargetKind.NewAccount:
+      return null
+  }
+}
+
 /** @spec docs/L1-api#account-crud-lifecycle */
 interface SettingsPanelProps {
   accounts: AccountOverview[]
   activeAccountId: string | null
-  initialAccountId?: string | null
-  initialCategory?: SettingsCategory
-  initialSmartMailboxId?: string | null
+  surface: SettingsSurfaceDescriptor
   onActiveAccountChange: (accountId: string | null) => void
+  onNavigate: (surface: SettingsSurfaceDescriptor) => void
   onClose?: () => void
   shell?: 'page' | 'overlay'
 }
@@ -111,21 +165,24 @@ interface SettingsPanelProps {
 export function SettingsPanel({
   accounts,
   activeAccountId,
-  initialAccountId,
-  initialCategory,
-  initialSmartMailboxId,
+  surface,
   onActiveAccountChange,
+  onNavigate,
   onClose,
   shell = 'page',
 }: SettingsPanelProps) {
   const queryClient = useQueryClient()
 
-  const [activeCategory, setActiveCategory] = useState<SettingsCategory>(
-    initialCategory ?? 'general',
-  )
-  const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null)
-  const [mailboxEditorTarget, setMailboxEditorTarget] =
-    useState<MailboxEditorTarget | null>(null)
+  const activeCategory = surface.params.category ?? 'general'
+  const settingsTarget = surface.params.target ?? null
+  const editorTarget =
+    activeCategory === 'accounts'
+      ? accountEditorTargetFromSettingsTarget(settingsTarget)
+      : null
+  const mailboxEditorTarget =
+    activeCategory === 'mailboxes'
+      ? mailboxEditorTargetFromSettingsTarget(settingsTarget)
+      : null
   const [smartMailboxActionPendingKey, setSmartMailboxActionPendingKey] =
     useState<string | null>(null)
   const [smartMailboxActionError, setSmartMailboxActionError] = useState<
@@ -134,24 +191,6 @@ export function SettingsPanel({
   const [accountCommandError, setAccountCommandError] = useState<string | null>(
     null,
   )
-
-  useEffect(() => {
-    if (initialCategory !== undefined) {
-      setActiveCategory(initialCategory)
-    }
-    if (
-      initialCategory === 'accounts' &&
-      initialAccountId &&
-      accounts.some((account) => account.id === initialAccountId)
-    ) {
-      setEditorTarget(initialAccountId)
-      setMailboxEditorTarget(null)
-    }
-    if (initialCategory === 'mailboxes' && initialSmartMailboxId) {
-      setMailboxEditorTarget({ kind: 'smart', id: initialSmartMailboxId })
-      setEditorTarget(null)
-    }
-  }, [accounts, initialAccountId, initialCategory, initialSmartMailboxId])
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
@@ -162,12 +201,7 @@ export function SettingsPanel({
     queryFn: fetchSmartMailboxes,
   })
 
-  const effectiveEditorTarget =
-    editorTarget !== null &&
-    editorTarget !== 'new' &&
-    !accounts.some((account) => account.id === editorTarget)
-      ? null
-      : editorTarget
+  const effectiveEditorTarget = editorTarget
   const editorAccountId =
     effectiveEditorTarget === null || effectiveEditorTarget === 'new'
       ? null
@@ -185,14 +219,7 @@ export function SettingsPanel({
   const smartMailboxSummaries = smartMailboxListQuery.data ?? []
   const smartMailboxEditorTarget =
     mailboxEditorTarget?.kind === 'smart' ? mailboxEditorTarget.id : null
-  const effectiveSmartMailboxTarget =
-    smartMailboxEditorTarget !== null &&
-    smartMailboxEditorTarget !== 'new' &&
-    !smartMailboxSummaries.some(
-      (mailbox) => mailbox.id === smartMailboxEditorTarget,
-    )
-      ? null
-      : smartMailboxEditorTarget
+  const effectiveSmartMailboxTarget = smartMailboxEditorTarget
   const editingSmartMailboxId =
     effectiveSmartMailboxTarget === null ||
     effectiveSmartMailboxTarget === 'new'
@@ -247,7 +274,7 @@ export function SettingsPanel({
     void runSmartMailboxAction('reset-defaults', async () => {
       await resetDefaultSmartMailboxes()
       await invalidateSmartMailboxQueries()
-      setMailboxEditorTarget(null)
+      onNavigate(settingsCategorySurface('mailboxes'))
     })
   }
 
@@ -373,7 +400,7 @@ export function SettingsPanel({
           onActiveAccountChange(fallbackAccountId)
         }
         if (effectiveEditorTarget === variables.account.id) {
-          setEditorTarget(null)
+          onNavigate(settingsCategorySurface('accounts'))
         }
       }
     },
@@ -395,9 +422,7 @@ export function SettingsPanel({
         ? 'mailbox:new'
         : `mailbox:${effectiveSmartMailboxTarget}:${'rule' in (editingSmartMailbox ?? {}) ? 'full' : 'summary'}:${editingSmartMailbox?.updatedAt ?? 'pending'}`
   function handleSelectCategory(category: SettingsCategory) {
-    setActiveCategory(category)
-    setEditorTarget(null)
-    setMailboxEditorTarget(null)
+    onNavigate(settingsCategorySurface(category))
   }
 
   return (
@@ -442,15 +467,19 @@ export function SettingsPanel({
               selectedAccountId={effectiveEditorTarget}
               editingAccount={editingAccount}
               editorKey={editorKey}
-              onSelectAccount={(accountId) => setEditorTarget(accountId)}
-              onBackToAccounts={() => setEditorTarget(null)}
-              onCreateAccount={() => setEditorTarget('new')}
+              onSelectAccount={(accountId) =>
+                onNavigate(accountSettingsSurface(accountId))
+              }
+              onBackToAccounts={() =>
+                onNavigate(settingsCategorySurface('accounts'))
+              }
+              onCreateAccount={() => onNavigate(newAccountSettingsSurface())}
               onCommand={(action, account) =>
                 commandMutation.mutate({ action, account })
               }
               onSaved={async (account) => {
                 applyAccountMutationResult(queryClient, account)
-                setEditorTarget(account.id)
+                onNavigate(accountSettingsSurface(account.id))
               }}
               onVerified={async () => {
                 invalidateAccountReadModels(
@@ -480,21 +509,23 @@ export function SettingsPanel({
               actionPendingKey={smartMailboxActionPendingKey}
               actionError={smartMailboxActionError}
               onSelectSmartMailbox={(mailboxId) =>
-                setMailboxEditorTarget({ kind: 'smart', id: mailboxId })
+                onNavigate(smartMailboxSettingsSurface(mailboxId))
               }
               onSelectSourceMailbox={(accountId, mailboxId) =>
-                setMailboxEditorTarget({ kind: 'source', accountId, mailboxId })
+                onNavigate(sourceMailboxSettingsSurface(accountId, mailboxId))
               }
-              onBackToMailboxes={() => setMailboxEditorTarget(null)}
+              onBackToMailboxes={() =>
+                onNavigate(settingsCategorySurface('mailboxes'))
+              }
               onCreateMailbox={() =>
-                setMailboxEditorTarget({ kind: 'smart', id: 'new' })
+                onNavigate(newSmartMailboxSettingsSurface())
               }
               onResetDefaults={handleResetSmartMailboxes}
               onReorderMailbox={handleReorderSmartMailbox}
               onSaved={async (mailbox) => {
                 await invalidateSmartMailboxQueries(mailbox.id)
                 await rewriteLinkedSmartMailboxAutomation(mailbox)
-                setMailboxEditorTarget({ kind: 'smart', id: mailbox.id })
+                onNavigate(smartMailboxSettingsSurface(mailbox.id))
               }}
               onAutomationSettingsSaved={async (settings) => {
                 queryClient.setQueryData(queryKeys.settings, settings)
@@ -504,7 +535,7 @@ export function SettingsPanel({
                 await removeLinkedSmartMailboxAutomation(mailboxId)
                 await deleteSmartMailbox(mailboxId)
                 await invalidateSmartMailboxQueries()
-                setMailboxEditorTarget(null)
+                onNavigate(settingsCategorySurface('mailboxes'))
               }}
             />
           )}

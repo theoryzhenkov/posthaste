@@ -56,8 +56,25 @@ struct MessageSurfaceParams {
 #[serde(rename_all = "camelCase")]
 struct SettingsSurfaceParams {
     category: Option<String>,
-    account_id: Option<String>,
-    smart_mailbox_id: Option<String>,
+    target: Option<SettingsSurfaceTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SettingsSurfaceTarget {
+    #[serde(rename = "account")]
+    Account { account_id: String },
+    #[serde(rename = "newAccount")]
+    NewAccount,
+    #[serde(rename = "smartMailbox")]
+    SmartMailbox { smart_mailbox_id: String },
+    #[serde(rename = "newSmartMailbox")]
+    NewSmartMailbox,
+    #[serde(rename = "sourceMailbox")]
+    SourceMailbox {
+        source_account_id: String,
+        source_mailbox_id: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,12 +327,7 @@ fn surface_route(surface: &SurfaceDescriptor) -> String {
             let _ = disposition;
             let mut pairs = Vec::new();
             push_query_pair(&mut pairs, "category", params.category.as_deref());
-            push_query_pair(&mut pairs, "accountId", params.account_id.as_deref());
-            push_query_pair(
-                &mut pairs,
-                "smartMailboxId",
-                params.smart_mailbox_id.as_deref(),
-            );
+            push_settings_target_query_pairs(&mut pairs, params.target.as_ref());
             if pairs.is_empty() {
                 "/surface/settings".to_string()
             } else {
@@ -361,6 +373,40 @@ fn surface_window_size(surface: &SurfaceDescriptor) -> (f64, f64) {
 fn push_query_pair(pairs: &mut Vec<String>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
         pairs.push(format!("{key}={}", encode_component(value)));
+    }
+}
+
+fn push_settings_target_query_pairs(
+    pairs: &mut Vec<String>,
+    target: Option<&SettingsSurfaceTarget>,
+) {
+    let Some(target) = target else {
+        return;
+    };
+
+    match target {
+        SettingsSurfaceTarget::Account { account_id } => {
+            push_query_pair(pairs, "targetKind", Some("account"));
+            push_query_pair(pairs, "accountId", Some(account_id));
+        }
+        SettingsSurfaceTarget::NewAccount => {
+            push_query_pair(pairs, "targetKind", Some("newAccount"));
+        }
+        SettingsSurfaceTarget::SmartMailbox { smart_mailbox_id } => {
+            push_query_pair(pairs, "targetKind", Some("smartMailbox"));
+            push_query_pair(pairs, "smartMailboxId", Some(smart_mailbox_id));
+        }
+        SettingsSurfaceTarget::NewSmartMailbox => {
+            push_query_pair(pairs, "targetKind", Some("newSmartMailbox"));
+        }
+        SettingsSurfaceTarget::SourceMailbox {
+            source_account_id,
+            source_mailbox_id,
+        } => {
+            push_query_pair(pairs, "targetKind", Some("sourceMailbox"));
+            push_query_pair(pairs, "sourceAccountId", Some(source_account_id));
+            push_query_pair(pairs, "sourceMailboxId", Some(source_mailbox_id));
+        }
     }
 }
 
@@ -448,15 +494,16 @@ mod tests {
             disposition: SurfaceDisposition::Focused,
             params: SettingsSurfaceParams {
                 category: Some("accounts".to_string()),
-                account_id: Some("primary".to_string()),
-                smart_mailbox_id: None,
+                target: Some(SettingsSurfaceTarget::Account {
+                    account_id: "primary".to_string(),
+                }),
             },
         };
 
         assert_eq!(surface_window_label(&surface), "settings");
         assert_eq!(
             surface_route(&surface),
-            "/surface/settings?category=accounts&accountId=primary"
+            "/surface/settings?category=accounts&targetKind=account&accountId=primary"
         );
     }
 

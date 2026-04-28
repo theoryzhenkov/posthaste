@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 
 import {
+  accountSettingsSurface,
   attachmentSurface,
   messageSurfaceFromSelection,
+  newAccountSettingsSurface,
+  newSmartMailboxSettingsSurface,
   parseSurfaceRoute,
-  settingsSurface,
+  sourceMailboxSettingsSurface,
   surfaceRoute,
 } from '../src/surfaces'
 
@@ -30,11 +33,20 @@ describe('surface routes', () => {
   })
 
   it('round trips settings surfaces', () => {
-    const surface = settingsSurface({
-      category: 'accounts',
-      accountId: 'primary',
-      smartMailboxId: null,
-    })
+    const surface = accountSettingsSurface('primary')
+
+    expect(parseSurfaceRoute(surfaceRoute(surface))).toEqual(surface)
+  })
+
+  it('round trips settings create and source mailbox drill-ins', () => {
+    expect(
+      parseSurfaceRoute(surfaceRoute(newAccountSettingsSurface())),
+    ).toEqual(newAccountSettingsSurface())
+    expect(
+      parseSurfaceRoute(surfaceRoute(newSmartMailboxSettingsSurface())),
+    ).toEqual(newSmartMailboxSettingsSurface())
+
+    const surface = sourceMailboxSettingsSurface('primary', 'inbox')
 
     expect(parseSurfaceRoute(surfaceRoute(surface))).toEqual(surface)
   })
@@ -51,5 +63,21 @@ describe('surface routes', () => {
 
   it('rejects unknown settings categories', () => {
     expect(parseSurfaceRoute('/surface/settings?category=advanced')).toBeNull()
+  })
+
+  it('rejects invalid settings targets', () => {
+    expect(
+      parseSurfaceRoute(
+        '/surface/settings?category=mailboxes&targetKind=account&accountId=primary',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/settings?category=accounts&targetKind=sourceMailbox&sourceAccountId=primary&sourceMailboxId=inbox',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute('/surface/settings?targetKind=smartMailbox'),
+    ).toBeNull()
   })
 })
