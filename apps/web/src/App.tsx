@@ -11,7 +11,7 @@ import {
   useMutation,
   useQuery,
 } from '@tanstack/react-query'
-import { useCallback, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -22,14 +22,10 @@ import {
 } from './api/client'
 import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
-import { CommandPalette } from './components/CommandPalette'
-import { ComposeOverlay } from './components/ComposeOverlay'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
-import { SurfaceHost } from './components/SurfaceHost'
-import { FocusedSurfaceDocument } from './components/FocusedSurface'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import { isTauriRuntime } from './desktop'
@@ -66,6 +62,27 @@ import {
   normalizeValidAppliedSearchQuery,
   prepareServerSearchQuery,
 } from './searchQuery'
+
+const CommandPalette = lazy(() =>
+  import('./components/CommandPalette').then((module) => ({
+    default: module.CommandPalette,
+  })),
+)
+const ComposeOverlay = lazy(() =>
+  import('./components/ComposeOverlay').then((module) => ({
+    default: module.ComposeOverlay,
+  })),
+)
+const SurfaceHost = lazy(() =>
+  import('./components/SurfaceHost').then((module) => ({
+    default: module.SurfaceHost,
+  })),
+)
+const FocusedSurfaceDocument = lazy(() =>
+  import('./components/FocusedSurface').then((module) => ({
+    default: module.FocusedSurfaceDocument,
+  })),
+)
 
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
@@ -504,23 +521,25 @@ function MailClient({
       </ResizablePanelGroup>
 
       {isCommandPaletteOpen && (
-        <CommandPalette
-          hasSelectedMessage={selectedMessage !== null}
-          onApplySearch={handleApplySearch}
-          onArchive={handleArchive}
-          onClose={handleCloseCommandPalette}
-          onCompose={handleCompose}
-          onOpenSettings={handleOpenSettings}
-          onOpenShortcuts={handleShowShortcuts}
-          onPlaceholderAction={handlePlaceholderAction}
-          onPreviewSearch={handlePreviewSearch}
-          onRejectSearchPreview={handleRejectSearchPreview}
-          onReply={handleReply}
-          onSelectMessage={handleSelectMessage}
-          onSelectSmartMailbox={handleSelectSmartMailbox}
-          onSelectSourceMailbox={handleSelectSourceMailbox}
-          onToggleFlag={handleToggleFlag}
-        />
+        <Suspense fallback={null}>
+          <CommandPalette
+            hasSelectedMessage={selectedMessage !== null}
+            onApplySearch={handleApplySearch}
+            onArchive={handleArchive}
+            onClose={handleCloseCommandPalette}
+            onCompose={handleCompose}
+            onOpenSettings={handleOpenSettings}
+            onOpenShortcuts={handleShowShortcuts}
+            onPlaceholderAction={handlePlaceholderAction}
+            onPreviewSearch={handlePreviewSearch}
+            onRejectSearchPreview={handleRejectSearchPreview}
+            onReply={handleReply}
+            onSelectMessage={handleSelectMessage}
+            onSelectSmartMailbox={handleSelectSmartMailbox}
+            onSelectSourceMailbox={handleSelectSourceMailbox}
+            onToggleFlag={handleToggleFlag}
+          />
+        </Suspense>
       )}
 
       {showShortcuts && (
@@ -535,14 +554,29 @@ function MailClient({
         />
       )}
       {composeIntent && (
-        <ComposeOverlay intent={composeIntent} onClose={closeCompose} />
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <Loader2
+                size={18}
+                className="animate-spin text-muted-foreground"
+              />
+            </div>
+          }
+        >
+          <ComposeOverlay intent={composeIntent} onClose={closeCompose} />
+        </Suspense>
       )}
-      <SurfaceHost
-        surface={effectiveSurface}
-        canClose={!shouldRenderForcedSettings}
-        onClose={closeWebSurface}
-        onSearch={handleSearch}
-      />
+      {effectiveSurface && (
+        <Suspense fallback={null}>
+          <SurfaceHost
+            surface={effectiveSurface}
+            canClose={!shouldRenderForcedSettings}
+            onClose={closeWebSurface}
+            onSearch={handleSearch}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
@@ -559,7 +593,18 @@ export default function App() {
     <DesignThemeProvider>
       <QueryClientProvider client={queryClient}>
         {isStandaloneSurface ? (
-          <FocusedSurfaceDocument surface={routeSurface} />
+          <Suspense
+            fallback={
+              <div className="flex h-screen items-center justify-center bg-background text-foreground">
+                <Loader2
+                  size={18}
+                  className="animate-spin text-muted-foreground"
+                />
+              </div>
+            }
+          >
+            <FocusedSurfaceDocument surface={routeSurface} />
+          </Suspense>
         ) : (
           <MailClient routeSurface={routeSurface} />
         )}

@@ -13,8 +13,7 @@
     "test": "bun test",
     "logging:check": "bun scripts/check-logging-contract.ts",
     "typecheck": "bun run logging:check && tsc -b",
-    "preview": "vite preview",
-    "tauri": "tauri"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
@@ -49,7 +48,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

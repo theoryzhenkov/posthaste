@@ -58,7 +58,6 @@
 
             # Rust
             rustToolchain
-            pkgs.cargo-tauri
             pkgs.pkg-config
 
             # Node / frontend

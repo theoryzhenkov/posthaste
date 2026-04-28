@@ -154,14 +154,13 @@ pub async fn list_smart_mailbox_messages(
             )
             .map_err(ApiError::from_service_error)?;
         let operation_id = observability::operation_id_from_headers(&headers);
-        record_search_cache_visibility(
-            &state,
-            &page,
-            &scope_rule,
-            &result_rule,
-            operation_id.as_deref(),
-        )
-        .await;
+        spawn_search_cache_visibility(
+            Arc::clone(&state),
+            page.clone(),
+            scope_rule,
+            result_rule,
+            operation_id,
+        );
         return Ok(Json(message_page_response(page)));
     }
 

@@ -1,41 +1,43 @@
 # Frontend (React/Vite) recipes
 
+set working-directory := '../..'
+
 # Start the Vite dev server alone. Assumes the backend is already running.
 dev:
-    bun run dev
+    bun --cwd=apps/web run dev
 
 # Production build
 build:
-    bun run build
+    bun --cwd=apps/web run build
 
 # Lint, typecheck, and verify formatting
 check:
-    bun run check
+    bun --cwd=apps/web run check
 
 # Typecheck
 typecheck:
-    bun run typecheck
+    bun --cwd=apps/web run typecheck
 
 # Run frontend tests
 test:
-    bun run test
+    bun --cwd=apps/web run test
 
 # Format frontend sources
 fmt:
-    bun run format
+    bun --cwd=apps/web run format
 
 # Check frontend formatting
 fmt-check:
-    bun run format:check
+    bun --cwd=apps/web run format:check
 
 # Lint with auto-fix, then format
 lint-fix:
-    bun run lint --fix
-    bun run format
+    bun --cwd=apps/web run lint --fix
+    bun --cwd=apps/web run format
 
 # Preview production build
 preview:
-    bun run preview
+    bun --cwd=apps/web run preview
 
 # Install dependencies
 install:

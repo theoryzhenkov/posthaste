@@ -448,6 +448,17 @@ export function MessageList({
     [onClearSelection],
   )
 
+  const handleSelectRowMessage = useCallback(
+    (message: MessageSummary) => {
+      onSelectMessage({
+        conversationId: message.conversationId,
+        sourceId: message.sourceId,
+        messageId: message.id,
+      })
+    },
+    [onSelectMessage],
+  )
+
   if (!selectedView) {
     return (
       <div
@@ -617,13 +628,7 @@ export function MessageList({
                       columns={columns}
                       layout={tableLayout}
                       actions={actions}
-                      onSelect={() =>
-                        onSelectMessage({
-                          conversationId: message.conversationId,
-                          sourceId: message.sourceId,
-                          messageId: message.id,
-                        })
-                      }
+                      onSelectMessage={handleSelectRowMessage}
                     />
                   </div>
                 ))}

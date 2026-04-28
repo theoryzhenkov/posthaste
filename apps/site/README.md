@@ -10,9 +10,9 @@ React island, while editable home page copy lives in Markdown under
 
 ```sh
 bun install
-bun run dev
-bun run build
-bun run check
+bun --cwd=apps/site run dev
+bun --cwd=apps/site run build
+bun --cwd=apps/site run check
 ```
 
 Edit home page text in:
@@ -24,6 +24,6 @@ src/content/home/
 ## Docker
 
 ```sh
-docker build -t posthaste-site apps/site
+docker build -f apps/site/Dockerfile -t posthaste-site .
 docker run --rm -p 8080:80 posthaste-site
 ```

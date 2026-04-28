@@ -2,12 +2,6 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { EditorSelection, EditorState, type Extension } from '@codemirror/state'
-import {
-  EditorView,
-  keymap,
-  placeholder as editorPlaceholder,
-  type Command,
-} from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import {
   Bold,
@@ -18,15 +12,23 @@ import {
 } from 'lucide-react'
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import {
+  EditorView,
+  keymap,
+  placeholder as editorPlaceholder,
+  type Command,
+  type ViewUpdate,
+} from '@codemirror/view'
 
-import { cn } from '@/lib/utils'
 import { toggleMarkdownMarker } from '@/markdownEditing'
+import { cn } from '@/lib/utils'
 
 export interface MarkdownComposerEditorHandle {
   focus: () => void
@@ -129,9 +131,9 @@ function formatSelection(marker: string): Command {
     const range = view.state.selection.main
     const next = toggleMarkdownMarker(
       {
-        selectionEnd: range.to,
-        selectionStart: range.from,
         text: source,
+        selectionStart: range.from,
+        selectionEnd: range.to,
       },
       marker,
     )
@@ -163,6 +165,15 @@ export const MarkdownComposerEditor = forwardRef<
     null,
   )
 
+  const handleEditorUpdate = useCallback(
+    (update: ViewUpdate) => {
+      if (update.docChanged) {
+        onChange(update.state.doc.toString())
+      }
+    },
+    [onChange],
+  )
+
   const extensions = useMemo<Extension[]>(
     () => [
       history(),
@@ -174,11 +185,7 @@ export const MarkdownComposerEditor = forwardRef<
       syntaxHighlighting(markdownHighlightStyle),
       composerTheme,
       EditorView.lineWrapping,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          onChange(update.state.doc.toString())
-        }
-      }),
+      EditorView.updateListener.of(handleEditorUpdate),
       keymap.of([
         ...FORMAT_COMMANDS.map((command) => ({
           key: command.shortcut,
@@ -190,7 +197,7 @@ export const MarkdownComposerEditor = forwardRef<
       ]),
       placeholder ? editorPlaceholder(placeholder) : [],
     ],
-    [onChange, placeholder],
+    [handleEditorUpdate, placeholder],
   )
 
   useEffect(() => {

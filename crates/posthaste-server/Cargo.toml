@@ -10,6 +10,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "posthaste"
 path = "src/main.rs"
+# The CLI has no unit tests. Library and integration tests cover server
+# behavior, so skip the otherwise empty libtest harness for this binary.
+test = false
 
 [dependencies]
 ammonia = { workspace = true }

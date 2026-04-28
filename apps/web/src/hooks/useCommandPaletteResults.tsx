@@ -77,6 +77,10 @@ interface UseCommandPaletteResultsArgs {
 }
 
 export const NO_COMMAND_PALETTE_SELECTION = '__posthaste_no_selection__'
+const MESSAGE_SUBLINE_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+})
 
 export function commandPaletteEntryValue(entry: CommandPaletteEntry): string {
   return `${entry.kind}:${entry.id}`
@@ -118,10 +122,9 @@ function formatMessageSubline(
   const location = mailbox
     ? `${mailbox.source.name} / ${mailbox.mailbox.name}`
     : message.sourceName
-  const received = new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(message.receivedAt))
+  const received = MESSAGE_SUBLINE_DATE_FORMATTER.format(
+    new Date(message.receivedAt),
+  )
   return `${sender} · ${location} · ${received}`
 }
 

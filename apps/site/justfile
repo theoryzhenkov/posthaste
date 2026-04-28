@@ -1,29 +1,31 @@
 # Public website recipes
 
+set working-directory := '../..'
+
 dev:
-    bun run dev
+    bun --cwd=apps/site run dev
 
 build:
-    bun run build
+    bun --cwd=apps/site run build
 
 check:
-    bun run check
+    bun --cwd=apps/site run check
 
 typecheck:
-    bun run typecheck
+    bun --cwd=apps/site run typecheck
 
 fmt:
-    bun run format
+    bun --cwd=apps/site run format
 
 fmt-check:
-    bun run format:check
+    bun --cwd=apps/site run format:check
 
 lint-fix:
-    bun run lint --fix
-    bun run format
+    bun --cwd=apps/site run lint --fix
+    bun --cwd=apps/site run format
 
 preview:
-    bun run preview
+    bun --cwd=apps/site run preview
 
 install:
     bun install
