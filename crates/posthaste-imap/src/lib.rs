@@ -17,6 +17,7 @@ mod idle;
 mod mailbox;
 mod message;
 mod mutation;
+mod provider;
 mod smtp;
 mod sync;
 

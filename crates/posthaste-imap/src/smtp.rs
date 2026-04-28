@@ -11,6 +11,7 @@ use posthaste_domain::{
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 use crate::discovery::connect_authenticated_client;
+use crate::provider::SmtpAdapterProviderProfile;
 use crate::ImapAdapterError;
 use crate::ImapConnectionConfig;
 
@@ -102,9 +103,10 @@ pub struct SubmittedSmtpMessage {
 }
 
 pub fn smtp_sent_copy_strategy(provider: &ProviderHint) -> SmtpSentCopyStrategy {
-    match provider {
-        ProviderHint::Gmail | ProviderHint::Outlook => SmtpSentCopyStrategy::ProviderManaged,
-        ProviderHint::Generic | ProviderHint::Icloud => SmtpSentCopyStrategy::AppendToSentMailbox,
+    if SmtpAdapterProviderProfile::from_provider_hint(provider).provider_manages_sent_copy() {
+        SmtpSentCopyStrategy::ProviderManaged
+    } else {
+        SmtpSentCopyStrategy::AppendToSentMailbox
     }
 }
 

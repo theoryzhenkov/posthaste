@@ -43,6 +43,7 @@ check:
 # Run all tests
 test *args:
     just backend test {{ args }}
+    just desktop test
     just frontend test
 
 # Build everything

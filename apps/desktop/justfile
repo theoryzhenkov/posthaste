@@ -6,6 +6,17 @@ set working-directory := '../..'
 dev *args:
     bun run tauri dev {{args}}
 
+# Run desktop Rust tests with constrained Cargo parallelism. The Tauri Linux
+# dependency graph links GTK/WebKit and can OOM smaller VMs when combined with
+# workspace-wide test fan-out.
+test *args:
+    cargo test -p posthaste-desktop -j 1 {{args}}
+
+# Check the desktop crate with constrained Cargo parallelism for the same
+# reason as `test`.
+check:
+    cargo clippy -p posthaste-desktop -j 1 --all-targets -- -D warnings
+
 # Build for release
 build *args:
     bun run tauri build {{args}}

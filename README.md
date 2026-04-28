@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-29
+reviewed: 2026-04-29
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-providers
@@ -14,6 +14,7 @@ dependents:
   - path: docs/L0-compose
   - path: docs/L0-ui
   - path: docs/L0-logging
+  - path: docs/L0-testing
   - path: docs/L0-website
 ---
 
@@ -42,10 +43,19 @@ just dev-services  # Stalwart + seed + posthaste serve --api-only
 just dev-smoke     # Validate dev-stack path wiring without starting services
 just frontend dev  # Vite only, assumes the backend is already running
 just desktop dev   # Tauri only, assumes Stalwart is already running if needed
+just desktop test  # Desktop Rust tests with constrained Cargo parallelism
 just build-serve   # Build web assets plus the browser-localhost server binary
 just package-serve # Create target/distribute/posthaste-serve-*.tar.gz
 just serve         # Run `posthaste serve` against apps/web/dist
 ```
+
+Rust backend validation intentionally excludes the Tauri desktop shell from
+normal workspace checks. Use `just test` or `just backend check` for routine
+backend/frontend validation. On constrained Linux VMs, avoid raw
+`cargo test --workspace` or `cargo clippy --workspace`: they include
+`apps/desktop` and can compile the GTK/WebKit stack alongside every backend
+test target. Run desktop tests and builds explicitly with `just desktop test`
+or `just desktop build`.
 
 OAuth provider secrets are read by the Nix dev shell from
 `secrets/oauth.yaml` when that SOPS file and `.age-key` are present. Supported
@@ -158,6 +168,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](docs/L0-accounts.md) [L1](docs/L1-accounts.md)
 - **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](docs/L0-api.md) [L1](docs/L1-api.md)
 - **logging** -- Structured tracing and logging across backend and frontend. [L0](docs/L0-logging.md) [L1](docs/L1-logging.md)
+- **testing** -- Red-first behavior contracts, provider observation matrix, and coverage standards. [L0](docs/L0-testing.md)
 
 ## MVP acceptance criteria
 

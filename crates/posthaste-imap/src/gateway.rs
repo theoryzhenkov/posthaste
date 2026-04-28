@@ -6,10 +6,10 @@ use imap_client::client::tokio::Client as ImapClient;
 use posthaste_domain::{
     now_iso8601, plan_imap_mailbox_sync, plan_imap_move, AccountId, BlobId, FetchedBody,
     GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
-    ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
-    MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressReporter,
-    SyncProgressStage, SyncTrigger,
+    ImapMessageLocation, ImapMoveStrategy, ImapProviderProfile, ImapUid, ImapUidValidity,
+    MailGateway, MailStore, MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress,
+    SyncProgressReporter, SyncProgressStage, SyncTrigger,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
@@ -349,6 +349,7 @@ async fn plan_mailboxes(
     );
 
     let mut planned_mailboxes = Vec::new();
+    let provider = discovery.provider_profile();
     for (mailbox_index, mailbox) in discovery
         .mailboxes
         .iter()
@@ -364,8 +365,17 @@ async fn plan_mailboxes(
                     selectable_mailbox_count,
                 ),
         );
-        planned_mailboxes
-            .push(plan_mailbox(client, account_id, mailbox, &discovery.capabilities, store).await?);
+        planned_mailboxes.push(
+            plan_mailbox(
+                client,
+                account_id,
+                mailbox,
+                &discovery.capabilities,
+                &provider,
+                store,
+            )
+            .await?,
+        );
     }
 
     Ok(planned_mailboxes)
@@ -376,6 +386,7 @@ async fn plan_mailbox(
     account_id: &AccountId,
     mailbox: &DiscoveredImapMailbox,
     capabilities: &ImapCapabilities,
+    provider: &ImapProviderProfile,
     store: Option<&dyn MailStore>,
 ) -> Result<PlannedImapMailbox, GatewayError> {
     let Some(store) = store else {
@@ -405,49 +416,51 @@ async fn plan_mailbox(
     let local_locations = store
         .list_imap_mailbox_message_locations(account_id, &mailbox.id)
         .map_err(store_error_to_gateway)?;
-    if let Some(stored_state) = stored_state.as_ref() {
-        let status = status_imap_mailbox(
-            client,
-            &mailbox.name,
-            capabilities.supports_condstore() && stored_state.highest_modseq.is_some(),
-        )
-        .await
-        .map_err(imap_error_to_gateway)?;
-        if mailbox_status_proves_unchanged(stored_state, local_locations.len(), &status) {
-            ph_info!(
-                events::IMAP_MAILBOX_SYNC_PLANNED,
-                account_id = %account_id,
-                mailbox_id = %mailbox.id,
-                plan = "skip_unchanged",
-                has_stored_state = true,
-                uid_validity = status.uid_validity.map(|uid_validity| uid_validity.0),
-                uid_next = status.uid_next.map(|uid| uid.0),
-                message_count = status.messages,
-                local_message_count = local_locations.len(),
-                "IMAP mailbox sync planned"
-            );
-            ph_debug!(
-                events::IMAP_MAILBOX_SYNC_PLAN_DETAIL,
-                account_id = %account_id,
-                mailbox_id = %mailbox.id,
-                mailbox_name = %mailbox.name,
-                plan = "skip_unchanged",
-                "IMAP mailbox sync plan detail"
-            );
-            return Ok(PlannedImapMailbox {
-                id: mailbox.id.clone(),
-                name: mailbox.name.clone(),
-                stored_state: Some(stored_state.clone()),
-                local_locations,
-                plan: PlannedImapMailboxSync::SkipUnchanged,
-            });
+    if provider.allows_status_skip() {
+        if let Some(stored_state) = stored_state.as_ref() {
+            let status = status_imap_mailbox(
+                client,
+                &mailbox.name,
+                capabilities.supports_condstore() && stored_state.highest_modseq.is_some(),
+            )
+            .await
+            .map_err(imap_error_to_gateway)?;
+            if mailbox_status_proves_unchanged(stored_state, local_locations.len(), &status) {
+                ph_info!(
+                    events::IMAP_MAILBOX_SYNC_PLANNED,
+                    account_id = %account_id,
+                    mailbox_id = %mailbox.id,
+                    plan = "skip_unchanged",
+                    has_stored_state = true,
+                    uid_validity = status.uid_validity.map(|uid_validity| uid_validity.0),
+                    uid_next = status.uid_next.map(|uid| uid.0),
+                    message_count = status.messages,
+                    local_message_count = local_locations.len(),
+                    "IMAP mailbox sync planned"
+                );
+                ph_debug!(
+                    events::IMAP_MAILBOX_SYNC_PLAN_DETAIL,
+                    account_id = %account_id,
+                    mailbox_id = %mailbox.id,
+                    mailbox_name = %mailbox.name,
+                    plan = "skip_unchanged",
+                    "IMAP mailbox sync plan detail"
+                );
+                return Ok(PlannedImapMailbox {
+                    id: mailbox.id.clone(),
+                    name: mailbox.name.clone(),
+                    stored_state: Some(stored_state.clone()),
+                    local_locations,
+                    plan: PlannedImapMailboxSync::SkipUnchanged,
+                });
+            }
         }
     }
 
     let selected = examine_selected_mailbox(client, &mailbox.name)
         .await
         .map_err(imap_error_to_gateway)?;
-    let plan = plan_imap_mailbox_sync(capabilities, stored_state.as_ref(), &selected);
+    let plan = plan_imap_mailbox_sync(capabilities, provider, stored_state.as_ref(), &selected);
     ph_info!(
         events::IMAP_MAILBOX_SYNC_PLANNED,
         account_id = %account_id,
@@ -1463,6 +1476,10 @@ mod tests {
         );
 
         assert!(!batch.replace_all_messages);
+        assert_eq!(
+            batch.deleted_imap_message_locations,
+            vec![local_location.key()]
+        );
         assert_eq!(batch.deleted_message_ids, vec![message_id]);
         assert!(batch.messages.is_empty());
         assert!(batch.imap_message_locations.is_empty());

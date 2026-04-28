@@ -5,6 +5,7 @@ modified: 2026-04-28
 reviewed: 2026-04-28
 depends:
   - path: docs/L0-ui
+  - path: docs/L0-testing
   - path: docs/L0-branding
   - path: docs/L0-api
   - path: docs/L1-sync

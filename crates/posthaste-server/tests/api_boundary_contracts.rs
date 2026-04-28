@@ -3,24 +3,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::body::to_bytes;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, ConfigRepository,
     MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef,
-    SecretStore, SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
+    SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_server::api::{
-    preview_automation_rule, AutomationRulePreviewResponse, PreviewAutomationRuleRequest,
+    list_mailboxes, list_source_messages, ApiError, ListSourceMessagesQuery,
 };
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::AppState;
 use posthaste_store::DatabaseStore;
+use serde_json::Value;
 use tokio::sync::broadcast;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -31,7 +31,7 @@ fn temp_root() -> PathBuf {
         .expect("system time should be after epoch")
         .as_nanos();
     let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("posthaste-automation-preview-test-{now}-{seq}"))
+    std::env::temp_dir().join(format!("posthaste-api-boundary-test-{now}-{seq}"))
 }
 
 struct TestSecretStore;
@@ -54,12 +54,12 @@ impl SecretStore for TestSecretStore {
     }
 }
 
-struct PreviewHarness {
+struct ApiHarness {
     state: Arc<AppState>,
     store: Arc<DatabaseStore>,
 }
 
-impl PreviewHarness {
+impl ApiHarness {
     fn new() -> Self {
         let root = temp_root();
         let config_root = root.join("config");
@@ -99,12 +99,12 @@ impl PreviewHarness {
         }
     }
 
-    fn save_account(&self, id: &str, name: &str) {
+    fn save_account(&self, id: &str) {
         self.state
             .service
             .save_source(&AccountSettings {
                 id: AccountId::from(id),
-                name: name.to_string(),
+                name: id.to_string(),
                 full_name: None,
                 email_patterns: Vec::new(),
                 driver: AccountDriver::Mock,
@@ -144,13 +144,13 @@ impl PreviewHarness {
     }
 }
 
-fn message(id: &str, from_name: &str, received_at: &str) -> MessageRecord {
+fn message(id: &str, received_at: &str) -> MessageRecord {
     MessageRecord {
         id: MessageId::from(id),
         source_thread_id: ThreadId::from(format!("thread-{id}")),
         remote_blob_id: None,
         subject: Some(format!("Subject {id}")),
-        from_name: Some(from_name.to_string()),
+        from_name: Some("Sender".to_string()),
         from_email: Some(format!("{id}@example.test")),
         preview: Some(format!("Preview {id}")),
         received_at: received_at.to_string(),
@@ -167,110 +167,120 @@ fn message(id: &str, from_name: &str, received_at: &str) -> MessageRecord {
     }
 }
 
-fn condition(
-    field: SmartMailboxField,
-    operator: SmartMailboxOperator,
-    value: SmartMailboxValue,
-) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-        field,
-        operator,
-        negated: false,
-        value,
-    })
-}
-
-fn source_is(account_id: &str) -> SmartMailboxRuleNode {
-    condition(
-        SmartMailboxField::SourceId,
-        SmartMailboxOperator::Equals,
-        SmartMailboxValue::String(account_id.to_string()),
-    )
-}
-
-fn from_contains(value: &str) -> SmartMailboxRuleNode {
-    SmartMailboxRuleNode::Group(SmartMailboxGroup {
-        operator: SmartMailboxGroupOperator::Any,
-        negated: false,
-        nodes: vec![
-            condition(
-                SmartMailboxField::FromName,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
-            ),
-            condition(
-                SmartMailboxField::FromEmail,
-                SmartMailboxOperator::Contains,
-                SmartMailboxValue::String(value.to_string()),
-            ),
-        ],
-    })
-}
-
-fn rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
-    SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
-            negated: false,
-            nodes,
-        },
+fn default_source_messages_query() -> ListSourceMessagesQuery {
+    ListSourceMessagesQuery {
+        mailbox_id: None,
+        limit: None,
+        cursor: None,
+        sort: None,
+        sort_dir: None,
+        q: None,
     }
 }
 
-fn expect_preview_ok(
-    result: Result<Json<AutomationRulePreviewResponse>, posthaste_server::api::ApiError>,
-) -> Json<AutomationRulePreviewResponse> {
-    match result {
-        Ok(response) => response,
-        Err(error) => panic!(
-            "automation preview should succeed, got {}",
-            error.into_response().status()
-        ),
-    }
+async fn api_error_json(error: ApiError) -> (StatusCode, Value) {
+    response_json(error.into_response()).await
 }
 
+async fn response_json(response: Response) -> (StatusCode, Value) {
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should read");
+    let json = serde_json::from_slice(&body).expect("response body should be JSON");
+    (status, json)
+}
+
+// spec: docs/L0-testing#api-boundary-contracts
 #[tokio::test]
-async fn preview_automation_rule_returns_total_and_newest_sample() {
-    let harness = PreviewHarness::new();
-    harness.save_account("primary", "Primary");
+async fn source_message_page_returns_structured_not_found_for_unknown_source() {
+    let harness = ApiHarness::new();
+
+    let error = list_source_messages(
+        State(harness.state.clone()),
+        Path("missing".to_string()),
+        HeaderMap::new(),
+        Query(default_source_messages_query()),
+    )
+    .await
+    .expect_err("unknown source should fail");
+
+    let (status, body) = api_error_json(error).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "not_found");
+    assert_eq!(body["message"], "account not found");
+    assert_eq!(body["details"], serde_json::json!({}));
+}
+
+// spec: docs/L0-testing#api-boundary-contracts
+#[tokio::test]
+async fn source_mailboxes_return_structured_not_found_for_unknown_source() {
+    let harness = ApiHarness::new();
+
+    let error = list_mailboxes(State(harness.state.clone()), Path("missing".to_string()))
+        .await
+        .expect_err("unknown source should fail");
+
+    let (status, body) = api_error_json(error).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "not_found");
+    assert_eq!(body["message"], "account not found");
+    assert_eq!(body["details"], serde_json::json!({}));
+}
+
+// spec: docs/L0-testing#api-boundary-contracts
+#[tokio::test]
+async fn source_message_page_rejects_cursor_issued_for_another_source() {
+    let harness = ApiHarness::new();
+    harness.save_account("primary");
+    harness.save_account("secondary");
     harness.seed_messages(
         "primary",
         vec![
-            message("old-match", "Posthaste", "2026-03-31T10:00:00Z"),
-            message("new-match", "Posthaste", "2026-04-01T10:00:00Z"),
-            message("ignored", "Someone Else", "2026-04-02T10:00:00Z"),
+            message("primary-new", "2026-04-02T10:00:00Z"),
+            message("primary-old", "2026-04-01T10:00:00Z"),
         ],
     );
-
-    let Json(response) = expect_preview_ok(
-        preview_automation_rule(
-            State(harness.state.clone()),
-            Json(PreviewAutomationRuleRequest {
-                condition: rule(vec![source_is("primary"), from_contains("Posthaste")]),
-                limit: Some(1),
-            }),
-        )
-        .await,
+    harness.seed_messages(
+        "secondary",
+        vec![
+            message("secondary-new", "2026-04-02T11:00:00Z"),
+            message("secondary-old", "2026-04-01T11:00:00Z"),
+        ],
     );
-
-    assert_eq!(response.total, 2);
-    assert_eq!(response.items.len(), 1);
-    assert_eq!(response.items[0].id, MessageId::from("new-match"));
-}
-
-#[tokio::test]
-async fn preview_automation_rule_rejects_invalid_limit() {
-    let harness = PreviewHarness::new();
-
-    let error = preview_automation_rule(
+    let mut first_page_query = default_source_messages_query();
+    first_page_query.limit = Some(1);
+    let Json(first_page) = match list_source_messages(
         State(harness.state.clone()),
-        Json(PreviewAutomationRuleRequest {
-            condition: rule(Vec::new()),
-            limit: Some(0),
-        }),
+        Path("secondary".to_string()),
+        HeaderMap::new(),
+        Query(first_page_query),
     )
     .await
-    .expect_err("preview should reject a zero limit");
+    {
+        Ok(page) => page,
+        Err(error) => panic!(
+            "secondary page should load, got {}",
+            error.into_response().status()
+        ),
+    };
+    let cursor = first_page
+        .next_cursor
+        .expect("first secondary page should include a cursor");
 
-    assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
+    let mut cross_source_query = default_source_messages_query();
+    cross_source_query.cursor = Some(cursor);
+    let error = list_source_messages(
+        State(harness.state.clone()),
+        Path("primary".to_string()),
+        HeaderMap::new(),
+        Query(cross_source_query),
+    )
+    .await
+    .expect_err("cursor from another source should fail");
+
+    let (status, body) = api_error_json(error).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_cursor");
+    assert_eq!(body["details"], serde_json::json!({}));
 }

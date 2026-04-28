@@ -4,7 +4,9 @@ summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, ev
 modified: 2026-04-28
 reviewed: 2026-04-28
 depends:
+  - path: docs/L0-providers
   - path: docs/L0-sync
+  - path: docs/L0-testing
   - path: docs/L1-jmap
   - path: docs/L0-api
 dependents:
@@ -200,6 +202,7 @@ pub struct SyncBatch {
     pub messages: Vec<MessageRecord>,
     pub imap_mailbox_states: Vec<ImapMailboxSyncState>,
     pub imap_message_locations: Vec<ImapMessageLocation>,
+    pub deleted_imap_message_locations: Vec<ImapMessageLocationKey>,
     pub deleted_mailbox_ids: Vec<MailboxId>,
     pub deleted_message_ids: Vec<MessageId>,
     pub replace_all_mailboxes: bool,
@@ -219,11 +222,15 @@ When `replace_all_mailboxes` is true, the store compares the current local mailb
 
 When `replace_all_messages` is true, the store performs the same reconciliation for messages. This prevents deleted or expunged remote email from surviving locally after an `Email/changes` cursor gets too old for the server to calculate.
 
-IMAP sync batches also carry `imap_mailbox_states` and
-`imap_message_locations`. These rows are applied in the same transaction as
-their `MessageRecord`s so later sync cycles, lazy body fetches, and mutations
-can use persisted IMAP command state without deriving it from presentation
-fields. When an IMAP account has local mailbox role overrides, the store applies
+IMAP sync batches also carry `imap_mailbox_states`,
+`imap_message_locations`, and `deleted_imap_message_locations`. Upserted
+locations are full rows; deleted locations are identity keys without row metadata.
+They are applied in the same transaction as their `MessageRecord`s so later sync
+cycles, lazy body fetches, and mutations can use persisted IMAP command state
+without deriving it from presentation fields. Deleted IMAP locations are
+mailbox-scoped: removing one location removes that mailbox membership, but it
+must not delete the canonical message while another IMAP location still addresses
+it. When an IMAP account has local mailbox role overrides, the store applies
 those overrides over the incoming discovery role before writing the mailbox
 projection.
 

@@ -1368,9 +1368,11 @@ pub async fn list_mailboxes(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
+    let account_id = AccountId(source_id);
+    load_account(state.as_ref(), &account_id)?;
     state
         .service
-        .list_mailboxes(&AccountId(source_id))
+        .list_mailboxes(&account_id)
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
@@ -1417,10 +1419,13 @@ pub async fn list_source_messages(
     let mailbox_id = query.mailbox_id.map(MailboxId);
     let limit = message_limit(query.limit)?;
     let cursor = parse_message_cursor(query.cursor.as_deref())?;
+    let account_id = AccountId::from(source_id.as_str());
+    load_account(state.as_ref(), &account_id)?;
+    validate_source_message_cursor(&account_id, cursor.as_ref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
     if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
-        let scoped_rule = source_message_scope_rule(&source_id, mailbox_id.as_ref());
+        let scoped_rule = source_message_scope_rule(account_id.as_str(), mailbox_id.as_ref());
         let result_rule = combine_rules(vec![scoped_rule.clone(), search_rule]);
         let page = state
             .service
@@ -1445,7 +1450,7 @@ pub async fn list_source_messages(
     let page = state
         .service
         .list_message_page(
-            &AccountId(source_id),
+            &account_id,
             mailbox_id.as_ref(),
             limit,
             cursor.as_ref(),
@@ -1454,6 +1459,20 @@ pub async fn list_source_messages(
         )
         .map_err(ApiError::from_service_error)?;
     Ok(Json(message_page_response(page)))
+}
+
+fn validate_source_message_cursor(
+    account_id: &AccountId,
+    cursor: Option<&MessageCursor>,
+) -> Result<(), ApiError> {
+    if cursor.is_some_and(|cursor| &cursor.source_id != account_id) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cursor",
+            "cursor does not belong to requested source",
+        ));
+    }
+    Ok(())
 }
 
 /// GET /v1/messages/search

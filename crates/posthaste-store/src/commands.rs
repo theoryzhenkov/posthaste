@@ -58,6 +58,7 @@ impl SyncWriteStore for DatabaseStore {
             mailbox_count = batch.mailboxes.len(),
             message_count = batch.messages.len(),
             deleted_mailbox_count = batch.deleted_mailbox_ids.len(),
+            deleted_imap_location_count = batch.deleted_imap_message_locations.len(),
             deleted_message_count = batch.deleted_message_ids.len(),
             event_count = events.len(),
             duration_ms = started.elapsed().as_millis() as u64,

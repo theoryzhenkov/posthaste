@@ -328,7 +328,14 @@ impl MessageDetailStore for TestStore {
 
 impl SyncStateStore for TestStore {
     fn get_sync_cursors(&self, _account_id: &AccountId) -> Result<Vec<SyncCursor>, StoreError> {
-        Ok(Vec::new())
+        Ok(self
+            .mutation_state
+            .lock()
+            .expect("mutation state lock poisoned")
+            .cursor
+            .clone()
+            .into_iter()
+            .collect())
     }
 
     fn get_cursor(
@@ -402,8 +409,25 @@ impl SyncWriteStore for TestStore {
     fn apply_sync_batch(
         &self,
         _account_id: &AccountId,
-        _batch: &SyncBatch,
+        batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
+        let mut state = self
+            .mutation_state
+            .lock()
+            .expect("mutation state lock poisoned");
+        if let Some(cursor) = batch
+            .cursors
+            .iter()
+            .find(|cursor| cursor.object_type == SyncObject::Message)
+        {
+            state.cursor = Some(cursor.clone());
+        }
+        if let Some(message) = batch.messages.last() {
+            state.mailbox_ids = message.mailbox_ids.clone();
+        }
+        if !batch.deleted_message_ids.is_empty() {
+            state.mailbox_ids.clear();
+        }
         Ok(Vec::new())
     }
 
@@ -1147,6 +1171,7 @@ async fn sync_account_records_body_cache_candidate_with_body_only_fetch_cost() {
             messages: vec![sample_message_record("message-1", 12 * 1024 * 1024, true)],
             imap_mailbox_states: Vec::new(),
             imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
@@ -1188,6 +1213,7 @@ async fn sync_account_records_imap_body_candidate_with_raw_message_fetch_cost() 
             messages: vec![sample_message_record("message-1", 12 * 1024 * 1024, true)],
             imap_mailbox_states: Vec::new(),
             imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
@@ -1706,6 +1732,7 @@ async fn sync_applies_matching_automation_tag() {
             }],
             imap_mailbox_states: Vec::new(),
             imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: false,
@@ -1813,13 +1840,100 @@ async fn mixed_message_mutations_reuse_advanced_cursor() {
     );
 }
 
+// spec: docs/L0-testing#sync-convergence-contracts
+// spec: docs/L1-sync#conflict-model
+#[tokio::test]
+async fn state_mismatch_refreshes_remote_projection_without_retrying_original_mutation() {
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let mut remote_message = sample_message_record("message-1", 0, false);
+    remote_message.mailbox_ids = vec![MailboxId::from("archive")];
+    let gateway = MutationGateway::with_sync_batch(
+        2,
+        SyncBatch {
+            mailboxes: Vec::new(),
+            messages: vec![remote_message],
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
+            replace_all_messages: false,
+            cursors: vec![SyncCursor {
+                object_type: SyncObject::Message,
+                state: "message-2".to_string(),
+                updated_at: crate::RFC3339_EPOCH.to_string(),
+            }],
+        },
+    );
+
+    let error = service
+        .set_keywords(
+            &account_id,
+            &MessageId::from("message-1"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+            &gateway,
+        )
+        .await
+        .expect_err("stale mutation should still report a state mismatch");
+
+    assert_eq!(error.code(), "state_mismatch");
+    assert_eq!(
+        store
+            .get_cursor(&account_id, SyncObject::Message)
+            .expect("cursor lookup should succeed")
+            .expect("cursor should exist")
+            .state,
+        "message-2"
+    );
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account_id, &MessageId::from("message-1"))
+            .expect("mailbox lookup should succeed"),
+        vec![MailboxId::from("archive")]
+    );
+    assert!(store
+        .keyword_adds
+        .lock()
+        .expect("keyword adds lock poisoned")
+        .is_empty());
+}
+
 #[tokio::test]
 async fn genuine_state_mismatch_is_not_retried() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let config = Arc::new(TestConfig::default());
     let service = MailService::new(store.clone(), config);
-    let gateway = MutationGateway::with_revision(2);
+    let gateway = MutationGateway::with_sync_batch(
+        2,
+        SyncBatch {
+            mailboxes: Vec::new(),
+            messages: Vec::new(),
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
+            replace_all_messages: false,
+            cursors: vec![SyncCursor {
+                object_type: SyncObject::Message,
+                state: "message-2".to_string(),
+                updated_at: crate::RFC3339_EPOCH.to_string(),
+            }],
+        },
+    );
 
     let error = service
         .set_keywords(
@@ -1841,8 +1955,13 @@ async fn genuine_state_mismatch_is_not_retried() {
             .expect("cursor lookup should succeed")
             .expect("cursor should exist")
             .state,
-        "message-1"
+        "message-2"
     );
+    assert!(store
+        .keyword_adds
+        .lock()
+        .expect("keyword adds lock poisoned")
+        .is_empty());
 }
 
 #[test]

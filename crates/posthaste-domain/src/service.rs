@@ -641,6 +641,7 @@ impl MailService {
             json!({
                 "mailboxCount": batch.mailboxes.len(),
                 "messageCount": batch.messages.len(),
+                "deletedImapLocationCount": batch.deleted_imap_message_locations.len(),
                 "deletedMessageCount": batch.deleted_message_ids.len(),
                 "automationEventCount": action_count,
                 "trigger": trigger.as_str(),

@@ -356,6 +356,7 @@ impl MailGateway for ScriptedGateway {
             messages: state.messages.values().cloned().collect(),
             imap_mailbox_states: Vec::new(),
             imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
             deleted_mailbox_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             replace_all_mailboxes: true,

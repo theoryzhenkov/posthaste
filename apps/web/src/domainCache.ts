@@ -205,11 +205,13 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
     case EVENT_TOPICS.MessageArrived: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
       return
     }
     case EVENT_TOPICS.MessageKeywordsChanged: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
 
       const keywords = event.payload.keywords
       const patched =
@@ -236,6 +238,7 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
     case EVENT_TOPICS.MessageMailboxesChanged: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
       if (target) {
         void queryClient.invalidateQueries({
           queryKey: mailKeys.message(target.sourceId, target.messageId),
@@ -254,6 +257,7 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
     }
     case EVENT_TOPICS.MessageUpdated: {
       if (target) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
         void queryClient.invalidateQueries({
           queryKey: mailKeys.message(target.sourceId, target.messageId),
         })
@@ -288,6 +292,15 @@ export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
     }
     case EVENT_TOPICS.AccountUpdated: {
       invalidateAccountReadModels(queryClient, event.accountId)
+      return
+    }
+    case EVENT_TOPICS.MailboxUpdated: {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.mailboxes(event.accountId),
+      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
       return
     }
     case EVENT_TOPICS.AccountDeleted: {

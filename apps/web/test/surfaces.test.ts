@@ -80,4 +80,23 @@ describe('surface routes', () => {
       parseSurfaceRoute('/surface/settings?targetKind=smartMailbox'),
     ).toBeNull()
   })
+
+  // spec: docs/L0-testing#frontend-state-contracts
+  it('rejects settings target routes with ids from another target kind', () => {
+    expect(
+      parseSurfaceRoute(
+        '/surface/settings?targetKind=account&accountId=primary&smartMailboxId=sm-work',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/settings?targetKind=newAccount&accountId=primary',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/settings?targetKind=sourceMailbox&sourceAccountId=primary&sourceMailboxId=inbox&accountId=primary',
+      ),
+    ).toBeNull()
+  })
 })

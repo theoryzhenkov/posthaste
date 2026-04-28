@@ -35,7 +35,7 @@ use posthaste_domain::{
     CacheSignalUpdate, CacheStore, CachedSenderAddress, CommandResult, ConversationCursor,
     ConversationId, ConversationPage, ConversationReadStore, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, EventStore, FetchedBody,
-    ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationStore,
+    ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationKey, ImapMessageLocationStore,
     ImapMessageLocationWriteStore, ImapModSeq, ImapSyncStateStore, ImapSyncStateWriteStore,
     ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxRole, MailboxRoleOverrideStore,
     MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore,

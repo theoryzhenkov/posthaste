@@ -66,6 +66,15 @@ export type SurfaceDescriptor =
   | AttachmentSurfaceDescriptor
   | SettingsSurfaceDescriptor
 
+const SETTINGS_TARGET_PARAM_KEYS = [
+  'accountId',
+  'smartMailboxId',
+  'sourceAccountId',
+  'sourceMailboxId',
+] as const
+
+type SettingsTargetParamKey = (typeof SETTINGS_TARGET_PARAM_KEYS)[number]
+
 export function messageSurfaceFromSelection(
   selection: MailSelection,
 ): MessageSurfaceDescriptor {
@@ -297,22 +306,42 @@ function parseSettingsTarget(
 
   switch (targetKind) {
     case SettingsSurfaceTargetKind.Account: {
+      if (!hasOnlySettingsTargetParams(params, ['accountId'])) {
+        return undefined
+      }
       const accountId = params.get('accountId')
       return accountId
         ? { kind: SettingsSurfaceTargetKind.Account, accountId }
         : undefined
     }
     case SettingsSurfaceTargetKind.NewAccount:
+      if (!hasOnlySettingsTargetParams(params, [])) {
+        return undefined
+      }
       return { kind: SettingsSurfaceTargetKind.NewAccount }
     case SettingsSurfaceTargetKind.SmartMailbox: {
+      if (!hasOnlySettingsTargetParams(params, ['smartMailboxId'])) {
+        return undefined
+      }
       const smartMailboxId = params.get('smartMailboxId')
       return smartMailboxId
         ? { kind: SettingsSurfaceTargetKind.SmartMailbox, smartMailboxId }
         : undefined
     }
     case SettingsSurfaceTargetKind.NewSmartMailbox:
+      if (!hasOnlySettingsTargetParams(params, [])) {
+        return undefined
+      }
       return { kind: SettingsSurfaceTargetKind.NewSmartMailbox }
     case SettingsSurfaceTargetKind.SourceMailbox: {
+      if (
+        !hasOnlySettingsTargetParams(params, [
+          'sourceAccountId',
+          'sourceMailboxId',
+        ])
+      ) {
+        return undefined
+      }
       const sourceAccountId = params.get('sourceAccountId')
       const sourceMailboxId = params.get('sourceMailboxId')
       return sourceAccountId && sourceMailboxId
@@ -326,6 +355,15 @@ function parseSettingsTarget(
     default:
       return undefined
   }
+}
+
+function hasOnlySettingsTargetParams(
+  params: URLSearchParams,
+  allowed: readonly SettingsTargetParamKey[],
+): boolean {
+  return SETTINGS_TARGET_PARAM_KEYS.every(
+    (key) => allowed.includes(key) || !params.has(key),
+  )
 }
 
 function isSettingsSurfaceCategory(
