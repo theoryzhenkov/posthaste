@@ -615,6 +615,25 @@ h1 {
   text-wrap: pretty;
 }
 
+.reader-message a,
+.landscape-copy a,
+.note-row a,
+.theme-copy a,
+.footer-section a {
+  color: var(--amber);
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.reader-message a:hover,
+.landscape-copy a:hover,
+.note-row a:hover,
+.theme-copy a:hover,
+.footer-section a:hover {
+  color: oklch(0.86 0.14 78);
+}
+
 .landscape-section {
   min-height: 360px;
   display: grid;
