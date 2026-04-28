@@ -1,5 +1,35 @@
 use super::*;
 
+impl MailboxRoleOverrideStore for DatabaseStore {
+    /// Stores a local mailbox role override for providers whose mailbox role
+    /// metadata cannot be changed remotely.
+    fn set_mailbox_role_override(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
+    ) -> Result<(), StoreError> {
+        validate_mailbox_role(role)?;
+        let updated_at = now_iso8601()?;
+        self.write_transaction(|tx| {
+            if let Some(clear_role_from) = clear_role_from.filter(|id| *id != mailbox_id) {
+                upsert_mailbox_role_override_tx(
+                    tx,
+                    account_id,
+                    clear_role_from,
+                    None,
+                    &updated_at,
+                )?;
+                update_mailbox_role_tx(tx, account_id, clear_role_from, None)?;
+            }
+            ensure_mailbox_role_is_available_tx(tx, account_id, mailbox_id, role)?;
+            upsert_mailbox_role_override_tx(tx, account_id, mailbox_id, role, &updated_at)?;
+            update_mailbox_role_tx(tx, account_id, mailbox_id, role)
+        })
+    }
+}
+
 impl SyncWriteStore for DatabaseStore {
     /// Applies a sync batch within a single SQLite transaction: stages raw
     /// bodies to disk first, then upserts/deletes mailboxes and messages,
@@ -55,6 +85,81 @@ impl SyncWriteStore for DatabaseStore {
             apply_message_body_tx(tx, account_id, message_id, body, raw_ref.as_ref())
         })
     }
+}
+
+fn upsert_mailbox_role_override_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    mailbox_id: &MailboxId,
+    role: Option<&str>,
+    updated_at: &str,
+) -> Result<(), StoreError> {
+    tx.execute(
+        "INSERT INTO mailbox_role_override (account_id, mailbox_id, role, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
+            role = excluded.role,
+            updated_at = excluded.updated_at",
+        params![account_id.as_str(), mailbox_id.as_str(), role, updated_at,],
+    )
+    .map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+fn validate_mailbox_role(role: Option<&str>) -> Result<(), StoreError> {
+    if let Some(role) = role.filter(|role| MailboxRole::parse(role).is_none()) {
+        return Err(StoreError::Conflict(format!(
+            "unsupported mailbox role: {role}"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_mailbox_role_is_available_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    mailbox_id: &MailboxId,
+    role: Option<&str>,
+) -> Result<(), StoreError> {
+    let Some(role) = role else {
+        return Ok(());
+    };
+    let owner = tx
+        .query_row(
+            "SELECT id FROM mailbox
+             WHERE account_id = ?1 AND role = ?2 AND id != ?3
+             LIMIT 1",
+            params![account_id.as_str(), role, mailbox_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?;
+    if let Some(owner) = owner {
+        return Err(StoreError::Conflict(format!(
+            "mailbox role {role} already assigned to mailbox:{owner}"
+        )));
+    }
+    Ok(())
+}
+
+fn update_mailbox_role_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    mailbox_id: &MailboxId,
+    role: Option<&str>,
+) -> Result<(), StoreError> {
+    let affected = tx
+        .execute(
+            "UPDATE mailbox
+             SET role = ?3
+             WHERE account_id = ?1 AND id = ?2",
+            params![account_id.as_str(), mailbox_id.as_str(), role],
+        )
+        .map_err(sql_to_store_error)?;
+    if affected == 0 {
+        return Err(StoreError::NotFound(format!("mailbox:{mailbox_id}")));
+    }
+    Ok(())
 }
 
 impl MessageCommandStore for DatabaseStore {

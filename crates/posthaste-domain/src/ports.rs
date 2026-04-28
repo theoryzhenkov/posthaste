@@ -163,6 +163,21 @@ pub trait MailboxReadStore: Send + Sync {
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError>;
 }
 
+/// Local mailbox metadata overrides for provider fields that cannot be mutated
+/// remotely by every driver.
+pub trait MailboxRoleOverrideStore: Send + Sync {
+    /// Store a local mailbox role override.
+    ///
+    /// `role = None` is an explicit local clear, not "remove the override".
+    fn set_mailbox_role_override(
+        &self,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
+    ) -> Result<(), StoreError>;
+}
+
 /// Message list projection for UI queries.
 pub trait MessageListStore: Send + Sync {
     /// List messages, optionally filtered by mailbox.
@@ -606,6 +621,7 @@ pub trait AutomationBackfillStore: Send + Sync {
 /// @spec docs/L1-sync#sqlite-schema
 pub trait MailStore:
     MailboxReadStore
+    + MailboxRoleOverrideStore
     + MessageListStore
     + TagReadStore
     + ConversationReadStore
@@ -628,6 +644,7 @@ pub trait MailStore:
 
 impl<T> MailStore for T where
     T: MailboxReadStore
+        + MailboxRoleOverrideStore
         + MessageListStore
         + TagReadStore
         + ConversationReadStore

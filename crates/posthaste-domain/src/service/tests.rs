@@ -187,6 +187,18 @@ impl MailboxReadStore for TestStore {
     }
 }
 
+impl MailboxRoleOverrideStore for TestStore {
+    fn set_mailbox_role_override(
+        &self,
+        _account_id: &AccountId,
+        _mailbox_id: &MailboxId,
+        _role: Option<&str>,
+        _clear_role_from: Option<&MailboxId>,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
 impl MessageListStore for TestStore {
     fn list_messages(
         &self,
