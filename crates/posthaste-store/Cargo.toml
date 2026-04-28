@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = { workspace = true }
 hex = { workspace = true }
 posthaste-domain = { path = "../posthaste-domain" }
+posthaste-observability = { path = "../posthaste-observability" }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -14,4 +15,3 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }

@@ -7,8 +7,14 @@ default_log="$("$root/tools/dev/overmind/server-log-path.sh")"
 log_file="$default_log"
 level=""
 target=""
+event=""
 account=""
 sync_id=""
+request_id=""
+operation_id=""
+operation_kind=""
+operation_source=""
+session_id=""
 message=""
 since=""
 limit="200"
@@ -22,8 +28,14 @@ Options:
   --file PATH       JSONL log file to query (default: current dev server log)
   --level LEVEL     Match level exactly, e.g. INFO, WARN, ERROR
   --target TEXT     Match target substring
+  --event NAME      Match stable event name
   --account ID      Match fields.account_id, span.account_id, or spans[].account_id
   --sync-id ID      Match fields.sync_id, span.sync_id, or spans[].sync_id
+  --request-id ID   Match request correlation ID
+  --operation-id ID Match operation correlation ID
+  --operation-kind K Match operation kind, e.g. mail.search
+  --operation-source S Match operation source, e.g. message-list
+  --session-id ID   Match observability session ID
   --message TEXT    Match fields.message substring
   --since TIME      Keep events with timestamp >= TIME
   --limit N         Number of rows to print from the end (default: 200)
@@ -46,12 +58,36 @@ while [[ $# -gt 0 ]]; do
       target="${2:?--target requires a value}"
       shift 2
       ;;
+    --event)
+      event="${2:?--event requires a value}"
+      shift 2
+      ;;
     --account)
       account="${2:?--account requires a value}"
       shift 2
       ;;
     --sync-id)
       sync_id="${2:?--sync-id requires a value}"
+      shift 2
+      ;;
+    --request-id)
+      request_id="${2:?--request-id requires a value}"
+      shift 2
+      ;;
+    --operation-id)
+      operation_id="${2:?--operation-id requires a value}"
+      shift 2
+      ;;
+    --operation-kind)
+      operation_kind="${2:?--operation-kind requires a value}"
+      shift 2
+      ;;
+    --operation-source)
+      operation_source="${2:?--operation-source requires a value}"
+      shift 2
+      ;;
+    --session-id)
+      session_id="${2:?--session-id requires a value}"
       shift 2
       ;;
     --message)
@@ -103,33 +139,40 @@ fi
 
 jq_filter='
   def field_message: .fields.message // .message // "";
-  def field_account: .fields.account_id // .span.account_id // "";
-  def field_sync_id: .fields.sync_id // .span.sync_id // "";
-  def account_matches($account):
-    $account == ""
-    or .fields.account_id == $account
-    or .span.account_id == $account
-    or any(.spans[]?; .account_id == $account);
-  def sync_id_matches($sync_id):
-    $sync_id == ""
-    or .fields.sync_id == $sync_id
-    or .span.sync_id == $sync_id
-    or any(.spans[]?; .sync_id == $sync_id);
+  def field_value($name):
+    .fields[$name] // .span[$name] // (first(.spans[]? | select(has($name)) | .[$name]) // "");
+  def value_matches($name; $value):
+    $value == ""
+    or .fields[$name] == $value
+    or .span[$name] == $value
+    or any(.spans[]?; .[$name] == $value);
 
   select($level == "" or .level == ($level | ascii_upcase))
   | select($target == "" or ((.target // "") | contains($target)))
+  | select(value_matches("event"; $event))
   | select($message == "" or (field_message | contains($message)))
   | select($since == "" or ((.timestamp // "") >= $since))
-  | select(account_matches($account))
-  | select(sync_id_matches($sync_id))
+  | select(value_matches("account_id"; $account))
+  | select(value_matches("sync_id"; $sync_id))
+  | select(value_matches("request_id"; $request_id))
+  | select(value_matches("operation_id"; $operation_id))
+  | select(value_matches("operation_kind"; $operation_kind))
+  | select(value_matches("operation_source"; $operation_source))
+  | select(value_matches("session_id"; $session_id))
 '
 
 if [[ "$json" == "true" ]]; then
   jq -c \
     --arg level "$level" \
     --arg target "$target" \
+    --arg event "$event" \
     --arg account "$account" \
     --arg sync_id "$sync_id" \
+    --arg request_id "$request_id" \
+    --arg operation_id "$operation_id" \
+    --arg operation_kind "$operation_kind" \
+    --arg operation_source "$operation_source" \
+    --arg session_id "$session_id" \
     --arg message "$message" \
     --arg since "$since" \
     "$jq_filter" \
@@ -138,8 +181,14 @@ else
   jq -r \
     --arg level "$level" \
     --arg target "$target" \
+    --arg event "$event" \
     --arg account "$account" \
     --arg sync_id "$sync_id" \
+    --arg request_id "$request_id" \
+    --arg operation_id "$operation_id" \
+    --arg operation_kind "$operation_kind" \
+    --arg operation_source "$operation_source" \
+    --arg session_id "$session_id" \
     --arg message "$message" \
     --arg since "$since" \
     "$jq_filter
@@ -147,8 +196,12 @@ else
         (.timestamp // \"\"),
         (.level // \"\"),
         (.target // \"\"),
-        (field_account // \"\"),
-        (field_sync_id // \"\"),
+        field_value(\"event\"),
+        field_value(\"account_id\"),
+        field_value(\"sync_id\"),
+        field_value(\"request_id\"),
+        field_value(\"operation_id\"),
+        field_value(\"operation_kind\"),
         field_message
       ]
     | @tsv" \

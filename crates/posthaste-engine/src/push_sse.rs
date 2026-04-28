@@ -4,8 +4,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use jmap_client::client::Client;
 use posthaste_domain::{AccountId, GatewayError, PushStream, PushTransport};
-
-use tracing::{debug, warn};
+use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::live::map_gateway_error;
 use crate::push_common::convert_sse_push_notification;
@@ -51,7 +50,8 @@ impl PushTransport for SsePushTransport {
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
         let target_url = self.client.session().event_source_url().to_string();
-        debug!(
+        ph_debug!(
+            events::PUSH_SSE_STREAM_OPENING,
             account_id = %account_id,
             server_account_id = %self.server_account_id,
             target_url = %target_url,
@@ -61,7 +61,11 @@ impl PushTransport for SsePushTransport {
         let stream = self
             .client
             .event_source(
-                crate::WATCHED_DATA_TYPES.into_iter().collect::<Vec<_>>().into_iter().into(),
+                crate::WATCHED_DATA_TYPES
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .into(),
                 false,
                 Some(60),
                 checkpoint,
@@ -69,7 +73,13 @@ impl PushTransport for SsePushTransport {
             .await
             .map_err(|error| {
                 let mapped = map_gateway_error(error);
-                warn!(account_id = %account_id, target_url = %target_url, error = %mapped, "SSE connection failed");
+                ph_warn!(
+                    events::PUSH_SSE_CONNECTION_FAILED,
+                    account_id = %account_id,
+                    target_url = %target_url,
+                    error = %mapped,
+                    "SSE connection failed"
+                );
                 mapped
             })?;
 

@@ -1,5 +1,6 @@
 import pino from 'pino'
 import { invoke } from '@tauri-apps/api/core'
+import type { LogEvent } from './logEvents'
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -19,6 +20,7 @@ type WriteObj = Record<string, unknown> & {
   level: number
   domain?: string
   msg?: string
+  event?: LogEvent
   requestId?: string
   operationId?: string
   operationKind?: string
@@ -39,14 +41,17 @@ function sendToBackend(obj: WriteObj): void {
   const domain = obj.domain ?? 'app'
   const message = obj.msg ?? JSON.stringify(obj)
   invoke('log_from_frontend', {
-    level,
-    domain,
-    message,
-    requestId: optionalString(obj.requestId),
-    operationId: optionalString(obj.operationId),
-    operationKind: optionalString(obj.operationKind),
-    operationSource: optionalString(obj.operationSource),
-    sessionId: optionalString(obj.sessionId),
+    entry: {
+      level,
+      domain,
+      message,
+      event: optionalString(obj.event),
+      requestId: optionalString(obj.requestId),
+      operationId: optionalString(obj.operationId),
+      operationKind: optionalString(obj.operationKind),
+      operationSource: optionalString(obj.operationSource),
+      sessionId: optionalString(obj.sessionId),
+    },
   }).catch(() => {})
 }
 
@@ -101,8 +106,35 @@ const logger = pino({
   browser: browserOpts,
 })
 
-export const syncLogger = logger.child({ domain: 'sync' })
-export const uiLogger = logger.child({ domain: 'ui' })
-export const apiLogger = logger.child({ domain: 'api' })
+export type LogFields = {
+  event: LogEvent
+  requestId?: string
+  operationId?: string
+  operationKind?: string
+  operationSource?: string
+  sessionId?: string
+  [key: string]: unknown
+}
 
-export default logger
+export interface TypedLogger {
+  trace(fields: LogFields, message: string): void
+  debug(fields: LogFields, message: string): void
+  info(fields: LogFields, message: string): void
+  warn(fields: LogFields, message: string): void
+  error(fields: LogFields, message: string): void
+}
+
+function typedLogger(domain: string): TypedLogger {
+  const child = logger.child({ domain })
+  return {
+    trace: (fields, message) => child.trace(fields, message),
+    debug: (fields, message) => child.debug(fields, message),
+    info: (fields, message) => child.info(fields, message),
+    warn: (fields, message) => child.warn(fields, message),
+    error: (fields, message) => child.error(fields, message),
+  }
+}
+
+export const syncLogger = typedLogger('sync')
+export const uiLogger = typedLogger('ui')
+export const apiLogger = typedLogger('api')

@@ -6,7 +6,7 @@ use posthaste_domain::{
     GatewayError, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncProgressReporter,
     SyncProgressStage, SyncTrigger,
 };
-use tracing::info;
+use posthaste_observability::{events, ph_info};
 
 use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
 
@@ -30,7 +30,8 @@ pub(crate) async fn sync_account(
         .find(|cursor| cursor.object_type == SyncObject::Message)
         .map(|cursor| cursor.state.as_str());
 
-    info!(
+    ph_info!(
+        events::JMAP_SYNC_FETCH_STARTED,
         has_mailbox_state = mailbox_cursor.is_some(),
         has_message_state = message_cursor.is_some(),
         "JMAP sync fetch started"
@@ -45,7 +46,8 @@ pub(crate) async fn sync_account(
         JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching mailboxes"),
     );
     let mailbox_sync = fetch_mailbox_sync(client, mailbox_cursor).await?;
-    info!(
+    ph_info!(
+        events::JMAP_SYNC_MAILBOX_FETCHED,
         mode = if mailbox_sync.replace_all_mailboxes {
             "full"
         } else {
@@ -62,7 +64,8 @@ pub(crate) async fn sync_account(
         JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching messages"),
     );
     let email_sync = fetch_email_sync(client, message_cursor).await?;
-    info!(
+    ph_info!(
+        events::JMAP_SYNC_BATCH_FETCHED,
         mailboxes = mailbox_sync.mailboxes.len(),
         messages = email_sync.messages.len(),
         deleted_mailboxes = mailbox_sync.deleted_mailbox_ids.len(),

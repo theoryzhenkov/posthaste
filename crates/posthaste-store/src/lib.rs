@@ -49,12 +49,11 @@ use posthaste_domain::{
     EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED, EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
+use posthaste_observability::{events, ph_debug, ph_info};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-
-use tracing::{debug, info};
 
 use crate::db::{
     bool_to_i64, configure_connection, init_schema, io_to_store_error, json_to_store_error,

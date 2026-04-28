@@ -18,6 +18,7 @@ import {
   useCommandPaletteResults,
 } from '@/hooks/useCommandPaletteResults'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { createOperationContext } from '@/observability'
 import { queryKeys } from '@/queryKeys'
 import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
@@ -80,6 +81,13 @@ export function CommandPalette({
   const serverQuery =
     queryValidation.state === 'valid' ? normalizeAppliedSearchQuery(query) : ''
   const debouncedServerQuery = useDebouncedValue(serverQuery, 180)
+  const searchPreviewOperation = useMemo(
+    () =>
+      debouncedServerQuery
+        ? createOperationContext('mail.search.preview', 'command-palette')
+        : undefined,
+    [debouncedServerQuery],
+  )
   const { data: sidebar } = useQuery({
     queryKey: ['sidebar'],
     queryFn: fetchSidebar,
@@ -97,6 +105,7 @@ export function CommandPalette({
           q: debouncedServerQuery,
           limit: 8,
           signal,
+          operation: searchPreviewOperation,
         }),
       enabled: debouncedServerQuery.length > 0,
     })),

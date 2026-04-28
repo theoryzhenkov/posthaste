@@ -8,9 +8,9 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+posthaste-observability = { path = "../posthaste-observability" }
 thiserror = { workspace = true }
 time = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

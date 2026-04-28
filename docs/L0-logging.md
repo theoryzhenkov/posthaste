@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Production-grade structured logging and tracing across Rust backend and React frontend"
-modified: 2026-04-04
-reviewed: 2026-04-24
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-api
   - path: docs/L0-sync
@@ -30,6 +30,8 @@ In scope:
 - Dual-sink output: human-readable stderr (dev) + JSON-lines log files (production)
 - Daily log rotation (7-day retention cleanup deferred — see L1 assertion `seven-day-retention`)
 - Per-request HTTP tracing via `tower-http::TraceLayer`
+- Request, operation, session, process, and source metadata so parallel frontend/backend activity can be queried as one local operation
+- Typed event registries and build/typecheck guards so application log calls cannot bypass the structured event contract
 - Log level as a user-facing setting in the TOML config, runtime-reconfigurable if feasible
 - Priority instrumentation of JMAP sync and push transport
 - Frontend-to-backend log forwarding via Tauri IPC (pino logs and WebKit console output routed to the Rust tracing subscriber)
@@ -37,6 +39,7 @@ In scope:
 Out of scope (for now):
 
 - Prometheus metrics or OpenTelemetry export
+- Anonymous remote telemetry upload or product analytics ingestion
 - Crash / panic reporting service
 - Fine-grained SQL query tracing
 - In-app log viewer UI

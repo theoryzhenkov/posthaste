@@ -32,7 +32,11 @@ impl DatabaseStore {
         let mut connection = connection;
         init_schema(&mut connection)?;
 
-        info!(db_path = %db_path.display(), "database store opened");
+        ph_info!(
+            events::DATABASE_OPENED,
+            db_path = %db_path.display(),
+            "database store opened"
+        );
         Ok(Self {
             db_path,
             data_root,

@@ -3338,6 +3338,7 @@ dependencies = [
 name = "posthaste-desktop"
 version = "0.1.0"
 dependencies = [
+ "posthaste-observability",
  "posthaste-server",
  "serde",
  "tauri",
@@ -3353,12 +3354,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
+ "posthaste-observability",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -3371,13 +3372,13 @@ dependencies = [
  "futures-util",
  "jmap-client",
  "posthaste-domain",
+ "posthaste-observability",
  "pulldown-cmark",
  "reqwest 0.12.28",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
- "tracing",
  "url",
 ]
 
@@ -3392,9 +3393,16 @@ dependencies = [
  "lettre",
  "mail-parser",
  "posthaste-domain",
+ "posthaste-observability",
  "pulldown-cmark",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "posthaste-observability"
+version = "0.1.0"
+dependencies = [
  "tracing",
 ]
 
@@ -3417,6 +3425,7 @@ dependencies = [
  "posthaste-domain",
  "posthaste-engine",
  "posthaste-imap",
+ "posthaste-observability",
  "posthaste-store",
  "serde",
  "serde_json",
@@ -3439,6 +3448,7 @@ dependencies = [
  "async-trait",
  "hex",
  "posthaste-domain",
+ "posthaste-observability",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3446,7 +3456,6 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use tracing::{debug, trace};
+use posthaste_observability::{events, ph_debug, ph_trace};
 
 use crate::{
     decide_cache_admission, score_cache_candidate, AccountDriver, AccountId, AccountSettings,
@@ -146,7 +146,8 @@ impl MailService {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        debug!(
+        ph_debug!(
+            events::CACHE_SEARCH_VISIBILITY_RECORDED,
             message_count = updates.len(),
             account_count = account_ids.len(),
             total_messages,
@@ -174,7 +175,8 @@ impl MailService {
             .list_cache_rescore_candidates(account_id, batch_size)?;
         outcome.scanned = candidates.len();
         if candidates.is_empty() {
-            debug!(
+            ph_trace!(
+                events::CACHE_RESCORE_NO_CANDIDATES,
                 account_id = %account_id,
                 "cache rescore worker found no dirty candidates"
             );
@@ -217,7 +219,8 @@ impl MailService {
                 let signals =
                     rescore_candidate_signals(candidate, fetch_unit, value_bytes, fetch_bytes);
                 let score = score_cache_candidate(&signals);
-                trace!(
+                ph_trace!(
+                    events::CACHE_RESCORE_CANDIDATE_SCORED,
                     account_id = %account_id,
                     message_id = candidate.message_id.as_str(),
                     layer = candidate.layer.as_str(),
@@ -249,7 +252,8 @@ impl MailService {
             .collect::<Vec<_>>();
         self.cache_store.update_cache_priorities(&updates)?;
         outcome.updated = updates.len();
-        debug!(
+        ph_debug!(
+            events::CACHE_RESCORE_COMPLETED,
             account_id = %account_id,
             scanned = outcome.scanned,
             updated = outcome.updated,
@@ -282,7 +286,8 @@ impl MailService {
             batch_size,
         )?;
         if queued > 0 {
-            debug!(
+            ph_debug!(
+                events::CACHE_RESCORE_STALE_QUEUED,
                 account_id = %account_id,
                 stale_after_seconds = stale_after.as_secs(),
                 stale_before = stale_before.as_str(),
@@ -312,7 +317,8 @@ impl MailService {
 
         let settings = self.config.get_app_settings()?;
         if !settings.cache_policy.cache_bodies {
-            debug!(
+            ph_debug!(
+                events::CACHE_BODY_SKIPPED_DISABLED,
                 account_id = %account_id,
                 layer = CacheLayer::Body.as_str(),
                 "cache worker skipped because body caching is disabled"
@@ -334,22 +340,43 @@ impl MailService {
             CacheLayer::Body,
             scan_limit,
         )?;
-        debug!(
-            account_id = %account_id,
-            layer = CacheLayer::Body.as_str(),
-            request_limit = lease.request_limit,
-            byte_limit = lease.byte_limit,
-            scan_limit,
-            candidate_count = candidates.len(),
-            used_bytes,
-            soft_cap_bytes = initial_budget.soft_cap_bytes,
-            effective_target_bytes = initial_budget.effective_target_bytes(),
-            hard_cap_bytes = initial_budget.hard_cap_bytes,
-            interactive_pressure = initial_budget.interactive_pressure,
-            "cache worker body batch planned"
-        );
+        let candidate_count = candidates.len();
+        if candidate_count > 0 {
+            ph_debug!(
+                events::CACHE_BODY_PLAN_CREATED,
+                account_id = %account_id,
+                layer = CacheLayer::Body.as_str(),
+                request_limit = lease.request_limit,
+                byte_limit = lease.byte_limit,
+                scan_limit,
+                candidate_count,
+                used_bytes,
+                soft_cap_bytes = initial_budget.soft_cap_bytes,
+                effective_target_bytes = initial_budget.effective_target_bytes(),
+                hard_cap_bytes = initial_budget.hard_cap_bytes,
+                interactive_pressure = initial_budget.interactive_pressure,
+                "cache worker body batch planned"
+            );
+        } else {
+            ph_trace!(
+                events::CACHE_BODY_PLAN_CREATED,
+                account_id = %account_id,
+                layer = CacheLayer::Body.as_str(),
+                request_limit = lease.request_limit,
+                byte_limit = lease.byte_limit,
+                scan_limit,
+                candidate_count,
+                used_bytes,
+                soft_cap_bytes = initial_budget.soft_cap_bytes,
+                effective_target_bytes = initial_budget.effective_target_bytes(),
+                hard_cap_bytes = initial_budget.hard_cap_bytes,
+                interactive_pressure = initial_budget.interactive_pressure,
+                "cache worker body batch planned"
+            );
+        }
         if candidates.is_empty() {
-            debug!(
+            ph_trace!(
+                events::CACHE_BODY_NO_CANDIDATES,
                 account_id = %account_id,
                 layer = CacheLayer::Body.as_str(),
                 "cache worker found no wanted body candidates"
@@ -363,7 +390,8 @@ impl MailService {
             outcome.scanned += 1;
             if candidate.fetch_bytes > remaining_lease_bytes {
                 outcome.skipped += 1;
-                debug!(
+                ph_trace!(
+                    events::CACHE_BODY_DEFERRED_BY_LEASE,
                     account_id = %account_id,
                     message_id = candidate.message_id.as_str(),
                     layer = candidate.layer.as_str(),
@@ -380,7 +408,8 @@ impl MailService {
                 .budget(used_bytes, lease.interactive_pressure);
             let admission =
                 decide_cache_admission(candidate.fetch_bytes, candidate.priority, None, &budget);
-            debug!(
+            ph_trace!(
+                events::CACHE_BODY_ADMISSION_EVALUATED,
                 account_id = %account_id,
                 message_id = candidate.message_id.as_str(),
                 layer = candidate.layer.as_str(),
@@ -412,7 +441,8 @@ impl MailService {
                 .attempted_bytes
                 .saturating_add(candidate.fetch_bytes);
             remaining_lease_bytes = remaining_lease_bytes.saturating_sub(candidate.fetch_bytes);
-            debug!(
+            ph_trace!(
+                events::CACHE_BODY_FETCH_STARTED,
                 account_id = %account_id,
                 message_id = %message_id,
                 layer = candidate.layer.as_str(),
@@ -427,7 +457,8 @@ impl MailService {
                 Err(error) => {
                     let service_error = ServiceError::from(error);
                     let error_code = service_error.code().to_string();
-                    debug!(
+                    ph_debug!(
+                        events::CACHE_BODY_FETCH_FAILED,
                         account_id = %account_id,
                         message_id = %message_id,
                         layer = candidate.layer.as_str(),
@@ -480,7 +511,8 @@ impl MailService {
             outcome.cached += 1;
             outcome.cached_bytes = outcome.cached_bytes.saturating_add(candidate.fetch_bytes);
             outcome.events.extend(result.events);
-            debug!(
+            ph_trace!(
+                events::CACHE_BODY_STORED,
                 account_id = %account_id,
                 message_id = %message_id,
                 layer = candidate.layer.as_str(),
@@ -502,7 +534,8 @@ impl MailService {
         messages: &[MessageRecord],
     ) -> Result<(), ServiceError> {
         if !policy.cache_bodies || messages.is_empty() {
-            debug!(
+            ph_debug!(
+                events::CACHE_BODY_CANDIDATE_GENERATION_SKIPPED,
                 account_id = %account_id,
                 message_count = messages.len(),
                 cache_bodies = policy.cache_bodies,
@@ -549,7 +582,8 @@ impl MailService {
                     pinned: false,
                 };
                 let score = score_cache_candidate(&signals);
-                trace!(
+                ph_trace!(
+                    events::CACHE_BODY_CANDIDATE_SCORED,
                     account_id = %account_id,
                     message_id = %message.id,
                     layer = CacheLayer::Body.as_str(),
@@ -590,7 +624,8 @@ impl MailService {
             .iter()
             .map(|candidate| candidate.value_bytes)
             .sum::<u64>();
-        debug!(
+        ph_debug!(
+            events::CACHE_BODY_CANDIDATES_SCORED,
             account_id = %account_id,
             driver = ?account.driver,
             fetch_unit = fetch_unit.as_str(),
@@ -601,7 +636,8 @@ impl MailService {
             "cache body candidates scored"
         );
         self.cache_store.upsert_cache_candidates(&candidates)?;
-        debug!(
+        ph_debug!(
+            events::CACHE_BODY_CANDIDATES_UPSERTED,
             account_id = %account_id,
             candidate_count = candidates.len(),
             "cache body candidates upserted"

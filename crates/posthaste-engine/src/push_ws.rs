@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use posthaste_domain::{AccountId, GatewayError, PushStream, PushTransport};
-
-use tracing::{debug, warn};
+use posthaste_observability::{events, ph_debug, ph_warn};
 
 use crate::live::map_gateway_error;
 use crate::push_common::convert_ws_push_object;
@@ -49,7 +48,8 @@ impl PushTransport for WsPushTransport {
         checkpoint: Option<&str>,
     ) -> Result<Option<PushStream>, GatewayError> {
         let target_url = self.ws.ws_url();
-        debug!(
+        ph_debug!(
+            events::PUSH_WS_STREAM_OPENING,
             account_id = %account_id,
             server_account_id = %self.server_account_id,
             target_url = target_url.as_deref(),
@@ -75,13 +75,22 @@ impl PushTransport for WsPushTransport {
                     }
                     Some(Err(error)) => {
                         let mapped = map_gateway_error(error);
-                        warn!(account_id = %account_id, error = %mapped, "WS push stream error");
+                        ph_warn!(
+                            events::PUSH_WS_STREAM_ERROR,
+                            account_id = %account_id,
+                            error = %mapped,
+                            "WS push stream error"
+                        );
                         ws.disconnect().await;
                         yield Err(mapped);
                         return;
                     }
                     None => {
-                        debug!(account_id = %account_id, "WS push stream ended");
+                        ph_debug!(
+                            events::PUSH_WS_STREAM_ENDED,
+                            account_id = %account_id,
+                            "WS push stream ended"
+                        );
                         ws.disconnect().await;
                         return;
                     }

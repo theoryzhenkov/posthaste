@@ -11,7 +11,7 @@ use posthaste_domain::{
     SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress, SyncProgressReporter,
     SyncProgressStage, SyncTrigger,
 };
-use tracing::{debug, info, warn};
+use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
 use crate::discovery::connect_authenticated_client;
 use crate::fetch::{
@@ -379,7 +379,8 @@ async fn plan_mailbox(
     store: Option<&dyn MailStore>,
 ) -> Result<PlannedImapMailbox, GatewayError> {
     let Some(store) = store else {
-        info!(
+        ph_info!(
+            events::IMAP_MAILBOX_SYNC_PLANNED,
             account_id = %account_id,
             mailbox_id = %mailbox.id,
             plan = "full_snapshot",
@@ -413,7 +414,8 @@ async fn plan_mailbox(
         .await
         .map_err(imap_error_to_gateway)?;
         if mailbox_status_proves_unchanged(stored_state, local_locations.len(), &status) {
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_SYNC_PLANNED,
                 account_id = %account_id,
                 mailbox_id = %mailbox.id,
                 plan = "skip_unchanged",
@@ -424,7 +426,8 @@ async fn plan_mailbox(
                 local_message_count = local_locations.len(),
                 "IMAP mailbox sync planned"
             );
-            debug!(
+            ph_debug!(
+                events::IMAP_MAILBOX_SYNC_PLAN_DETAIL,
                 account_id = %account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_name = %mailbox.name,
@@ -445,7 +448,8 @@ async fn plan_mailbox(
         .await
         .map_err(imap_error_to_gateway)?;
     let plan = plan_imap_mailbox_sync(capabilities, stored_state.as_ref(), &selected);
-    info!(
+    ph_info!(
+        events::IMAP_MAILBOX_SYNC_PLANNED,
         account_id = %account_id,
         mailbox_id = %mailbox.id,
         plan = imap_sync_plan_name(&plan),
@@ -456,7 +460,8 @@ async fn plan_mailbox(
         local_message_count = local_locations.len(),
         "IMAP mailbox sync planned"
     );
-    debug!(
+    ph_debug!(
+        events::IMAP_MAILBOX_SYNC_PLAN_DETAIL,
         account_id = %account_id,
         mailbox_id = %mailbox.id,
         mailbox_name = %mailbox.name,
@@ -549,7 +554,8 @@ async fn execute_mailbox_plan(
                     )
                     .with_message_count(0),
             );
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -572,7 +578,8 @@ async fn execute_mailbox_plan(
                         execution.mailbox_count,
                     ),
             );
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_STARTED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -595,7 +602,8 @@ async fn execute_mailbox_plan(
                 ));
             }
             let header_count = accumulator.record_header_snapshot(snapshot, execution.updated_at);
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -622,7 +630,8 @@ async fn execute_mailbox_plan(
                     execution.mailbox_count,
                 ),
             );
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_STARTED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -642,7 +651,8 @@ async fn execute_mailbox_plan(
             .map_err(imap_error_to_gateway)?;
             let summary =
                 accumulator.record_changed_since_snapshot(&mailbox, snapshot, execution.updated_at);
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -668,7 +678,8 @@ async fn execute_mailbox_plan(
                     execution.mailbox_count,
                 ),
             );
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_STARTED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -689,7 +700,8 @@ async fn execute_mailbox_plan(
                 &snapshot.headers,
             ));
             let header_count = accumulator.record_header_snapshot(snapshot, execution.updated_at);
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -714,7 +726,8 @@ async fn execute_mailbox_plan(
                     execution.mailbox_count,
                 ),
             );
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_STARTED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -734,7 +747,8 @@ async fn execute_mailbox_plan(
             .map_err(imap_error_to_gateway)?;
             let summary =
                 accumulator.record_uid_delta_snapshot(&mailbox, snapshot, execution.updated_at);
-            info!(
+            ph_info!(
+                events::IMAP_MAILBOX_HEADER_FETCH_COMPLETED,
                 account_id = %execution.account_id,
                 mailbox_id = %mailbox.id,
                 mailbox_index = execution.mailbox_ordinal,
@@ -788,7 +802,8 @@ impl MailGateway for LiveImapSmtpGateway {
             .iter()
             .filter(|mailbox| mailbox.selectable)
             .count();
-        info!(
+        ph_info!(
+            events::IMAP_SYNC_DISCOVERY_COMPLETED,
             account_id = %account_id,
             mailbox_count = discovery.mailboxes.len(),
             selectable_mailbox_count,
@@ -815,7 +830,8 @@ impl MailGateway for LiveImapSmtpGateway {
             planned_mailboxes_require_partial_delta_batch(&planned_mailboxes);
         let planned_mailbox_count = planned_mailboxes.len();
 
-        info!(
+        ph_info!(
+            events::IMAP_SYNC_FETCH_STARTED,
             account_id = %account_id,
             mailbox_count = planned_mailbox_count,
             account_full_message_snapshot,
@@ -840,7 +856,8 @@ impl MailGateway for LiveImapSmtpGateway {
         )
         .await?;
 
-        info!(
+        ph_info!(
+            events::IMAP_SYNC_FETCH_COMPLETED,
             account_id = %account_id,
             mailbox_count = planned_mailbox_count,
             message_count = accumulator.message_count(),
@@ -1069,14 +1086,18 @@ impl MailGateway for LiveImapSmtpGateway {
                     append_smtp_sent_copy(&self.config, &sent_mailbox.name, &submitted.raw_message)
                         .await
                 {
-                    warn!(
+                    ph_warn!(
+                        events::IMAP_SMTP_SENT_APPEND_FAILED,
                         mailbox = sent_mailbox.name,
                         error = %error,
                         "SMTP send accepted but IMAP Sent copy append failed"
                     );
                 }
             } else {
-                warn!("SMTP send accepted but no selectable IMAP Sent mailbox was discovered");
+                ph_warn!(
+                    events::IMAP_SMTP_SENT_MAILBOX_MISSING,
+                    "SMTP send accepted but no selectable IMAP Sent mailbox was discovered"
+                );
             }
         }
 

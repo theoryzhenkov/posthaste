@@ -35,10 +35,7 @@ import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
 import { isEditableKeyboardTarget } from './keyboard/inputTargets'
-import {
-  createOperationContext,
-  type OperationContext,
-} from '../observability'
+import { createOperationContext, type OperationContext } from '../observability'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -179,18 +176,24 @@ export function MessageList({
     () => viewKey(selectedView, searchQuery, sort),
     [selectedView, searchQuery, sort],
   )
-  const operation = useMemo(() => {
+  const operationEntry = useMemo(() => {
     const source =
       selectedView?.kind === 'smart-mailbox'
         ? 'message-list.smart-mailbox'
         : selectedView?.kind === 'source-mailbox'
           ? 'message-list.source-mailbox'
           : 'message-list'
-    return createOperationContext(
-      preparedSearchQuery.query ? 'mail.search' : 'mail.list',
-      source,
-    )
+    return {
+      // Keep the full view key as a local lifecycle input without logging
+      // query details in operation metadata.
+      viewKey: currentViewKey,
+      context: createOperationContext(
+        preparedSearchQuery.query ? 'mail.search' : 'mail.list',
+        source,
+      ),
+    }
   }, [currentViewKey, preparedSearchQuery.query, selectedView?.kind])
+  const operation = operationEntry.context
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const restoredViewKeyRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)

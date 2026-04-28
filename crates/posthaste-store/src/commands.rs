@@ -11,7 +11,8 @@ impl SyncWriteStore for DatabaseStore {
         account_id: &AccountId,
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError> {
-        debug!(
+        ph_debug!(
+            events::STORE_SYNC_BATCH_APPLYING,
             account_id = %account_id,
             mailboxes = batch.mailboxes.len(),
             messages = batch.messages.len(),
@@ -21,7 +22,8 @@ impl SyncWriteStore for DatabaseStore {
         let staged_bodies = stage_sync_bodies(self, account_id, batch)?;
         let events = self
             .write_transaction(|tx| apply_sync_batch_tx(tx, account_id, batch, &staged_bodies))?;
-        info!(
+        ph_info!(
+            events::STORE_SYNC_BATCH_APPLIED,
             account_id = %account_id,
             mailbox_count = batch.mailboxes.len(),
             message_count = batch.messages.len(),

@@ -8,10 +8,12 @@ run *args:
 
 # Build all crates
 build:
+    bash tools/dev/logs/check-rust-contract.sh
     cargo build
 
 # Build in release mode
 build-release:
+    bash tools/dev/logs/check-rust-contract.sh
     cargo build --release
 
 # Run tests
@@ -20,6 +22,7 @@ test *args:
 
 # Run clippy + check
 check:
+    bash tools/dev/logs/check-rust-contract.sh
     cargo clippy --workspace --all-targets -- -D warnings
 
 # Format code

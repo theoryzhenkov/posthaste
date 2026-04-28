@@ -8,6 +8,7 @@
  * @spec docs/L1-api#endpoint-table
  */
 import { apiLogger } from '../logger'
+import { LOG_EVENTS } from '../logEvents'
 import {
   createOperationContext,
   createRequestContext,
@@ -148,6 +149,7 @@ async function request<T>(
   const started = performance.now()
   apiLogger.debug(
     {
+      event: LOG_EVENTS.apiRequestStarted,
       requestId: context.requestId,
       operationId: context.operationId,
       operationKind: context.operationKind,
@@ -167,6 +169,7 @@ async function request<T>(
   } catch (error) {
     apiLogger.warn(
       {
+        event: LOG_EVENTS.apiRequestFailed,
         requestId: context.requestId,
         operationId: context.operationId,
         operationKind: context.operationKind,
@@ -183,6 +186,7 @@ async function request<T>(
   }
   apiLogger.debug(
     {
+      event: LOG_EVENTS.apiRequestCompleted,
       requestId: context.requestId,
       operationId: context.operationId,
       operationKind: context.operationKind,
