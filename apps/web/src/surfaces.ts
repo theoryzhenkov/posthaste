@@ -17,6 +17,16 @@ export interface MessageSurfaceDescriptor {
   }
 }
 
+export interface AttachmentSurfaceDescriptor {
+  kind: 'attachment'
+  disposition: SurfaceDisposition
+  params: {
+    sourceId: string
+    messageId: string
+    attachmentId: string
+  }
+}
+
 export interface SettingsSurfaceDescriptor {
   kind: 'settings'
   disposition: SurfaceDisposition
@@ -29,6 +39,7 @@ export interface SettingsSurfaceDescriptor {
 
 export type SurfaceDescriptor =
   | MessageSurfaceDescriptor
+  | AttachmentSurfaceDescriptor
   | SettingsSurfaceDescriptor
 
 export function messageSurfaceFromSelection(
@@ -58,6 +69,18 @@ export function settingsSurface(input?: {
       accountId: input?.accountId ?? null,
       smartMailboxId: input?.smartMailboxId ?? null,
     },
+  }
+}
+
+export function attachmentSurface(input: {
+  sourceId: string
+  messageId: string
+  attachmentId: string
+}): AttachmentSurfaceDescriptor {
+  return {
+    kind: 'attachment',
+    disposition: 'focused',
+    params: input,
   }
 }
 
@@ -92,6 +115,15 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
         disposition: 'focused',
         params: { conversationId, sourceId, messageId },
       }
+    }
+    case 'attachment': {
+      const sourceId = url.searchParams.get('sourceId')
+      const messageId = url.searchParams.get('messageId')
+      const attachmentId = url.searchParams.get('attachmentId')
+      if (!sourceId || !messageId || !attachmentId) {
+        return null
+      }
+      return attachmentSurface({ sourceId, messageId, attachmentId })
     }
     case 'settings': {
       const category = url.searchParams.get('category')

@@ -19,6 +19,15 @@ type WriteObj = Record<string, unknown> & {
   level: number
   domain?: string
   msg?: string
+  requestId?: string
+  operationId?: string
+  operationKind?: string
+  operationSource?: string
+  sessionId?: string
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null
 }
 
 /**
@@ -29,7 +38,16 @@ function sendToBackend(obj: WriteObj): void {
   const level = LEVEL_NAMES[obj.level] ?? 'info'
   const domain = obj.domain ?? 'app'
   const message = obj.msg ?? JSON.stringify(obj)
-  invoke('log_from_frontend', { level, domain, message }).catch(() => {})
+  invoke('log_from_frontend', {
+    level,
+    domain,
+    message,
+    requestId: optionalString(obj.requestId),
+    operationId: optionalString(obj.operationId),
+    operationKind: optionalString(obj.operationKind),
+    operationSource: optionalString(obj.operationSource),
+    sessionId: optionalString(obj.sessionId),
+  }).catch(() => {})
 }
 
 /**

@@ -2,8 +2,7 @@
  * Sandboxed iframe for rendering email HTML.
  *
  * Persisted message HTML is sanitized in Rust via ammonia before reaching the
- * frontend. Compose previews use locally generated Markdown HTML in the same
- * no-script sandbox before the message is sent.
+ * frontend.
  * The iframe uses `sandbox="allow-same-origin"` with no script execution.
  * Long messages scroll inside the iframe rather than expanding the detail pane.
  *
@@ -37,6 +36,9 @@ export function EmailFrame({
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         :root { color-scheme: light; }
+        html {
+            background: transparent;
+        }
         body {
             font-family: "Geist", system-ui, sans-serif;
             font-size: 14px;
@@ -44,7 +46,7 @@ export function EmailFrame({
             color: #141618;
             margin: 0;
             padding: 16px;
-            background: #FFFFFF;
+            background: transparent;
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
@@ -76,7 +78,7 @@ export function EmailFrame({
 
   return (
     <iframe
-      className={cn('block h-full w-full border-0 bg-card', className)}
+      className={cn('block h-full w-full border-0 bg-transparent', className)}
       sandbox="allow-same-origin"
       srcDoc={wrappedHtml}
       title={title}

@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why the frontend owns interaction, the handoff-led UI direction, and shell model"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: README
   - path: docs/L0-api
@@ -82,7 +82,7 @@ The default shell should use layered pane fills and thin separators. It should n
 
 Email HTML is sanitized in Rust via `ammonia` before reaching the frontend. The frontend renders sanitized HTML in a sandboxed `srcdoc` iframe with `sandbox="allow-same-origin"`. Scripts remain disabled because `allow-scripts` is never granted.
 
-The reader visual contract is set by the handoff. Plain text messages render directly in the reader body with `13px` Geist text and `1.6` line height. HTML messages may use an iframe, but the iframe's outer treatment must preserve the reference reader feel: header first, optional tags, optional attachment strip, then body content on `bgReader` with a `720px` maximum readable body width.
+The reader visual contract is set by the handoff, adjusted for real email rendering. Plain text messages render directly in the reader body with `13px` Geist text and `1.6` line height. HTML messages may use an iframe, but the iframe must inherit the reader surface background instead of painting a default white document slab. The body viewport fills the available reader width so responsive email layouts can use the space the user gives the pane.
 
 ## Keyboard-First Design
 

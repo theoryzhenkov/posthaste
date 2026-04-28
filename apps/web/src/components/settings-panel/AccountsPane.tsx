@@ -104,7 +104,7 @@ export function AccountsPane({
       <SettingsPage>
         <SettingsPageHeader
           title="Connected accounts"
-          description="Connect each mail source PostHaste should sync. Accounts keep their own credentials, status, and sync controls."
+          description="Connect each mail source Posthaste should sync. Accounts keep their own credentials, status, and sync controls."
         />
 
         {accounts.length === 0 ? (

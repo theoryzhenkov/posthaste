@@ -53,6 +53,10 @@ App
     │   ├── ShortcutReference
     │   └── Compose
     ├── SurfaceHost
+    │   └── FocusedSurface
+    │       ├── MessageDetail
+    │       ├── AttachmentSurface
+    │       └── SettingsPanel
 ```
 
 The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L2-ui-visual-reference.md). L1 owns interaction and data rules; L2 owns dimensions, colors, typography, and visual states.
@@ -67,10 +71,17 @@ React Query manages server state, but different surfaces use different strategie
 - `queryKeys.messages(selectedView, query, sort)` loads paginated individual message summaries for the selected mailbox or smart mailbox, with filtering and sorting executed by the backend.
 - `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
 - `mailKeys.message(sourceId, messageId)` loads full message detail, including lazily fetched body content when needed.
+- Attachment focused surfaces reuse `mailKeys.message(sourceId, messageId)` and resolve the selected attachment by `attachmentId`; they must not depend on parent-only React props.
 
 Mutable account display fields are canonical in the accounts query. Message and sidebar DTOs may contain `sourceName` snapshots, but the UI resolves visible account names from `sourceId -> account.name` through the account directory selector.
 
 Domain events and mutation results update caches through the centralized domain cache helper. Components should not invent ad hoc cache keys or scatter account/message invalidation rules locally. The message list still listens for live domain events and refreshes the current view when a relevant message or mailbox event arrives.
+
+## Loading And Progress
+
+Long-running loads and process state use the shared `ProgressBar` primitive rather than one-off pulse bars. It supports determinate percentages when the backend exposes counts and indeterminate motion when only pending state is known. Message detail loads, uncached body fetches, attachment preview loads, and account sync progress all use the same primitive so future tasks can share labels, accessibility, and reduced-motion behavior.
+
+The progress bar supplements skeleton layout placeholders; it does not replace the component's spatial placeholder. For an uncached message, the reader shows a compact progress meter above the header skeleton while the full detail is fetched. For an attachment focused surface, the shell shows progress while metadata loads and the preview area shows progress until the image or iframe finishes loading.
 
 ## MessageList
 
@@ -134,7 +145,7 @@ The message switcher intentionally enumerates message summaries inside the selec
 
 When an unread selected message detail successfully loads, the client marks that message as read by adding the JMAP `$seen` keyword through the backend message command API. This is a one-way automatic read transition; explicitly marking a message unread remains a user command.
 
-`EmailFrame` renders wrapped `srcdoc` HTML inside a sandboxed iframe with `allow-same-origin`. It is full-height within the detail body container, so long newsletters scroll inside the iframe rather than forcing the entire right pane to expand. This fixed-height viewport was introduced to solve broken scrolling in long HTML emails.
+`EmailFrame` renders wrapped `srcdoc` HTML inside a sandboxed iframe with `allow-same-origin`. It is full-height within the detail body container, so long newsletters scroll inside the iframe rather than forcing the entire right pane to expand. This fixed-height viewport was introduced to solve broken scrolling in long HTML emails. The iframe body background is transparent and the reader body fills the available width, so HTML email does not appear as a fixed-width white document preview unless the email's own HTML explicitly paints one.
 
 When a message has both sanitized HTML and plaintext body alternatives, the
 reader renders the HTML alternative. Plaintext is a fallback for messages
@@ -142,7 +153,9 @@ without HTML. This matches normal mail-client behavior for
 `multipart/alternative` and prevents rendered Markdown email from appearing as
 its Markdown source when a provider also supplies the HTML part.
 
-The reader header, attachment strip, and plain text body must follow the L2 visual contract. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or turn the whole pane into a full-width white document viewer.
+The reader header, attachment strip, and plain text body must follow the L2 visual contract. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or add a default white background.
+
+Attachment rows are preview targets when the MIME type is image, PDF, or text. The preview affordance uses an eye icon, and clicking anywhere on the row outside explicit secondary actions opens a focused attachment surface. Attachment previews are never expanded inline inside the message reader; the focused surface fetches by source, message, and attachment IDs and renders the attachment full-window with a download action.
 
 ## Command Search
 
@@ -179,13 +192,15 @@ it during send. Compose loads the accepted free-form cache through
 `queryKeys.senderAddresses`; it does not keep sender identities in browser
 storage.
 
-Compose body editing is Markdown-first. The composer offers write, split, and
-preview modes; preview renders the Markdown as email HTML in the same sandboxed
-iframe primitive used for message bodies. Sending still submits the Markdown
-source to the Rust API, which emits `text/plain` Markdown plus the rendered
-`text/html` alternative.
+Compose body editing is Markdown-first in a single inline-rendered source
+editor. Markdown delimiters remain real editable characters while recognized
+spans are styled in place. Formatting shortcuts and the editor context menu
+insert or remove Markdown markers around the selection, or insert paired markers
+at the cursor for the next typed text. Sending still submits the Markdown source
+to the Rust API, which emits `text/plain` Markdown plus the rendered `text/html`
+alternative.
 
-Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }` or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, while `o` opens or focuses one stable `message-*` window per exact source/message ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
+Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }`, `{ kind: "attachment", params, disposition: "focused" }`, or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Browser overlays form a history-backed surface stack: opening an attachment from a focused message pushes a child surface, and Esc or the close button pops only the top surface before returning to the parent message. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, `o` opens or focuses one stable `message-*` window per exact source/message ID, and attachment previews open or focus one stable `attachment-*` window per exact source/message/attachment ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 
 ## Keyboard shortcuts
 
@@ -225,7 +240,7 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 
 - Frontend never talks to JMAP directly; all data flows through the Rust API
 - Message list rows come from message endpoints and are not grouped by thread by default
-- Persisted email HTML is sanitized in Rust; compose preview HTML is generated locally from the user's Markdown source and rendered only in a no-script sandboxed iframe
+- Persisted email HTML is sanitized in Rust; compose editing renders Markdown source inline without generating frontend-owned email HTML
 - Long HTML messages scroll inside the iframe or detail body instead of auto-expanding the pane
 - The conversation list preserves scroll position under live prepends
 - Keyboard shortcuts do not fire when an input element has focus
@@ -244,6 +259,6 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 | sanitize-in-rust                 | MUST   | HTML sanitization runs in Rust via ammonia before HTML reaches frontend                                                     |
 | tracking-pixel-strip             | SHOULD | 1x1 tracking pixels stripped during sanitization                                                                            |
 | anchored-prepend                 | MUST   | Live top-of-list inserts preserve the visible viewport when the user is scrolled down                                       |
-| keyboard-input-suppressed        | MUST   | Keyboard shortcuts suppressed when an input or textarea has focus                                                           |
+| keyboard-input-suppressed        | MUST   | Keyboard shortcuts suppressed when an input, textarea, or editor surface has focus                                          |
 | visual-reference                 | MUST   | Main shell and overlay styling conform to `docs/L2-ui-visual-reference` unless a documented backend gap blocks exact parity |
 | surface-descriptors-serializable | MUST   | Focused surfaces are described by serializable data, not React component instances or closures                              |

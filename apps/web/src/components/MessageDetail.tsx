@@ -6,13 +6,15 @@
  *
  * @spec docs/L1-ui#messagedetail-and-emailframe
  */
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Archive,
   Download,
   Ellipsis,
+  Eye,
   FileText,
   Forward,
   Mail,
@@ -25,17 +27,20 @@ import {
   fetchMessage,
 } from '../api/client'
 import type {
-  MessageAttachment,
   MessageDetail as MessageDetailRecord,
   MessageSummary,
   SourceMessageRef,
 } from '../api/types'
+import { canPreviewAttachment, formatAttachmentSize } from '../attachments'
+import { openFocusedSurface } from '../hooks/useSurfaceRouting'
 import { cn } from '../lib/utils'
 import { mergeConversationView } from '../mailState'
 import { resolveMessageBodyRender } from '../messageBody'
+import { attachmentSurface } from '../surfaces'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { EmailFrame } from './EmailFrame'
+import { ProgressBar } from './ui/progress'
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageSelection extends SourceMessageRef {
@@ -74,28 +79,10 @@ function dedupeConversationMessages(
   })
 }
 
-function canPreviewAttachment(attachment: MessageAttachment): boolean {
-  return (
-    attachment.mimeType.startsWith('image/') ||
-    attachment.mimeType === 'application/pdf' ||
-    attachment.mimeType.startsWith('text/')
-  )
-}
-
 function isMessageDetailPayload(
   message: MessageDetailRecord | MessageSummary | undefined,
 ): message is MessageDetailRecord {
   return Array.isArray((message as Partial<MessageDetailRecord>)?.attachments)
-}
-
-function formatAttachmentSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`
-  }
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function formatAbsoluteDate(value: string): string {
@@ -103,42 +90,6 @@ function formatAbsoluteDate(value: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
-}
-
-function AttachmentPreview({
-  attachment,
-  messageId,
-  sourceId,
-}: {
-  attachment: MessageAttachment
-  messageId: string
-  sourceId: string
-}) {
-  const attachmentUrl = buildMessageAttachmentUrl(
-    sourceId,
-    messageId,
-    attachment.id,
-  )
-
-  if (attachment.mimeType.startsWith('image/')) {
-    return (
-      <div className="flex h-full items-center justify-center bg-card">
-        <img
-          alt={attachment.filename ?? 'Attachment preview'}
-          className="max-h-full max-w-full object-contain"
-          src={attachmentUrl}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <iframe
-      className="h-full w-full border-0 bg-card"
-      src={attachmentUrl}
-      title={attachment.filename ?? 'Attachment preview'}
-    />
-  )
 }
 
 /**
@@ -152,17 +103,6 @@ export function MessageDetail({
   onSearch,
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
-  const selectionKey = selection
-    ? `${selection.sourceId}:${selection.messageId}`
-    : null
-  const [attachmentSelection, setAttachmentSelection] = useState<{
-    attachmentId: string | null
-    selectionKey: string | null
-  }>({ attachmentId: null, selectionKey: null })
-  const selectedAttachmentId =
-    attachmentSelection.selectionKey === selectionKey
-      ? attachmentSelection.attachmentId
-      : null
   const conversationQuery = useQuery({
     queryKey: ['conversation', selection?.conversationId],
     queryFn: () => fetchConversation(selection!.conversationId),
@@ -226,8 +166,18 @@ export function MessageDetail({
     isMessageLoading ||
     (messageData && !hasMessageDetailPayload)
   ) {
+    const loadingLabel =
+      messageData && !hasMessageDetailPayload
+        ? 'Fetching uncached message'
+        : 'Loading message'
+
     return (
       <div className="flex h-full flex-col bg-panel">
+        <ProgressBar
+          label={loadingLabel}
+          className="border-b border-border px-5 py-2"
+          compact
+        />
         <div className="shrink-0 space-y-3 border-b border-border px-5 py-4">
           <div className="h-5 w-3/4 animate-pulse rounded bg-muted" />
           <div className="flex items-center gap-3">
@@ -272,12 +222,31 @@ export function MessageDetail({
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
   const threadMessages = dedupeConversationMessages(conversation.messages)
-  const selectedAttachment =
-    message.attachments.find(
-      (attachment) => attachment.id === selectedAttachmentId,
-    ) ?? null
   const bodyRender = resolveMessageBodyRender(message)
+  const sourceId = message.sourceId
+  const messageId = message.id
   void onSelectMessage
+
+  function openAttachmentPreview(attachmentId: string) {
+    openFocusedSurface(
+      attachmentSurface({
+        sourceId,
+        messageId,
+        attachmentId,
+      }),
+    )
+  }
+
+  function handleAttachmentKeyDown(
+    event: KeyboardEvent<HTMLDivElement>,
+    attachmentId: string,
+  ) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    event.preventDefault()
+    openAttachmentPreview(attachmentId)
+  }
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel">
@@ -377,8 +346,8 @@ export function MessageDetail({
                     variant="outline"
                     className="cursor-pointer rounded-[4px] border-border/80 bg-background/45 px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:border-primary hover:text-primary"
                     key={tag}
-                    onClick={(e: React.MouseEvent) =>
-                      onSearch?.(`tag:${tag}`, e.shiftKey)
+                    onClick={(event: MouseEvent) =>
+                      onSearch?.(`tag:${tag}`, event.shiftKey)
                     }
                     title={`Search emails tagged "${tag}"`}
                   >
@@ -416,10 +385,9 @@ export function MessageDetail({
             <div className="space-y-2">
               {message.attachments.map((attachment) => {
                 const canPreview = canPreviewAttachment(attachment)
-                const isSelected = attachment.id === selectedAttachmentId
                 const downloadUrl = buildMessageAttachmentUrl(
-                  message.sourceId,
-                  message.id,
+                  sourceId,
+                  messageId,
                   attachment.id,
                   { download: true },
                 )
@@ -428,10 +396,33 @@ export function MessageDetail({
                   <div
                     className={cn(
                       'flex items-center justify-between gap-3 rounded-[6px] border border-border/80 bg-background/30 px-2.5 py-2',
-                      isSelected &&
-                        'border-primary/60 bg-[color-mix(in_oklab,var(--brand-coral)_14%,transparent)]',
+                      canPreview &&
+                        'cursor-pointer transition-colors hover:border-primary/60 hover:bg-background/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
                     )}
+                    aria-label={
+                      canPreview
+                        ? `Preview attachment ${attachment.filename ?? 'Unnamed attachment'}`
+                        : undefined
+                    }
                     key={attachment.id}
+                    onClick={
+                      canPreview
+                        ? () => openAttachmentPreview(attachment.id)
+                        : undefined
+                    }
+                    onKeyDown={
+                      canPreview
+                        ? (event) =>
+                            handleAttachmentKeyDown(event, attachment.id)
+                        : undefined
+                    }
+                    role={canPreview ? 'button' : undefined}
+                    tabIndex={canPreview ? 0 : undefined}
+                    title={
+                      canPreview
+                        ? `Preview ${attachment.filename ?? 'attachment'}`
+                        : undefined
+                    }
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex size-8 shrink-0 items-center justify-center rounded-[5px] bg-brand-coral text-brand-coral-foreground">
@@ -451,17 +442,17 @@ export function MessageDetail({
                     <div className="flex shrink-0 items-center gap-1">
                       {canPreview && (
                         <Button
-                          onClick={() =>
-                            setAttachmentSelection({
-                              attachmentId: isSelected ? null : attachment.id,
-                              selectionKey,
-                            })
-                          }
+                          aria-label={`Preview ${attachment.filename ?? 'attachment'}`}
+                          onClick={(event: MouseEvent) => {
+                            event.stopPropagation()
+                            openAttachmentPreview(attachment.id)
+                          }}
                           size="icon-sm"
+                          title="Preview"
                           type="button"
                           variant="ghost"
                         >
-                          <Paperclip size={14} strokeWidth={1.75} />
+                          <Eye size={14} strokeWidth={1.75} />
                         </Button>
                       )}
                       <Button
@@ -470,7 +461,13 @@ export function MessageDetail({
                         type="button"
                         variant="ghost"
                       >
-                        <a download href={downloadUrl}>
+                        <a
+                          download
+                          href={downloadUrl}
+                          onClick={(event: MouseEvent) =>
+                            event.stopPropagation()
+                          }
+                        >
                           <Download size={14} strokeWidth={1.75} />
                         </a>
                       </Button>
@@ -490,26 +487,16 @@ export function MessageDetail({
           </div>
         )}
 
-        {selectedAttachment && (
-          <div className="mx-5 mt-4 h-72 shrink-0 overflow-hidden rounded-[6px] border border-border bg-card">
-            <AttachmentPreview
-              attachment={selectedAttachment}
-              messageId={message.id}
-              sourceId={message.sourceId}
-            />
-          </div>
-        )}
-
         <div className="min-h-0 flex-1 overflow-hidden bg-panel">
           {bodyRender.kind === 'html' ? (
-            <div className="ph-scroll h-full max-w-[720px] overflow-auto px-[22px] py-[18px]">
+            <div className="ph-scroll h-full overflow-auto px-[22px] py-[18px]">
               <EmailFrame
-                className="h-full min-h-[480px] bg-card"
+                className="h-full min-h-[480px] bg-transparent"
                 html={bodyRender.html}
               />
             </div>
           ) : bodyRender.kind === 'text' ? (
-            <article className="ph-scroll h-full max-w-[720px] overflow-auto px-[22px] py-[18px] text-[13px] leading-[1.6] text-foreground/92">
+            <article className="ph-scroll h-full overflow-auto px-[22px] py-[18px] text-[13px] leading-[1.6] text-foreground/92">
               {bodyRender.paragraphs.map((paragraph, index) => (
                 <p
                   key={`${index}-${paragraph.slice(0, 20)}`}

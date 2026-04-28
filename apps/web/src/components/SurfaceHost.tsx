@@ -14,6 +14,8 @@ interface SurfaceHostProps {
 
 function surfaceTitle(surface: SurfaceDescriptor): string {
   switch (surface.kind) {
+    case 'attachment':
+      return 'Attachment'
     case 'message':
       return 'Message'
     case 'settings':
@@ -33,7 +35,7 @@ export function SurfaceHost({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && canClose) {
+      if (event.key === 'Escape' && !event.repeat && canClose) {
         event.preventDefault()
         onClose()
       }

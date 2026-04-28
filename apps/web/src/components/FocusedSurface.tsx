@@ -6,6 +6,7 @@ import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
 import { closeCurrentSurfaceWindow, isTauriRuntime } from '@/desktop'
+import { AttachmentSurface } from './AttachmentSurface'
 import { MessageDetail } from './MessageDetail'
 import { SettingsPanel } from './SettingsPanel'
 
@@ -31,16 +32,16 @@ export function FocusedSurface({
   })
 
   useEffect(() => {
+    if (onClose) {
+      return
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || !canClose) {
+      if (event.key !== 'Escape' || event.repeat || !canClose) {
         return
       }
       event.preventDefault()
-      if (onClose) {
-        onClose()
-      } else {
-        void closeCurrentSurfaceWindow()
-      }
+      void closeCurrentSurfaceWindow()
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -64,6 +65,10 @@ export function FocusedSurface({
         shell="overlay"
       />
     )
+  }
+
+  if (surface.kind === 'attachment') {
+    return <AttachmentSurface surface={surface} />
   }
 
   return (
