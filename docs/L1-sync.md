@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-sync
   - path: docs/L1-jmap
@@ -223,13 +223,16 @@ IMAP sync batches also carry `imap_mailbox_states` and
 `imap_message_locations`. These rows are applied in the same transaction as
 their `MessageRecord`s so later sync cycles, lazy body fetches, and mutations
 can use persisted IMAP command state without deriving it from presentation
-fields.
+fields. When an IMAP account has local mailbox role overrides, the store applies
+those overrides over the incoming discovery role before writing the mailbox
+projection.
 
 ## SQLite schema
 
 The runtime schema is centered around raw message state plus locally derived projections:
 
 - `mailbox`
+- `mailbox_role_override`
 - `message`
 - `conversation`
 - `conversation_message`
@@ -260,6 +263,10 @@ Important derived tables:
   message addressable for fetch and mutation commands. This is separate from
   message identity so provider-stable IDs such as Gmail `X-GM-MSGID` can
   deduplicate messages across labels while retaining per-mailbox UIDs.
+- `mailbox_role_override` stores user-assigned mailbox roles for providers such
+  as IMAP/SMTP where SPECIAL-USE roles are discovered but not portably mutable.
+  A row with `role = NULL` is an explicit local clear; absence of a row means
+  use the discovered role.
 - `automation_backfill_job` stores durable per-account work for the current automation-rule fingerprint, so completed backfills are not repeated after restart while changed rules enqueue fresh work.
 - `sender_address_cache` stores account-scoped sender addresses that previously passed provider submission. Entries are keyed by `(account_id, normalized_email)`, ordered by `last_used_at`, and used only as compose suggestions.
 - `cache_object` stores scored optional-content child objects and their state (`wanted`, `fetching`, `cached`, `failed`, or `evicted`). Every message has one structural body row; later layers add raw-message or attachment rows as policy decides. Rows include `layer`, `fetch_unit`, `value_bytes`, `fetch_bytes`, priority, reason, timestamps, and last error code. Body cache workers read scored wanted rows from this table and cached rows contribute to the configured cache budget.

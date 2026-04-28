@@ -142,7 +142,7 @@ Request validation errors use handler-specific codes: `invalid_account`, `invali
 
 ## Mailbox metadata
 
-`PATCH /sources/{source_id}/mailboxes/{mailbox_id}` updates server-side mailbox metadata through JMAP `Mailbox/set`. The initial supported request field is `role`; valid values are `inbox`, `archive`, `drafts`, `sent`, `junk`, `trash`, or `null` to clear the role. When assigning a role that another mailbox currently owns, the server first clears the old owner, then assigns the new owner using the returned mailbox state. After the mutation succeeds, the server refreshes the account's mailbox projection and returns the current `MailboxSummary[]`.
+`PATCH /sources/{source_id}/mailboxes/{mailbox_id}` updates mailbox metadata. The initial supported request field is `role`; valid values are `inbox`, `archive`, `drafts`, `sent`, `junk`, `trash`, or `null` to clear the role. JMAP accounts apply this through `Mailbox/set`. IMAP/SMTP accounts persist the role as a local override over SPECIAL-USE discovery, because IMAP has no portable remote role mutation. When assigning a role that another mailbox currently owns, the server first clears the old owner, then assigns the new owner. After the mutation succeeds, the server refreshes the account's mailbox projection and returns the current `MailboxSummary[]`.
 
 ## Cursor pagination
 

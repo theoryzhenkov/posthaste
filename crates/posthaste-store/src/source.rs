@@ -43,6 +43,11 @@ impl SourceDataStore for DatabaseStore {
             )
             .map_err(sql_to_store_error)?;
             tx.execute(
+                "DELETE FROM mailbox_role_override WHERE account_id = ?1",
+                params![account_id.as_str()],
+            )
+            .map_err(sql_to_store_error)?;
+            tx.execute(
                 "DELETE FROM message WHERE account_id = ?1",
                 params![account_id.as_str()],
             )

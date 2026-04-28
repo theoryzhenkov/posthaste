@@ -154,6 +154,8 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     for mailbox in &batch.mailboxes {
+        let effective_role =
+            effective_mailbox_role_tx(tx, account_id, &mailbox.id, mailbox.role.as_deref())?;
         tx.execute(
             "INSERT INTO mailbox (account_id, id, name, role, unread_emails, total_emails)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -166,7 +168,7 @@ pub(crate) fn apply_sync_batch_tx(
                 account_id.as_str(),
                 mailbox.id.as_str(),
                 mailbox.name,
-                mailbox.role,
+                effective_role,
                 mailbox.unread_emails,
                 mailbox.total_emails
             ],
@@ -257,6 +259,25 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     Ok(events)
+}
+
+fn effective_mailbox_role_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    mailbox_id: &MailboxId,
+    discovered_role: Option<&str>,
+) -> Result<Option<String>, StoreError> {
+    let override_role = tx
+        .query_row(
+            "SELECT role FROM mailbox_role_override
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            params![account_id.as_str(), mailbox_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?;
+
+    Ok(override_role.unwrap_or_else(|| discovered_role.map(str::to_string)))
 }
 
 struct MessageBeforeApply {
@@ -641,6 +662,11 @@ fn delete_mailbox_and_track_projection_inputs(
     .map_err(sql_to_store_error)?;
     tx.execute(
         "DELETE FROM imap_message_location WHERE account_id = ?1 AND mailbox_id = ?2",
+        params![account_id.as_str(), mailbox_id.as_str()],
+    )
+    .map_err(sql_to_store_error)?;
+    tx.execute(
+        "DELETE FROM mailbox_role_override WHERE account_id = ?1 AND mailbox_id = ?2",
         params![account_id.as_str(), mailbox_id.as_str()],
     )
     .map_err(sql_to_store_error)?;

@@ -20,6 +20,14 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
                 PRIMARY KEY (account_id, id)
             );
 
+            CREATE TABLE IF NOT EXISTS mailbox_role_override (
+                account_id TEXT NOT NULL,
+                mailbox_id TEXT NOT NULL,
+                role TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (account_id, mailbox_id)
+            );
+
             CREATE TABLE IF NOT EXISTS message (
                 account_id TEXT NOT NULL,
                 id TEXT NOT NULL,
@@ -229,6 +237,9 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
 
             CREATE INDEX IF NOT EXISTS idx_message_thread
                 ON message (account_id, thread_id, received_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mailbox_role_override_unique_role
+                ON mailbox_role_override (account_id, role)
+                WHERE role IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_message_account_received
                 ON message (account_id, received_at, id);
             CREATE INDEX IF NOT EXISTS idx_message_account_from_sort

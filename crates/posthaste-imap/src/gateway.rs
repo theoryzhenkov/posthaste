@@ -1028,13 +1028,17 @@ impl MailGateway for LiveImapSmtpGateway {
 
     async fn set_mailbox_role(
         &self,
-        _account_id: &AccountId,
-        _mailbox_id: &MailboxId,
+        account_id: &AccountId,
+        mailbox_id: &MailboxId,
         _expected_state: Option<&str>,
-        _role: Option<&str>,
-        _clear_role_from: Option<&MailboxId>,
+        role: Option<&str>,
+        clear_role_from: Option<&MailboxId>,
     ) -> Result<MutationOutcome, GatewayError> {
-        Err(unsupported("mailbox role mutation"))
+        self.store("mailbox role override")?
+            .set_mailbox_role_override(account_id, mailbox_id, role, clear_role_from)
+            .map_err(store_error_to_gateway)?;
+
+        Ok(MutationOutcome { cursor: None })
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {
