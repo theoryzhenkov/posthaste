@@ -7,7 +7,8 @@ depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
   - path: docs/L0-search
-dependents: []
+dependents:
+  - path: docs/L1-telemetry
 ---
 
 # Accounts domain -- L1
