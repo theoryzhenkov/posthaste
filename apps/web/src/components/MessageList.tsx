@@ -188,9 +188,7 @@ export function MessageList({
     error,
     fetchNextPage,
     hasNextPage,
-    isFetching,
     isFetchingNextPage,
-    isPlaceholderData,
   } = useInfiniteQuery({
     queryKey: queryKeys.messages(selectedView, searchQuery, sort),
     queryFn: ({ pageParam, signal }) =>
@@ -237,12 +235,6 @@ export function MessageList({
       : error instanceof ApiError && error.code === 'invalid_query'
         ? `Search query is not valid: ${error.message}`
         : 'Failed to load messages'
-  const isRefreshingMessages =
-    !preparedSearchQuery.isBlocked &&
-    !isLoading &&
-    !isFetchingNextPage &&
-    (isFetching || isPlaceholderData)
-
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
       if (messages.length === 0) return
@@ -499,12 +491,6 @@ export function MessageList({
               onToggleSort={toggleSort}
             />
           </div>
-          {isRefreshingMessages && (
-            <div className="h-px overflow-hidden bg-border/40">
-              <div className="h-full w-full animate-pulse bg-foreground/30" />
-            </div>
-          )}
-
           <div
             ref={scrollContainerRef}
             className="ph-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[var(--list-zebra)]"
