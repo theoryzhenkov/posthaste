@@ -3,6 +3,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import type { SurfaceDescriptor } from './surfaces'
 import { surfaceRoute } from './surfaces'
+import {
+  currentSurfaceDepth,
+  isSurfaceHistoryState,
+  rootUrl,
+  surfaceHistoryState,
+  surfaceUrl,
+} from './surfaceHistory'
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -24,14 +31,22 @@ export async function closeCurrentSurfaceWindow(): Promise<void> {
 }
 
 export function openWebSurface(surface: SurfaceDescriptor): void {
-  window.location.hash = surfaceRoute(surface)
+  const route = surfaceRoute(surface)
+  const depth = currentSurfaceDepth(window.location, window.history.state) + 1
+  window.history.pushState(
+    surfaceHistoryState(route, depth),
+    '',
+    surfaceUrl(window.location, route),
+  )
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
 export function closeWebSurface(): void {
-  window.history.pushState(
-    null,
-    '',
-    `${window.location.pathname}${window.location.search}`,
-  )
+  if (isSurfaceHistoryState(window.history.state)) {
+    window.history.back()
+    return
+  }
+
+  window.history.pushState(null, '', rootUrl(window.location))
   window.dispatchEvent(new HashChangeEvent('hashchange'))
 }

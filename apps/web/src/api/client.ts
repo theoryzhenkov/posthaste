@@ -7,6 +7,13 @@
  *
  * @spec docs/L1-api#endpoint-table
  */
+import { apiLogger } from '../logger'
+import {
+  createOperationContext,
+  createRequestContext,
+  observabilityHeaders,
+  type OperationContext,
+} from '../observability'
 import { ApiError } from './errors'
 import type {
   AccountOverview,
@@ -46,6 +53,11 @@ interface MessagePageInput {
   sort?: MessageSortField
   sortDir?: string
   signal?: AbortSignal
+  operation?: OperationContext
+}
+
+type RequestInitWithObservability = RequestInit & {
+  operation?: OperationContext
 }
 
 function normalizeApiBaseUrl(baseUrl: string): string {
@@ -107,9 +119,82 @@ async function parseError(response: Response): Promise<never> {
   throw new ApiError(response.status, response.statusText, message, code)
 }
 
+function safeLogPath(path: string): string {
+  return path.split('?')[0] ?? path
+}
+
+function mergeHeaders(
+  base: HeadersInit | undefined,
+  extra: HeadersInit,
+): Headers {
+  const headers = new Headers(base)
+  for (const [key, value] of Object.entries(extra)) {
+    headers.set(key, value)
+  }
+  return headers
+}
+
 /** Low-level fetch wrapper that throws {@link ApiError} on non-OK responses. */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, init)
+async function request<T>(
+  path: string,
+  init: RequestInitWithObservability = {},
+): Promise<T> {
+  const { operation, headers, ...fetchInit } = init
+  const context = createRequestContext(
+    operation ?? createOperationContext('api.request', 'api-client'),
+  )
+  const requestPath = safeLogPath(path)
+  const method = fetchInit.method ?? 'GET'
+  const started = performance.now()
+  apiLogger.debug(
+    {
+      requestId: context.requestId,
+      operationId: context.operationId,
+      operationKind: context.operationKind,
+      operationSource: context.operationSource,
+      sessionId: context.sessionId,
+      method,
+      path: requestPath,
+    },
+    'api request started',
+  )
+  let response: Response
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      ...fetchInit,
+      headers: mergeHeaders(headers, observabilityHeaders(context)),
+    })
+  } catch (error) {
+    apiLogger.warn(
+      {
+        requestId: context.requestId,
+        operationId: context.operationId,
+        operationKind: context.operationKind,
+        operationSource: context.operationSource,
+        sessionId: context.sessionId,
+        method,
+        path: requestPath,
+        durationMs: Math.round(performance.now() - started),
+        error,
+      },
+      'api request failed before response',
+    )
+    throw error
+  }
+  apiLogger.debug(
+    {
+      requestId: context.requestId,
+      operationId: context.operationId,
+      operationKind: context.operationKind,
+      operationSource: context.operationSource,
+      sessionId: context.sessionId,
+      method,
+      path: requestPath,
+      status: response.status,
+      durationMs: Math.round(performance.now() - started),
+    },
+    'api request completed',
+  )
   if (!response.ok) {
     return parseError(response)
   }
@@ -121,11 +206,13 @@ function jsonRequest<T>(
   path: string,
   method: string,
   body?: unknown,
+  operation?: OperationContext,
 ): Promise<T> {
   return request<T>(path, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    operation,
   })
 }
 
@@ -319,7 +406,7 @@ export async function fetchSmartMailboxMessages(
   const search = params.toString()
   return request<MessagePage>(
     `/smart-mailboxes/${id}/messages${search ? `?${search}` : ''}`,
-    { signal: input?.signal },
+    { signal: input?.signal, operation: input?.operation },
   )
 }
 
@@ -446,7 +533,7 @@ export async function fetchSourceMessages(
   const search = params.toString()
   return request<MessagePage>(
     `/sources/${sourceId}/messages${search ? `?${search}` : ''}`,
-    { signal: input?.signal },
+    { signal: input?.signal, operation: input?.operation },
   )
 }
 

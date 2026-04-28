@@ -540,6 +540,18 @@ Reader tag strip:
 - Radius: `4px`.
 - Each tag contains a `5px` circular dot in tag color plus label.
 
+Progress bars:
+
+- Use the shared `ProgressBar` primitive for component loads and process meters.
+- Track height: `4px` compact, `6px` standard.
+- Track radius: full pill.
+- Track background: `borderSoft`.
+- Indicator radius: full pill.
+- Default indicator color: `brand-coral`; domain-specific process meters may use a semantic accent such as sync blue.
+- Determinate progress transitions width over roughly `300ms`.
+- Indeterminate progress uses a single moving segment and must respect `prefers-reduced-motion`.
+- Labels, when visible, use `fgFaint`/muted text at `11px` compact or `12px` standard.
+
 Attachment strip:
 
 - Display only when attachments exist.
@@ -556,6 +568,7 @@ Attachment rows:
 - Border: `1px solid border`.
 - Radius: `6px`.
 - Margin bottom: `6px` except last row.
+- Previewable attachment rows are clickable across the full row, with hover and focus states matching quiet reader action treatment.
 
 Attachment type tile:
 
@@ -571,7 +584,7 @@ Attachment text:
 
 - Filename: Geist `12px`, weight `500`, color `fg`, single line ellipsis.
 - Size: Geist Mono `11px`, color `fgFaint`.
-- Actions: download and more icon buttons, using the reader action button treatment.
+- Actions: preview, download, and more icon buttons, using the reader action button treatment. Preview uses the eye icon. Download and more remain secondary actions; row click itself opens the preview surface.
 
 Reader body:
 
@@ -580,8 +593,8 @@ Reader body:
 - Line height: `1.6`.
 - Color: `fg`.
 - White space: pre-wrap for plain text.
-- Max width: `720px`.
-- Body does not center itself in the handoff; it begins at the left padding. If HTML iframe constraints require centering for compatibility, the visual result must still preserve the `720px` readable width and avoid full-pane white slabs.
+- Width: fills the available reader pane.
+- Body does not center itself in the handoff; it begins at the left padding. HTML iframe content must inherit the reader background rather than painting a default white slab. If an email's own HTML sets a background, that email-owned styling may show.
 - Links use `accent.coralDeep`, no underline, with `1px dotted accent.coral` bottom border.
 
 ## Floating Panel
@@ -867,14 +880,14 @@ Fields:
 
 Body:
 
-- Textarea minimum height: `220px`.
+- Editor minimum height: `220px`.
 - Padding: `14px 16px 8px`.
 - Font: Geist `13.5px`.
 - Line height: `1.55`.
 - Background: `bgReader`.
-- Body toolbar contains a three-option segmented control for write, split, and preview modes.
-- Split mode uses the Markdown editor and rendered preview side by side on desktop, stacked on narrow screens.
-- Preview mode renders through the shared sandboxed email iframe rather than an inline HTML container.
+- The editor is a single inline-rendered Markdown source surface with no split/preview toolbar.
+- Markdown formatting controls are exposed through keyboard shortcuts and the editor context menu.
+- Markdown delimiters remain editable source characters; recognized spans are styled in place.
 
 Footer:
 

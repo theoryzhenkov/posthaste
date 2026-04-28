@@ -52,6 +52,11 @@ export function installConsoleCapture(): void {
         level,
         domain: 'webview',
         message: formatArgs(args),
+        requestId: null,
+        operationId: null,
+        operationKind: null,
+        operationSource: null,
+        sessionId: null,
       }).catch(() => {})
     }
   }
@@ -61,6 +66,11 @@ export function installConsoleCapture(): void {
       level: 'error',
       domain: 'webview',
       message: `Uncaught ${event.error?.stack ?? event.message}`,
+      requestId: null,
+      operationId: null,
+      operationKind: null,
+      operationSource: null,
+      sessionId: null,
     }).catch(() => {})
   })
 
@@ -74,6 +84,11 @@ export function installConsoleCapture(): void {
       level: 'error',
       domain: 'webview',
       message: `Unhandled rejection: ${message}`,
+      requestId: null,
+      operationId: null,
+      operationKind: null,
+      operationSource: null,
+      sessionId: null,
     }).catch(() => {})
   })
 }

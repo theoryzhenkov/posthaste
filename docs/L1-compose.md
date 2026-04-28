@@ -96,9 +96,6 @@ ComposeSession {
     fn add_attachment(data: Vec<u8>, filename: String, mimeType: String) -> Result<FfiAttachmentId>
     fn remove_attachment(id: FfiAttachmentId) -> Result<()>
 
-    // Preview
-    fn render_preview(markdown: String) -> Result<String>  // returns HTML
-
     // Persistence
     fn save_draft() -> Result<()>          // creates/updates server draft
     fn send() -> Result<()>                // submits via EmailSubmission/set
@@ -157,7 +154,7 @@ ComposeError
 - Drafts use Email/set with `$draft` keyword, never raw SMTP
 - Send uses EmailSubmission/set. Server-side draft cleanup or Sent placement is requested through `onSuccessUpdateEmail` and the implicit Email/set response is handled as part of the same JMAP operation.
 - The compose session is a Rust object; the frontend interacts via REST API
-- The composer may render previews locally for responsiveness, but preview HTML must use the same Markdown extension set as send-time rendering
+- The composer may style Markdown source locally for responsiveness, but Rust send-time rendering remains authoritative for generated email HTML
 - Attachments are uploaded before send, not inline with the email body
 
 ## Assertions

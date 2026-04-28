@@ -28,7 +28,7 @@ export function GeneralPane({
     <SettingsPage>
       <SettingsPageHeader
         title="General"
-        description="Choose the default account PostHaste should use when no source is selected."
+        description="Choose the default account Posthaste should use when no source is selected."
       />
 
       <SettingsSection title="Defaults">

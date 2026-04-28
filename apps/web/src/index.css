@@ -441,6 +441,11 @@
     @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-ring/50;
   }
 
+  .ph-progress-indeterminate {
+    width: 38%;
+    animation: ph-progress-indeterminate 1.15s ease-in-out infinite;
+  }
+
   .ph-hue-range::-webkit-slider-thumb {
     width: 1.125rem;
     height: 1.125rem;
@@ -462,5 +467,26 @@
     box-shadow:
       0 0 0 1px var(--border-strong),
       0 2px 8px rgb(0 0 0 / 0.24);
+  }
+}
+
+@keyframes ph-progress-indeterminate {
+  0% {
+    transform: translateX(-115%);
+  }
+
+  50% {
+    transform: translateX(80%);
+  }
+
+  100% {
+    transform: translateX(265%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ph-progress-indeterminate {
+    animation: none;
+    transform: translateX(0);
   }
 }

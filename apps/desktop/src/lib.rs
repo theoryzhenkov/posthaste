@@ -8,6 +8,11 @@ use tauri_utils::config::WebviewUrl;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum SurfaceDescriptor {
+    #[serde(rename = "attachment")]
+    Attachment {
+        disposition: SurfaceDisposition,
+        params: AttachmentSurfaceParams,
+    },
     #[serde(rename = "message")]
     Message {
         disposition: SurfaceDisposition,
@@ -25,6 +30,14 @@ enum SurfaceDescriptor {
 enum SurfaceDisposition {
     #[serde(rename = "focused")]
     Focused,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentSurfaceParams {
+    source_id: String,
+    message_id: String,
+    attachment_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +98,7 @@ struct EmbeddedBackend {
     port: u16,
 }
 
-/// Run the PostHaste desktop application.
+/// Run the Posthaste desktop application.
 ///
 /// Starts the embedded Axum backend on an OS-assigned port, then opens a Tauri
 /// webview. The port is injected into the webview via `initialization_script`
@@ -117,7 +130,7 @@ pub fn run() {
                 app.handle(),
                 "main",
                 "index.html",
-                "PostHaste",
+                "Posthaste",
                 1200.0,
                 800.0,
                 port,
@@ -126,7 +139,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running PostHaste");
+        .expect("error while running Posthaste");
 }
 
 fn build_window<M: Manager<R>, R: tauri::Runtime>(
@@ -154,6 +167,18 @@ fn backend_init_script(port: u16) -> String {
 
 fn surface_route(surface: &SurfaceDescriptor) -> String {
     match surface {
+        SurfaceDescriptor::Attachment {
+            disposition,
+            params,
+        } => {
+            let _ = disposition;
+            format!(
+                "/surface/attachment?sourceId={}&messageId={}&attachmentId={}",
+                encode_component(&params.source_id),
+                encode_component(&params.message_id),
+                encode_component(&params.attachment_id)
+            )
+        }
         SurfaceDescriptor::Message {
             disposition,
             params,
@@ -190,6 +215,13 @@ fn surface_route(surface: &SurfaceDescriptor) -> String {
 
 fn surface_window_label(surface: &SurfaceDescriptor) -> String {
     match surface {
+        SurfaceDescriptor::Attachment { params, .. } => {
+            let key = format!(
+                "{}:{}:{}",
+                params.source_id, params.message_id, params.attachment_id
+            );
+            format!("attachment-{:016x}", stable_hash(key.as_bytes()))
+        }
         SurfaceDescriptor::Settings { .. } => "settings".to_string(),
         SurfaceDescriptor::Message { params, .. } => {
             let key = format!("{}:{}", params.source_id, params.message_id);
@@ -200,13 +232,15 @@ fn surface_window_label(surface: &SurfaceDescriptor) -> String {
 
 fn surface_title(surface: &SurfaceDescriptor) -> &'static str {
     match surface {
-        SurfaceDescriptor::Settings { .. } => "PostHaste Settings",
-        SurfaceDescriptor::Message { .. } => "PostHaste Message",
+        SurfaceDescriptor::Attachment { .. } => "Posthaste Attachment",
+        SurfaceDescriptor::Settings { .. } => "Posthaste Settings",
+        SurfaceDescriptor::Message { .. } => "Posthaste Message",
     }
 }
 
 fn surface_window_size(surface: &SurfaceDescriptor) -> (f64, f64) {
     match surface {
+        SurfaceDescriptor::Attachment { .. } => (1100.0, 820.0),
         SurfaceDescriptor::Settings { .. } => (980.0, 720.0),
         SurfaceDescriptor::Message { .. } => (900.0, 760.0),
     }
@@ -258,6 +292,23 @@ mod tests {
         assert_eq!(
             surface_route(&surface),
             "/surface/message?conversationId=conversation%2F1&sourceId=source%3Aprimary&messageId=message%201"
+        );
+    }
+
+    #[test]
+    fn attachment_surface_route_uses_hash_route_and_encoded_params() {
+        let surface = SurfaceDescriptor::Attachment {
+            disposition: SurfaceDisposition::Focused,
+            params: AttachmentSurfaceParams {
+                source_id: "source:primary".to_string(),
+                message_id: "message 1".to_string(),
+                attachment_id: "part/2".to_string(),
+            },
+        };
+
+        assert_eq!(
+            surface_route(&surface),
+            "/surface/attachment?sourceId=source%3Aprimary&messageId=message%201&attachmentId=part%2F2"
         );
     }
 

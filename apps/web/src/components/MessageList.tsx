@@ -35,6 +35,10 @@ import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
 import { isEditableKeyboardTarget } from './keyboard/inputTargets'
+import {
+  createOperationContext,
+  type OperationContext,
+} from '../observability'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -119,6 +123,7 @@ async function fetchMessagesForView(
   sort: SortConfig,
   cursor: string | null,
   signal: AbortSignal,
+  operation: OperationContext,
 ): Promise<MessagePage> {
   const input = {
     q: serverQuery,
@@ -127,6 +132,7 @@ async function fetchMessagesForView(
     sort: serverSortField(sort),
     sortDir: sort.direction,
     signal,
+    operation,
   }
   if (selectedView.kind === 'smart-mailbox') {
     return fetchSmartMailboxMessages(selectedView.id, input)
@@ -173,6 +179,18 @@ export function MessageList({
     () => viewKey(selectedView, searchQuery, sort),
     [selectedView, searchQuery, sort],
   )
+  const operation = useMemo(() => {
+    const source =
+      selectedView?.kind === 'smart-mailbox'
+        ? 'message-list.smart-mailbox'
+        : selectedView?.kind === 'source-mailbox'
+          ? 'message-list.source-mailbox'
+          : 'message-list'
+    return createOperationContext(
+      preparedSearchQuery.query ? 'mail.search' : 'mail.list',
+      source,
+    )
+  }, [currentViewKey, preparedSearchQuery.query, selectedView?.kind])
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const restoredViewKeyRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -199,6 +217,7 @@ export function MessageList({
         sort,
         pageParam,
         signal,
+        operation,
       ),
     enabled: selectedView !== null && !preparedSearchQuery.isBlocked,
     initialPageParam: null as string | null,

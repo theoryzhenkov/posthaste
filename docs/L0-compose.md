@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why Markdown composition, MIME strategy, borrowed components"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -15,9 +15,9 @@ dependents:
 
 ## Why Markdown
 
-MailMate proved that power users prefer Markdown composition over WYSIWYG rich text editors. Markdown is plain text: versionable, greppable, portable. It converts to well-structured HTML with predictable output. The alternative, building a rich text editor, is far more complex and produces worse HTML.
+MailMate proved that power users prefer Markdown composition over traditional rich text editors. Markdown is plain text: versionable, greppable, portable. It converts to well-structured HTML with predictable output. The alternative, authoring mutable HTML directly, is far more complex and produces worse HTML.
 
-The compose UI is a split-pane editor. Markdown source on the left, live HTML preview on the right. This gives immediate visual feedback without the complexity of contentEditable, which is a notoriously broken browser API that every major rich text editor has regretted building on.
+The compose UI is an inline-rendered Markdown source editor. Markdown delimiters remain real document characters, but the editor styles recognized spans in place: `*text*` looks italic, `**text**` looks bold, code spans use monospace styling, and strikethrough is shown inline. Deleting still deletes the real Markdown characters first, so removing a closing `*` turns the span back into literal Markdown source instead of mutating hidden HTML state.
 
 ## MIME strategy
 
@@ -27,7 +27,7 @@ Preserving the Markdown source as the plain text part is a deliberate choice. Mo
 
 ## Borrowed: pulldown-cmark
 
-`pulldown-cmark` is a Rust crate implementing CommonMark with GFM extensions (tables, strikethrough, task lists). It parses email-length text in sub-millisecond time and is widely used across the Rust ecosystem. The compose pipeline calls it from Rust on every keystroke (debounced) to generate the HTML preview. No Swift Markdown library is needed.
+`pulldown-cmark` is a Rust crate implementing CommonMark with GFM extensions (tables, strikethrough, task lists). It parses email-length text in sub-millisecond time and is widely used across the Rust ecosystem. The send pipeline calls it from Rust to generate the final HTML alternative. The browser editor may use a separate Markdown parser for inline styling, but the Rust renderer is authoritative for outgoing MIME.
 
 ## Draft lifecycle via JMAP
 
@@ -35,4 +35,4 @@ Drafts are real JMAP Email objects with the `$draft` keyword, stored on the serv
 
 ## What we don't build
 
-No WYSIWYG editor. No HTML source editing. No rich text formatting toolbar. The Markdown editor is a plain text field with syntax highlighting. This is a deliberate constraint that keeps composition simple and the output clean. Users who need pixel-perfect HTML email formatting are not the target audience.
+No HTML source editing and no hidden rich-text document model. Formatting commands insert or remove Markdown markers around the selected source text; they do not create HTML nodes. This is a deliberate constraint that keeps composition portable and the output clean. Users who need pixel-perfect HTML email formatting are not the target audience.
