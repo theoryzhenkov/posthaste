@@ -34,6 +34,7 @@ import { ThreadListHeader } from './thread-list/ThreadListHeader'
 import { useColumnConfig } from './thread-list/useColumnConfig'
 import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
+import { isEditableKeyboardTarget } from './keyboard/inputTargets'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -266,8 +267,7 @@ export function MessageList({
   // Keyboard shortcuts -- suppressed when an input has focus.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+      if (isEditableKeyboardTarget(event.target)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
       switch (event.key) {

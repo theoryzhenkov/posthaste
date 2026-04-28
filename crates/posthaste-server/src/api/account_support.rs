@@ -106,41 +106,118 @@ pub(super) fn apply_secret_instruction(
     previous_secret_ref: Option<&SecretRef>,
     secret: &SecretWriteRequest,
 ) -> Result<(), ApiError> {
+    let decision = decide_secret_instruction(&account.id, previous_secret_ref, secret)?;
+
+    match &decision.store_instruction {
+        SecretStoreInstruction::None => {}
+        SecretStoreInstruction::Save {
+            secret_ref,
+            password,
+        } => state
+            .secret_store
+            .save(secret_ref, password)
+            .map_err(ServiceError::from)
+            .map_err(ApiError::from)?,
+        SecretStoreInstruction::Update {
+            secret_ref,
+            password,
+        } => state
+            .secret_store
+            .update(secret_ref, password)
+            .map_err(ServiceError::from)
+            .map_err(ApiError::from)?,
+        SecretStoreInstruction::Delete { secret_ref } => state
+            .secret_store
+            .delete(secret_ref)
+            .map_err(ServiceError::from)
+            .map_err(ApiError::from)?,
+    }
+
+    match decision.account_secret_ref {
+        AccountSecretRefUpdate::Preserve => {}
+        AccountSecretRefUpdate::Set(secret_ref) => {
+            account.transport.secret_ref = secret_ref;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct SecretInstructionDecision<'a> {
+    account_secret_ref: AccountSecretRefUpdate,
+    store_instruction: SecretStoreInstruction<'a>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum AccountSecretRefUpdate {
+    Preserve,
+    Set(Option<SecretRef>),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum SecretStoreInstruction<'a> {
+    None,
+    Save {
+        secret_ref: SecretRef,
+        password: &'a str,
+    },
+    Update {
+        secret_ref: SecretRef,
+        password: &'a str,
+    },
+    Delete {
+        secret_ref: SecretRef,
+    },
+}
+
+fn decide_secret_instruction<'a>(
+    account_id: &AccountId,
+    previous_secret_ref: Option<&SecretRef>,
+    secret: &'a SecretWriteRequest,
+) -> Result<SecretInstructionDecision<'a>, ApiError> {
     validate_secret_request(secret)?;
 
-    match secret.mode {
-        SecretWriteMode::Keep => {
-            if let Some(previous_secret_ref) = previous_secret_ref {
-                account.transport.secret_ref = Some(previous_secret_ref.clone());
-            }
-        }
+    let decision = match secret.mode {
+        SecretWriteMode::Keep => SecretInstructionDecision {
+            account_secret_ref: previous_secret_ref
+                .cloned()
+                .map(|secret_ref| AccountSecretRefUpdate::Set(Some(secret_ref)))
+                .unwrap_or(AccountSecretRefUpdate::Preserve),
+            store_instruction: SecretStoreInstruction::None,
+        },
         SecretWriteMode::Replace => {
             let password = required_secret_password(secret)?;
             let secret_ref = previous_secret_ref
                 .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
                 .cloned()
-                .unwrap_or_else(|| account_secret_ref(&account.id));
-            match previous_secret_ref {
-                Some(existing) if existing == &secret_ref => state
-                    .secret_store
-                    .update(&secret_ref, password)
-                    .map_err(ServiceError::from)
-                    .map_err(ApiError::from)?,
-                _ => state
-                    .secret_store
-                    .save(&secret_ref, password)
-                    .map_err(ServiceError::from)
-                    .map_err(ApiError::from)?,
+                .unwrap_or_else(|| account_secret_ref(account_id));
+            let store_instruction = match previous_secret_ref {
+                Some(existing) if existing == &secret_ref => SecretStoreInstruction::Update {
+                    secret_ref: secret_ref.clone(),
+                    password,
+                },
+                _ => SecretStoreInstruction::Save {
+                    secret_ref: secret_ref.clone(),
+                    password,
+                },
+            };
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(secret_ref)),
+                store_instruction,
             }
-            account.transport.secret_ref = Some(secret_ref);
         }
-        SecretWriteMode::Clear => {
-            delete_managed_secret(state, previous_secret_ref)?;
-            account.transport.secret_ref = None;
-        }
-    }
+        SecretWriteMode::Clear => SecretInstructionDecision {
+            account_secret_ref: AccountSecretRefUpdate::Set(None),
+            store_instruction: previous_secret_ref
+                .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
+                .cloned()
+                .map(|secret_ref| SecretStoreInstruction::Delete { secret_ref })
+                .unwrap_or(SecretStoreInstruction::None),
+        },
+    };
 
-    Ok(())
+    Ok(decision)
 }
 
 /// Validate that the secret write request is internally consistent
@@ -785,5 +862,350 @@ pub(super) fn generate_account_id_seed(name: &str, email_patterns: &[String]) ->
         "account".to_string()
     } else {
         slug
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use posthaste_config::TomlConfigRepository;
+    use posthaste_domain::{
+        ConfigRepository, MailService, MailStore, SecretStore, SecretStoreError,
+    };
+    use posthaste_store::DatabaseStore;
+    use tokio::sync::broadcast;
+
+    use crate::oauth::OAuthFlowStore;
+    use crate::supervisor::AccountSupervisor;
+
+    #[test]
+    fn secret_keep_preserves_existing_refs_without_store_instruction() {
+        let account_id = AccountId::from("primary");
+        let request = secret_request(SecretWriteMode::Keep, None);
+        let os_ref = secret_ref(SecretKind::Os, "account:primary");
+        let env_ref = secret_ref(SecretKind::Env, "POSTHASTE_PASSWORD");
+
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, None, &request),
+                "keep should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Preserve,
+                store_instruction: SecretStoreInstruction::None,
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&os_ref), &request),
+                "keep should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(os_ref.clone())),
+                store_instruction: SecretStoreInstruction::None,
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&env_ref), &request),
+                "keep should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(env_ref)),
+                store_instruction: SecretStoreInstruction::None,
+            }
+        );
+    }
+
+    #[test]
+    fn secret_replace_updates_os_ref_or_saves_new_managed_ref() {
+        let account_id = AccountId::from("primary");
+        let request = secret_request(SecretWriteMode::Replace, Some("  replacement  "));
+        let default_ref = account_secret_ref(&account_id);
+        let os_ref = secret_ref(SecretKind::Os, "account:custom");
+        let env_ref = secret_ref(SecretKind::Env, "POSTHASTE_PASSWORD");
+
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, None, &request),
+                "replace should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(default_ref.clone())),
+                store_instruction: SecretStoreInstruction::Save {
+                    secret_ref: default_ref.clone(),
+                    password: "replacement",
+                },
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&os_ref), &request),
+                "replace should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(os_ref.clone())),
+                store_instruction: SecretStoreInstruction::Update {
+                    secret_ref: os_ref,
+                    password: "replacement",
+                },
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&env_ref), &request),
+                "replace should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(Some(default_ref.clone())),
+                store_instruction: SecretStoreInstruction::Save {
+                    secret_ref: default_ref,
+                    password: "replacement",
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn secret_clear_clears_account_ref_and_deletes_only_os_refs() {
+        let account_id = AccountId::from("primary");
+        let request = secret_request(SecretWriteMode::Clear, None);
+        let os_ref = secret_ref(SecretKind::Os, "account:primary");
+        let env_ref = secret_ref(SecretKind::Env, "POSTHASTE_PASSWORD");
+
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, None, &request),
+                "clear should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(None),
+                store_instruction: SecretStoreInstruction::None,
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&env_ref), &request),
+                "clear should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(None),
+                store_instruction: SecretStoreInstruction::None,
+            }
+        );
+        assert_eq!(
+            expect_decision(
+                decide_secret_instruction(&account_id, Some(&os_ref), &request),
+                "clear should be valid"
+            ),
+            SecretInstructionDecision {
+                account_secret_ref: AccountSecretRefUpdate::Set(None),
+                store_instruction: SecretStoreInstruction::Delete { secret_ref: os_ref },
+            }
+        );
+    }
+
+    #[test]
+    fn secret_replace_rejects_missing_or_blank_passwords() {
+        for password in [None, Some(""), Some("   ")] {
+            let request = secret_request(SecretWriteMode::Replace, password);
+            let error = decide_secret_instruction(&AccountId::from("primary"), None, &request)
+                .expect_err("replace without a nonblank password should fail");
+
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(error.body.code, "invalid_secret");
+            assert_eq!(
+                error.body.message,
+                "secret.password is required when secret.mode is replace"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_secret_instruction_replaces_env_ref_with_managed_os_ref() {
+        let test_state = test_app_state();
+        let mut account = test_account(Some(secret_ref(SecretKind::Env, "POSTHASTE_PASSWORD")));
+        let previous_ref = account.transport.secret_ref.clone();
+        let request = secret_request(SecretWriteMode::Replace, Some("  replacement  "));
+        let expected_ref = account_secret_ref(&account.id);
+
+        apply_secret_instruction(
+            &test_state.state,
+            &mut account,
+            previous_ref.as_ref(),
+            &request,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "replace should save the managed secret, got {}: {}",
+                error.body.code, error.body.message
+            )
+        });
+
+        assert_eq!(account.transport.secret_ref, Some(expected_ref.clone()));
+        assert_eq!(
+            test_state.secret_store.calls(),
+            vec![SecretStoreCall::Save(
+                expected_ref,
+                "replacement".to_string()
+            )]
+        );
+    }
+
+    fn expect_decision<'a>(
+        result: Result<SecretInstructionDecision<'a>, ApiError>,
+        context: &str,
+    ) -> SecretInstructionDecision<'a> {
+        result.unwrap_or_else(|error| {
+            panic!("{context}, got {}: {}", error.body.code, error.body.message)
+        })
+    }
+
+    fn secret_request(mode: SecretWriteMode, password: Option<&str>) -> SecretWriteRequest {
+        SecretWriteRequest {
+            mode,
+            password: password.map(str::to_string),
+        }
+    }
+
+    fn secret_ref(kind: SecretKind, key: &str) -> SecretRef {
+        SecretRef {
+            kind,
+            key: key.to_string(),
+        }
+    }
+
+    fn test_account(secret_ref: Option<SecretRef>) -> AccountSettings {
+        AccountSettings {
+            id: AccountId::from("primary"),
+            name: "Primary".to_string(),
+            full_name: None,
+            email_patterns: vec!["primary@example.com".to_string()],
+            driver: AccountDriver::ImapSmtp,
+            enabled: true,
+            appearance: None,
+            transport: AccountTransportSettings {
+                username: Some("primary@example.com".to_string()),
+                secret_ref,
+                imap: Some(ImapTransportSettings {
+                    host: "imap.example.com".to_string(),
+                    port: 993,
+                    security: posthaste_domain::TransportSecurity::Tls,
+                }),
+                smtp: Some(SmtpTransportSettings {
+                    host: "smtp.example.com".to_string(),
+                    port: 587,
+                    security: posthaste_domain::TransportSecurity::StartTls,
+                }),
+                ..Default::default()
+            },
+            created_at: "2026-03-31T10:00:00Z".to_string(),
+            updated_at: "2026-03-31T10:00:00Z".to_string(),
+        }
+    }
+
+    struct TestAppState {
+        state: AppState,
+        secret_store: Arc<RecordingSecretStore>,
+        _root: TestRoot,
+    }
+
+    fn test_app_state() -> TestAppState {
+        let root = TestRoot(
+            std::env::temp_dir().join(format!("posthaste-account-support-{}", Uuid::new_v4())),
+        );
+        let config: Arc<dyn ConfigRepository> =
+            Arc::new(TomlConfigRepository::open(root.0.join("config")).expect("open config repo"));
+        let database_store = Arc::new(
+            DatabaseStore::open(root.0.join("mail.sqlite"), root.0.join("data"))
+                .expect("open database store"),
+        );
+        let store: Arc<dyn MailStore> = database_store.clone();
+        let service = Arc::new(MailService::new(database_store, config));
+        let secret_store = Arc::new(RecordingSecretStore::default());
+        let secret_store_for_state: Arc<dyn SecretStore> = secret_store.clone();
+        let (event_sender, _) = broadcast::channel(1);
+        let supervisor = Arc::new(AccountSupervisor::new(
+            service.clone(),
+            store.clone(),
+            secret_store_for_state.clone(),
+            event_sender.clone(),
+            Duration::from_secs(60),
+        ));
+
+        TestAppState {
+            state: AppState {
+                service,
+                store,
+                secret_store: secret_store_for_state,
+                supervisor,
+                event_sender,
+                account_logo_root: root.0.join("account-assets").join("logos"),
+                oauth_flows: Arc::new(OAuthFlowStore::default()),
+            },
+            secret_store,
+            _root: root,
+        }
+    }
+
+    struct TestRoot(PathBuf);
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    enum SecretStoreCall {
+        Save(SecretRef, String),
+        Update(SecretRef, String),
+        Delete(SecretRef),
+    }
+
+    #[derive(Default)]
+    struct RecordingSecretStore {
+        calls: Mutex<Vec<SecretStoreCall>>,
+    }
+
+    impl RecordingSecretStore {
+        fn calls(&self) -> Vec<SecretStoreCall> {
+            self.calls.lock().expect("calls lock").clone()
+        }
+
+        fn record(&self, call: SecretStoreCall) {
+            self.calls.lock().expect("calls lock").push(call);
+        }
+    }
+
+    impl SecretStore for RecordingSecretStore {
+        fn resolve(&self, _secret_ref: &SecretRef) -> Result<String, SecretStoreError> {
+            Err(SecretStoreError::Unavailable(
+                "test store does not resolve secrets".to_string(),
+            ))
+        }
+
+        fn save(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+            self.record(SecretStoreCall::Save(secret_ref.clone(), value.to_string()));
+            Ok(())
+        }
+
+        fn update(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+            self.record(SecretStoreCall::Update(
+                secret_ref.clone(),
+                value.to_string(),
+            ));
+            Ok(())
+        }
+
+        fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError> {
+            self.record(SecretStoreCall::Delete(secret_ref.clone()));
+            Ok(())
+        }
     }
 }

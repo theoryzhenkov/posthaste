@@ -29,7 +29,16 @@ import {
   triggerSync,
   updateSmartMailbox,
 } from '../api/client'
-import type { AccountOverview, SmartMailboxSummary } from '../api/types'
+import type {
+  AccountOverview,
+  AppSettings,
+  SmartMailbox,
+  SmartMailboxSummary,
+} from '../api/types'
+import {
+  removeSmartMailboxLinkedRules,
+  rewriteSmartMailboxLinkedRules,
+} from '../automationRules'
 import { AccountsPane } from './settings-panel/AccountsPane'
 import { AppearancePane } from './settings-panel/AppearancePane'
 import { GeneralPane } from './settings-panel/GeneralPane'
@@ -252,6 +261,65 @@ export function SettingsPanel({
     })
   }
 
+  const currentSettings = () =>
+    queryClient.getQueryData<AppSettings>(queryKeys.settings) ??
+    settingsQuery.data ??
+    null
+
+  const rewriteLinkedSmartMailboxAutomation = async (
+    smartMailbox: SmartMailbox,
+  ) => {
+    const settings = currentSettings()
+    if (!settings) {
+      return
+    }
+    const automationRules = rewriteSmartMailboxLinkedRules(
+      settings.automationRules ?? [],
+      smartMailbox,
+    )
+    const automationDrafts = rewriteSmartMailboxLinkedRules(
+      settings.automationDrafts ?? [],
+      smartMailbox,
+    )
+    if (
+      automationRules === settings.automationRules &&
+      automationDrafts === settings.automationDrafts
+    ) {
+      return
+    }
+    const savedSettings = await patchSettings({
+      automationRules,
+      automationDrafts,
+    })
+    queryClient.setQueryData(queryKeys.settings, savedSettings)
+  }
+
+  const removeLinkedSmartMailboxAutomation = async (smartMailboxId: string) => {
+    const settings = currentSettings()
+    if (!settings) {
+      return
+    }
+    const automationRules = removeSmartMailboxLinkedRules(
+      settings.automationRules ?? [],
+      smartMailboxId,
+    )
+    const automationDrafts = removeSmartMailboxLinkedRules(
+      settings.automationDrafts ?? [],
+      smartMailboxId,
+    )
+    if (
+      automationRules === settings.automationRules &&
+      automationDrafts === settings.automationDrafts
+    ) {
+      return
+    }
+    const savedSettings = await patchSettings({
+      automationRules,
+      automationDrafts,
+    })
+    queryClient.setQueryData(queryKeys.settings, savedSettings)
+  }
+
   const defaultMutation = useMutation({
     mutationFn: (accountId: string | null) =>
       patchSettings({ defaultAccountId: accountId }),
@@ -425,6 +493,7 @@ export function SettingsPanel({
               onReorderMailbox={handleReorderSmartMailbox}
               onSaved={async (mailbox) => {
                 await invalidateSmartMailboxQueries(mailbox.id)
+                await rewriteLinkedSmartMailboxAutomation(mailbox)
                 setMailboxEditorTarget({ kind: 'smart', id: mailbox.id })
               }}
               onAutomationSettingsSaved={async (settings) => {
@@ -432,6 +501,7 @@ export function SettingsPanel({
                 invalidateAccountReadModels(queryClient)
               }}
               onDeleted={async (mailboxId) => {
+                await removeLinkedSmartMailboxAutomation(mailboxId)
                 await deleteSmartMailbox(mailboxId)
                 await invalidateSmartMailboxQueries()
                 setMailboxEditorTarget(null)

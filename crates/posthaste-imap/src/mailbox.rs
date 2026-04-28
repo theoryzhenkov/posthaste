@@ -29,6 +29,7 @@ pub(crate) struct ImapMailboxStatus {
     pub messages: Option<u32>,
     pub uid_next: Option<ImapUid>,
     pub uid_validity: Option<ImapUidValidity>,
+    pub highest_modseq: Option<ImapModSeq>,
 }
 
 /// Fetch cheap mailbox status without selecting the mailbox.
@@ -42,12 +43,13 @@ pub(crate) struct ImapMailboxStatus {
 pub(crate) async fn status_imap_mailbox(
     client: &mut ImapClient,
     mailbox_name: &str,
+    include_highest_modseq: bool,
 ) -> Result<ImapMailboxStatus, ImapAdapterError> {
     let mailbox = Mailbox::try_from(mailbox_name)
         .map_err(|_| ImapAdapterError::InvalidMailboxName(mailbox_name.to_string()))?
         .into_static();
     client
-        .resolve(StatusTask::new(mailbox))
+        .resolve(StatusTask::new(mailbox, include_highest_modseq))
         .await
         .map_err(ImapAdapterError::from)?
         .map_err(|error| ImapAdapterError::Client(error.to_string()))
@@ -71,13 +73,23 @@ pub(crate) async fn examine_selected_mailbox(
 #[derive(Clone, Debug)]
 struct StatusTask {
     mailbox: Mailbox<'static>,
+    item_names: Vec<StatusDataItemName>,
     output: ImapMailboxStatus,
 }
 
 impl StatusTask {
-    fn new(mailbox: Mailbox<'static>) -> Self {
+    fn new(mailbox: Mailbox<'static>, include_highest_modseq: bool) -> Self {
+        let mut item_names = vec![
+            StatusDataItemName::Messages,
+            StatusDataItemName::UidNext,
+            StatusDataItemName::UidValidity,
+        ];
+        if include_highest_modseq {
+            item_names.push(StatusDataItemName::HighestModSeq);
+        }
         Self {
             mailbox,
+            item_names,
             output: ImapMailboxStatus::default(),
         }
     }
@@ -89,12 +101,7 @@ impl Task for StatusTask {
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Status {
             mailbox: self.mailbox.clone(),
-            item_names: vec![
-                StatusDataItemName::Messages,
-                StatusDataItemName::UidNext,
-                StatusDataItemName::UidValidity,
-            ]
-            .into(),
+            item_names: self.item_names.clone().into(),
         }
     }
 
@@ -111,6 +118,9 @@ impl Task for StatusTask {
                         }
                         StatusDataItem::UidValidity(uid_validity) => {
                             self.output.uid_validity = Some(ImapUidValidity(uid_validity.get()));
+                        }
+                        StatusDataItem::HighestModSeq(modseq) if *modseq > 0 => {
+                            self.output.highest_modseq = Some(ImapModSeq(*modseq));
                         }
                         _ => {}
                     }

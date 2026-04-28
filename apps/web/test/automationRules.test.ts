@@ -11,6 +11,8 @@ import {
   draftToRule,
   extractAccountIdFromRule,
   ruleToDraft,
+  removeSmartMailboxLinkedRules,
+  rewriteSmartMailboxLinkedRules,
   sourceMailboxDraftToRule,
   sourceMailboxRulePrefix,
   smartMailboxDraftToRule,
@@ -183,6 +185,82 @@ describe('automation rule projection', () => {
     expect(actionConditionFromSmartMailboxRule(saved, 'primary')).toEqual(
       actionRule,
     )
+  })
+
+  it('rewrites smart mailbox action rules when the mailbox definition changes', () => {
+    const saved = smartMailboxDraftToRule(
+      {
+        id: `${smartMailboxRulePrefix(smartMailbox.id)}rule-1`,
+        accountId: 'primary',
+        name: 'Archive action',
+        enabled: true,
+        triggers: ['messageArrived'],
+        condition: actionRule,
+        actions: [{ kind: 'markRead' }],
+        backfill: true,
+      },
+      smartMailbox,
+    )
+    const nextSmartMailbox: SmartMailbox = {
+      ...smartMailbox,
+      rule: {
+        root: {
+          ...smartMailboxRule.root,
+          nodes: [
+            {
+              type: 'condition',
+              field: 'fromEmail',
+              operator: 'contains',
+              negated: false,
+              value: '@example.com',
+            },
+          ],
+        },
+      },
+    }
+
+    const [rewritten] = rewriteSmartMailboxLinkedRules(
+      [saved],
+      nextSmartMailbox,
+    )
+
+    expect(rewritten.condition.root.nodes[1]).toMatchObject({
+      type: 'group',
+      nodes: [
+        {
+          type: 'group',
+          nodes: nextSmartMailbox.rule.root.nodes,
+        },
+        {
+          type: 'group',
+          nodes: actionRule.root.nodes,
+        },
+      ],
+    })
+  })
+
+  it('removes smart mailbox action rules and drafts when the mailbox is deleted', () => {
+    const linked = smartMailboxDraftToRule(
+      {
+        id: `${smartMailboxRulePrefix(smartMailbox.id)}rule-1`,
+        accountId: 'primary',
+        name: 'Archive action',
+        enabled: true,
+        triggers: ['messageArrived'],
+        condition: actionRule,
+        actions: [{ kind: 'markRead' }],
+        backfill: true,
+      },
+      smartMailbox,
+    )
+    const unrelated = {
+      ...linked,
+      id: `${smartMailboxRulePrefix('other')}rule-2`,
+    }
+
+    expect(
+      removeSmartMailboxLinkedRules([linked, unrelated], smartMailbox.id),
+    ).toEqual([unrelated])
   })
 
   it('serializes source mailbox actions as source and mailbox constrained rules', () => {

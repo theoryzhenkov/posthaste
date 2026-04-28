@@ -23,7 +23,25 @@ use posthaste_domain::GatewayError;
 /// @spec docs/L2-transport#single-ws-per-account
 pub struct SharedWsConnection {
     client: Arc<Client>,
-    ws: RwLock<Option<CorrelatedWs>>,
+    state: RwLock<WsConnectionState>,
+}
+
+enum WsConnectionState {
+    Disconnected,
+    Connected(Arc<CorrelatedWs>),
+}
+
+impl WsConnectionState {
+    fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected(_))
+    }
+
+    fn connection(&self) -> Option<Arc<CorrelatedWs>> {
+        match self {
+            Self::Disconnected => None,
+            Self::Connected(ws) => Some(ws.clone()),
+        }
+    }
 }
 
 impl SharedWsConnection {
@@ -31,7 +49,7 @@ impl SharedWsConnection {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
             client,
-            ws: RwLock::new(None),
+            state: RwLock::new(WsConnectionState::Disconnected),
         }
     }
 
@@ -50,14 +68,14 @@ impl SharedWsConnection {
     /// @spec docs/L2-transport#websocket-connection-lifecycle
     pub async fn ensure_connected(&self) -> Result<(), GatewayError> {
         {
-            let guard = self.ws.read().await;
-            if guard.is_some() {
+            let guard = self.state.read().await;
+            if guard.is_connected() {
                 return Ok(());
             }
         }
-        let mut guard = self.ws.write().await;
+        let mut guard = self.state.write().await;
         // Double-check after acquiring write lock
-        if guard.is_some() {
+        if guard.is_connected() {
             return Ok(());
         }
         let target_url = self.ws_url();
@@ -74,7 +92,7 @@ impl SharedWsConnection {
                 warn!(target_url = target_url.as_deref(), error = %mapped, "WebSocket connection failed");
                 mapped
             })?;
-        *guard = Some(ws);
+        *guard = WsConnectionState::Connected(Arc::new(ws));
         info!(
             target_url = target_url.as_deref(),
             "WebSocket connection established"
@@ -84,7 +102,7 @@ impl SharedWsConnection {
 
     /// Check if a WS connection is currently active.
     pub async fn is_connected(&self) -> bool {
-        self.ws.read().await.is_some()
+        self.state.read().await.is_connected()
     }
 
     /// Send a JMAP request over WebSocket.
@@ -97,9 +115,11 @@ impl SharedWsConnection {
         &self,
         request: Request<'_>,
     ) -> Result<Response<TaggedMethodResponse>, GatewayError> {
-        let guard = self.ws.read().await;
-        let ws = guard
-            .as_ref()
+        let ws = self
+            .state
+            .read()
+            .await
+            .connection()
             .ok_or_else(|| GatewayError::Network("WebSocket not connected".to_string()))?;
         ws.send(request).await.map_err(map_gateway_error)
     }
@@ -108,12 +128,7 @@ impl SharedWsConnection {
     ///
     /// @spec docs/L1-jmap#push
     pub async fn next_push(&self) -> Option<Result<PushObject, jmap_client::Error>> {
-        let guard = self.ws.read().await;
-        let ws = guard.as_ref()?;
-        // Release the RwLock before awaiting — next_push has its own internal lock.
-        // We need to hold a reference to ws though, so we can't drop guard.
-        // This is safe: the read lock allows concurrent readers, and CorrelatedWs
-        // methods are safe for concurrent use.
+        let ws = self.state.read().await.connection()?;
         ws.next_push().await
     }
 
@@ -122,9 +137,11 @@ impl SharedWsConnection {
     /// @spec docs/L2-transport#websocket-connection-lifecycle
     /// @spec docs/L1-jmap#push
     pub async fn enable_push(&self, checkpoint: Option<&str>) -> Result<(), GatewayError> {
-        let guard = self.ws.read().await;
-        let ws = guard
-            .as_ref()
+        let ws = self
+            .state
+            .read()
+            .await
+            .connection()
             .ok_or_else(|| GatewayError::Network("WebSocket not connected".to_string()))?;
         ws.enable_push_ws(
             Some(crate::WATCHED_DATA_TYPES),
@@ -138,7 +155,7 @@ impl SharedWsConnection {
     ///
     /// @spec docs/L2-transport#http-fallback
     pub async fn disconnect(&self) {
-        let mut guard = self.ws.write().await;
-        *guard = None;
+        let mut guard = self.state.write().await;
+        *guard = WsConnectionState::Disconnected;
     }
 }

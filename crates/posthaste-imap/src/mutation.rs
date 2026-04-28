@@ -12,10 +12,14 @@ use imap_client::imap_types::{
 };
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain::{ImapMessageLocation, MailboxId, MutationOutcome, SetKeywordsCommand};
+use posthaste_domain::{
+    ImapMessageLocation, MailboxId, MutationOutcome, SetKeywordsCommand, SystemKeyword,
+};
 
 use crate::discovery::connect_authenticated_client;
 use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfig};
+
+const IMAP_FLAG_FORWARDED: &str = "\\Forwarded";
 
 /// Apply a JMAP keyword delta using UID STORE in the selected IMAP mailbox.
 ///
@@ -178,13 +182,10 @@ pub fn imap_flags_for_keywords(
 }
 
 fn imap_flag_for_keyword(keyword: &str) -> Result<Flag<'static>, ImapAdapterError> {
-    let flag = match keyword.to_ascii_lowercase().as_str() {
-        "$seen" => Flag::Seen,
-        "$flagged" => Flag::Flagged,
-        "$answered" => Flag::Answered,
-        "$draft" => Flag::Draft,
-        "$forwarded" => Flag::try_from("\\Forwarded").expect("static IMAP flag is valid"),
-        _ => Flag::try_from(keyword)
+    let normalized_keyword = keyword.to_ascii_lowercase();
+    let flag = match SystemKeyword::parse(&normalized_keyword) {
+        Some(system_keyword) => imap_flag_for_system_keyword(system_keyword),
+        None => Flag::try_from(keyword)
             .map_err(|error| ImapAdapterError::InvalidKeywordFlag {
                 keyword: keyword.to_string(),
                 reason: error.to_string(),
@@ -193,6 +194,18 @@ fn imap_flag_for_keyword(keyword: &str) -> Result<Flag<'static>, ImapAdapterErro
     };
 
     Ok(flag)
+}
+
+fn imap_flag_for_system_keyword(keyword: SystemKeyword) -> Flag<'static> {
+    match keyword {
+        SystemKeyword::Seen => Flag::Seen,
+        SystemKeyword::Flagged => Flag::Flagged,
+        SystemKeyword::Answered => Flag::Answered,
+        SystemKeyword::Draft => Flag::Draft,
+        SystemKeyword::Forwarded => {
+            Flag::try_from(IMAP_FLAG_FORWARDED).expect("static IMAP flag is valid")
+        }
+    }
 }
 
 fn uid_sequence_set(location: &ImapMessageLocation) -> Result<SequenceSet, ImapAdapterError> {
@@ -316,11 +329,11 @@ mod tests {
     #[test]
     fn maps_jmap_keywords_to_imap_system_flags() {
         let flags = imap_flags_for_keywords(&[
-            "$seen".to_string(),
-            "$flagged".to_string(),
-            "$answered".to_string(),
-            "$draft".to_string(),
-            "$forwarded".to_string(),
+            SystemKeyword::Seen.as_str().to_string(),
+            SystemKeyword::Flagged.as_str().to_string(),
+            SystemKeyword::Answered.as_str().to_string(),
+            SystemKeyword::Draft.as_str().to_string(),
+            SystemKeyword::Forwarded.as_str().to_string(),
         ])
         .expect("flags");
 
@@ -331,7 +344,7 @@ mod tests {
                 Flag::Flagged,
                 Flag::Answered,
                 Flag::Draft,
-                Flag::try_from("\\Forwarded").expect("forwarded flag"),
+                Flag::try_from(IMAP_FLAG_FORWARDED).expect("forwarded flag"),
             ]
         );
     }

@@ -1,10 +1,13 @@
+use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
 use posthaste_domain::{
     imap_message_id, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId,
-    MessageId, MessageRecord, ThreadId, RFC3339_EPOCH,
+    MessageId, MessageRecord, SystemKeyword, ThreadId, RFC3339_EPOCH,
 };
 
 use crate::ImapAdapterError;
+
+const IMAP_FLAG_FORWARDED: &str = "\\Forwarded";
 
 /// Header-level data fetched for one IMAP message.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,19 +99,39 @@ pub fn imap_header_message_record(
 pub fn imap_flag_keywords(flags: &[String]) -> Vec<String> {
     let mut keywords = flags
         .iter()
-        .filter_map(|flag| match flag.as_str().to_ascii_lowercase().as_str() {
-            "\\seen" => Some("$seen".to_string()),
-            "\\flagged" => Some("$flagged".to_string()),
-            "\\answered" => Some("$answered".to_string()),
-            "\\draft" => Some("$draft".to_string()),
-            "\\forwarded" => Some("$forwarded".to_string()),
-            _ if !flag.starts_with('\\') => Some(flag.to_string()),
-            _ => None,
+        .filter_map(|flag| {
+            if let Some(keyword) = imap_system_flag_keyword(flag) {
+                Some(keyword.as_str().to_string())
+            } else if !flag.starts_with('\\') {
+                Some(flag.to_string())
+            } else {
+                None
+            }
         })
         .collect::<Vec<_>>();
     keywords.sort();
     keywords.dedup();
     keywords
+}
+
+fn imap_system_flag_keyword(flag: &str) -> Option<SystemKeyword> {
+    if flag.eq_ignore_ascii_case(IMAP_FLAG_FORWARDED) {
+        return Some(SystemKeyword::Forwarded);
+    }
+
+    match Flag::try_from(flag).ok()? {
+        Flag::Seen => Some(SystemKeyword::Seen),
+        Flag::Flagged => Some(SystemKeyword::Flagged),
+        Flag::Answered => Some(SystemKeyword::Answered),
+        Flag::Draft => Some(SystemKeyword::Draft),
+        _ => None,
+    }
+}
+
+pub(crate) fn imap_flags_include_deleted(flags: &[String]) -> bool {
+    flags
+        .iter()
+        .any(|flag| flag.eq_ignore_ascii_case("\\Deleted"))
 }
 
 fn imap_thread_id(
@@ -207,10 +230,18 @@ mod tests {
     fn maps_custom_imap_keywords_to_jmap_keywords() {
         let keywords = imap_flag_keywords(&[
             "\\Seen".to_string(),
+            IMAP_FLAG_FORWARDED.to_string(),
             "project-x".to_string(),
             "\\UnknownExtension".to_string(),
         ]);
 
-        assert_eq!(keywords, vec!["$seen", "project-x"]);
+        assert_eq!(
+            keywords,
+            vec![
+                SystemKeyword::Forwarded.as_str(),
+                SystemKeyword::Seen.as_str(),
+                "project-x"
+            ]
+        );
     }
 }

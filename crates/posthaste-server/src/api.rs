@@ -19,12 +19,11 @@ use posthaste_domain::{
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, ProviderAuthKind,
     ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
     SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest, ServiceError,
-    SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId,
-    SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    ServiceErrorKind, SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
-    TransportSecurity, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED,
+    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -33,12 +32,26 @@ use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use tracing::warn;
 
 use crate::oauth::{
-    OAuthExchangeResult, OAuthProviderProfile, OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
+    OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthProviderProfile, OAuthTokenService,
+    OAuthTokenSet, PendingOAuthFlow,
 };
 use crate::{sanitize, AppState};
 
 mod account_support;
 mod cursor_support;
+mod message_commands;
+mod settings;
+mod smart_mailboxes;
+
+pub use message_commands::{
+    add_to_mailbox, destroy_message, remove_from_mailbox, replace_mailboxes, set_keywords,
+};
+pub use settings::{get_settings, patch_settings, preview_automation_rule};
+pub use smart_mailboxes::{
+    create_smart_mailbox, delete_smart_mailbox, get_smart_mailbox,
+    list_smart_mailbox_conversations, list_smart_mailbox_messages, list_smart_mailboxes,
+    patch_smart_mailbox, reset_default_smart_mailboxes,
+};
 
 use account_support::{
     account_overview, account_secret_ref, append_and_publish_account_event, apply_account_patch,
@@ -46,7 +59,7 @@ use account_support::{
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
     normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
     normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
-    validate_automation_rules, validate_logo_image_id,
+    validate_automation_rules, validate_logo_image_id, validate_secret_request,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -220,23 +233,6 @@ async fn record_search_cache_visibility(
     }
 }
 
-const DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 5;
-const MAX_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 50;
-
-fn automation_rule_preview_limit(limit: Option<usize>) -> Result<usize, ApiError> {
-    let limit = limit.unwrap_or(DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT);
-    if limit == 0 || limit > MAX_AUTOMATION_RULE_PREVIEW_LIMIT {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_limit",
-            format!(
-                "limit must be between 1 and {MAX_AUTOMATION_RULE_PREVIEW_LIMIT} preview messages"
-            ),
-        ));
-    }
-    Ok(limit)
-}
-
 /// Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.
 ///
 /// Outer `Option` distinguishes omitted `role` from an explicit JSON `null`.
@@ -261,11 +257,6 @@ pub struct PatchSettingsRequest {
     pub cache_policy: Option<CachePolicy>,
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
-}
-
-fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
-    policy.hard_cap_bytes = policy.hard_cap_bytes.max(policy.soft_cap_bytes);
-    policy
 }
 
 /// Request body for `POST /v1/automation-rules:preview`.
@@ -494,19 +485,7 @@ impl ApiError {
     ///
     /// @spec docs/L1-api#error-code-mapping
     pub fn from_service_error(error: ServiceError) -> Self {
-        let status = match error.code() {
-            "not_found" => StatusCode::NOT_FOUND,
-            "conflict" | "state_mismatch" => StatusCode::CONFLICT,
-            "auth_error" => StatusCode::UNAUTHORIZED,
-            "gateway_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
-            "network_error" => StatusCode::BAD_GATEWAY,
-            "gateway_rejected" | "secret_unavailable" | "secret_unsupported" => {
-                StatusCode::BAD_REQUEST
-            }
-            "config_validation" | "config_parse" => StatusCode::BAD_REQUEST,
-            "config_io" => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        };
+        let status = service_error_status(error.kind());
         Self {
             status,
             body: ApiErrorBody {
@@ -530,6 +509,24 @@ impl ApiError {
     }
 }
 
+fn service_error_status(kind: ServiceErrorKind) -> StatusCode {
+    match kind {
+        ServiceErrorKind::NotFound => StatusCode::NOT_FOUND,
+        ServiceErrorKind::Conflict | ServiceErrorKind::StateMismatch => StatusCode::CONFLICT,
+        ServiceErrorKind::AuthError => StatusCode::UNAUTHORIZED,
+        ServiceErrorKind::GatewayUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ServiceErrorKind::NetworkError => StatusCode::BAD_GATEWAY,
+        ServiceErrorKind::GatewayRejected
+        | ServiceErrorKind::SecretUnavailable
+        | ServiceErrorKind::SecretUnsupported
+        | ServiceErrorKind::ConfigValidation
+        | ServiceErrorKind::ConfigParse => StatusCode::BAD_REQUEST,
+        ServiceErrorKind::CannotCalculateChanges
+        | ServiceErrorKind::StorageFailure
+        | ServiceErrorKind::ConfigIo => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {
         Self::from_service_error(error)
@@ -542,103 +539,43 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// GET /v1/settings
-///
-/// @spec docs/L1-api#settings
-pub async fn get_settings(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<AppSettings>, ApiError> {
-    state
-        .service
-        .get_app_settings()
-        .map(Json)
-        .map_err(ApiError::from_service_error)
+fn account_not_found() -> ApiError {
+    ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found")
 }
 
-/// PATCH /v1/settings
-///
-/// Validates that the referenced default account exists before persisting.
-///
-/// @spec docs/L1-api#settings
-pub async fn patch_settings(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<PatchSettingsRequest>,
-) -> Result<Json<AppSettings>, ApiError> {
-    let mut settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    if let Some(default_account_id) = &request.default_account_id {
-        if let Some(default_account_id) = default_account_id {
-            let account = state
-                .service
-                .get_source(&AccountId::from(default_account_id.as_str()))
-                .map_err(ApiError::from_service_error)?;
-            if account.is_none() {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_account",
-                    "default account must reference an existing account",
-                ));
-            }
-            settings.default_account_id = Some(AccountId::from(default_account_id.as_str()));
-        } else {
-            settings.default_account_id = None;
-        }
-    }
-    if let Some(automation_rules) = &request.automation_rules {
-        settings.automation_rules = normalize_automation_rules(automation_rules);
-    }
-    if let Some(automation_drafts) = &request.automation_drafts {
-        settings.automation_drafts = normalize_automation_rules(automation_drafts);
-    }
-    if let Some(cache_policy) = request.cache_policy {
-        settings.cache_policy = normalize_cache_policy(cache_policy);
-    }
-    validate_automation_rules(&settings.automation_rules)?;
-    validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
+fn load_account(state: &AppState, account_id: &AccountId) -> Result<AccountSettings, ApiError> {
     state
         .service
-        .put_app_settings(&settings)
-        .map_err(ApiError::from_service_error)?;
-    if request.automation_rules.is_some() {
-        state
-            .service
-            .ensure_automation_backfills_for_current_rules()
-            .map_err(ApiError::from_service_error)?;
-    }
-    Ok(Json(settings))
+        .get_source(account_id)
+        .map_err(ApiError::from_service_error)?
+        .ok_or_else(account_not_found)
 }
 
-/// POST /v1/automation-rules:preview
-///
-/// Returns a small newest-first sample and total count for a draft rule
-/// condition using the same indexed rule query path as smart mailboxes.
-///
-/// @spec docs/L1-api#account-crud-lifecycle
-pub async fn preview_automation_rule(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<PreviewAutomationRuleRequest>,
-) -> Result<Json<AutomationRulePreviewResponse>, ApiError> {
-    let limit = automation_rule_preview_limit(request.limit)?;
-    let (_, total) = state
-        .service
-        .count_messages_by_rule(&request.condition)
-        .map_err(ApiError::from_service_error)?;
-    let page = state
-        .service
-        .query_message_page_by_rule(
-            &request.condition,
-            limit,
-            None,
-            MessageSortField::Date,
-            SortDirection::Desc,
-        )
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(AutomationRulePreviewResponse {
-        total,
-        items: page.items,
-    }))
+fn command_result_response(
+    state: &AppState,
+    result: Result<CommandResult, ServiceError>,
+) -> Result<Json<CommandResult>, ApiError> {
+    let result = result.map_err(ApiError::from_service_error)?;
+    state.publish_events(&result.events);
+    Ok(Json(result))
+}
+
+fn secret_ref_after_write_request(
+    account_id: &AccountId,
+    previous_secret_ref: Option<&SecretRef>,
+    secret: &SecretWriteRequest,
+) -> Result<Option<SecretRef>, ApiError> {
+    validate_secret_request(secret)?;
+    match secret.mode {
+        SecretWriteMode::Keep => Ok(previous_secret_ref.cloned()),
+        SecretWriteMode::Replace => Ok(Some(
+            previous_secret_ref
+                .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
+                .cloned()
+                .unwrap_or_else(|| account_secret_ref(account_id)),
+        )),
+        SecretWriteMode::Clear => Ok(None),
+    }
 }
 
 /// GET /v1/accounts
@@ -673,11 +610,8 @@ pub async fn get_account(
         .service
         .get_app_settings()
         .map_err(ApiError::from_service_error)?;
-    let account = state
-        .service
-        .get_source(&AccountId::from(account_id.as_str()))
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let account_id = AccountId::from(account_id.as_str());
+    let account = load_account(state.as_ref(), &account_id)?;
     Ok(Json(account_overview(&state, &settings, account).await))
 }
 
@@ -747,8 +681,9 @@ pub async fn create_account(
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
-    apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
+    account.transport.secret_ref = secret_ref_after_write_request(&account.id, None, &secret)?;
     validate_account_settings(&account)?;
+    apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
     state
         .service
         .save_source(&account)
@@ -776,28 +711,37 @@ pub async fn patch_account(
     Json(request): Json<PatchAccountRequest>,
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let mut account = state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let mut account = load_account(state.as_ref(), &account_id)?;
     let previous_image_id = account_appearance_image_id(&account);
     apply_account_patch(&mut account, &request);
     account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     let existing_secret_ref = account.transport.secret_ref.clone();
     let secret_request = request.secret.unwrap_or_default();
-    apply_secret_instruction(
-        state.as_ref(),
-        &mut account,
-        existing_secret_ref.as_ref(),
-        &secret_request,
-    )?;
+    account.transport.secret_ref =
+        secret_ref_after_write_request(&account.id, existing_secret_ref.as_ref(), &secret_request)?;
     validate_account_settings(&account)?;
+    let defer_secret_clear = secret_request.mode == SecretWriteMode::Clear;
+    if !defer_secret_clear {
+        apply_secret_instruction(
+            state.as_ref(),
+            &mut account,
+            existing_secret_ref.as_ref(),
+            &secret_request,
+        )?;
+    }
 
     state
         .service
         .save_source(&account)
         .map_err(ApiError::from_service_error)?;
+    if defer_secret_clear {
+        apply_secret_instruction(
+            state.as_ref(),
+            &mut account,
+            existing_secret_ref.as_ref(),
+            &secret_request,
+        )?;
+    }
     state.supervisor.start_account(&account).await;
     append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
         .map_err(store_error_to_api)?;
@@ -824,11 +768,8 @@ pub async fn verify_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
 ) -> Result<Json<VerificationResponse>, ApiError> {
-    let account = state
-        .service
-        .get_source(&AccountId::from(account_id.as_str()))
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let account_id = AccountId::from(account_id.as_str());
+    let account = load_account(state.as_ref(), &account_id)?;
     let result = state
         .supervisor
         .verify_account(&account)
@@ -901,11 +842,7 @@ pub async fn start_account_oauth(
     Json(request): Json<StartOAuthRequest>,
 ) -> Result<Json<StartOAuthResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let account = state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let account = load_account(state.as_ref(), &account_id)?;
     let profile =
         OAuthProviderProfile::for_provider(&account.transport.provider).ok_or_else(|| {
             ApiError::new(
@@ -990,16 +927,16 @@ pub async fn complete_account_oauth(
         })?;
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
     let exchange = oauth
-        .exchange_authorization_code(
-            &flow.profile,
-            &flow.client_id,
-            flow.client_secret.as_deref(),
-            &flow.redirect_uri,
+        .exchange_authorization_code(OAuthAuthorizationCodeExchange {
+            profile: &flow.profile,
+            client_id: &flow.client_id,
+            client_secret: flow.client_secret.as_deref(),
+            redirect_uri: &flow.redirect_uri,
             code,
-            &flow.pkce_verifier,
-            &flow.nonce,
-            time::OffsetDateTime::now_utc(),
-        )
+            pkce_verifier: &flow.pkce_verifier,
+            nonce: &flow.nonce,
+            now: time::OffsetDateTime::now_utc(),
+        })
         .await
         .map_err(ServiceError::from)?;
     match flow.account_id {
@@ -1135,37 +1072,15 @@ fn oauth_account_settings(
 fn oauth_provider_mail_transport(
     provider: &ProviderHint,
 ) -> Result<(ImapTransportSettings, SmtpTransportSettings), ApiError> {
-    match provider {
-        ProviderHint::Gmail => Ok((
-            ImapTransportSettings {
-                host: "imap.gmail.com".to_string(),
-                port: 993,
-                security: TransportSecurity::Tls,
-            },
-            SmtpTransportSettings {
-                host: "smtp.gmail.com".to_string(),
-                port: 587,
-                security: TransportSecurity::StartTls,
-            },
-        )),
-        ProviderHint::Outlook => Ok((
-            ImapTransportSettings {
-                host: "outlook.office365.com".to_string(),
-                port: 993,
-                security: TransportSecurity::Tls,
-            },
-            SmtpTransportSettings {
-                host: "smtp.office365.com".to_string(),
-                port: 587,
-                security: TransportSecurity::StartTls,
-            },
-        )),
-        ProviderHint::Generic | ProviderHint::Icloud => Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_provider",
-            "provider does not support built-in OAuth account creation",
-        )),
-    }
+    OAuthProviderProfile::for_provider(provider)
+        .and_then(|profile| profile.default_mail_transport())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_provider",
+                "provider does not support built-in OAuth account creation",
+            )
+        })
 }
 
 async fn persist_oauth_token_set(
@@ -1173,11 +1088,7 @@ async fn persist_oauth_token_set(
     account_id: &AccountId,
     token_set: OAuthTokenSet,
 ) -> Result<(), ApiError> {
-    let mut account = state
-        .service
-        .get_source(account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let mut account = load_account(state.as_ref(), account_id)?;
     let previous_secret_ref = account.transport.secret_ref.clone();
     let secret_ref = previous_secret_ref
         .as_ref()
@@ -1185,6 +1096,11 @@ async fn persist_oauth_token_set(
         .cloned()
         .unwrap_or_else(|| account_secret_ref(&account.id));
     let encoded = token_set.encode().map_err(ServiceError::from)?;
+
+    account.transport.auth = ProviderAuthKind::OAuth2;
+    account.transport.secret_ref = Some(secret_ref.clone());
+    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
+    validate_account_settings(&account)?;
 
     match previous_secret_ref.as_ref() {
         Some(existing) if existing == &secret_ref => state
@@ -1202,10 +1118,6 @@ async fn persist_oauth_token_set(
         }
     }
 
-    account.transport.auth = ProviderAuthKind::OAuth2;
-    account.transport.secret_ref = Some(secret_ref);
-    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
-    validate_account_settings(&account)?;
     state
         .service
         .save_source(&account)
@@ -1250,11 +1162,7 @@ pub async fn upload_account_logo(
     bytes: Bytes,
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let mut account = state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let mut account = load_account(state.as_ref(), &account_id)?;
 
     if bytes.is_empty() {
         return Err(ApiError::new(
@@ -1365,17 +1273,7 @@ pub async fn delete_account(
     Path(account_id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let account = state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?;
-    let Some(account) = account else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "account not found",
-        ));
-    };
+    let account = load_account(state.as_ref(), &account_id)?;
     let logo_image_id = match &account.appearance {
         Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
         _ => None,
@@ -1522,227 +1420,6 @@ pub async fn get_sidebar(
     state
         .service
         .get_sidebar()
-        .map(Json)
-        .map_err(ApiError::from_service_error)
-}
-
-/// GET /v1/smart-mailboxes
-///
-/// @spec docs/L1-api#smart-mailboxes
-pub async fn list_smart_mailboxes(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
-    state
-        .service
-        .list_smart_mailboxes()
-        .map(Json)
-        .map_err(ApiError::from_service_error)
-}
-
-/// POST /v1/smart-mailboxes
-///
-/// Generates an ID from the name (`sm-{slug}-{uuid}`) and persists to config.
-///
-/// @spec docs/L1-api#smart-mailbox-crud
-pub async fn create_smart_mailbox(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<CreateSmartMailboxRequest>,
-) -> Result<Json<SmartMailbox>, ApiError> {
-    let timestamp = domain_now_iso8601().map_err(internal_error)?;
-    let smart_mailbox = SmartMailbox {
-        id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
-        name: request.name,
-        position: request.position.unwrap_or(0),
-        kind: SmartMailboxKind::User,
-        default_key: None,
-        parent_id: None,
-        rule: request.rule,
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    };
-    state
-        .service
-        .save_smart_mailbox(&smart_mailbox)
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(smart_mailbox))
-}
-
-/// GET /v1/smart-mailboxes/{id}
-///
-/// @spec docs/L1-api#smart-mailboxes
-pub async fn get_smart_mailbox(
-    State(state): State<Arc<AppState>>,
-    Path(smart_mailbox_id): Path<String>,
-) -> Result<Json<SmartMailbox>, ApiError> {
-    state
-        .service
-        .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
-        .map(Json)
-        .map_err(ApiError::from_service_error)
-}
-
-/// PATCH /v1/smart-mailboxes/{id}
-///
-/// Merges name, position, and rule fields. Omitted fields are preserved.
-///
-/// @spec docs/L1-api#smart-mailbox-crud
-pub async fn patch_smart_mailbox(
-    State(state): State<Arc<AppState>>,
-    Path(smart_mailbox_id): Path<String>,
-    Json(request): Json<PatchSmartMailboxRequest>,
-) -> Result<Json<SmartMailbox>, ApiError> {
-    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
-    let mut smart_mailbox = state
-        .service
-        .get_smart_mailbox(&smart_mailbox_id)
-        .map_err(ApiError::from_service_error)?;
-    if let Some(name) = request.name {
-        smart_mailbox.name = name;
-    }
-    if let Some(position) = request.position {
-        smart_mailbox.position = position;
-    }
-    if let Some(rule) = request.rule {
-        smart_mailbox.rule = rule;
-    }
-    smart_mailbox.updated_at = domain_now_iso8601().map_err(internal_error)?;
-    state
-        .service
-        .save_smart_mailbox(&smart_mailbox)
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(smart_mailbox))
-}
-
-/// DELETE /v1/smart-mailboxes/{id}
-///
-/// @spec docs/L1-api#smart-mailboxes
-pub async fn delete_smart_mailbox(
-    State(state): State<Arc<AppState>>,
-    Path(smart_mailbox_id): Path<String>,
-) -> Result<Json<OkResponse>, ApiError> {
-    state
-        .service
-        .delete_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(OkResponse { ok: true }))
-}
-
-/// POST /v1/smart-mailboxes:reset-defaults
-///
-/// Restores default smart mailboxes (Inbox, Archive, Drafts, Sent, Junk,
-/// Trash, All Mail) and returns the full list.
-///
-/// @spec docs/L1-api#smart-mailbox-crud
-/// @spec docs/L1-accounts#smart-mailbox-defaults
-pub async fn reset_default_smart_mailboxes(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
-    state
-        .service
-        .reset_default_smart_mailboxes()
-        .map_err(ApiError::from_service_error)?;
-    state
-        .service
-        .list_smart_mailboxes()
-        .map(Json)
-        .map_err(ApiError::from_service_error)
-}
-
-/// GET /v1/smart-mailboxes/{id}/messages
-///
-/// @spec docs/L1-api#smart-mailboxes
-pub async fn list_smart_mailbox_messages(
-    State(state): State<Arc<AppState>>,
-    Path(smart_mailbox_id): Path<String>,
-    Query(query): Query<ListSmartMailboxMessagesQuery>,
-) -> Result<Json<MessagePageResponse>, ApiError> {
-    let limit = message_limit(query.limit)?;
-    let cursor = parse_message_cursor(query.cursor.as_deref())?;
-    let sort_field = query.sort.unwrap_or_default();
-    let sort_direction = query.sort_dir.unwrap_or_default();
-    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
-    if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
-        let mailbox = state
-            .service
-            .get_smart_mailbox(&smart_mailbox_id)
-            .map_err(ApiError::from_service_error)?;
-        let scope_rule = mailbox.rule;
-        let result_rule = combine_rules(vec![scope_rule.clone(), search_rule]);
-        let page = state
-            .service
-            .query_message_page_by_rule(
-                &result_rule,
-                limit,
-                cursor.as_ref(),
-                sort_field,
-                sort_direction,
-            )
-            .map_err(ApiError::from_service_error)?;
-        record_search_cache_visibility(&state, &page, &scope_rule, &result_rule).await;
-        return Ok(Json(message_page_response(page)));
-    }
-
-    let page = state
-        .service
-        .list_smart_mailbox_message_page(
-            &smart_mailbox_id,
-            limit,
-            cursor.as_ref(),
-            sort_field,
-            sort_direction,
-        )
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(message_page_response(page)))
-}
-
-/// GET /v1/smart-mailboxes/{id}/conversations
-///
-/// @spec docs/L1-api#smart-mailboxes
-/// @spec docs/L1-api#cursor-pagination
-pub async fn list_smart_mailbox_conversations(
-    State(state): State<Arc<AppState>>,
-    Path(smart_mailbox_id): Path<String>,
-    Query(query): Query<ListConversationsQuery>,
-) -> Result<Json<ConversationPageResponse>, ApiError> {
-    let limit = conversation_limit(query.limit)?;
-    let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
-    let sort_field = query.sort.unwrap_or_default();
-    let sort_direction = query.sort_dir.unwrap_or_default();
-
-    // When a search query is provided, AND it with the smart mailbox rule.
-    if let Some(q) = &query.q {
-        if !q.trim().is_empty() {
-            let search_rule = parse_optional_search_rule(Some(q))?.expect("non-empty query");
-            let mailbox = state
-                .service
-                .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
-                .map_err(ApiError::from_service_error)?;
-            let combined = combine_rules(vec![mailbox.rule, search_rule]);
-            return state
-                .service
-                .query_conversations_by_rule(
-                    &combined,
-                    limit,
-                    cursor.as_ref(),
-                    sort_field,
-                    sort_direction,
-                )
-                .map(conversation_page_response)
-                .map(Json)
-                .map_err(ApiError::from_service_error);
-        }
-    }
-
-    state
-        .service
-        .list_smart_mailbox_conversations(
-            &SmartMailboxId::from(smart_mailbox_id),
-            limit,
-            cursor.as_ref(),
-            sort_field,
-            sort_direction,
-        )
-        .map(conversation_page_response)
         .map(Json)
         .map_err(ApiError::from_service_error)
 }
@@ -2119,120 +1796,6 @@ fn require_live_gateway(
     })
 }
 
-/// POST /v1/sources/{sid}/commands/messages/{mid}/set-keywords
-///
-/// @spec docs/L1-api#message-commands
-pub async fn set_keywords(
-    State(state): State<Arc<AppState>>,
-    Path((source_id, message_id)): Path<(String, String)>,
-    Json(command): Json<SetKeywordsCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let result = state
-        .service
-        .set_keywords(
-            &account_id,
-            &MessageId(message_id),
-            &command,
-            gateway.as_ref(),
-        )
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
-
-/// POST /v1/sources/{sid}/commands/messages/{mid}/add-to-mailbox
-///
-/// @spec docs/L1-api#message-commands
-pub async fn add_to_mailbox(
-    State(state): State<Arc<AppState>>,
-    Path((source_id, message_id)): Path<(String, String)>,
-    Json(command): Json<AddToMailboxCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let result = state
-        .service
-        .add_to_mailbox(
-            &account_id,
-            &MessageId(message_id),
-            &command,
-            gateway.as_ref(),
-        )
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
-
-/// POST /v1/sources/{sid}/commands/messages/{mid}/remove-from-mailbox
-///
-/// @spec docs/L1-api#message-commands
-pub async fn remove_from_mailbox(
-    State(state): State<Arc<AppState>>,
-    Path((source_id, message_id)): Path<(String, String)>,
-    Json(command): Json<RemoveFromMailboxCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let result = state
-        .service
-        .remove_from_mailbox(
-            &account_id,
-            &MessageId(message_id),
-            &command,
-            gateway.as_ref(),
-        )
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
-
-/// POST /v1/sources/{sid}/commands/messages/{mid}/replace-mailboxes
-///
-/// @spec docs/L1-api#message-commands
-pub async fn replace_mailboxes(
-    State(state): State<Arc<AppState>>,
-    Path((source_id, message_id)): Path<(String, String)>,
-    Json(command): Json<ReplaceMailboxesCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let result = state
-        .service
-        .replace_mailboxes(
-            &account_id,
-            &MessageId(message_id),
-            &command,
-            gateway.as_ref(),
-        )
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
-
-/// POST /v1/sources/{sid}/commands/messages/{mid}/destroy
-///
-/// @spec docs/L1-api#message-commands
-pub async fn destroy_message(
-    State(state): State<Arc<AppState>>,
-    Path((source_id, message_id)): Path<(String, String)>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let result = state
-        .service
-        .destroy_message(&account_id, &MessageId(message_id), gateway.as_ref())
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
-
 /// POST /v1/sources/{source_id}/commands/sync
 ///
 /// @spec docs/L1-api#sync-and-events
@@ -2313,11 +1876,7 @@ async fn set_account_enabled(
     enabled: bool,
 ) -> Result<Json<OkResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let mut account = state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found"))?;
+    let mut account = load_account(state.as_ref(), &account_id)?;
     account.enabled = enabled;
     account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     state
@@ -2400,7 +1959,7 @@ mod tests {
     use super::*;
     use account_support::{secret_status, validate_secret_request};
     use cursor_support::{encode_conversation_cursor, encode_message_cursor};
-    use posthaste_domain::{GatewayError, EVENT_TOPIC_MESSAGE_ARRIVED};
+    use posthaste_domain::{GatewayError, TransportSecurity, EVENT_TOPIC_MESSAGE_ARRIVED};
 
     #[test]
     fn conversation_cursor_round_trips() {

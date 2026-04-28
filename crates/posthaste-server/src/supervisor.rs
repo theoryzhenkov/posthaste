@@ -8,9 +8,9 @@ use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
     GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream, PushStatus,
-    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, SharedGateway, SyncProgress,
-    SyncProgressReporter, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
-    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind,
+    SharedGateway, SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
+    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
@@ -90,6 +90,42 @@ pub struct AccountVerification {
 struct AccountConnection {
     gateway: SharedGateway,
     push_events: Option<PushEventStream>,
+}
+
+/// Local runtime connection state. Keeps gateway and push stream lifetimes coupled.
+#[derive(Default)]
+enum AccountRuntimeConnectionState {
+    #[default]
+    Disconnected,
+    Connected(AccountConnection),
+}
+
+impl AccountRuntimeConnectionState {
+    fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected(_))
+    }
+
+    fn gateway(&self) -> Option<SharedGateway> {
+        match self {
+            Self::Connected(connection) => Some(connection.gateway.clone()),
+            Self::Disconnected => None,
+        }
+    }
+
+    fn push_events_mut(&mut self) -> Option<&mut PushEventStream> {
+        match self {
+            Self::Connected(connection) => connection.push_events.as_mut(),
+            Self::Disconnected => None,
+        }
+    }
+
+    fn set_connected(&mut self, connection: AccountConnection) {
+        *self = Self::Connected(connection);
+    }
+
+    fn disconnect(&mut self) {
+        *self = Self::Disconnected;
+    }
 }
 
 impl AccountSupervisor {
@@ -259,7 +295,7 @@ impl AccountSupervisor {
         Ok(AccountVerification {
             ok: true,
             identity,
-            push_supported: matches!(account.driver, AccountDriver::Jmap),
+            push_supported: account.driver.capabilities().supports_push,
         })
     }
 }
@@ -274,7 +310,7 @@ async fn run_account_runtime(
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
 ) {
     let account_id = account.id.clone();
-    let mut connection: Option<AccountConnection> = None;
+    let mut connection = AccountRuntimeConnectionState::default();
     let mut backfill_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + AUTOMATION_BACKFILL_INITIAL_DELAY,
         AUTOMATION_BACKFILL_INTERVAL,
@@ -309,7 +345,7 @@ async fn run_account_runtime(
 
     loop {
         let next_push = async {
-            match connection.as_mut().and_then(|c| c.push_events.as_mut()) {
+            match connection.push_events_mut() {
                 Some(stream) => stream.next().await,
                 None => pending().await,
             }
@@ -317,80 +353,137 @@ async fn run_account_runtime(
 
         tokio::select! {
             _ = interval.tick() => {
-                let _ = process_sync_trigger(
-                    &shared, &account, SyncTrigger::Poll, &mut connection, None,
-                ).await;
+                handle_poll_tick(&shared, &account, &mut connection).await;
                 interval = sync_poll_interval(shared.poll_interval);
             }
             _ = backfill_interval.tick() => {
-                let _ = process_automation_backfill_batch(
-                    &shared,
-                    &account_id,
-                    connection.as_ref().map(|connection| connection.gateway.clone()),
-                ).await;
+                handle_backfill_tick(&shared, &account_id, connection.gateway()).await;
             }
             _ = cache_interval.tick() => {
-                process_cache_maintenance_batch(
+                handle_cache_tick(
                     &shared,
                     &account_id,
-                    connection.as_ref().map(|connection| connection.gateway.clone()),
+                    connection.gateway(),
                     CACHE_BACKGROUND_PRESSURE,
                 ).await;
             }
             Some(command) = command_rx.recv() => {
-                match command {
-                    RuntimeCommand::Trigger { trigger, reply } => {
-                        let _ = process_sync_trigger(
-                            &shared, &account, trigger, &mut connection, Some(reply),
-                        ).await;
-                        interval = sync_poll_interval(shared.poll_interval);
-                    }
-                    RuntimeCommand::TriggerOnly { trigger } => {
-                        let _ = process_sync_trigger(
-                            &shared, &account, trigger, &mut connection, None,
-                        ).await;
-                        interval = sync_poll_interval(shared.poll_interval);
-                    }
-                    RuntimeCommand::CacheMaintenance { interactive_pressure } => {
-                        process_cache_maintenance_batch(
-                            &shared,
-                            &account_id,
-                            connection.as_ref().map(|connection| connection.gateway.clone()),
-                            interactive_pressure,
-                        ).await;
-                    }
+                if handle_runtime_command(
+                    &shared,
+                    &account,
+                    &account_id,
+                    &mut connection,
+                    command,
+                ).await {
+                    interval = sync_poll_interval(shared.poll_interval);
                 }
             }
             Some(event) = next_push => {
-                match event {
-                    PushStreamEvent::Notification(ref notification) => {
-                        debug!(
-                            account_id = %account_id,
-                            changed = ?notification.changed,
-                            "push notification received"
-                        );
-                        let _ = process_sync_trigger(
-                            &shared, &account, SyncTrigger::Push, &mut connection, None,
-                        ).await;
-                        interval = sync_poll_interval(shared.poll_interval);
-                    }
-                    PushStreamEvent::Connected { transport } => {
-                        info!(account_id = %account_id, transport, "push connected");
-                        shared.set_push_status(&account_id, PushStatus::Connected).await;
-                    }
-                    PushStreamEvent::Disconnected { transport, reason } => {
-                        warn!(account_id = %account_id, transport, reason = %reason, "push disconnected");
-                        shared.handle_push_disconnect(&account_id, &format!("{transport}: {reason}")).await;
-                    }
-                    PushStreamEvent::Fallback { from, to } => {
-                        warn!(account_id = %account_id, from, to, "push falling back");
-                        shared.handle_push_disconnect(
-                            &account_id,
-                            &format!("falling back from {from} to {to}"),
-                        ).await;
-                    }
+                if handle_push_event(&shared, &account, &account_id, &mut connection, event).await {
+                    interval = sync_poll_interval(shared.poll_interval);
                 }
             }
+        }
+    }
+}
+
+async fn handle_poll_tick(
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    connection: &mut AccountRuntimeConnectionState,
+) {
+    let _ = process_sync_trigger(shared, account, SyncTrigger::Poll, connection, None).await;
+}
+
+async fn handle_backfill_tick(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    gateway: Option<SharedGateway>,
+) {
+    let _ = process_automation_backfill_batch(shared, account_id, gateway).await;
+}
+
+async fn handle_cache_tick(
+    shared: &Arc<SupervisorShared>,
+    account_id: &AccountId,
+    gateway: Option<SharedGateway>,
+    interactive_pressure: f64,
+) {
+    process_cache_maintenance_batch(shared, account_id, gateway, interactive_pressure).await;
+}
+
+async fn handle_runtime_command(
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    account_id: &AccountId,
+    connection: &mut AccountRuntimeConnectionState,
+    command: RuntimeCommand,
+) -> bool {
+    match command {
+        RuntimeCommand::Trigger { trigger, reply } => {
+            let _ = process_sync_trigger(shared, account, trigger, connection, Some(reply)).await;
+            true
+        }
+        RuntimeCommand::TriggerOnly { trigger } => {
+            let _ = process_sync_trigger(shared, account, trigger, connection, None).await;
+            true
+        }
+        RuntimeCommand::CacheMaintenance {
+            interactive_pressure,
+        } => {
+            handle_cache_tick(
+                shared,
+                account_id,
+                connection.gateway(),
+                interactive_pressure,
+            )
+            .await;
+            false
+        }
+    }
+}
+
+async fn handle_push_event(
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    account_id: &AccountId,
+    connection: &mut AccountRuntimeConnectionState,
+    event: PushStreamEvent,
+) -> bool {
+    match event {
+        PushStreamEvent::Notification(ref notification) => {
+            debug!(
+                account_id = %account_id,
+                changed = ?notification.changed,
+                "push notification received"
+            );
+            if notification.changed.is_empty() {
+                return false;
+            }
+            let _ =
+                process_sync_trigger(shared, account, SyncTrigger::Push, connection, None).await;
+            true
+        }
+        PushStreamEvent::Connected { transport } => {
+            info!(account_id = %account_id, transport, "push connected");
+            shared
+                .set_push_status(account_id, PushStatus::Connected)
+                .await;
+            false
+        }
+        PushStreamEvent::Disconnected { transport, reason } => {
+            warn!(account_id = %account_id, transport, reason = %reason, "push disconnected");
+            shared
+                .handle_push_disconnect(account_id, &format!("{transport}: {reason}"))
+                .await;
+            false
+        }
+        PushStreamEvent::Fallback { from, to } => {
+            warn!(account_id = %account_id, from, to, "push falling back");
+            shared
+                .handle_push_disconnect(account_id, &format!("falling back from {from} to {to}"))
+                .await;
+            false
         }
     }
 }
@@ -649,7 +742,7 @@ async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
-    connection: &mut Option<AccountConnection>,
+    connection: &mut AccountRuntimeConnectionState,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
@@ -670,7 +763,7 @@ async fn process_sync_trigger_inner(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
-    connection: &mut Option<AccountConnection>,
+    connection: &mut AccountRuntimeConnectionState,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
     sync_id: String,
 ) -> Result<(), ServiceError> {
@@ -705,7 +798,7 @@ async fn process_sync_trigger_inner(
 
     let result = match ensure_connection(shared, account, connection).await {
         Ok(()) => {
-            if let Some(connection) = connection.as_ref() {
+            if let AccountRuntimeConnectionState::Connected(connection) = connection {
                 let progress = sync_progress_reporter(
                     shared,
                     account_id.clone(),
@@ -748,17 +841,8 @@ async fn process_sync_trigger_inner(
         }
         Err(error) => {
             shared.remove_gateway(&account_id).await;
-            *connection = None; // tears down gateway + push stream together
-            let stage = if matches!(
-                error,
-                ServiceError::Gateway(GatewayError::Unavailable(_))
-                    | ServiceError::Gateway(GatewayError::Auth)
-                    | ServiceError::Gateway(GatewayError::Network(_))
-            ) {
-                "connect"
-            } else {
-                "sync"
-            };
+            connection.disconnect(); // tears down gateway + push stream together
+            let stage = sync_failure_stage(&error);
             error!(
                 account_id = %account_id,
                 sync_id = %sync_id,
@@ -787,20 +871,29 @@ async fn process_sync_trigger_inner(
     Ok(())
 }
 
+fn sync_failure_stage(error: &ServiceError) -> &'static str {
+    match error.kind() {
+        ServiceErrorKind::GatewayUnavailable
+        | ServiceErrorKind::AuthError
+        | ServiceErrorKind::NetworkError => "connect",
+        _ => "sync",
+    }
+}
+
 /// Lazily establish the gateway connection and push stream if not already
 /// connected.
 async fn ensure_connection(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
-    connection: &mut Option<AccountConnection>,
+    connection: &mut AccountRuntimeConnectionState,
 ) -> Result<(), ServiceError> {
-    if connection.is_some() {
+    if connection.is_connected() {
         return Ok(());
     }
     debug!(account_id = %account.id, "establishing connection");
     let conn = build_connection(account, shared).await?;
     shared.set_gateway(&account.id, conn.gateway.clone()).await;
-    *connection = Some(conn);
+    connection.set_connected(conn);
     info!(account_id = %account.id, "connection established");
     Ok(())
 }
@@ -973,9 +1066,17 @@ async fn resolve_account_secret(
     }
 
     let token_set = OAuthTokenSet::decode(&secret)?;
+    refresh_oauth_access_token(shared, secret_ref, &token_set).await
+}
+
+async fn refresh_oauth_access_token(
+    shared: &Arc<SupervisorShared>,
+    secret_ref: &posthaste_domain::SecretRef,
+    token_set: &OAuthTokenSet,
+) -> Result<String, ServiceError> {
     let token_service = OAuthTokenService::new()?;
     let access_token = token_service
-        .access_token(&token_set, time::OffsetDateTime::now_utc())
+        .access_token(token_set, time::OffsetDateTime::now_utc())
         .await?;
     if let Some(updated_token_set) = access_token.updated_token_set {
         shared
@@ -1192,5 +1293,54 @@ impl SupervisorShared {
         }
 
         self.publish_events(&side_effects);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn runtime_connection_state_tracks_connected_gateway() {
+        let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
+        let mut state = AccountRuntimeConnectionState::default();
+
+        assert!(!state.is_connected());
+        assert!(state.gateway().is_none());
+
+        state.set_connected(AccountConnection {
+            gateway: gateway.clone(),
+            push_events: None,
+        });
+
+        assert!(state.is_connected());
+        assert!(Arc::ptr_eq(&state.gateway().expect("gateway"), &gateway));
+
+        state.disconnect();
+
+        assert!(!state.is_connected());
+        assert!(state.gateway().is_none());
+    }
+
+    #[test]
+    fn sync_failure_stage_classifies_connection_failures() {
+        let unavailable: ServiceError = GatewayError::Unavailable("account".to_string()).into();
+        let auth: ServiceError = GatewayError::Auth.into();
+        let network: ServiceError = GatewayError::Network("offline".to_string()).into();
+
+        assert_eq!(sync_failure_stage(&unavailable), "connect");
+        assert_eq!(sync_failure_stage(&auth), "connect");
+        assert_eq!(sync_failure_stage(&network), "connect");
+    }
+
+    #[test]
+    fn sync_failure_stage_classifies_non_connection_failures_as_sync() {
+        let rejected: ServiceError = GatewayError::Rejected("bad request".to_string()).into();
+        let state_mismatch: ServiceError = GatewayError::StateMismatch.into();
+
+        assert_eq!(sync_failure_stage(&rejected), "sync");
+        assert_eq!(sync_failure_stage(&state_mismatch), "sync");
     }
 }

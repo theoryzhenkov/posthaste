@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-ui
   - path: docs/L0-branding
@@ -179,22 +179,28 @@ it during send. Compose loads the accepted free-form cache through
 `queryKeys.senderAddresses`; it does not keep sender identities in browser
 storage.
 
+Compose body editing is Markdown-first. The composer offers write, split, and
+preview modes; preview renders the Markdown as email HTML in the same sandboxed
+iframe primitive used for message bodies. Sending still submits the Markdown
+source to the Rust API, which emits `text/plain` Markdown plus the rendered
+`text/html` alternative.
+
 Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }` or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, while `o` opens or focuses one stable `message-*` window per exact source/message ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 
 ## Keyboard shortcuts
 
-| Key | Action |
-|-----|--------|
-| `Cmd/Ctrl+K` | Open command palette |
-| `Cmd/Ctrl+,` | Open settings |
-| `Cmd/Ctrl+N` | Compose new message |
-| `?` | Open keyboard shortcuts |
-| `o` | Open the selected message in a focused surface |
-| `Esc` | Deselect the open message, or clear the active filter when no message is open |
-| `j` / `k` or Down / Up | Next / previous conversation |
-| `e` or `y` | Archive |
-| `#` or `Backspace` | Delete (move to Trash) |
-| `Shift+Cmd/Ctrl+L` | Toggle flag |
+| Key                    | Action                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `Cmd/Ctrl+K`           | Open command palette                                                          |
+| `Cmd/Ctrl+,`           | Open settings                                                                 |
+| `Cmd/Ctrl+N`           | Compose new message                                                           |
+| `?`                    | Open keyboard shortcuts                                                       |
+| `o`                    | Open the selected message in a focused surface                                |
+| `Esc`                  | Deselect the open message, or clear the active filter when no message is open |
+| `j` / `k` or Down / Up | Next / previous conversation                                                  |
+| `e` or `y`             | Archive                                                                       |
+| `#` or `Backspace`     | Delete (move to Trash)                                                        |
+| `Shift+Cmd/Ctrl+L`     | Toggle flag                                                                   |
 
 The original keyboard plan is broader than the current implementation. The shortcuts above are the ones the frontend actually handles today.
 
@@ -219,7 +225,7 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 
 - Frontend never talks to JMAP directly; all data flows through the Rust API
 - Message list rows come from message endpoints and are not grouped by thread by default
-- Email HTML is sanitized in Rust; frontend renders only sanitized HTML in a sandboxed iframe
+- Persisted email HTML is sanitized in Rust; compose preview HTML is generated locally from the user's Markdown source and rendered only in a no-script sandboxed iframe
 - Long HTML messages scroll inside the iframe or detail body instead of auto-expanding the pane
 - The conversation list preserves scroll position under live prepends
 - Keyboard shortcuts do not fire when an input element has focus
@@ -230,14 +236,14 @@ Not implemented yet. Current mutations invalidate and refetch; they do not provi
 
 ## Assertions
 
-| ID | Sev. | Assertion |
-|----|------|-----------|
-| ui-no-jmap | MUST | Frontend never makes JMAP calls directly |
-| message-list-message-first | MUST | Middle pane displays individual messages by default, not grouped thread summaries |
-| iframe-sandbox | MUST | Email HTML rendered in sandboxed iframe with no script execution |
-| sanitize-in-rust | MUST | HTML sanitization runs in Rust via ammonia before HTML reaches frontend |
-| tracking-pixel-strip | SHOULD | 1x1 tracking pixels stripped during sanitization |
-| anchored-prepend | MUST | Live top-of-list inserts preserve the visible viewport when the user is scrolled down |
-| keyboard-input-suppressed | MUST | Keyboard shortcuts suppressed when an input or textarea has focus |
-| visual-reference | MUST | Main shell and overlay styling conform to `docs/L2-ui-visual-reference` unless a documented backend gap blocks exact parity |
-| surface-descriptors-serializable | MUST | Focused surfaces are described by serializable data, not React component instances or closures |
+| ID                               | Sev.   | Assertion                                                                                                                   |
+| -------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| ui-no-jmap                       | MUST   | Frontend never makes JMAP calls directly                                                                                    |
+| message-list-message-first       | MUST   | Middle pane displays individual messages by default, not grouped thread summaries                                           |
+| iframe-sandbox                   | MUST   | Email HTML rendered in sandboxed iframe with no script execution                                                            |
+| sanitize-in-rust                 | MUST   | HTML sanitization runs in Rust via ammonia before HTML reaches frontend                                                     |
+| tracking-pixel-strip             | SHOULD | 1x1 tracking pixels stripped during sanitization                                                                            |
+| anchored-prepend                 | MUST   | Live top-of-list inserts preserve the visible viewport when the user is scrolled down                                       |
+| keyboard-input-suppressed        | MUST   | Keyboard shortcuts suppressed when an input or textarea has focus                                                           |
+| visual-reference                 | MUST   | Main shell and overlay styling conform to `docs/L2-ui-visual-reference` unless a documented backend gap blocks exact parity |
+| surface-descriptors-serializable | MUST   | Focused surfaces are described by serializable data, not React component instances or closures                              |

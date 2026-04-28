@@ -11,6 +11,7 @@ import {
   findConversationIdForMessage,
   mailKeys,
 } from './mailState'
+import { EVENT_TOPICS } from './domainVocabulary'
 import { queryKeys } from './queryKeys'
 
 function isStringArray(value: unknown): value is string[] {
@@ -201,12 +202,12 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
   const target = eventTarget(event)
 
   switch (event.topic) {
-    case 'message.arrived': {
+    case EVENT_TOPICS.MessageArrived: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
       return
     }
-    case 'message.keywords_changed': {
+    case EVENT_TOPICS.MessageKeywordsChanged: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
 
@@ -232,7 +233,7 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
       }
       return
     }
-    case 'message.mailboxes_changed': {
+    case EVENT_TOPICS.MessageMailboxesChanged: {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
       void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
       if (target) {
@@ -251,7 +252,7 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
       }
       return
     }
-    case 'message.updated': {
+    case EVENT_TOPICS.MessageUpdated: {
       if (target) {
         void queryClient.invalidateQueries({
           queryKey: mailKeys.message(target.sourceId, target.messageId),
@@ -274,10 +275,10 @@ function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
 
 export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
   switch (event.topic) {
-    case 'account.created':
-    case 'account.status_changed': {
+    case EVENT_TOPICS.AccountCreated:
+    case EVENT_TOPICS.AccountStatusChanged: {
       if (
-        event.topic === 'account.status_changed' &&
+        event.topic === EVENT_TOPICS.AccountStatusChanged &&
         applyAccountStatusPatch(queryClient, event.accountId, event.payload)
       ) {
         return
@@ -285,11 +286,11 @@ export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
       invalidateAccountReadModels(queryClient, event.accountId)
       return
     }
-    case 'account.updated': {
+    case EVENT_TOPICS.AccountUpdated: {
       invalidateAccountReadModels(queryClient, event.accountId)
       return
     }
-    case 'account.deleted': {
+    case EVENT_TOPICS.AccountDeleted: {
       removeAccountOverview(queryClient, event.accountId)
       invalidateAccountReadModels(queryClient)
       return

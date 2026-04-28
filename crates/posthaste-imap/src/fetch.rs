@@ -21,6 +21,7 @@ use tracing::{debug, info};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
+use crate::message::imap_flags_include_deleted;
 use crate::{
     imap_header_message_record, normalize_imap_capabilities, ImapAdapterError,
     ImapConnectionConfig, ImapFetchedHeader, ImapMappedHeader,
@@ -109,7 +110,7 @@ pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
     updated_at: String,
 ) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
-    let mut uids = client.uid_search([SearchKey::All]).await?;
+    let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
 
     // Normalize search output before chunking so later sync reconciliation does
     // not depend on provider-specific ordering or duplicate behavior.
@@ -169,7 +170,7 @@ pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
     updated_at: String,
 ) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
-    let mut uids = client.uid_search([SearchKey::All]).await?;
+    let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
 
     uids.sort_unstable();
     uids.dedup();
@@ -241,7 +242,7 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     let fetch_vanished = include_vanished && enable_qresync(client).await?;
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
     if include_vanished && !fetch_vanished {
-        let mut uids = client.uid_search([SearchKey::All]).await?;
+        let mut uids = client.uid_search([SearchKey::Undeleted]).await?;
         uids.sort_unstable();
         uids.dedup();
         info!(
@@ -275,16 +276,23 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
         .map_err(|error| ImapAdapterError::Client(error.to_string()))?;
 
     let mut headers = Vec::with_capacity(snapshot.headers.len());
+    let mut vanished_uids = snapshot.vanished_uids;
     for items in snapshot.headers.into_values() {
         let fetched = fetched_header_from_items(&selected, items, updated_at.clone())?;
+        if imap_flags_include_deleted(&fetched.flags) {
+            vanished_uids.push(fetched.uid);
+            continue;
+        }
         headers.push(imap_header_message_record(&selected, fetched)?);
     }
     headers.sort_by_key(|record| record.location.uid);
+    vanished_uids.sort();
+    vanished_uids.dedup();
 
     Ok(ImapChangedSinceSnapshot {
         selected,
         headers,
-        vanished_uids: snapshot.vanished_uids,
+        vanished_uids,
         is_full_snapshot: false,
     })
 }
@@ -413,7 +421,7 @@ impl Task for ChangedSinceFetchTask {
         match data {
             Data::Fetch { items, seq } => {
                 if let Some(prev_items) = self.output.get_mut(&seq) {
-                    prev_items.extend(items.into_iter());
+                    prev_items.extend(items);
                 } else {
                     self.output.insert(seq, items.into_iter().collect());
                 }

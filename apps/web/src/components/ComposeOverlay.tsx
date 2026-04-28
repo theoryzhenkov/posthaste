@@ -5,7 +5,17 @@
  * @spec docs/L1-compose#mime-structure
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Loader2, Mail, Reply, Send } from 'lucide-react'
+import {
+  ChevronDown,
+  Columns2,
+  Eye,
+  Loader2,
+  Mail,
+  Reply,
+  Send,
+  TextCursorInput,
+  type LucideIcon,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -30,8 +40,10 @@ import type {
   SendMessageInput,
 } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { renderMarkdownPreview } from '@/markdownPreview'
 import { queryKeys } from '@/queryKeys'
 
+import { EmailFrame } from './EmailFrame'
 import { FloatingPanel } from './FloatingPanel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -53,6 +65,8 @@ interface ComposeForm {
   subject: string
   body: string
 }
+
+type BodyMode = 'write' | 'split' | 'preview'
 
 const EMPTY_FORM: ComposeForm = {
   from: '',
@@ -254,31 +268,42 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   }))
   const [fromMenuOpen, setFromMenuOpen] = useState(false)
   const [fromInputFocused, setFromInputFocused] = useState(false)
+  const [bodyMode, setBodyMode] = useState<BodyMode>('split')
 
-  if (composeState.resetKey !== formResetKey) {
-    setComposeState({
-      errorMessage: null,
-      form: initialForm,
-      resetKey: formResetKey,
-    })
-  }
-
-  const form =
-    composeState.resetKey === formResetKey ? composeState.form : initialForm
-  const errorMessage =
-    composeState.resetKey === formResetKey ? composeState.errorMessage : null
-  const setForm = useCallback((nextForm: SetStateAction<ComposeForm>) => {
-    setComposeState((current) => ({
-      ...current,
-      form: typeof nextForm === 'function' ? nextForm(current.form) : nextForm,
-    }))
-  }, [])
-  const setErrorMessage = useCallback((message: string | null) => {
-    setComposeState((current) => ({
-      ...current,
-      errorMessage: message,
-    }))
-  }, [])
+  const needsFormReset = composeState.resetKey !== formResetKey
+  const form = needsFormReset ? initialForm : composeState.form
+  const errorMessage = needsFormReset ? null : composeState.errorMessage
+  const bodyPreviewHtml = useMemo(
+    () => renderMarkdownPreview(form.body),
+    [form.body],
+  )
+  const setForm = useCallback(
+    (nextForm: SetStateAction<ComposeForm>) => {
+      setComposeState((current) => {
+        const isCurrentForm = current.resetKey === formResetKey
+        const baseForm = isCurrentForm ? current.form : initialForm
+        return {
+          errorMessage: isCurrentForm ? current.errorMessage : null,
+          form: typeof nextForm === 'function' ? nextForm(baseForm) : nextForm,
+          resetKey: formResetKey,
+        }
+      })
+    },
+    [formResetKey, initialForm],
+  )
+  const setErrorMessage = useCallback(
+    (message: string | null) => {
+      setComposeState((current) => {
+        const isCurrentForm = current.resetKey === formResetKey
+        return {
+          errorMessage: message,
+          form: isCurrentForm ? current.form : initialForm,
+          resetKey: formResetKey,
+        }
+      })
+    },
+    [formResetKey, initialForm],
+  )
   const setField = useCallback(
     <K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) => {
       setForm((current) => ({ ...current, [field]: value }))
@@ -613,14 +638,62 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
             Preparing reply...
           </div>
         ) : (
-          <textarea
-            ref={bodyRef}
-            value={form.body}
-            onChange={(event) => setField('body', event.target.value)}
-            className="ph-scroll h-full w-full resize-none bg-transparent px-5 py-4 font-mono text-[13px] leading-6 text-foreground outline-none placeholder:text-muted-foreground/70"
-            placeholder="Message"
-            spellCheck
-          />
+          <div className="flex h-full min-h-[220px] flex-col">
+            <div className="flex min-h-10 shrink-0 items-center justify-end border-b border-border/60 px-3">
+              <div className="grid grid-cols-3 overflow-hidden rounded-[7px] border border-border bg-background/45">
+                <BodyModeButton
+                  icon={TextCursorInput}
+                  isActive={bodyMode === 'write'}
+                  label="Write"
+                  onClick={() => setBodyMode('write')}
+                />
+                <BodyModeButton
+                  icon={Columns2}
+                  isActive={bodyMode === 'split'}
+                  label="Split"
+                  onClick={() => setBodyMode('split')}
+                />
+                <BodyModeButton
+                  icon={Eye}
+                  isActive={bodyMode === 'preview'}
+                  label="Preview"
+                  onClick={() => setBodyMode('preview')}
+                />
+              </div>
+            </div>
+            <div
+              className={cn(
+                'min-h-0 flex-1',
+                bodyMode === 'split'
+                  ? 'grid grid-rows-[minmax(0,1fr)_minmax(0,1fr)] md:grid-cols-2 md:grid-rows-1'
+                  : 'grid',
+              )}
+            >
+              {bodyMode !== 'preview' && (
+                <textarea
+                  ref={bodyRef}
+                  value={form.body}
+                  onChange={(event) => setField('body', event.target.value)}
+                  className={cn(
+                    'ph-scroll min-h-0 w-full resize-none bg-transparent px-5 py-4 font-mono text-[13px] leading-6 text-foreground outline-none placeholder:text-muted-foreground/70',
+                    bodyMode === 'split' &&
+                      'border-b border-border/60 md:border-b-0 md:border-r',
+                  )}
+                  placeholder="Write Markdown"
+                  spellCheck
+                />
+              )}
+              {bodyMode !== 'write' && (
+                <div className="min-h-0 overflow-hidden bg-card">
+                  <EmailFrame
+                    className="h-full bg-card"
+                    html={bodyPreviewHtml}
+                    title="Markdown preview"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
@@ -656,6 +729,33 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         </Button>
       </div>
     </FloatingPanel>
+  )
+}
+
+function BodyModeButton({
+  icon: Icon,
+  isActive,
+  label,
+  onClick,
+}: {
+  icon: LucideIcon
+  isActive: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={isActive}
+      className={cn(
+        'flex h-7 min-w-[4.75rem] items-center justify-center gap-1.5 border-r border-border px-2.5 text-[12px] font-medium text-muted-foreground last:border-r-0 hover:bg-[var(--hover-bg)]',
+        isActive && 'bg-[var(--hover-bg)] text-foreground',
+      )}
+      onClick={onClick}
+    >
+      <Icon size={14} />
+      <span>{label}</span>
+    </button>
   )
 }
 

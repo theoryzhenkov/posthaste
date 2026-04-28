@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -872,6 +872,9 @@ Body:
 - Font: Geist `13.5px`.
 - Line height: `1.55`.
 - Background: `bgReader`.
+- Body toolbar contains a three-option segmented control for write, split, and preview modes.
+- Split mode uses the Markdown editor and rendered preview side by side on desktop, stacked on narrow screens.
+- Preview mode renders through the shared sandboxed email iframe rather than an inline HTML container.
 
 Footer:
 

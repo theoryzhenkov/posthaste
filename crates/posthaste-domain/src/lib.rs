@@ -15,6 +15,7 @@ mod ports;
 mod push;
 pub mod search;
 mod service;
+mod vocab;
 
 pub use cache::*;
 pub use config::*;
@@ -23,3 +24,4 @@ pub use model::*;
 pub use ports::*;
 pub use push::*;
 pub use service::*;
+pub use vocab::*;

@@ -4,6 +4,19 @@ const BODY_CACHE_OBJECT_ID: &str = "";
 const BODY_STRUCTURAL_REPAIR_REASON: &str = "body-structural";
 pub(crate) const BACKGROUND_RESCORE_PRIORITY: f64 = 0.0;
 const BACKGROUND_RESCORE_PRIORITY_CEILING: f64 = 99.0;
+const CACHE_RESCORE_QUEUE_UPSERT_UPDATE_SQL: &str = "
+ON CONFLICT(account_id, message_id) DO UPDATE SET
+    reason = CASE
+        WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+        THEN excluded.reason
+        ELSE cache_rescore_queue.reason
+    END,
+    queued_at = CASE
+        WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+        THEN excluded.queued_at
+        ELSE cache_rescore_queue.queued_at
+    END,
+    rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)";
 
 fn cache_object_id_key(object_id: Option<&str>) -> &str {
     object_id.unwrap_or("")
@@ -135,27 +148,38 @@ pub(crate) fn ensure_body_cache_object_tx(
         ],
     )
     .map_err(sql_to_store_error)?;
-    tx.execute(
+    upsert_cache_rescore_queue_tx(
+        tx,
+        account_id,
+        message_id,
+        reason,
+        now.as_str(),
+        rescore_priority,
+    )?;
+    Ok(())
+}
+
+fn upsert_cache_rescore_queue_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+    reason: &str,
+    queued_at: &str,
+    rescore_priority: f64,
+) -> Result<(), StoreError> {
+    let sql = format!(
         "INSERT INTO cache_rescore_queue (
             account_id, message_id, reason, queued_at, rescore_priority
          ) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(account_id, message_id) DO UPDATE SET
-            reason = CASE
-                WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
-                THEN excluded.reason
-                ELSE cache_rescore_queue.reason
-            END,
-            queued_at = CASE
-                WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
-                THEN excluded.queued_at
-                ELSE cache_rescore_queue.queued_at
-            END,
-            rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)",
+         {CACHE_RESCORE_QUEUE_UPSERT_UPDATE_SQL}"
+    );
+    tx.execute(
+        &sql,
         params![
             account_id.as_str(),
             message_id.as_str(),
             reason,
-            now.as_str(),
+            queued_at,
             finite_rescore_priority(rescore_priority),
         ],
     )
@@ -171,9 +195,18 @@ fn finite_rescore_priority(priority: f64) -> f64 {
     }
 }
 
-pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Result<(), StoreError> {
+pub(crate) fn repair_missing_body_cache_objects(
+    connection: &mut Connection,
+) -> Result<(), StoreError> {
+    let tx = connection.transaction().map_err(sql_to_store_error)?;
+    repair_missing_body_cache_objects_tx(&tx)?;
+    tx.commit().map_err(sql_to_store_error)?;
+    Ok(())
+}
+
+fn repair_missing_body_cache_objects_tx(tx: &Transaction<'_>) -> Result<(), StoreError> {
     let now = now_iso8601()?;
-    let pruned_queue = connection
+    let pruned_queue = tx
         .execute(
             "DELETE FROM cache_rescore_queue
              WHERE NOT EXISTS (
@@ -185,7 +218,7 @@ pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Resu
             [],
         )
         .map_err(sql_to_store_error)?;
-    let pruned_signals = connection
+    let pruned_signals = tx
         .execute(
             "DELETE FROM cache_message_signal
              WHERE NOT EXISTS (
@@ -197,7 +230,7 @@ pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Resu
             [],
         )
         .map_err(sql_to_store_error)?;
-    let pruned_objects = connection
+    let pruned_objects = tx
         .execute(
             "DELETE FROM cache_object
              WHERE NOT EXISTS (
@@ -215,41 +248,32 @@ pub(crate) fn repair_missing_body_cache_objects(connection: &Connection) -> Resu
             pruned_signals, pruned_objects, "pruned orphan cache child rows"
         );
     }
-    connection
-        .execute(
-            "INSERT INTO cache_rescore_queue (
-                account_id, message_id, reason, queued_at, rescore_priority
-             )
-             SELECT m.account_id, m.id, ?1, ?2, ?3
-             FROM message m
-             WHERE NOT EXISTS (
-                SELECT 1
-                FROM cache_object co
-                WHERE co.account_id = m.account_id
-                  AND co.message_id = m.id
-                  AND co.layer = 'body'
-                  AND co.object_id = ''
-             )
-             ON CONFLICT(account_id, message_id) DO UPDATE SET
-                reason = CASE
-                    WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
-                    THEN excluded.reason
-                    ELSE cache_rescore_queue.reason
-                END,
-                queued_at = CASE
-                    WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
-                    THEN excluded.queued_at
-                    ELSE cache_rescore_queue.queued_at
-                END,
-                rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)",
-            params![
-                BODY_STRUCTURAL_REPAIR_REASON,
-                now.as_str(),
-                BACKGROUND_RESCORE_PRIORITY
-            ],
-        )
-        .map_err(sql_to_store_error)?;
-    let repaired = connection
+    let sql = format!(
+        "INSERT INTO cache_rescore_queue (
+            account_id, message_id, reason, queued_at, rescore_priority
+         )
+         SELECT m.account_id, m.id, ?1, ?2, ?3
+         FROM message m
+         WHERE NOT EXISTS (
+            SELECT 1
+            FROM cache_object co
+            WHERE co.account_id = m.account_id
+              AND co.message_id = m.id
+              AND co.layer = 'body'
+              AND co.object_id = ''
+         )
+         {CACHE_RESCORE_QUEUE_UPSERT_UPDATE_SQL}"
+    );
+    tx.execute(
+        &sql,
+        params![
+            BODY_STRUCTURAL_REPAIR_REASON,
+            now.as_str(),
+            BACKGROUND_RESCORE_PRIORITY
+        ],
+    )
+    .map_err(sql_to_store_error)?;
+    let repaired = tx
         .execute(
             "INSERT INTO cache_object (
                 account_id, message_id, layer, object_id, fetch_unit, state,
