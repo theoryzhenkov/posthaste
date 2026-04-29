@@ -23,7 +23,7 @@ import { createAccount, updateAccount, verifyAccount } from '../../api/client'
 import type {
   AccountOverview,
   ProviderAuthKind,
-  ProviderHint,
+  ProviderKind,
   VerificationResponse,
 } from '../../api/types'
 import { AccountMark } from '../AccountMark'
@@ -338,7 +338,7 @@ function AccountHeaderMeta({ model }: { model: ExistingAccountEditorModel }) {
         {model.account.status}
       </span>
       <span aria-hidden>·</span>
-      <span>{providerLabel(model.account.connection.provider)}</span>
+      <span>{providerLabel(model.account.connection.providerKind)}</span>
       <span aria-hidden>·</span>
       <span>{authLabel(model.account.connection.auth)}</span>
     </>
@@ -422,7 +422,7 @@ function OAuthConnectionDetails({
       <div className="grid gap-3 sm:grid-cols-2">
         <ReadOnlyDetail
           label="Provider"
-          value={providerLabel(account.connection.provider)}
+          value={providerLabel(account.connection.providerKind)}
         />
         <ReadOnlyDetail
           label="Authentication"
@@ -470,7 +470,7 @@ function ReadOnlyDetail({
   )
 }
 
-function providerLabel(provider: ProviderHint): string {
+function providerLabel(provider: ProviderKind): string {
   switch (provider) {
     case 'gmail':
       return 'Google'

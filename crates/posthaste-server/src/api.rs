@@ -2388,6 +2388,21 @@ mod tests {
     }
 
     #[test]
+    fn account_transport_request_keeps_provider_hint_json_field() {
+        let request: AccountTransportRequest =
+            serde_json::from_str(r#"{"provider":"gmail","auth":"oauth2"}"#)
+                .expect("legacy provider field should deserialize");
+        let transport = posthaste_domain::AccountTransportSettings::from(request);
+
+        assert_eq!(transport.provider, ProviderHint::Gmail);
+        assert_eq!(
+            transport.provider_kind(),
+            posthaste_domain::ProviderKind::Gmail
+        );
+        assert_eq!(transport.auth, ProviderAuthKind::OAuth2);
+    }
+
+    #[test]
     fn provider_oauth_account_uses_identity_for_username_and_sender_address() {
         let account = match oauth_account_settings(
             AccountId::from("user-example-com"),

@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-04-29
+reviewed: 2026-04-29
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -202,7 +202,7 @@ progress tick.
 
 **Enable/Disable**: Toggle `enabled` flag, re-persist, and restart the supervisor (which respects the flag).
 
-**Transport and connection variants**: Account create/patch transport JSON uses camelCase. Common input fields are `provider`, `auth`, `username`, `secret`, and optional JMAP `baseUrl`. IMAP/SMTP account input also includes `imap` and `smtp` endpoint objects with `host`, `port`, and `security` (`tls`, `startTls`, or `plain`). `PATCH /accounts/{id}` sparse-merges the transport object and preserves omitted sub-fields. `AccountOverview` exposes this as a `connection` variant tagged by `kind`: `manualCredentials` for password/app-password accounts with editable server credentials, or `managedOAuth` for provider-owned OAuth accounts whose endpoint and credential details are managed by the OAuth flow.
+**Transport and connection variants**: Account create/patch transport JSON uses camelCase. Common input fields are `provider`, `auth`, `username`, `secret`, and optional JMAP `baseUrl`. `provider` remains the compatibility setup field; account overview connection responses also expose `providerKind` as the stable provider family identity. IMAP/SMTP account input also includes `imap` and `smtp` endpoint objects with `host`, `port`, and `security` (`tls`, `startTls`, or `plain`). `PATCH /accounts/{id}` sparse-merges the transport object and preserves omitted sub-fields. `AccountOverview` exposes this as a `connection` variant tagged by `kind`: `manualCredentials` for password/app-password accounts with editable server credentials, or `managedOAuth` for provider-owned OAuth accounts whose endpoint and credential details are managed by the OAuth flow.
 
 **Runtime progress**: `AccountOverview` includes `syncProgress` while a sync is
 running and `null` otherwise. The object contains `syncId`, `trigger`,

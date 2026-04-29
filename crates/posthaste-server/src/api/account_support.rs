@@ -38,6 +38,7 @@ fn account_connection_overview(account: &AccountSettings) -> AccountConnectionOv
     match account.transport.auth {
         ProviderAuthKind::OAuth2 => AccountConnectionOverview::ManagedOAuth {
             provider: account.transport.provider.clone(),
+            provider_kind: account.transport.provider_kind(),
             auth: account.transport.auth.clone(),
             username: account.transport.username.clone(),
             imap: account.transport.imap.clone(),
@@ -47,6 +48,7 @@ fn account_connection_overview(account: &AccountSettings) -> AccountConnectionOv
         ProviderAuthKind::Password | ProviderAuthKind::AppPassword => {
             AccountConnectionOverview::ManualCredentials {
                 provider: account.transport.provider.clone(),
+                provider_kind: account.transport.provider_kind(),
                 auth: account.transport.auth.clone(),
                 base_url: account.transport.base_url.clone(),
                 username: account.transport.username.clone(),

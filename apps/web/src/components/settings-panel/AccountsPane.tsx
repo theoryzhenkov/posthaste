@@ -7,7 +7,7 @@ import { useMutation, type UseMutationResult } from '@tanstack/react-query'
 import { Cloud, Mail, Plus, Settings2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { buildOAuthRedirectUri, startProviderOAuth } from '../../api/client'
-import type { AccountOverview, ProviderHint } from '../../api/types'
+import type { AccountOverview, ProviderKind } from '../../api/types'
 import { providerOAuthClientCredentials } from '../../config/oauthProviders'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
@@ -228,11 +228,11 @@ function AccountsEmptyState({
 
 function AccountSetupChoice({ onManual }: { onManual: () => void }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [startedProvider, setStartedProvider] = useState<ProviderHint | null>(
+  const [startedProvider, setStartedProvider] = useState<ProviderKind | null>(
     null,
   )
   const startOAuthMutation = useMutation({
-    mutationFn: async (provider: ProviderHint) => {
+    mutationFn: async (provider: ProviderKind) => {
       const credentials = providerOAuthClientCredentials[provider]
       const clientId = credentials?.clientId.trim()
       if (!clientId) {
@@ -325,7 +325,7 @@ function ProviderButton({
   )
 }
 
-function providerLabel(provider: ProviderHint): string {
+function providerLabel(provider: ProviderKind): string {
   switch (provider) {
     case 'gmail':
       return 'Google'
