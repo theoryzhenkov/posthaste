@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{MailboxId, MessageId};
+use crate::{MailboxId, MessageId, ProviderKind, ProviderProfile};
 
 /// IMAP UID value. UIDs are scoped to one mailbox and one UIDVALIDITY value.
 ///
@@ -94,26 +94,6 @@ impl ImapCapabilities {
     }
 }
 
-/// Provider family inferred from IMAP capabilities.
-///
-/// @spec docs/L0-providers#imap-smtp-sync-strategy
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ImapProviderKind {
-    #[default]
-    Generic,
-    Gmail,
-}
-
-impl ImapProviderKind {
-    pub fn from_capabilities(capabilities: &ImapCapabilities) -> Self {
-        if capabilities.supports_gmail_extensions() {
-            Self::Gmail
-        } else {
-            Self::Generic
-        }
-    }
-}
-
 /// Remote identity source used to deduplicate IMAP messages.
 ///
 /// @spec docs/L0-providers#identity-and-threading
@@ -154,66 +134,13 @@ pub struct ImapProviderFeatures {
 
 impl ImapProviderFeatures {
     pub fn from_capabilities(capabilities: &ImapCapabilities) -> Self {
-        ImapProviderProfile::from_capabilities(capabilities).features()
+        ProviderProfile::from_imap_capabilities(capabilities)
+            .imap()
+            .features()
     }
 
-    pub fn for_provider_kind(kind: ImapProviderKind) -> Self {
-        match kind {
-            ImapProviderKind::Gmail => Self {
-                message_identity: ImapMessageIdentitySource::Rfc5322MessageId,
-                thread_identity: ImapThreadIdentitySource::Rfc5322Headers,
-                label_source: ImapLabelSource::GmailLabels,
-            },
-            ImapProviderKind::Generic => Self {
-                message_identity: ImapMessageIdentitySource::UidValidityUid,
-                thread_identity: ImapThreadIdentitySource::Rfc5322Headers,
-                label_source: ImapLabelSource::MailboxMembership,
-            },
-        }
-    }
-}
-
-/// Provider policy selected for one IMAP account.
-///
-/// Capability parsing stays at the edge, while sync planning asks this profile
-/// about provider behavior instead of branching on provider-specific tokens.
-///
-/// @spec docs/L0-providers#imap-smtp-sync-strategy
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ImapProviderProfile {
-    kind: ImapProviderKind,
-    features: ImapProviderFeatures,
-}
-
-impl ImapProviderProfile {
-    pub fn from_capabilities(capabilities: &ImapCapabilities) -> Self {
-        Self::for_kind(ImapProviderKind::from_capabilities(capabilities))
-    }
-
-    pub fn for_kind(kind: ImapProviderKind) -> Self {
-        Self {
-            kind,
-            features: ImapProviderFeatures::for_provider_kind(kind),
-        }
-    }
-
-    pub fn kind(self) -> ImapProviderKind {
-        self.kind
-    }
-
-    pub fn features(self) -> ImapProviderFeatures {
-        self.features
-    }
-
-    pub fn required_full_sync_reason(self) -> Option<ImapFullSyncReason> {
-        match self.kind {
-            ImapProviderKind::Gmail => Some(ImapFullSyncReason::ProviderCanonicalizationRequired),
-            ImapProviderKind::Generic => None,
-        }
-    }
-
-    pub fn allows_status_skip(self) -> bool {
-        self.required_full_sync_reason().is_none()
+    pub fn for_provider_kind(kind: ProviderKind) -> Self {
+        ProviderProfile::from_kind(kind).imap().features()
     }
 }
 
@@ -291,7 +218,7 @@ pub struct ImapSelectedMailbox {
 /// Reason the IMAP driver must discard delta state and build an authoritative snapshot.
 ///
 /// @spec docs/L0-providers#imap-delta-fallback
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImapFullSyncReason {
     InitialSync,
     UidValidityChanged,
@@ -375,7 +302,7 @@ impl ImapMailboxSyncState {
 /// @spec docs/L0-providers#imap-delta-fallback
 pub fn plan_imap_mailbox_sync(
     capabilities: &ImapCapabilities,
-    provider: &ImapProviderProfile,
+    provider: &ProviderProfile,
     stored: Option<&ImapMailboxSyncState>,
     selected: &ImapSelectedMailbox,
 ) -> ImapMailboxSyncPlan {
@@ -391,7 +318,7 @@ pub fn plan_imap_mailbox_sync(
         };
     }
 
-    if let Some(reason) = provider.required_full_sync_reason() {
+    if let Some(reason) = provider.imap().required_full_sync_reason() {
         return ImapMailboxSyncPlan::FullSnapshot { reason };
     }
 
@@ -584,7 +511,7 @@ mod tests {
     fn planner_uses_qresync_when_server_and_state_support_it() {
         let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC"]);
         let stored = stored_state();
-        let provider = ImapProviderProfile::from_capabilities(&capabilities);
+        let provider = ProviderProfile::from_imap_capabilities(&capabilities);
 
         let plan = plan_imap_mailbox_sync(
             &capabilities,
@@ -607,7 +534,7 @@ mod tests {
     fn planner_falls_back_to_full_snapshot_after_uidvalidity_change() {
         let capabilities = ImapCapabilities::from_tokens(["ENABLE", "QRESYNC"]);
         let stored = stored_state();
-        let provider = ImapProviderProfile::from_capabilities(&capabilities);
+        let provider = ProviderProfile::from_imap_capabilities(&capabilities);
 
         let plan = plan_imap_mailbox_sync(
             &capabilities,
@@ -628,7 +555,7 @@ mod tests {
     fn planner_uses_full_snapshot_when_flag_delta_is_unavailable() {
         let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1"]);
         let stored = stored_state();
-        let provider = ImapProviderProfile::from_capabilities(&capabilities);
+        let provider = ProviderProfile::from_imap_capabilities(&capabilities);
 
         let plan = plan_imap_mailbox_sync(
             &capabilities,
@@ -650,7 +577,7 @@ mod tests {
         let capabilities =
             ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC", "X-GM-EXT-1"]);
         let stored = stored_state();
-        let provider = ImapProviderProfile::from_capabilities(&capabilities);
+        let provider = ProviderProfile::from_imap_capabilities(&capabilities);
 
         let plan = plan_imap_mailbox_sync(
             &capabilities,
@@ -715,16 +642,16 @@ mod tests {
     #[test]
     fn provider_features_use_gmail_extension_for_deduplication_and_threads() {
         let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "X-GM-EXT-1"]);
-        let profile = ImapProviderProfile::from_capabilities(&capabilities);
+        let profile = ProviderProfile::from_imap_capabilities(&capabilities);
 
         let features = ImapProviderFeatures::from_capabilities(&capabilities);
 
-        assert_eq!(profile.kind(), ImapProviderKind::Gmail);
+        assert_eq!(profile.kind(), ProviderKind::Gmail);
         assert_eq!(
-            profile.required_full_sync_reason(),
+            profile.imap().required_full_sync_reason(),
             Some(ImapFullSyncReason::ProviderCanonicalizationRequired)
         );
-        assert!(!profile.allows_status_skip());
+        assert!(!profile.imap().allows_status_skip());
         assert_eq!(
             features,
             ImapProviderFeatures {
@@ -746,13 +673,13 @@ mod tests {
     #[test]
     fn provider_profile_uses_generic_policy_without_gmail_extension() {
         let capabilities = ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC"]);
-        let profile = ImapProviderProfile::from_capabilities(&capabilities);
+        let profile = ProviderProfile::from_imap_capabilities(&capabilities);
 
-        assert_eq!(profile.kind(), ImapProviderKind::Generic);
-        assert_eq!(profile.required_full_sync_reason(), None);
-        assert!(profile.allows_status_skip());
+        assert_eq!(profile.kind(), ProviderKind::Generic);
+        assert_eq!(profile.imap().required_full_sync_reason(), None);
+        assert!(profile.imap().allows_status_skip());
         assert_eq!(
-            profile.features(),
+            profile.imap().features(),
             ImapProviderFeatures {
                 message_identity: ImapMessageIdentitySource::UidValidityUid,
                 thread_identity: ImapThreadIdentitySource::Rfc5322Headers,

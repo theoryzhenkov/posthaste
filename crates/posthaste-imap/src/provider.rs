@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use posthaste_domain::{
-    ImapMessageLocation, ImapProviderKind, ImapProviderProfile, MailboxId, MessageId,
-    MessageRecord, ProviderHint,
+    ImapMessageLocation, MailboxId, MessageId, MessageRecord, ProviderKind, ProviderProfile,
 };
 
 use crate::{DiscoveredImapAccount, ImapMappedHeader};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ImapAdapterProviderProfile {
-    profile: ImapProviderProfile,
+    profile: ProviderProfile,
 }
 
 impl ImapAdapterProviderProfile {
@@ -22,38 +21,25 @@ impl ImapAdapterProviderProfile {
     #[cfg(test)]
     pub(crate) fn gmail() -> Self {
         Self {
-            profile: ImapProviderProfile::for_kind(ImapProviderKind::Gmail),
+            profile: ProviderProfile::from_kind(ProviderKind::Gmail),
         }
     }
 
     pub(crate) fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
         match self.profile.kind() {
-            ImapProviderKind::Generic => headers,
-            ImapProviderKind::Gmail => GmailImapProviderProfile.project_headers(headers),
+            ProviderKind::Gmail => GmailImapProviderProfile.project_headers(headers),
+            ProviderKind::Generic | ProviderKind::Outlook | ProviderKind::Icloud => headers,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn canonical_message_id(&self, message: &MessageRecord) -> MessageId {
         match self.profile.kind() {
-            ImapProviderKind::Generic => message.id.clone(),
-            ImapProviderKind::Gmail => GmailImapProviderProfile.canonical_message_id(message),
+            ProviderKind::Gmail => GmailImapProviderProfile.canonical_message_id(message),
+            ProviderKind::Generic | ProviderKind::Outlook | ProviderKind::Icloud => {
+                message.id.clone()
+            }
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SmtpAdapterProviderProfile<'a> {
-    provider: &'a ProviderHint,
-}
-
-impl<'a> SmtpAdapterProviderProfile<'a> {
-    pub(crate) fn from_provider_hint(provider: &'a ProviderHint) -> Self {
-        Self { provider }
-    }
-
-    pub(crate) fn provider_manages_sent_copy(self) -> bool {
-        matches!(self.provider, ProviderHint::Gmail | ProviderHint::Outlook)
     }
 }
 

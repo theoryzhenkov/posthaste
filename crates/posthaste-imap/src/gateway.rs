@@ -6,8 +6,8 @@ use imap_client::client::tokio::Client as ImapClient;
 use posthaste_domain::{
     now_iso8601, plan_imap_mailbox_sync, plan_imap_move, AccountId, BlobId, FetchedBody,
     GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
-    ImapMessageLocation, ImapMoveStrategy, ImapProviderProfile, ImapUid, ImapUidValidity,
-    MailGateway, MailStore, MailboxId, MessageId, MutationOutcome, PushTransport, ReplyContext,
+    ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
+    MailboxId, MessageId, MutationOutcome, ProviderProfile, PushTransport, ReplyContext,
     SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress,
     SyncProgressReporter, SyncProgressStage, SyncTrigger,
 };
@@ -386,7 +386,7 @@ async fn plan_mailbox(
     account_id: &AccountId,
     mailbox: &DiscoveredImapMailbox,
     capabilities: &ImapCapabilities,
-    provider: &ImapProviderProfile,
+    provider: &ProviderProfile,
     store: Option<&dyn MailStore>,
 ) -> Result<PlannedImapMailbox, GatewayError> {
     let Some(store) = store else {
@@ -416,7 +416,7 @@ async fn plan_mailbox(
     let local_locations = store
         .list_imap_mailbox_message_locations(account_id, &mailbox.id)
         .map_err(store_error_to_gateway)?;
-    if provider.allows_status_skip() {
+    if provider.imap().allows_status_skip() {
         if let Some(stored_state) = stored_state.as_ref() {
             let status = status_imap_mailbox(
                 client,
