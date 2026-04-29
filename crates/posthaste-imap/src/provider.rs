@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use posthaste_domain::{
-    ImapMessageLocation, MailboxId, MessageId, MessageRecord, ProviderKind, ProviderProfile,
-};
+#[cfg(test)]
+use posthaste_domain::ProviderKind;
+use posthaste_domain::{ImapMessageLocation, MailboxId, MessageId, MessageRecord, ProviderProfile};
 
 use crate::{DiscoveredImapAccount, ImapMappedHeader};
 
@@ -26,29 +26,29 @@ impl ImapAdapterProviderProfile {
     }
 
     pub(crate) fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
-        match self.profile.kind() {
-            ProviderKind::Gmail => GmailImapProviderProfile.project_headers(headers),
-            ProviderKind::Generic | ProviderKind::Outlook | ProviderKind::Icloud => headers,
+        if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
+            Rfc5322CanonicalMessageProfile.project_headers(headers)
+        } else {
+            headers
         }
     }
 
     #[cfg(test)]
     pub(crate) fn canonical_message_id(&self, message: &MessageRecord) -> MessageId {
-        match self.profile.kind() {
-            ProviderKind::Gmail => GmailImapProviderProfile.canonical_message_id(message),
-            ProviderKind::Generic | ProviderKind::Outlook | ProviderKind::Icloud => {
-                message.id.clone()
-            }
+        if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
+            Rfc5322CanonicalMessageProfile.canonical_message_id(message)
+        } else {
+            message.id.clone()
         }
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct GmailImapProviderProfile;
+pub(crate) struct Rfc5322CanonicalMessageProfile;
 
-impl GmailImapProviderProfile {
+impl Rfc5322CanonicalMessageProfile {
     fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
-        let mut groups = BTreeMap::<MessageId, GmailCanonicalMessageGroup>::new();
+        let mut groups = BTreeMap::<MessageId, CanonicalMessageGroup>::new();
 
         for mut header in headers {
             let canonical_id = self.canonical_message_id(&header.message);
@@ -57,13 +57,13 @@ impl GmailImapProviderProfile {
 
             groups
                 .entry(canonical_id)
-                .or_insert_with(|| GmailCanonicalMessageGroup::new(header.message.clone()))
+                .or_insert_with(|| CanonicalMessageGroup::new(header.message.clone()))
                 .push(header);
         }
 
         groups
             .into_values()
-            .flat_map(GmailCanonicalMessageGroup::into_headers)
+            .flat_map(CanonicalMessageGroup::into_headers)
             .collect()
     }
 
@@ -83,14 +83,14 @@ impl GmailImapProviderProfile {
 }
 
 #[derive(Debug)]
-struct GmailCanonicalMessageGroup {
+struct CanonicalMessageGroup {
     message: MessageRecord,
     mailbox_ids: BTreeSet<MailboxId>,
     keywords: BTreeSet<String>,
     locations: Vec<ImapMessageLocation>,
 }
 
-impl GmailCanonicalMessageGroup {
+impl CanonicalMessageGroup {
     fn new(message: MessageRecord) -> Self {
         Self {
             message,

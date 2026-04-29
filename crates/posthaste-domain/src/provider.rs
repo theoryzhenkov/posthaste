@@ -186,6 +186,10 @@ impl ImapProviderPolicy {
     pub fn allows_status_skip(self) -> bool {
         self.required_full_sync_reason.is_none()
     }
+
+    pub fn canonicalizes_by_rfc5322_message_id(self) -> bool {
+        self.features.message_identity == ImapMessageIdentitySource::Rfc5322MessageId
+    }
 }
 
 /// SMTP provider policy selected after message submission.
@@ -256,10 +260,21 @@ mod tests {
 
         assert_eq!(profile.kind(), ProviderKind::Generic);
         assert!(profile.imap().allows_status_skip());
+        assert!(!profile.imap().canonicalizes_by_rfc5322_message_id());
         assert_eq!(
             profile.smtp().sent_copy(),
             SmtpSentCopyPolicy::AppendToSentMailbox
         );
+    }
+
+    #[test]
+    fn imap_policy_exposes_rfc5322_canonicalization_without_vendor_match() {
+        let profile = ProviderProfile::from_imap_capabilities(&ImapCapabilities::from_tokens([
+            "IMAP4rev1",
+            "X-GM-EXT-1",
+        ]));
+
+        assert!(profile.imap().canonicalizes_by_rfc5322_message_id());
     }
 
     #[test]
