@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Provider driver strategy for JMAP, IMAP/SMTP, and future native APIs"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-04-29
+reviewed: 2026-04-29
 depends:
   - path: README
   - path: docs/L0-accounts
@@ -35,6 +35,12 @@ remain in backend adapters.
 An account has a provider driver. The driver owns remote protocol behavior and
 maps it into the common domain model consumed by sync, storage, automation, and
 the API.
+
+Provider family and protocol driver are separate axes. `ProviderKind` identifies
+the vendor or family, while `AccountDriver` selects the runtime protocol. The
+domain `ProviderProfile` groups one `ProviderPolicy` with protocol-specific
+sub-policies for JMAP, IMAP, and SMTP so vendor checks stay behind one provider
+boundary without forcing unrelated protocols into one abstraction.
 
 Initial drivers:
 
@@ -154,6 +160,7 @@ source informs the implementation.
 |---|---|---|
 | IMAP connection/auth/discovery | `posthaste-imap::discover_imap_account`, `LiveImapSmtpGateway::connect` | `imap-client` 0.3.0 constructors/auth/capability/list wrappers: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs> |
 | Capability normalization | `posthaste_domain::ImapCapabilities`, `normalize_imap_capabilities` | RFC 9051 capabilities and IMAP4rev2 baseline: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-types` capability variants: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
+| Provider profile policy | `posthaste_domain::ProviderProfile`, `ProviderPolicy`, `JmapProviderPolicy`, `ImapProviderPolicy`, `SmtpProviderPolicy` | Local provider policy boundary. Protocol specs below define each sub-policy's behavior. |
 | Mailbox LIST and roles | `map_imap_mailbox`, `imap_special_use_role`, `mailbox_role_override` | RFC 6154 SPECIAL-USE attributes: <https://www.rfc-editor.org/rfc/rfc6154.html>; Gmail IMAP exposes provider-specific `\All` and `\Spam` role aliases through LIST: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; `imap-client` LIST task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/list.rs> |
 | SELECT/EXAMINE state | `examine_imap_mailbox`, `ExamineStateTask`, `selected_mailbox_from_examine`, `ImapSelectedMailbox` | RFC 9051 SELECT/EXAMINE response codes including `UIDVALIDITY` and `UIDNEXT`: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 requires CONDSTORE servers to return `HIGHESTMODSEQ` for successful SELECT/EXAMINE unless `NOMODSEQ` applies: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` SELECT task provides the base response handling but does not expose `HIGHESTMODSEQ`, so Posthaste adds a local EXAMINE task over `imap-types` response codes: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/select.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
 | No-op mailbox preflight | `status_imap_mailbox`, `StatusTask`, `mailbox_status_proves_unchanged` | RFC 9051 STATUS data items `MESSAGES`, `UIDNEXT`, and `UIDVALIDITY`, including the warning that clients should not assume many consecutive STATUS commands are fast: <https://datatracker.ietf.org/doc/html/rfc9051#section-6.3.11> |

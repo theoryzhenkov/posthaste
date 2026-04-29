@@ -5,13 +5,12 @@ use lettre::message::{header, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use posthaste_domain::{
-    AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, Recipient,
-    SendMessageRequest, TransportSecurity,
+    AccountSettings, AccountTransportSettings, ProviderAuthKind, ProviderHint, ProviderProfile,
+    Recipient, SendMessageRequest, SmtpSentCopyPolicy, TransportSecurity,
 };
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 use crate::discovery::connect_authenticated_client;
-use crate::provider::SmtpAdapterProviderProfile;
 use crate::ImapAdapterError;
 use crate::ImapConnectionConfig;
 
@@ -103,10 +102,9 @@ pub struct SubmittedSmtpMessage {
 }
 
 pub fn smtp_sent_copy_strategy(provider: &ProviderHint) -> SmtpSentCopyStrategy {
-    if SmtpAdapterProviderProfile::from_provider_hint(provider).provider_manages_sent_copy() {
-        SmtpSentCopyStrategy::ProviderManaged
-    } else {
-        SmtpSentCopyStrategy::AppendToSentMailbox
+    match ProviderProfile::from_hint(provider).smtp().sent_copy() {
+        SmtpSentCopyPolicy::ProviderManaged => SmtpSentCopyStrategy::ProviderManaged,
+        SmtpSentCopyPolicy::AppendToSentMailbox => SmtpSentCopyStrategy::AppendToSentMailbox,
     }
 }
 
