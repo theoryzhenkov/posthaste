@@ -11,7 +11,8 @@ use oauth2::{
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use posthaste_domain::{
-    GatewayError, ImapTransportSettings, ProviderHint, SmtpTransportSettings, TransportSecurity,
+    GatewayError, ImapTransportSettings, ProviderHint, ProviderKind, ProviderProfile,
+    SmtpTransportSettings,
 };
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
@@ -93,34 +94,26 @@ pub struct OAuthProviderProfile {
     pub metadata_url: &'static str,
     pub scopes: &'static [&'static str],
     pub extra_authorization_params: &'static [(&'static str, &'static str)],
-    pub mail_transport: Option<OAuthProviderMailTransport>,
 }
 
 impl OAuthProviderProfile {
     pub fn for_provider(provider: &ProviderHint) -> Option<Self> {
-        match provider {
-            ProviderHint::Gmail => Some(Self {
-                provider: ProviderHint::Gmail,
+        let provider_profile = ProviderProfile::from_hint(provider);
+        if !provider_profile.oauth().is_supported() {
+            return None;
+        }
+
+        match provider_profile.kind() {
+            ProviderKind::Gmail => Some(Self {
+                provider: provider.clone(),
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
                 token_url: "https://oauth2.googleapis.com/token",
                 metadata_url: "https://accounts.google.com/.well-known/openid-configuration",
                 scopes: &["openid", "email", "https://mail.google.com/"],
                 extra_authorization_params: &[("access_type", "offline"), ("prompt", "consent")],
-                mail_transport: Some(OAuthProviderMailTransport {
-                    imap: OAuthProviderEndpoint {
-                        host: "imap.gmail.com",
-                        port: 993,
-                        security: TransportSecurity::Tls,
-                    },
-                    smtp: OAuthProviderEndpoint {
-                        host: "smtp.gmail.com",
-                        port: 587,
-                        security: TransportSecurity::StartTls,
-                    },
-                }),
             }),
-            ProviderHint::Outlook => Some(Self {
-                provider: ProviderHint::Outlook,
+            ProviderKind::Outlook => Some(Self {
+                provider: provider.clone(),
                 auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
                 token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
                 metadata_url:
@@ -133,71 +126,22 @@ impl OAuthProviderProfile {
                     "https://outlook.office.com/SMTP.Send",
                 ],
                 extra_authorization_params: &[],
-                mail_transport: Some(OAuthProviderMailTransport {
-                    imap: OAuthProviderEndpoint {
-                        host: "outlook.office365.com",
-                        port: 993,
-                        security: TransportSecurity::Tls,
-                    },
-                    smtp: OAuthProviderEndpoint {
-                        host: "smtp.office365.com",
-                        port: 587,
-                        security: TransportSecurity::StartTls,
-                    },
-                }),
             }),
-            ProviderHint::Generic | ProviderHint::Icloud => None,
+            ProviderKind::Generic | ProviderKind::Icloud => None,
         }
     }
 
     pub fn openid_issuer_matches(&self, issuer: &str) -> bool {
-        match self.provider {
-            ProviderHint::Gmail => {
-                issuer == "https://accounts.google.com" || issuer == "accounts.google.com"
-            }
-            ProviderHint::Outlook => {
-                issuer.starts_with("https://login.microsoftonline.com/")
-                    && issuer.ends_with("/v2.0")
-            }
-            ProviderHint::Generic | ProviderHint::Icloud => false,
-        }
+        ProviderProfile::from_hint(&self.provider)
+            .oauth()
+            .openid_issuer_matches(issuer)
     }
 
     pub fn default_mail_transport(&self) -> Option<(ImapTransportSettings, SmtpTransportSettings)> {
-        self.mail_transport
-            .as_ref()
-            .map(OAuthProviderMailTransport::to_settings)
+        ProviderProfile::from_hint(&self.provider)
+            .oauth()
+            .default_mail_transport()
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OAuthProviderMailTransport {
-    pub imap: OAuthProviderEndpoint,
-    pub smtp: OAuthProviderEndpoint,
-}
-
-impl OAuthProviderMailTransport {
-    fn to_settings(&self) -> (ImapTransportSettings, SmtpTransportSettings) {
-        (
-            ImapTransportSettings {
-                host: self.imap.host.to_string(),
-                port: self.imap.port,
-                security: self.imap.security.clone(),
-            },
-            SmtpTransportSettings {
-                host: self.smtp.host.to_string(),
-                port: self.smtp.port,
-                security: self.smtp.security.clone(),
-            },
-        )
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OAuthProviderEndpoint {
-    pub host: &'static str,
-    pub port: u16,
-    pub security: TransportSecurity,
 }
 
 /// Serializable OAuth token bundle stored as the account secret value.
@@ -819,6 +763,7 @@ mod tests {
     use base64::Engine;
     use jsonwebtoken::jwk::Jwk;
     use jsonwebtoken::{encode, EncodingKey, Header};
+    use posthaste_domain::TransportSecurity;
 
     const TEST_RSA_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCptW7Vkr5e34U+
@@ -896,6 +841,57 @@ TaMgUWVodLXy+lMRbtUQ97M=
         assert!(gmail.openid_issuer_matches("accounts.google.com"));
         assert!(outlook.openid_issuer_matches("https://login.microsoftonline.com/tenant-id/v2.0"));
         assert!(!outlook.openid_issuer_matches("https://accounts.google.com"));
+    }
+
+    #[test]
+    fn oauth_profile_availability_follows_provider_profile_policy() {
+        for provider in [
+            ProviderHint::Gmail,
+            ProviderHint::Outlook,
+            ProviderHint::Generic,
+            ProviderHint::Icloud,
+        ] {
+            let domain_policy = ProviderProfile::from_hint(&provider).oauth();
+
+            assert_eq!(
+                OAuthProviderProfile::for_provider(&provider).is_some(),
+                domain_policy.is_supported()
+            );
+        }
+    }
+
+    #[test]
+    fn oauth_profile_mail_transport_matches_provider_profile_policy() {
+        for provider in [ProviderHint::Gmail, ProviderHint::Outlook] {
+            let oauth_profile = OAuthProviderProfile::for_provider(&provider).expect("profile");
+            let domain_transport = ProviderProfile::from_hint(&provider)
+                .oauth()
+                .default_mail_transport();
+
+            assert_eq!(oauth_profile.default_mail_transport(), domain_transport);
+        }
+    }
+
+    #[test]
+    fn oauth_profile_issuer_matching_matches_provider_profile_policy() {
+        let issuers = [
+            "https://accounts.google.com",
+            "accounts.google.com",
+            "https://login.microsoftonline.com/tenant-id/v2.0",
+            "https://example.com",
+        ];
+
+        for provider in [ProviderHint::Gmail, ProviderHint::Outlook] {
+            let oauth_profile = OAuthProviderProfile::for_provider(&provider).expect("profile");
+            let domain_policy = ProviderProfile::from_hint(&provider).oauth();
+
+            for issuer in issuers {
+                assert_eq!(
+                    oauth_profile.openid_issuer_matches(issuer),
+                    domain_policy.openid_issuer_matches(issuer)
+                );
+            }
+        }
     }
 
     #[test]

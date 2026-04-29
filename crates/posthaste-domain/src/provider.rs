@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AccountSettings, AccountTransportSettings, ImapCapabilities, ImapFullSyncReason,
     ImapLabelSource, ImapMessageIdentitySource, ImapProviderFeatures, ImapThreadIdentitySource,
-    ProviderHint,
+    ImapTransportSettings, ProviderHint, SmtpTransportSettings, TransportSecurity,
 };
 
 /// Provider family independent of the account driver/protocol.
@@ -105,6 +105,10 @@ impl ProviderProfile {
     pub fn smtp(self) -> SmtpProviderPolicy {
         self.policy.smtp
     }
+
+    pub fn oauth(self) -> OAuthProviderPolicy {
+        self.policy.oauth
+    }
 }
 
 /// Protocol-specific provider policies grouped under one provider boundary.
@@ -115,6 +119,7 @@ pub struct ProviderPolicy {
     pub jmap: JmapProviderPolicy,
     pub imap: ImapProviderPolicy,
     pub smtp: SmtpProviderPolicy,
+    pub oauth: OAuthProviderPolicy,
 }
 
 impl ProviderPolicy {
@@ -123,6 +128,7 @@ impl ProviderPolicy {
             jmap: JmapProviderPolicy::for_kind(kind),
             imap: ImapProviderPolicy::for_kind(kind),
             smtp: SmtpProviderPolicy::for_kind(kind),
+            oauth: OAuthProviderPolicy::for_kind(kind),
         }
     }
 }
@@ -220,6 +226,119 @@ pub enum SmtpSentCopyPolicy {
     AppendToSentMailbox,
 }
 
+/// OAuth provider policy shared by API setup and token validation.
+///
+/// Server-specific authorization URLs and scopes stay in the server adapter,
+/// while provider eligibility, OIDC issuer policy, and default IMAP/SMTP
+/// endpoints are selected through the general provider profile.
+///
+/// @spec docs/L0-providers#authentication
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OAuthProviderPolicy {
+    openid_issuer: OAuthOpenIdIssuerPolicy,
+    default_mail_transport: Option<OAuthDefaultMailTransport>,
+}
+
+impl OAuthProviderPolicy {
+    pub fn for_kind(kind: ProviderKind) -> Self {
+        match kind {
+            ProviderKind::Gmail => Self {
+                openid_issuer: OAuthOpenIdIssuerPolicy::Google,
+                default_mail_transport: Some(OAuthDefaultMailTransport::Gmail),
+            },
+            ProviderKind::Outlook => Self {
+                openid_issuer: OAuthOpenIdIssuerPolicy::MicrosoftTenantV2,
+                default_mail_transport: Some(OAuthDefaultMailTransport::Outlook),
+            },
+            ProviderKind::Generic | ProviderKind::Icloud => Self {
+                openid_issuer: OAuthOpenIdIssuerPolicy::Unsupported,
+                default_mail_transport: None,
+            },
+        }
+    }
+
+    pub fn is_supported(self) -> bool {
+        self.default_mail_transport.is_some()
+            && self.openid_issuer != OAuthOpenIdIssuerPolicy::Unsupported
+    }
+
+    pub fn openid_issuer_matches(self, issuer: &str) -> bool {
+        self.openid_issuer.matches(issuer)
+    }
+
+    pub fn default_mail_transport(self) -> Option<(ImapTransportSettings, SmtpTransportSettings)> {
+        self.default_mail_transport
+            .map(OAuthDefaultMailTransport::to_settings)
+    }
+
+    pub fn openid_issuer_policy(self) -> OAuthOpenIdIssuerPolicy {
+        self.openid_issuer
+    }
+
+    pub fn default_mail_transport_policy(self) -> Option<OAuthDefaultMailTransport> {
+        self.default_mail_transport
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OAuthOpenIdIssuerPolicy {
+    Google,
+    MicrosoftTenantV2,
+    Unsupported,
+}
+
+impl OAuthOpenIdIssuerPolicy {
+    pub fn matches(self, issuer: &str) -> bool {
+        match self {
+            Self::Google => {
+                issuer == "https://accounts.google.com" || issuer == "accounts.google.com"
+            }
+            Self::MicrosoftTenantV2 => {
+                issuer.starts_with("https://login.microsoftonline.com/")
+                    && issuer.ends_with("/v2.0")
+            }
+            Self::Unsupported => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OAuthDefaultMailTransport {
+    Gmail,
+    Outlook,
+}
+
+impl OAuthDefaultMailTransport {
+    pub fn to_settings(self) -> (ImapTransportSettings, SmtpTransportSettings) {
+        match self {
+            Self::Gmail => (
+                ImapTransportSettings {
+                    host: "imap.gmail.com".to_string(),
+                    port: 993,
+                    security: TransportSecurity::Tls,
+                },
+                SmtpTransportSettings {
+                    host: "smtp.gmail.com".to_string(),
+                    port: 587,
+                    security: TransportSecurity::StartTls,
+                },
+            ),
+            Self::Outlook => (
+                ImapTransportSettings {
+                    host: "outlook.office365.com".to_string(),
+                    port: 993,
+                    security: TransportSecurity::Tls,
+                },
+                SmtpTransportSettings {
+                    host: "smtp.office365.com".to_string(),
+                    port: 587,
+                    security: TransportSecurity::StartTls,
+                },
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +408,59 @@ mod tests {
             transport.provider_profile().smtp().sent_copy(),
             SmtpSentCopyPolicy::ProviderManaged
         );
+    }
+
+    #[test]
+    fn oauth_policy_is_available_only_for_supported_provider_profiles() {
+        let cases = [
+            (ProviderHint::Gmail, ProviderKind::Gmail, true),
+            (ProviderHint::Outlook, ProviderKind::Outlook, true),
+            (ProviderHint::Generic, ProviderKind::Generic, false),
+            (ProviderHint::Icloud, ProviderKind::Icloud, false),
+        ];
+
+        for (hint, kind, supported) in cases {
+            let profile = ProviderProfile::from_hint(&hint);
+
+            assert_eq!(profile.kind(), kind);
+            assert_eq!(profile.oauth().is_supported(), supported);
+            assert_eq!(
+                profile.oauth().default_mail_transport().is_some(),
+                supported
+            );
+        }
+    }
+
+    #[test]
+    fn oauth_policy_matches_provider_issuer_rules() {
+        let gmail = ProviderProfile::from_kind(ProviderKind::Gmail).oauth();
+        let outlook = ProviderProfile::from_kind(ProviderKind::Outlook).oauth();
+        let generic = ProviderProfile::from_kind(ProviderKind::Generic).oauth();
+
+        assert!(gmail.openid_issuer_matches("https://accounts.google.com"));
+        assert!(gmail.openid_issuer_matches("accounts.google.com"));
+        assert!(!gmail.openid_issuer_matches("https://login.microsoftonline.com/tenant/v2.0"));
+        assert!(outlook.openid_issuer_matches("https://login.microsoftonline.com/tenant/v2.0"));
+        assert!(!outlook.openid_issuer_matches("https://accounts.google.com"));
+        assert!(!generic.openid_issuer_matches("https://accounts.google.com"));
+    }
+
+    #[test]
+    fn oauth_policy_provides_default_mail_endpoints() {
+        let gmail = ProviderProfile::from_kind(ProviderKind::Gmail)
+            .oauth()
+            .default_mail_transport()
+            .expect("Gmail OAuth mail transport");
+        let outlook = ProviderProfile::from_kind(ProviderKind::Outlook)
+            .oauth()
+            .default_mail_transport()
+            .expect("Outlook OAuth mail transport");
+
+        assert_eq!(gmail.0.host, "imap.gmail.com");
+        assert_eq!(gmail.0.security, TransportSecurity::Tls);
+        assert_eq!(gmail.1.host, "smtp.gmail.com");
+        assert_eq!(gmail.1.security, TransportSecurity::StartTls);
+        assert_eq!(outlook.0.host, "outlook.office365.com");
+        assert_eq!(outlook.1.host, "smtp.office365.com");
     }
 }
