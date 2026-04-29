@@ -1,4 +1,4 @@
-import type { ProviderHint } from '../api/types'
+import type { ProviderKind } from '../api/types'
 import oauthProviderConfig from './oauthProviders.json'
 
 interface OAuthProviderConfig {
@@ -12,18 +12,18 @@ interface OAuthClientCredentials {
 }
 
 const providers = oauthProviderConfig as Partial<
-  Record<ProviderHint, OAuthProviderConfig>
+  Record<ProviderKind, OAuthProviderConfig>
 >
 
 export const providerOAuthClientCredentials: Partial<
-  Record<ProviderHint, OAuthClientCredentials | undefined>
+  Record<ProviderKind, OAuthClientCredentials | undefined>
 > = {
   gmail: oauthClientCredentials('gmail'),
   outlook: oauthClientCredentials('outlook'),
 }
 
 function oauthClientCredentials(
-  provider: ProviderHint,
+  provider: ProviderKind,
 ): OAuthClientCredentials | undefined {
   const config = providers[provider]
   if (!config) {
@@ -37,7 +37,7 @@ function oauthClientCredentials(
   }
 }
 
-function oauthClientSecretFromEnv(provider: ProviderHint): string | undefined {
+function oauthClientSecretFromEnv(provider: ProviderKind): string | undefined {
   switch (provider) {
     case 'gmail':
       return (

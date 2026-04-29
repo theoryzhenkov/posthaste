@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use crate::{
     cache::{CacheFetchUnit, CachePolicy},
     imap::{ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationKey},
-    ConfigError,
+    ConfigError, ProviderKind,
 };
 
 /// Generates a newtype wrapper around `String` for type-safe identifiers.
@@ -286,6 +286,17 @@ pub enum ProviderHint {
     Icloud,
 }
 
+impl From<ProviderKind> for ProviderHint {
+    fn from(provider: ProviderKind) -> Self {
+        match provider {
+            ProviderKind::Generic => Self::Generic,
+            ProviderKind::Gmail => Self::Gmail,
+            ProviderKind::Outlook => Self::Outlook,
+            ProviderKind::Icloud => Self::Icloud,
+        }
+    }
+}
+
 /// Authentication mode used by the selected provider transport.
 ///
 /// @spec docs/L0-providers#authentication
@@ -348,6 +359,12 @@ pub struct AccountTransportSettings {
     pub secret_ref: Option<SecretRef>,
     pub imap: Option<ImapTransportSettings>,
     pub smtp: Option<SmtpTransportSettings>,
+}
+
+impl AccountTransportSettings {
+    pub fn provider_kind(&self) -> ProviderKind {
+        ProviderKind::from(&self.provider)
+    }
 }
 
 /// User-facing visual identity for an account.
@@ -502,7 +519,7 @@ pub struct AccountSettings {
 /// API-facing account connection variant used by account settings UIs.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -511,6 +528,7 @@ pub struct AccountSettings {
 pub enum AccountConnectionOverview {
     ManualCredentials {
         provider: ProviderHint,
+        provider_kind: ProviderKind,
         auth: ProviderAuthKind,
         base_url: Option<String>,
         username: Option<String>,
@@ -520,12 +538,89 @@ pub enum AccountConnectionOverview {
     },
     ManagedOAuth {
         provider: ProviderHint,
+        provider_kind: ProviderKind,
         auth: ProviderAuthKind,
         username: Option<String>,
         imap: Option<ImapTransportSettings>,
         smtp: Option<SmtpTransportSettings>,
         secret: SecretStatus,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+enum AccountConnectionOverviewCompat {
+    ManualCredentials {
+        provider: ProviderHint,
+        provider_kind: Option<ProviderKind>,
+        auth: ProviderAuthKind,
+        base_url: Option<String>,
+        username: Option<String>,
+        imap: Option<ImapTransportSettings>,
+        smtp: Option<SmtpTransportSettings>,
+        secret: SecretStatus,
+    },
+    ManagedOAuth {
+        provider: ProviderHint,
+        provider_kind: Option<ProviderKind>,
+        auth: ProviderAuthKind,
+        username: Option<String>,
+        imap: Option<ImapTransportSettings>,
+        smtp: Option<SmtpTransportSettings>,
+        secret: SecretStatus,
+    },
+}
+
+impl<'de> Deserialize<'de> for AccountConnectionOverview {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(
+            match AccountConnectionOverviewCompat::deserialize(deserializer)? {
+                AccountConnectionOverviewCompat::ManualCredentials {
+                    provider,
+                    provider_kind,
+                    auth,
+                    base_url,
+                    username,
+                    imap,
+                    smtp,
+                    secret,
+                } => AccountConnectionOverview::ManualCredentials {
+                    provider_kind: provider_kind.unwrap_or_else(|| ProviderKind::from(&provider)),
+                    provider,
+                    auth,
+                    base_url,
+                    username,
+                    imap,
+                    smtp,
+                    secret,
+                },
+                AccountConnectionOverviewCompat::ManagedOAuth {
+                    provider,
+                    provider_kind,
+                    auth,
+                    username,
+                    imap,
+                    smtp,
+                    secret,
+                } => AccountConnectionOverview::ManagedOAuth {
+                    provider_kind: provider_kind.unwrap_or_else(|| ProviderKind::from(&provider)),
+                    provider,
+                    auth,
+                    username,
+                    imap,
+                    smtp,
+                    secret,
+                },
+            },
+        )
+    }
 }
 
 /// Runtime health status of a mail account.
@@ -1612,6 +1707,7 @@ mod tests {
     fn manual_connection_overview_serializes_editable_credentials_variant() {
         let value = serde_json::to_value(AccountConnectionOverview::ManualCredentials {
             provider: ProviderHint::Generic,
+            provider_kind: ProviderKind::Generic,
             auth: ProviderAuthKind::AppPassword,
             base_url: Some("https://mail.example.com/jmap".to_string()),
             username: Some("me@example.com".to_string()),
@@ -1622,6 +1718,8 @@ mod tests {
         .expect("serialize connection overview");
 
         assert_eq!(value["kind"], "manualCredentials");
+        assert_eq!(value["provider"], "generic");
+        assert_eq!(value["providerKind"], "generic");
         assert_eq!(value["auth"], "appPassword");
         assert_eq!(value["baseUrl"], "https://mail.example.com/jmap");
         assert_eq!(value["username"], "me@example.com");
@@ -1631,6 +1729,7 @@ mod tests {
     fn oauth_connection_overview_serializes_managed_variant_without_base_url() {
         let value = serde_json::to_value(AccountConnectionOverview::ManagedOAuth {
             provider: ProviderHint::Gmail,
+            provider_kind: ProviderKind::Gmail,
             auth: ProviderAuthKind::OAuth2,
             username: Some("me@gmail.com".to_string()),
             imap: None,
@@ -1641,7 +1740,35 @@ mod tests {
 
         assert_eq!(value["kind"], "managedOAuth");
         assert_eq!(value["provider"], "gmail");
+        assert_eq!(value["providerKind"], "gmail");
         assert_eq!(value["auth"], "oauth2");
         assert!(value.get("baseUrl").is_none());
+    }
+
+    #[test]
+    fn connection_overview_deserializes_legacy_provider_without_provider_kind() {
+        let value: AccountConnectionOverview = serde_json::from_value(serde_json::json!({
+            "kind": "managedOAuth",
+            "provider": "gmail",
+            "auth": "oauth2",
+            "username": "me@gmail.com",
+            "imap": null,
+            "smtp": null,
+            "secret": {
+                "storage": "os",
+                "configured": true,
+                "label": null
+            }
+        }))
+        .expect("legacy connection overview should deserialize");
+
+        match value {
+            AccountConnectionOverview::ManagedOAuth { provider_kind, .. } => {
+                assert_eq!(provider_kind, ProviderKind::Gmail);
+            }
+            AccountConnectionOverview::ManualCredentials { .. } => {
+                panic!("expected managed OAuth variant");
+            }
+        }
     }
 }

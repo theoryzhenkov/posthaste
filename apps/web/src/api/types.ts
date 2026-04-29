@@ -2,7 +2,10 @@
 export type AccountDriver = 'jmap' | 'imapSmtp' | 'mock'
 
 /** @spec docs/L0-providers#driver-model */
-export type ProviderHint = 'generic' | 'gmail' | 'outlook' | 'icloud'
+export type ProviderKind = 'generic' | 'gmail' | 'outlook' | 'icloud'
+
+/** Compatibility alias for the existing serialized account setup field. */
+export type ProviderHint = ProviderKind
 
 /** @spec docs/L0-providers#authentication */
 export type ProviderAuthKind = 'password' | 'appPassword' | 'oauth2'
@@ -91,6 +94,7 @@ export interface AutomationRulePreviewResponse {
 
 interface AccountConnectionOverviewBase {
   provider: ProviderHint
+  providerKind: ProviderKind
   auth: ProviderAuthKind
   username: string | null
   imap: MailEndpointSettings | null
