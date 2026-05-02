@@ -174,8 +174,8 @@ impl ImapProviderPolicy {
         match kind {
             ProviderKind::Gmail => Self {
                 features: ImapProviderFeatures {
-                    message_identity: ImapMessageIdentitySource::Rfc5322MessageId,
-                    thread_identity: ImapThreadIdentitySource::Rfc5322Headers,
+                    message_identity: ImapMessageIdentitySource::GmailMessageId,
+                    thread_identity: ImapThreadIdentitySource::GmailThreadId,
                     label_source: ImapLabelSource::GmailLabels,
                 },
                 required_full_sync_reason: Some(
@@ -212,6 +212,10 @@ impl ImapProviderPolicy {
 
     pub fn canonicalizes_by_rfc5322_message_id(self) -> bool {
         self.features.message_identity == ImapMessageIdentitySource::Rfc5322MessageId
+    }
+
+    pub fn canonicalizes_by_gmail_message_id(self) -> bool {
+        self.features.message_identity == ImapMessageIdentitySource::GmailMessageId
     }
 
     pub fn remote_observation(self) -> RemoteObservationPolicy {
@@ -513,7 +517,7 @@ mod tests {
         assert_eq!(profile.kind(), ProviderKind::Gmail);
         assert_eq!(
             profile.imap().features().message_identity,
-            ImapMessageIdentitySource::Rfc5322MessageId
+            ImapMessageIdentitySource::GmailMessageId
         );
     }
 
@@ -584,13 +588,13 @@ mod tests {
     }
 
     #[test]
-    fn imap_policy_exposes_rfc5322_canonicalization_without_vendor_match() {
+    fn imap_policy_exposes_gmail_canonicalization_without_vendor_match() {
         let profile = ProviderProfile::from_imap_capabilities(&ImapCapabilities::from_tokens([
             "IMAP4rev1",
             "X-GM-EXT-1",
         ]));
 
-        assert!(profile.imap().canonicalizes_by_rfc5322_message_id());
+        assert!(profile.imap().canonicalizes_by_gmail_message_id());
     }
 
     #[test]

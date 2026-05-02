@@ -508,19 +508,41 @@ struct MailboxPlanExecution<'a> {
     mailbox_ordinal: usize,
     mailbox_count: usize,
     fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
     account_full_message_snapshot: bool,
     updated_at: &'a str,
     progress: &'a Option<SyncProgressReporter>,
 }
 
+#[derive(Clone, Copy)]
+struct MailboxPlanExecutionContext<'a> {
+    account_id: &'a AccountId,
+    fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
+    account_full_message_snapshot: bool,
+    updated_at: &'a str,
+    progress: &'a Option<SyncProgressReporter>,
+}
+
+impl<'a> MailboxPlanExecutionContext<'a> {
+    fn for_mailbox(self, mailbox_ordinal: usize, mailbox_count: usize) -> MailboxPlanExecution<'a> {
+        MailboxPlanExecution {
+            account_id: self.account_id,
+            mailbox_ordinal,
+            mailbox_count,
+            fetch_modseq: self.fetch_modseq,
+            fetch_gmail_metadata: self.fetch_gmail_metadata,
+            account_full_message_snapshot: self.account_full_message_snapshot,
+            updated_at: self.updated_at,
+            progress: self.progress,
+        }
+    }
+}
+
 async fn execute_mailbox_plans(
     client: &mut ImapClient,
-    account_id: &AccountId,
     planned_mailboxes: Vec<PlannedImapMailbox>,
-    fetch_modseq: bool,
-    account_full_message_snapshot: bool,
-    updated_at: &str,
-    progress: &Option<SyncProgressReporter>,
+    context: MailboxPlanExecutionContext<'_>,
 ) -> Result<SyncBatchAccumulator, GatewayError> {
     let mailbox_count = planned_mailboxes.len();
     let mut accumulator = SyncBatchAccumulator::default();
@@ -529,15 +551,7 @@ async fn execute_mailbox_plans(
         execute_mailbox_plan(
             client,
             mailbox,
-            MailboxPlanExecution {
-                account_id,
-                mailbox_ordinal: mailbox_index + 1,
-                mailbox_count,
-                fetch_modseq,
-                account_full_message_snapshot,
-                updated_at,
-                progress,
-            },
+            context.for_mailbox(mailbox_index + 1, mailbox_count),
             &mut accumulator,
         )
         .await?;
@@ -604,6 +618,7 @@ async fn execute_mailbox_plan(
                 client,
                 &mailbox.name,
                 execution.fetch_modseq,
+                execution.fetch_gmail_metadata,
                 execution.updated_at.to_string(),
             )
             .await
@@ -658,6 +673,7 @@ async fn execute_mailbox_plan(
                 &mailbox.name,
                 *since_modseq,
                 true,
+                execution.fetch_gmail_metadata,
                 execution.updated_at.to_string(),
             )
             .await
@@ -704,6 +720,7 @@ async fn execute_mailbox_plan(
                 client,
                 &mailbox.name,
                 execution.fetch_modseq,
+                execution.fetch_gmail_metadata,
                 execution.updated_at.to_string(),
             )
             .await
@@ -754,6 +771,7 @@ async fn execute_mailbox_plan(
                 &mailbox.name,
                 *after_uid,
                 execution.fetch_modseq,
+                execution.fetch_gmail_metadata,
                 execution.updated_at.to_string(),
             )
             .await
@@ -810,6 +828,7 @@ impl MailGateway for LiveImapSmtpGateway {
                 .map(std::string::ToString::to_string),
         )
         .supports_condstore();
+        let fetch_gmail_metadata = discovery.capabilities.supports_gmail_extensions();
         let selectable_mailbox_count = discovery
             .mailboxes
             .iter()
@@ -860,12 +879,15 @@ impl MailGateway for LiveImapSmtpGateway {
 
         let accumulator = execute_mailbox_plans(
             &mut client,
-            account_id,
             planned_mailboxes,
-            fetch_modseq,
-            account_full_message_snapshot,
-            &updated_at,
-            &progress,
+            MailboxPlanExecutionContext {
+                account_id,
+                fetch_modseq,
+                fetch_gmail_metadata,
+                account_full_message_snapshot,
+                updated_at: &updated_at,
+                progress: &progress,
+            },
         )
         .await?;
 

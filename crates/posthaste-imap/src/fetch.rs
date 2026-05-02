@@ -16,14 +16,17 @@ use imap_client::imap_types::search::SearchKey;
 use imap_client::imap_types::sequence::SequenceSet;
 use imap_client::tasks::tasks::TaskError;
 use imap_client::tasks::Task;
-use posthaste_domain::{ImapModSeq, ImapSelectedMailbox, ImapUid};
+use posthaste_domain::{
+    GmailLabel, GmailMessageId, GmailThreadId, ImapGmailMetadata, ImapModSeq, ImapSelectedMailbox,
+    ImapUid,
+};
 use posthaste_observability::{events, ph_debug, ph_info};
 
 use crate::discovery::connect_authenticated_client;
 use crate::mailbox::examine_selected_mailbox;
 use crate::message::imap_flags_include_deleted;
 use crate::{
-    imap_header_message_record, normalize_imap_capabilities, ImapAdapterError,
+    imap_header_message_record_with_gmail_metadata, normalize_imap_capabilities, ImapAdapterError,
     ImapConnectionConfig, ImapFetchedHeader, ImapMappedHeader,
 };
 
@@ -92,21 +95,29 @@ pub async fn fetch_mailbox_header_snapshot(
 ) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
-    let fetch_modseq = normalize_imap_capabilities(
+    let capabilities = normalize_imap_capabilities(
         client
             .state
             .capabilities_iter()
             .map(std::string::ToString::to_string),
+    );
+    let fetch_modseq = capabilities.supports_condstore();
+    let fetch_gmail_metadata = capabilities.supports_gmail_extensions();
+    fetch_mailbox_header_snapshot_with_client(
+        &mut client,
+        mailbox_name,
+        fetch_modseq,
+        fetch_gmail_metadata,
+        updated_at,
     )
-    .supports_condstore();
-    fetch_mailbox_header_snapshot_with_client(&mut client, mailbox_name, fetch_modseq, updated_at)
-        .await
+    .await
 }
 
 pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
     client: &mut ImapClient,
     mailbox_name: &str,
     fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
     updated_at: String,
 ) -> Result<ImapMailboxHeaderSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
@@ -124,8 +135,15 @@ pub(crate) async fn fetch_mailbox_header_snapshot_with_client(
         "IMAP mailbox UID search completed"
     );
 
-    let headers =
-        fetch_selected_mailbox_headers(client, &selected, &uids, fetch_modseq, updated_at).await?;
+    let headers = fetch_selected_mailbox_headers(
+        client,
+        &selected,
+        &uids,
+        fetch_modseq,
+        fetch_gmail_metadata,
+        updated_at,
+    )
+    .await?;
 
     Ok(ImapMailboxHeaderSnapshot { selected, headers })
 }
@@ -146,18 +164,20 @@ pub async fn fetch_mailbox_headers_after_uid(
 ) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
-    let fetch_modseq = normalize_imap_capabilities(
+    let capabilities = normalize_imap_capabilities(
         client
             .state
             .capabilities_iter()
             .map(std::string::ToString::to_string),
-    )
-    .supports_condstore();
+    );
+    let fetch_modseq = capabilities.supports_condstore();
+    let fetch_gmail_metadata = capabilities.supports_gmail_extensions();
     fetch_mailbox_headers_after_uid_with_client(
         &mut client,
         mailbox_name,
         after_uid,
         fetch_modseq,
+        fetch_gmail_metadata,
         updated_at,
     )
     .await
@@ -168,6 +188,7 @@ pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
     mailbox_name: &str,
     after_uid: ImapUid,
     fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
     updated_at: String,
 ) -> Result<ImapMailboxUidDeltaSnapshot, ImapAdapterError> {
     let selected = examine_selected_mailbox(client, mailbox_name).await?;
@@ -193,9 +214,15 @@ pub(crate) async fn fetch_mailbox_headers_after_uid_with_client(
         "IMAP mailbox UID delta search completed"
     );
 
-    let headers =
-        fetch_selected_mailbox_headers(client, &selected, &new_uids, fetch_modseq, updated_at)
-            .await?;
+    let headers = fetch_selected_mailbox_headers(
+        client,
+        &selected,
+        &new_uids,
+        fetch_modseq,
+        fetch_gmail_metadata,
+        updated_at,
+    )
+    .await?;
 
     Ok(ImapMailboxUidDeltaSnapshot {
         selected,
@@ -222,11 +249,19 @@ pub async fn fetch_mailbox_changed_since_snapshot(
 ) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
     let mut client = connect_authenticated_client(config).await?;
     client.refresh_capabilities().await?;
+    let fetch_gmail_metadata = normalize_imap_capabilities(
+        client
+            .state
+            .capabilities_iter()
+            .map(std::string::ToString::to_string),
+    )
+    .supports_gmail_extensions();
     fetch_mailbox_changed_since_snapshot_with_client(
         &mut client,
         mailbox_name,
         since_modseq,
         include_vanished,
+        fetch_gmail_metadata,
         updated_at,
     )
     .await
@@ -237,6 +272,7 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     mailbox_name: &str,
     since_modseq: ImapModSeq,
     include_vanished: bool,
+    fetch_gmail_metadata: bool,
     updated_at: String,
 ) -> Result<ImapChangedSinceSnapshot, ImapAdapterError> {
     let since_modseq =
@@ -255,8 +291,15 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
             reason = "qresync_enable_unavailable",
             "IMAP mailbox UID search completed"
         );
-        let headers =
-            fetch_selected_mailbox_headers(client, &selected, &uids, true, updated_at).await?;
+        let headers = fetch_selected_mailbox_headers(
+            client,
+            &selected,
+            &uids,
+            true,
+            fetch_gmail_metadata,
+            updated_at,
+        )
+        .await?;
 
         return Ok(ImapChangedSinceSnapshot {
             selected,
@@ -270,7 +313,7 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     let snapshot = client
         .resolve(ChangedSinceFetchTask::new(
             sequence_set,
-            fetch_item_names(true),
+            fetch_item_names(true, fetch_gmail_metadata),
             since_modseq,
             fetch_vanished,
         ))
@@ -281,12 +324,17 @@ pub(crate) async fn fetch_mailbox_changed_since_snapshot_with_client(
     let mut headers = Vec::with_capacity(snapshot.headers.len());
     let mut vanished_uids = snapshot.vanished_uids;
     for items in snapshot.headers.into_values() {
-        let fetched = fetched_header_from_items(&selected, items, updated_at.clone())?;
-        if imap_flags_include_deleted(&fetched.flags) {
-            vanished_uids.push(fetched.uid);
+        let fetched =
+            fetched_header_from_items_with_metadata(&selected, items, updated_at.clone())?;
+        if imap_flags_include_deleted(&fetched.header.flags) {
+            vanished_uids.push(fetched.header.uid);
             continue;
         }
-        headers.push(imap_header_message_record(&selected, fetched)?);
+        headers.push(imap_header_message_record_with_gmail_metadata(
+            &selected,
+            fetched.header,
+            fetched.gmail,
+        )?);
     }
     headers.sort_by_key(|record| record.location.uid);
     vanished_uids.sort();
@@ -305,6 +353,7 @@ pub(crate) async fn fetch_selected_mailbox_headers(
     selected: &ImapSelectedMailbox,
     uids: &[NonZeroU32],
     fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
     updated_at: String,
 ) -> Result<Vec<ImapMappedHeader>, ImapAdapterError> {
     let mut records = Vec::new();
@@ -313,13 +362,21 @@ pub(crate) async fn fetch_selected_mailbox_headers(
         let sequence_set = SequenceSet::try_from(chunk)
             .map_err(|error| ImapAdapterError::InvalidUidSequence(error.to_string()))?;
         let responses = client
-            .uid_fetch(sequence_set, fetch_item_names(fetch_modseq))
+            .uid_fetch(
+                sequence_set,
+                fetch_item_names(fetch_modseq, fetch_gmail_metadata),
+            )
             .await
             .map_err(ImapAdapterError::from)?;
 
         for items in responses.into_values() {
-            let fetched = fetched_header_from_items(selected, items, updated_at.clone())?;
-            records.push(imap_header_message_record(selected, fetched)?);
+            let fetched =
+                fetched_header_from_items_with_metadata(selected, items, updated_at.clone())?;
+            records.push(imap_header_message_record_with_gmail_metadata(
+                selected,
+                fetched.header,
+                fetched.gmail,
+            )?);
         }
         ph_info!(
             events::IMAP_MAILBOX_HEADER_FETCH_PROGRESS,
@@ -356,7 +413,10 @@ async fn enable_qresync(client: &mut ImapClient) -> Result<bool, ImapAdapterErro
         .any(|capability| capability.to_string().eq_ignore_ascii_case("QRESYNC")))
 }
 
-fn fetch_item_names(fetch_modseq: bool) -> MacroOrMessageDataItemNames<'static> {
+fn fetch_item_names(
+    fetch_modseq: bool,
+    fetch_gmail_metadata: bool,
+) -> MacroOrMessageDataItemNames<'static> {
     let mut items = vec![
         MessageDataItemName::Flags,
         MessageDataItemName::BodyStructure,
@@ -366,6 +426,11 @@ fn fetch_item_names(fetch_modseq: bool) -> MacroOrMessageDataItemNames<'static> 
     ];
     if fetch_modseq {
         items.push(MessageDataItemName::ModSeq);
+    }
+    if fetch_gmail_metadata {
+        items.push(MessageDataItemName::GmailMessageId);
+        items.push(MessageDataItemName::GmailThreadId);
+        items.push(MessageDataItemName::GmailLabels);
     }
 
     MacroOrMessageDataItemNames::MessageDataItemNames(items)
@@ -464,13 +529,33 @@ impl Task for ChangedSinceFetchTask {
 ///
 /// `imap-client` returns FETCH rows keyed by sequence number even for
 /// `UID FETCH`; this function always takes identity from the `UID` data item.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImapFetchedHeaderWithMetadata {
+    pub header: ImapFetchedHeader,
+    pub gmail: ImapGmailMetadata,
+}
+
 pub fn fetched_header_from_items(
     selected: &ImapSelectedMailbox,
     items: impl IntoIterator<Item = MessageDataItem<'static>>,
     updated_at: String,
 ) -> Result<ImapFetchedHeader, ImapAdapterError> {
+    Ok(fetched_header_from_items_with_metadata(selected, items, updated_at)?.header)
+}
+
+/// Extract Posthaste header data plus typed provider metadata from one FETCH
+/// response.
+///
+/// Gmail fields are optional because generic IMAP fetches do not request them
+/// and because RFC identity remains the fallback when Gmail omits them.
+pub fn fetched_header_from_items_with_metadata(
+    selected: &ImapSelectedMailbox,
+    items: impl IntoIterator<Item = MessageDataItem<'static>>,
+    updated_at: String,
+) -> Result<ImapFetchedHeaderWithMetadata, ImapAdapterError> {
     let mut uid = None;
     let mut modseq = None;
+    let mut gmail = ImapGmailMetadata::default();
     let mut flags = Vec::new();
     let mut rfc822_size = None;
     let mut has_attachment = false;
@@ -501,19 +586,34 @@ pub fn fetched_header_from_items(
             MessageDataItem::ModSeq(next_modseq) => {
                 modseq = Some(ImapModSeq(next_modseq.get()));
             }
+            MessageDataItem::GmailMessageId(gmail_message_id) => {
+                gmail.message_id = Some(GmailMessageId(gmail_message_id));
+            }
+            MessageDataItem::GmailThreadId(gmail_thread_id) => {
+                gmail.thread_id = Some(GmailThreadId(gmail_thread_id));
+            }
+            MessageDataItem::GmailLabels(labels) => {
+                gmail.labels = labels
+                    .into_iter()
+                    .map(|label| GmailLabel::from(label.as_ref()))
+                    .collect();
+            }
             _ => {}
         }
     }
 
-    Ok(ImapFetchedHeader {
-        mailbox_id: selected.mailbox_id.clone(),
-        uid: uid.ok_or(ImapAdapterError::MissingFetchData("UID"))?,
-        modseq,
-        flags,
-        rfc822_size: rfc822_size.ok_or(ImapAdapterError::MissingFetchData("RFC822.SIZE"))?,
-        has_attachment,
-        headers: headers.ok_or(ImapAdapterError::MissingFetchData("RFC822.HEADER"))?,
-        updated_at,
+    Ok(ImapFetchedHeaderWithMetadata {
+        header: ImapFetchedHeader {
+            mailbox_id: selected.mailbox_id.clone(),
+            uid: uid.ok_or(ImapAdapterError::MissingFetchData("UID"))?,
+            modseq,
+            flags,
+            rfc822_size: rfc822_size.ok_or(ImapAdapterError::MissingFetchData("RFC822.SIZE"))?,
+            has_attachment,
+            headers: headers.ok_or(ImapAdapterError::MissingFetchData("RFC822.HEADER"))?,
+            updated_at,
+        },
+        gmail,
     })
 }
 
@@ -616,6 +716,48 @@ mod tests {
     }
 
     #[test]
+    fn fetched_header_extracts_typed_gmail_metadata() {
+        let fetched = fetched_header_from_items_with_metadata(
+            &selected_mailbox(),
+            [
+                MessageDataItem::Rfc822Header(
+                    NString::try_from(b"Subject: Gmail\r\n\r\n".as_slice())
+                        .expect("header nstring"),
+                ),
+                MessageDataItem::Rfc822Size(512),
+                MessageDataItem::Uid(NonZeroU32::new(42).expect("uid")),
+                MessageDataItem::GmailMessageId(1278455344230334865),
+                MessageDataItem::GmailThreadId(1266894439832287888),
+                MessageDataItem::GmailLabels(vec![
+                    Text::try_from("INBOX").expect("inbox label"),
+                    Text::try_from("\\Important").expect("important label"),
+                ]),
+            ],
+            "2026-04-25T00:00:00Z".to_string(),
+        )
+        .expect("fetched header");
+
+        assert_eq!(
+            fetched.gmail.message_id,
+            Some(GmailMessageId(1278455344230334865))
+        );
+        assert_eq!(
+            fetched.gmail.thread_id,
+            Some(GmailThreadId(1266894439832287888))
+        );
+        assert_eq!(
+            fetched
+                .gmail
+                .labels
+                .iter()
+                .map(GmailLabel::as_str)
+                .collect::<Vec<_>>(),
+            vec!["INBOX", "\\Important"]
+        );
+        assert_eq!(fetched.header.uid, ImapUid(42));
+    }
+
+    #[test]
     fn fetched_header_requires_uid() {
         let error = fetched_header_from_items(
             &selected_mailbox(),
@@ -636,7 +778,7 @@ mod tests {
     #[test]
     fn fetch_items_only_include_modseq_when_condstore_is_available() {
         assert_eq!(
-            fetch_item_names(false),
+            fetch_item_names(false, false),
             MacroOrMessageDataItemNames::MessageDataItemNames(vec![
                 MessageDataItemName::Flags,
                 MessageDataItemName::BodyStructure,
@@ -646,7 +788,7 @@ mod tests {
             ])
         );
         assert_eq!(
-            fetch_item_names(true),
+            fetch_item_names(true, false),
             MacroOrMessageDataItemNames::MessageDataItemNames(vec![
                 MessageDataItemName::Flags,
                 MessageDataItemName::BodyStructure,
@@ -654,6 +796,23 @@ mod tests {
                 MessageDataItemName::Rfc822Size,
                 MessageDataItemName::Uid,
                 MessageDataItemName::ModSeq,
+            ])
+        );
+    }
+
+    #[test]
+    fn fetch_items_include_typed_gmail_metadata_when_requested() {
+        assert_eq!(
+            fetch_item_names(false, true),
+            MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+                MessageDataItemName::Flags,
+                MessageDataItemName::BodyStructure,
+                MessageDataItemName::Rfc822Header,
+                MessageDataItemName::Rfc822Size,
+                MessageDataItemName::Uid,
+                MessageDataItemName::GmailMessageId,
+                MessageDataItemName::GmailThreadId,
+                MessageDataItemName::GmailLabels,
             ])
         );
     }
@@ -682,7 +841,7 @@ mod tests {
     fn changed_since_fetch_task_uses_uid_fetch_modifiers() {
         let task = ChangedSinceFetchTask::new(
             SequenceSet::try_from("1:*").expect("sequence set"),
-            fetch_item_names(true),
+            fetch_item_names(true, true),
             NonZeroU64::new(777).expect("modseq"),
             true,
         );
@@ -705,14 +864,14 @@ mod tests {
                 FetchModifier::Vanished,
             ]
         );
-        assert_eq!(macro_or_item_names, fetch_item_names(true));
+        assert_eq!(macro_or_item_names, fetch_item_names(true, true));
     }
 
     #[test]
     fn changed_since_fetch_task_collects_fetch_rows_and_vanished_uids() {
         let mut task = ChangedSinceFetchTask::new(
             SequenceSet::try_from("1:*").expect("sequence set"),
-            fetch_item_names(true),
+            fetch_item_names(true, false),
             NonZeroU64::new(777).expect("modseq"),
             true,
         );
