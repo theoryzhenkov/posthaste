@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
     AccountSettings, AccountTransportSettings, ImapCapabilities, ImapFullSyncReason,
     ImapLabelSource, ImapMessageIdentitySource, ImapProviderFeatures, ImapThreadIdentitySource,
-    ImapTransportSettings, ProviderHint, SmtpTransportSettings, TransportSecurity,
+    ImapTransportSettings, MailboxRole, ProviderHint, SmtpTransportSettings, TransportSecurity,
 };
 
 /// Provider family independent of the account driver/protocol.
@@ -139,12 +141,20 @@ impl ProviderPolicy {
 /// still participates in the same profile boundary as IMAP/SMTP.
 ///
 /// @spec docs/L0-providers#driver-model
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct JmapProviderPolicy;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct JmapProviderPolicy {
+    remote_observation: RemoteObservationPolicy,
+}
 
 impl JmapProviderPolicy {
     pub fn for_kind(_kind: ProviderKind) -> Self {
-        Self
+        Self {
+            remote_observation: RemoteObservationPolicy::account_push(),
+        }
+    }
+
+    pub fn remote_observation(self) -> RemoteObservationPolicy {
+        self.remote_observation
     }
 }
 
@@ -155,6 +165,8 @@ impl JmapProviderPolicy {
 pub struct ImapProviderPolicy {
     features: ImapProviderFeatures,
     required_full_sync_reason: Option<ImapFullSyncReason>,
+    remote_observation: RemoteObservationPolicy,
+    mailbox_role_aliases: ImapMailboxRoleAliasPolicy,
 }
 
 impl ImapProviderPolicy {
@@ -169,6 +181,9 @@ impl ImapProviderPolicy {
                 required_full_sync_reason: Some(
                     ImapFullSyncReason::ProviderCanonicalizationRequired,
                 ),
+                remote_observation: RemoteObservationPolicy::selected_mailbox_idle()
+                    .with_incomplete_hints(),
+                mailbox_role_aliases: ImapMailboxRoleAliasPolicy::Gmail,
             },
             ProviderKind::Generic | ProviderKind::Outlook | ProviderKind::Icloud => Self {
                 features: ImapProviderFeatures {
@@ -177,6 +192,8 @@ impl ImapProviderPolicy {
                     label_source: ImapLabelSource::MailboxMembership,
                 },
                 required_full_sync_reason: None,
+                remote_observation: RemoteObservationPolicy::selected_mailbox_idle(),
+                mailbox_role_aliases: ImapMailboxRoleAliasPolicy::StandardOnly,
             },
         }
     }
@@ -196,6 +213,126 @@ impl ImapProviderPolicy {
     pub fn canonicalizes_by_rfc5322_message_id(self) -> bool {
         self.features.message_identity == ImapMessageIdentitySource::Rfc5322MessageId
     }
+
+    pub fn remote_observation(self) -> RemoteObservationPolicy {
+        self.remote_observation
+    }
+
+    pub fn mailbox_role(
+        self,
+        mailbox_name: &str,
+        attributes: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Option<&'static str> {
+        let normalized = attributes
+            .into_iter()
+            .map(|attribute| attribute.as_ref().to_ascii_uppercase())
+            .collect::<BTreeSet<_>>();
+
+        crate::imap_special_use_role(mailbox_name, normalized.iter().map(String::as_str)).or_else(
+            || match self.mailbox_role_aliases {
+                ImapMailboxRoleAliasPolicy::StandardOnly => None,
+                ImapMailboxRoleAliasPolicy::Gmail => gmail_mailbox_role_alias(&normalized),
+            },
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImapMailboxRoleAliasPolicy {
+    StandardOnly,
+    Gmail,
+}
+
+fn gmail_mailbox_role_alias(attributes: &BTreeSet<String>) -> Option<&'static str> {
+    if attributes.contains("\\SPAM") {
+        Some(MailboxRole::Junk.as_str())
+    } else if attributes.contains("\\ALL") {
+        Some(MailboxRole::Archive.as_str())
+    } else {
+        None
+    }
+}
+
+/// Provider policy for turning remote push/IDLE signals into local sync work.
+///
+/// Push transports only deliver hints. The policy records what remote surface
+/// is observed and whether a hint must be followed by an account-level
+/// observation rather than trusted as a complete change description.
+///
+/// @spec docs/L0-providers#imap-smtp-sync-strategy
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RemoteObservationPolicy {
+    idle_scope: RemoteIdleScope,
+    empty_hint: EmptyRemoteHintPolicy,
+    hint_completeness: RemoteHintCompleteness,
+}
+
+impl RemoteObservationPolicy {
+    pub fn account_push() -> Self {
+        Self {
+            idle_scope: RemoteIdleScope::Account,
+            empty_hint: EmptyRemoteHintPolicy::Ignore,
+            hint_completeness: RemoteHintCompleteness::Complete,
+        }
+    }
+
+    pub fn selected_mailbox_idle() -> Self {
+        Self {
+            idle_scope: RemoteIdleScope::SelectedMailbox,
+            empty_hint: EmptyRemoteHintPolicy::Sync,
+            hint_completeness: RemoteHintCompleteness::Complete,
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self {
+            idle_scope: RemoteIdleScope::None,
+            empty_hint: EmptyRemoteHintPolicy::Ignore,
+            hint_completeness: RemoteHintCompleteness::Complete,
+        }
+    }
+
+    pub fn with_incomplete_hints(mut self) -> Self {
+        self.hint_completeness = RemoteHintCompleteness::Incomplete;
+        self
+    }
+
+    pub fn idle_scope(self) -> RemoteIdleScope {
+        self.idle_scope
+    }
+
+    pub fn observes_empty_hints(self) -> bool {
+        self.empty_hint == EmptyRemoteHintPolicy::Sync
+    }
+
+    pub fn treats_hints_as_incomplete(self) -> bool {
+        self.hint_completeness == RemoteHintCompleteness::Incomplete
+    }
+}
+
+impl Default for RemoteObservationPolicy {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteIdleScope {
+    None,
+    Account,
+    SelectedMailbox,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmptyRemoteHintPolicy {
+    Ignore,
+    Sync,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteHintCompleteness {
+    Complete,
+    Incomplete,
 }
 
 /// SMTP provider policy selected after message submission.
@@ -348,7 +485,10 @@ mod tests {
         let profile = ProviderProfile::from_hint(&ProviderHint::Gmail);
 
         assert_eq!(profile.kind(), ProviderKind::Gmail);
-        assert_eq!(profile.jmap(), JmapProviderPolicy);
+        assert_eq!(
+            profile.jmap().remote_observation().idle_scope(),
+            RemoteIdleScope::Account
+        );
         assert_eq!(
             profile.imap().required_full_sync_reason(),
             Some(ImapFullSyncReason::ProviderCanonicalizationRequired)
@@ -357,6 +497,10 @@ mod tests {
             profile.smtp().sent_copy(),
             SmtpSentCopyPolicy::ProviderManaged
         );
+        assert!(profile
+            .imap()
+            .remote_observation()
+            .treats_hints_as_incomplete());
     }
 
     #[test]
@@ -381,8 +525,61 @@ mod tests {
         assert!(profile.imap().allows_status_skip());
         assert!(!profile.imap().canonicalizes_by_rfc5322_message_id());
         assert_eq!(
+            profile.imap().remote_observation().idle_scope(),
+            RemoteIdleScope::SelectedMailbox
+        );
+        assert!(profile.imap().remote_observation().observes_empty_hints());
+        assert!(!profile
+            .imap()
+            .remote_observation()
+            .treats_hints_as_incomplete());
+        assert_eq!(
             profile.smtp().sent_copy(),
             SmtpSentCopyPolicy::AppendToSentMailbox
+        );
+    }
+
+    #[test]
+    fn remote_observation_policy_keeps_jmap_and_gmail_push_semantics_distinct() {
+        let jmap = ProviderProfile::from_hint(&ProviderHint::Generic)
+            .jmap()
+            .remote_observation();
+        let gmail_imap = ProviderProfile::from_hint(&ProviderHint::Gmail)
+            .imap()
+            .remote_observation();
+
+        assert_eq!(jmap.idle_scope(), RemoteIdleScope::Account);
+        assert!(!jmap.observes_empty_hints());
+        assert!(!jmap.treats_hints_as_incomplete());
+        assert_eq!(gmail_imap.idle_scope(), RemoteIdleScope::SelectedMailbox);
+        assert!(gmail_imap.observes_empty_hints());
+        assert!(gmail_imap.treats_hints_as_incomplete());
+    }
+
+    #[test]
+    fn imap_mailbox_role_aliases_are_provider_policy() {
+        let generic = ProviderProfile::from_hint(&ProviderHint::Generic).imap();
+        let gmail = ProviderProfile::from_hint(&ProviderHint::Gmail).imap();
+
+        assert_eq!(
+            generic.mailbox_role("[Gmail]/All Mail", ["\\All", "\\HasNoChildren"]),
+            None
+        );
+        assert_eq!(
+            generic.mailbox_role("[Gmail]/Spam", ["\\Spam", "\\HasNoChildren"]),
+            None
+        );
+        assert_eq!(
+            gmail.mailbox_role("[Gmail]/All Mail", ["\\All", "\\HasNoChildren"]),
+            Some(MailboxRole::Archive.as_str())
+        );
+        assert_eq!(
+            gmail.mailbox_role("[Gmail]/Spam", ["\\Spam", "\\HasNoChildren"]),
+            Some(MailboxRole::Junk.as_str())
+        );
+        assert_eq!(
+            gmail.mailbox_role("Sent Items", ["\\Sent"]),
+            Some(MailboxRole::Sent.as_str())
         );
     }
 

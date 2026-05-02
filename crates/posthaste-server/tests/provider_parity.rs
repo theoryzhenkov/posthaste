@@ -9,13 +9,14 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, BlobId, FetchedBody,
     GatewayError, Identity, MailGateway, MailService, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, MutationOutcome, PushTransport, ReplyContext, SendMessageRequest,
-    SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, SyncTrigger, ThreadId, RFC3339_EPOCH,
+    MessageRecord, MutationOutcome, ProviderKind, ProviderProfile, PushTransport, ReplyContext,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, SyncTrigger,
+    ThreadId, RFC3339_EPOCH,
 };
 use posthaste_imap::{
     imap_body_from_raw_mime, imap_condstore_delta_sync_batch, imap_full_sync_batch,
     imap_header_message_record, imap_mailbox_state_from_header_snapshot, map_imap_mailbox,
-    ImapFetchedHeader, ImapMailboxHeaderSnapshot,
+    map_imap_mailbox_with_provider, ImapFetchedHeader, ImapMailboxHeaderSnapshot,
 };
 use posthaste_store::DatabaseStore;
 
@@ -625,7 +626,7 @@ fn imap_gmail_label_sync_batch() -> SyncBatch {
             ]),
             mailboxes: vec![
                 map_imap_mailbox("INBOX", ["\\Inbox"]),
-                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+                map_gmail_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
             ],
         },
         vec![inbox_header, archive_header],
@@ -670,7 +671,7 @@ fn imap_gmail_flagged_delta_batch(
             ]),
             mailboxes: vec![
                 map_imap_mailbox("INBOX", ["\\Inbox"]),
-                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+                map_gmail_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
             ],
         },
         vec![changed_header],
@@ -714,7 +715,7 @@ fn imap_single_label_vanished_batch(
             ]),
             mailboxes: vec![
                 map_imap_mailbox("INBOX", ["\\Inbox"]),
-                map_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
+                map_gmail_imap_mailbox("[Gmail]/All Mail", ["\\All"]),
             ],
         },
         Vec::new(),
@@ -722,6 +723,17 @@ fn imap_single_label_vanished_batch(
         locations,
         vec![vanished],
         "2026-04-25T12:01:00Z".to_string(),
+    )
+}
+
+fn map_gmail_imap_mailbox(
+    name: impl Into<String>,
+    attributes: impl IntoIterator<Item = impl AsRef<str>>,
+) -> posthaste_imap::DiscoveredImapMailbox {
+    map_imap_mailbox_with_provider(
+        ProviderProfile::from_kind(ProviderKind::Gmail),
+        name,
+        attributes,
     )
 }
 

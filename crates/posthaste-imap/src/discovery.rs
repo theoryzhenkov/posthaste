@@ -2,8 +2,8 @@ use imap_client::client::tokio::Client as ImapClient;
 use imap_client::imap_types::flag::FlagNameAttribute;
 use imap_client::imap_types::mailbox::Mailbox;
 use posthaste_domain::{
-    imap_special_use_role, AccountTransportSettings, ImapCapabilities, MailboxId, MailboxRole,
-    ProviderAuthKind, ProviderProfile, TransportSecurity,
+    AccountTransportSettings, ImapCapabilities, MailboxId, MailboxRole, ProviderAuthKind,
+    ProviderProfile, TransportSecurity,
 };
 
 use crate::ImapAdapterError;
@@ -104,11 +104,14 @@ pub(crate) async fn discover_authenticated_client(
             .capabilities_iter()
             .map(std::string::ToString::to_string),
     );
+    let provider = ProviderProfile::from_imap_capabilities(&capabilities);
     let mailboxes = client
         .list("", "*")
         .await?
         .into_iter()
-        .map(|(mailbox, _delimiter, attributes)| map_client_mailbox(&mailbox, &attributes))
+        .map(|(mailbox, _delimiter, attributes)| {
+            map_client_mailbox(&provider, &mailbox, &attributes)
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(DiscoveredImapAccount {
@@ -160,6 +163,19 @@ pub fn map_imap_mailbox(
     name: impl Into<String>,
     attributes: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> DiscoveredImapMailbox {
+    map_imap_mailbox_with_provider(
+        ProviderProfile::from_kind(posthaste_domain::ProviderKind::Generic),
+        name,
+        attributes,
+    )
+}
+
+/// Map a mailbox name and LIST attributes with provider-specific role policy.
+pub fn map_imap_mailbox_with_provider(
+    provider: ProviderProfile,
+    name: impl Into<String>,
+    attributes: impl IntoIterator<Item = impl AsRef<str>>,
+) -> DiscoveredImapMailbox {
     let name = name.into();
     let attributes = attributes
         .into_iter()
@@ -168,11 +184,14 @@ pub fn map_imap_mailbox(
     let selectable = !attributes
         .iter()
         .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect"));
-    let role = imap_special_use_role(&name, attributes.iter().map(String::as_str)).map(|role| {
-        MailboxRole::parse(role)
-            .map(MailboxRole::as_str)
-            .unwrap_or(role)
-    });
+    let role = provider
+        .imap()
+        .mailbox_role(&name, attributes.iter().map(String::as_str))
+        .map(|role| {
+            MailboxRole::parse(role)
+                .map(MailboxRole::as_str)
+                .unwrap_or(role)
+        });
 
     DiscoveredImapMailbox {
         id: imap_mailbox_id(&name),
@@ -189,6 +208,7 @@ pub fn imap_mailbox_id(name: &str) -> MailboxId {
 }
 
 fn map_client_mailbox(
+    provider: &ProviderProfile,
     mailbox: &Mailbox<'_>,
     attributes: &[FlagNameAttribute<'_>],
 ) -> Result<DiscoveredImapMailbox, ImapAdapterError> {
@@ -197,7 +217,8 @@ fn map_client_mailbox(
         Mailbox::Other(other) => String::from_utf8(other.as_ref().to_vec())
             .map_err(|_| ImapAdapterError::InvalidMailboxName(format!("{other:?}")))?,
     };
-    Ok(map_imap_mailbox(
+    Ok(map_imap_mailbox_with_provider(
+        *provider,
         name,
         attributes.iter().map(std::string::ToString::to_string),
     ))
@@ -235,5 +256,18 @@ mod tests {
 
         assert_eq!(mailbox.role, None);
         assert!(!mailbox.selectable);
+    }
+
+    #[test]
+    fn maps_gmail_role_aliases_only_with_gmail_provider_policy() {
+        let generic = map_imap_mailbox("[Gmail]/All Mail", ["\\All", "\\HasNoChildren"]);
+        let gmail = map_imap_mailbox_with_provider(
+            ProviderProfile::from_kind(posthaste_domain::ProviderKind::Gmail),
+            "[Gmail]/All Mail",
+            ["\\All", "\\HasNoChildren"],
+        );
+
+        assert_eq!(generic.role, None);
+        assert_eq!(gmail.role, Some(MailboxRole::Archive.as_str()));
     }
 }

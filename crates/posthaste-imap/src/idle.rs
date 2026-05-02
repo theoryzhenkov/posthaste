@@ -53,12 +53,10 @@ pub fn imap_idle_event_stream(
                                         break;
                                     }
                                 };
-                                yield PushStreamEvent::Notification(PushNotification {
-                                    account_id: account_id.clone(),
-                                    changed: vec![format!("imap:{mailbox_name}")],
+                                yield PushStreamEvent::Notification(imap_idle_notification(
+                                    account_id.clone(),
                                     received_at,
-                                    checkpoint: None,
-                                });
+                                ));
                             }
                             Err(error) => {
                                 ph_warn!(
@@ -105,4 +103,29 @@ async fn connect_idle_client(
     client.refresh_capabilities().await?;
     examine_selected_mailbox(&mut client, mailbox_name).await?;
     Ok(client)
+}
+
+fn imap_idle_notification(account_id: AccountId, received_at: String) -> PushNotification {
+    PushNotification {
+        account_id,
+        changed: Vec::new(),
+        received_at,
+        checkpoint: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_notification_is_an_observation_hint_without_changed_ids() {
+        let notification = imap_idle_notification(
+            AccountId::from("primary"),
+            "2026-04-29T00:00:00Z".to_string(),
+        );
+
+        assert!(notification.changed.is_empty());
+        assert_eq!(notification.checkpoint, None);
+    }
 }
