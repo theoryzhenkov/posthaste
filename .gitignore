@@ -16,6 +16,8 @@ result
 # build output
 /target/
 /crates/target/
+/vendor/*/Cargo.lock
+/vendor/*/target/
 /node_modules/
 /apps/desktop/target/
 /apps/web/dist/
