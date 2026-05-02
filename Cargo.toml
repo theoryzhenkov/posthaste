@@ -1,7 +1,7 @@
 [workspace]
 members = ["crates/*", "apps/desktop"]
 default-members = ["crates/*"]
-exclude = ["crates/target"]
+exclude = ["crates/target", "vendor/imap-codec", "vendor/imap-types"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -42,3 +42,7 @@ uuid = { version = "1", features = ["v4"] }
 # every integration-test executable. The full debug profile makes parallel
 # `cargo test` links memory-heavy on constrained Linux dev VMs.
 debug = "line-tables-only"
+
+[patch.crates-io]
+imap-codec = { path = "vendor/imap-codec" }
+imap-types = { path = "vendor/imap-types" }
