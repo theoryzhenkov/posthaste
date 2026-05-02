@@ -387,9 +387,9 @@ pub fn imap_special_use_role(
         Some("drafts")
     } else if normalized.contains("\\TRASH") {
         Some("trash")
-    } else if normalized.contains("\\JUNK") || normalized.contains("\\SPAM") {
+    } else if normalized.contains("\\JUNK") {
         Some("junk")
-    } else if normalized.contains("\\ARCHIVE") || normalized.contains("\\ALL") {
+    } else if normalized.contains("\\ARCHIVE") {
         Some("archive")
     } else {
         None
@@ -608,14 +608,14 @@ mod tests {
     }
 
     #[test]
-    fn special_use_mapping_accepts_gmail_role_aliases() {
+    fn special_use_mapping_keeps_provider_aliases_out_of_standard_mapping() {
         assert_eq!(
             imap_special_use_role("[Gmail]/All Mail", ["\\All", "\\HasNoChildren"]),
-            Some("archive")
+            None
         );
         assert_eq!(
             imap_special_use_role("[Gmail]/Spam", ["\\Spam", "\\HasNoChildren"]),
-            Some("junk")
+            None
         );
     }
 

@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Provider driver strategy for JMAP, IMAP/SMTP, and future native APIs"
-modified: 2026-04-29
-reviewed: 2026-04-29
+modified: 2026-05-02
+reviewed: 2026-05-02
 depends:
   - path: README
   - path: docs/L0-accounts
@@ -118,14 +118,17 @@ The driver prefers IMAP extensions when advertised:
 - CONDSTORE/QRESYNC for efficient flag and expunge reconciliation
 - MOVE and UIDPLUS for better mutation reconciliation
 
-Every extension has a correctness-preserving fallback. IDLE is only a hint; the
-runtime keeps one selected-mailbox IDLE watcher when advertised, prefers INBOX
-for that watcher, and treats IDLE returns as sync triggers. The periodic poll
-remains authoritative for missed events and unobserved mailboxes. If delta state
-cannot be trusted, the driver performs a full snapshot for that mailbox and
-deletes stale local rows by stored IMAP location. Account-wide message
-replacement is reserved for adapter instances that lack access to the local
-store.
+Every extension has a correctness-preserving fallback. Remote push and IDLE are
+only hints; provider policy records the observed scope and whether an empty hint
+is enough to schedule sync. The runtime keeps one selected-mailbox IDLE watcher
+when advertised, prefers INBOX for that watcher, and treats IDLE returns as
+observation hints rather than changed object IDs. Gmail's selected-mailbox IDLE
+scope requires full observation after a hint because labels and multi-mailbox
+membership can change outside the selected mailbox. The periodic poll remains
+authoritative for missed events and unobserved mailboxes. If delta state cannot
+be trusted, the driver performs a full snapshot for that mailbox and deletes
+stale local rows by stored IMAP location. Account-wide message replacement is
+reserved for adapter instances that lack access to the local store.
 
 The IMAP sync planner chooses the strongest safe mailbox strategy from server
 capabilities and stored cursor state:
@@ -161,7 +164,7 @@ source informs the implementation.
 | IMAP connection/auth/discovery | `posthaste-imap::discover_imap_account`, `LiveImapSmtpGateway::connect` | `imap-client` 0.3.0 constructors/auth/capability/list wrappers: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs> |
 | Capability normalization | `posthaste_domain::ImapCapabilities`, `normalize_imap_capabilities` | RFC 9051 capabilities and IMAP4rev2 baseline: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-types` capability variants: <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
 | Provider profile policy | `posthaste_domain::ProviderProfile`, `ProviderPolicy`, `JmapProviderPolicy`, `ImapProviderPolicy`, `SmtpProviderPolicy` | Local provider policy boundary. Protocol specs below define each sub-policy's behavior. |
-| Mailbox LIST and roles | `map_imap_mailbox`, `imap_special_use_role`, `mailbox_role_override` | RFC 6154 SPECIAL-USE attributes: <https://www.rfc-editor.org/rfc/rfc6154.html>; Gmail IMAP exposes provider-specific `\All` and `\Spam` role aliases through LIST: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; `imap-client` LIST task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/list.rs> |
+| Mailbox LIST and roles | `map_imap_mailbox`, `ImapProviderPolicy::mailbox_role`, `imap_special_use_role`, `mailbox_role_override` | RFC 6154 SPECIAL-USE attributes: <https://www.rfc-editor.org/rfc/rfc6154.html>; Gmail IMAP exposes provider-specific `\All` and `\Spam` role aliases through LIST, and PostHaste applies those aliases only through Gmail provider policy: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; `imap-client` LIST task: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/list.rs> |
 | SELECT/EXAMINE state | `examine_imap_mailbox`, `ExamineStateTask`, `selected_mailbox_from_examine`, `ImapSelectedMailbox` | RFC 9051 SELECT/EXAMINE response codes including `UIDVALIDITY` and `UIDNEXT`: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 requires CONDSTORE servers to return `HIGHESTMODSEQ` for successful SELECT/EXAMINE unless `NOMODSEQ` applies: <https://datatracker.ietf.org/doc/html/rfc7162>; `imap-client` SELECT task provides the base response handling but does not expose `HIGHESTMODSEQ`, so Posthaste adds a local EXAMINE task over `imap-types` response codes: <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/select.rs>, <https://docs.rs/crate/imap-types/2.0.0-alpha.6/source/src/response.rs> |
 | No-op mailbox preflight | `status_imap_mailbox`, `StatusTask`, `mailbox_status_proves_unchanged` | RFC 9051 STATUS data items `MESSAGES`, `UIDNEXT`, and `UIDVALIDITY`, including the warning that clients should not assume many consecutive STATUS commands are fast: <https://datatracker.ietf.org/doc/html/rfc9051#section-6.3.11> |
 | IMAP push hint | `imap_idle_event_stream`, supervisor IMAP push wiring | RFC 2177 IDLE capability use, DONE termination, unsolicited EXISTS/EXPUNGE, and 29-minute reissue guidance: <https://datatracker.ietf.org/doc/html/rfc2177>; RFC 5465 NOTIFY is the broader notification extension but is not assumed by the generic driver: <https://datatracker.ietf.org/doc/html/rfc5465>; Gmail advertises `IDLE` in IMAP CAPABILITY with `X-GM-EXT-1`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |

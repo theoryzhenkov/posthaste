@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-02
+reviewed: 2026-05-02
 depends:
   - path: docs/L0-providers
   - path: docs/L0-sync
@@ -26,6 +26,12 @@ The sync engine runs as a Rust async task per enabled account. Four triggers cau
 - remote push notification
 - periodic poll
 - manual sync
+
+Remote push notifications are scheduling hints. JMAP notifications must carry
+changed object state or a checkpoint to trigger sync. IMAP IDLE returns are
+selected-mailbox observation hints, so the supervisor can schedule sync even
+when no changed IDs are named; provider policy decides when that hint requires a
+full observation path, as Gmail does for label and multi-mailbox state.
 
 The poll timer is scheduled after a sync cycle completes and uses skipped
 missed-tick behavior. Startup, manual, and push-triggered syncs therefore reset

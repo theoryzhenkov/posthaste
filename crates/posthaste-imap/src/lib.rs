@@ -28,8 +28,9 @@ pub use body::{
 };
 pub use compose::{fetch_imap_reply_context_by_location, imap_reply_context_from_raw_mime};
 pub use discovery::{
-    discover_imap_account, imap_mailbox_id, map_imap_mailbox, normalize_imap_capabilities,
-    DiscoveredImapAccount, DiscoveredImapMailbox, ImapConnectionConfig,
+    discover_imap_account, imap_mailbox_id, map_imap_mailbox, map_imap_mailbox_with_provider,
+    normalize_imap_capabilities, DiscoveredImapAccount, DiscoveredImapMailbox,
+    ImapConnectionConfig,
 };
 pub use error::ImapAdapterError;
 pub use fetch::{

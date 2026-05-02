@@ -7,10 +7,11 @@ use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream, PushStatus,
-    PushStreamEvent, ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind,
-    SharedGateway, SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,
+    PushNotification, PushStatus, PushStreamEvent, RemoteIdleScope, RemoteObservationPolicy,
+    ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind, SharedGateway, SyncProgress,
+    SyncProgressReporter, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
+    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
@@ -92,6 +93,7 @@ pub struct AccountVerification {
 struct AccountConnection {
     gateway: SharedGateway,
     push_events: Option<PushEventStream>,
+    remote_observation: RemoteObservationPolicy,
 }
 
 /// Local runtime connection state. Keeps gateway and push stream lifetimes coupled.
@@ -110,6 +112,13 @@ impl AccountRuntimeConnectionState {
     fn gateway(&self) -> Option<SharedGateway> {
         match self {
             Self::Connected(connection) => Some(connection.gateway.clone()),
+            Self::Disconnected => None,
+        }
+    }
+
+    fn remote_observation(&self) -> Option<RemoteObservationPolicy> {
+        match self {
+            Self::Connected(connection) => Some(connection.remote_observation),
             Self::Disconnected => None,
         }
     }
@@ -484,13 +493,18 @@ async fn handle_push_event(
 ) -> bool {
     match event {
         PushStreamEvent::Notification(ref notification) => {
+            let remote_observation = connection
+                .remote_observation()
+                .unwrap_or_else(|| remote_observation_policy_for_account(account));
             ph_debug!(
                 events::PUSH_NOTIFICATION_RECEIVED,
                 account_id = %account_id,
                 changed = ?notification.changed,
+                checkpoint = notification.checkpoint.as_deref(),
+                hints_incomplete = remote_observation.treats_hints_as_incomplete(),
                 "push notification received"
             );
-            if notification.changed.is_empty() && notification.checkpoint.is_none() {
+            if !push_notification_triggers_sync(remote_observation, notification) {
                 return false;
             }
             let _ =
@@ -536,6 +550,31 @@ async fn handle_push_event(
             false
         }
     }
+}
+
+fn remote_observation_policy_for_account(account: &AccountSettings) -> RemoteObservationPolicy {
+    match account.driver {
+        AccountDriver::Jmap => account
+            .transport
+            .provider_profile()
+            .jmap()
+            .remote_observation(),
+        AccountDriver::ImapSmtp => account
+            .transport
+            .provider_profile()
+            .imap()
+            .remote_observation(),
+        AccountDriver::Mock => RemoteObservationPolicy::disabled(),
+    }
+}
+
+fn push_notification_triggers_sync(
+    remote_observation: RemoteObservationPolicy,
+    notification: &PushNotification,
+) -> bool {
+    !notification.changed.is_empty()
+        || notification.checkpoint.is_some()
+        || remote_observation.observes_empty_hints()
 }
 
 async fn process_cache_maintenance_batch(
@@ -1015,6 +1054,7 @@ async fn build_connection(
         AccountDriver::Mock => Ok(AccountConnection {
             gateway: Arc::new(MockJmapGateway::default()),
             push_events: None,
+            remote_observation: RemoteObservationPolicy::disabled(),
         }),
         AccountDriver::Jmap => {
             let url = account
@@ -1073,6 +1113,11 @@ async fn build_connection(
             Ok(AccountConnection {
                 gateway,
                 push_events,
+                remote_observation: account
+                    .transport
+                    .provider_profile()
+                    .jmap()
+                    .remote_observation(),
             })
         }
         AccountDriver::ImapSmtp => {
@@ -1105,19 +1150,29 @@ async fn build_connection(
             )
             .await
             .map_err(imap_adapter_error)?;
-            let idle_mailbox_name = gateway
+            let remote_observation = gateway
                 .discovery()
-                .mailboxes
-                .iter()
-                .find(|mailbox| mailbox.selectable && mailbox.role == Some("inbox"))
-                .or_else(|| {
+                .provider_profile()
+                .imap()
+                .remote_observation();
+            let idle_mailbox_name =
+                if remote_observation.idle_scope() == RemoteIdleScope::SelectedMailbox {
                     gateway
                         .discovery()
                         .mailboxes
                         .iter()
-                        .find(|mailbox| mailbox.selectable)
-                })
-                .map(|mailbox| mailbox.name.clone());
+                        .find(|mailbox| mailbox.selectable && mailbox.role == Some("inbox"))
+                        .or_else(|| {
+                            gateway
+                                .discovery()
+                                .mailboxes
+                                .iter()
+                                .find(|mailbox| mailbox.selectable)
+                        })
+                        .map(|mailbox| mailbox.name.clone())
+                } else {
+                    None
+                };
             ph_info!(
                 events::IMAP_DISCOVERY_COMPLETED,
                 account_id = %account.id,
@@ -1162,6 +1217,7 @@ async fn build_connection(
             Ok(AccountConnection {
                 gateway: Arc::new(gateway),
                 push_events,
+                remote_observation,
             })
         }
     }
@@ -1417,7 +1473,8 @@ mod tests {
 
     use posthaste_config::TomlConfigRepository;
     use posthaste_domain::{
-        AccountTransportSettings, PushNotification, SecretRef, SecretStoreError, RFC3339_EPOCH,
+        AccountTransportSettings, ProviderHint, PushNotification, SecretRef, SecretStoreError,
+        RFC3339_EPOCH,
     };
     use posthaste_store::DatabaseStore;
 
@@ -1515,6 +1572,7 @@ mod tests {
         state.set_connected(AccountConnection {
             gateway: gateway.clone(),
             push_events: None,
+            remote_observation: RemoteObservationPolicy::disabled(),
         });
 
         assert!(state.is_connected());
@@ -1556,6 +1614,11 @@ mod tests {
         connection.set_connected(AccountConnection {
             gateway,
             push_events: None,
+            remote_observation: account
+                .transport
+                .provider_profile()
+                .jmap()
+                .remote_observation(),
         });
         let notification = PushNotification {
             account_id: account.id.clone(),
@@ -1575,6 +1638,95 @@ mod tests {
 
         assert!(triggered);
         assert!(!shared
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty());
+    }
+
+    // spec: docs/L1-sync#sync-loop
+    #[tokio::test]
+    async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync() {
+        let mut account = test_account("gmail");
+        account.driver = AccountDriver::ImapSmtp;
+        account.transport.provider = ProviderHint::Gmail;
+        let shared = test_shared(&account);
+        let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
+        let mut connection = AccountRuntimeConnectionState::default();
+        connection.set_connected(AccountConnection {
+            gateway,
+            push_events: None,
+            remote_observation: account
+                .transport
+                .provider_profile()
+                .imap()
+                .remote_observation(),
+        });
+        let notification = PushNotification {
+            account_id: account.id.clone(),
+            changed: Vec::new(),
+            received_at: "2026-04-29T00:00:00Z".to_string(),
+            checkpoint: None,
+        };
+
+        let triggered = handle_push_event(
+            &shared,
+            &account,
+            &account.id,
+            &mut connection,
+            PushStreamEvent::Notification(notification),
+        )
+        .await;
+
+        assert!(triggered);
+        assert!(account
+            .transport
+            .provider_profile()
+            .imap()
+            .remote_observation()
+            .treats_hints_as_incomplete());
+        assert!(!shared
+            .service
+            .list_messages(&account.id, None)
+            .expect("messages should list")
+            .is_empty());
+    }
+
+    // spec: docs/L1-sync#sync-loop
+    #[tokio::test]
+    async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
+        let mut account = test_account("jmap");
+        account.driver = AccountDriver::Jmap;
+        let shared = test_shared(&account);
+        let gateway: SharedGateway = Arc::new(MockJmapGateway::default());
+        let mut connection = AccountRuntimeConnectionState::default();
+        connection.set_connected(AccountConnection {
+            gateway,
+            push_events: None,
+            remote_observation: account
+                .transport
+                .provider_profile()
+                .jmap()
+                .remote_observation(),
+        });
+        let notification = PushNotification {
+            account_id: account.id.clone(),
+            changed: Vec::new(),
+            received_at: "2026-04-29T00:00:00Z".to_string(),
+            checkpoint: None,
+        };
+
+        let triggered = handle_push_event(
+            &shared,
+            &account,
+            &account.id,
+            &mut connection,
+            PushStreamEvent::Notification(notification),
+        )
+        .await;
+
+        assert!(!triggered);
+        assert!(shared
             .service
             .list_messages(&account.id, None)
             .expect("messages should list")
