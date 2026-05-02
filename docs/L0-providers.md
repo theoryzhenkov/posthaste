@@ -170,7 +170,7 @@ source informs the implementation.
 | IMAP push hint | `imap_idle_event_stream`, supervisor IMAP push wiring | RFC 2177 IDLE capability use, DONE termination, unsolicited EXISTS/EXPUNGE, and 29-minute reissue guidance: <https://datatracker.ietf.org/doc/html/rfc2177>; RFC 5465 NOTIFY is the broader notification extension but is not assumed by the generic driver: <https://datatracker.ietf.org/doc/html/rfc5465>; Gmail advertises `IDLE` in IMAP CAPABILITY with `X-GM-EXT-1`: <https://developers.google.com/workspace/gmail/imap/imap-extensions> |
 | Mailbox sync planning and baseline reconciliation | `plan_imap_mailbox_sync`, `LiveImapSmtpGateway::sync`, `imap_full_sync_batch`, `imap_delta_sync_batch` | RFC 4549 disconnected-client synchronization uses `UIDVALIDITY`, new UID discovery, and current UID/FLAGS descriptor comparison to remove local cache entries no longer returned by the server: <https://datatracker.ietf.org/doc/html/rfc4549>; RFC 9051 UID semantics and FETCH/SEARCH commands, including the rule that UID ranges with `*` can include the highest UID even if the other endpoint is higher than any assigned UID: <https://www.rfc-editor.org/rfc/rfc9051.html>; RFC 7162 CONDSTORE/QRESYNC `HIGHESTMODSEQ`, `CHANGEDSINCE`, `ENABLE QRESYNC`, and `VANISHED (EARLIER)` define the stronger MODSEQ delta path and the rule that `VANISHED` is only allowed on `UID FETCH` with `CHANGEDSINCE`: <https://datatracker.ietf.org/doc/html/rfc7162>; ImapFlow exposes QRESYNC/VANISHED and `changedSince`/modseq behavior for this stronger path: <https://imapflow.com/docs/>, <https://imapflow.com/docs/guides/fetching-messages>, <https://imapflow.com/docs/api/imapflow-client/>; node-imap exposes `changedsince`, `modseq`, and `highestmodseq` for CONDSTORE-style sync: <https://github.com/mscdex/node-imap> |
 | Message identity and UID reuse | `imap_message_id`, `ImapMessageLocation` | RFC 9051 UID and UIDVALIDITY semantics: <https://www.rfc-editor.org/rfc/rfc9051.html> |
-| Gmail identity/labels | `ImapProviderFeatures`, `posthaste_imap::sync` Gmail canonicalization, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; local `imap-types`/`imap-codec` patches expose typed Gmail FETCH request and response fields, while adapter metadata mapping still uses RFC `Message-ID` until business-logic wiring consumes them |
+| Gmail identity/labels | `ImapProviderFeatures`, `posthaste_imap::sync` Gmail canonicalization, `gmail_message_id`, `gmail_thread_id` | Gmail IMAP extensions `X-GM-EXT-1`, `X-GM-MSGID`, `X-GM-THRID`, `X-GM-LABELS`: <https://developers.google.com/workspace/gmail/imap/imap-extensions>; typed Gmail FETCH request and response fields are requested when `X-GM-EXT-1` is advertised, and adapter metadata mapping uses them as canonical identity before RFC fallbacks |
 | Header-to-message mapping | `imap_header_message_record` | `mail-parser` message/header/body API: <https://docs.rs/mail-parser/0.11.2/mail_parser/>; source: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Lazy body fetch/parsing | `fetch_message_body_by_location`, `fetched_body_from_items`, `imap_body_from_raw_mime` | RFC 9051 `BODY.PEEK[]` does not implicitly set `\Seen` and UIDs are valid only in a `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first`/FETCH task behavior: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` body and attachment APIs: <https://docs.rs/mail-parser/0.11.2/mail_parser/struct.Message.html>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs> |
 | Attachment blob download | `LiveImapSmtpGateway::download_blob`, `fetch_raw_message_by_location`, `imap_attachment_bytes_from_raw_mime`, `parse_imap_attachment_blob_id` | RFC 9051 `BODY.PEEK[]` fetches message bytes without the `\Seen` side effect and the stored UID is valid only within the selected mailbox `UIDVALIDITY` epoch: <https://www.rfc-editor.org/rfc/rfc9051.html>; `imap-client` `uid_fetch_first` uses UID FETCH and returns FETCH items from server responses: <https://docs.rs/crate/imap-client/0.3.0/source/src/client/tokio.rs>, <https://docs.rs/crate/imap-client/0.3.0/source/src/tasks/tasks/fetch.rs>; `mail-parser` resolves attachment ordinals and decoded part contents: <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/message.rs>, <https://docs.rs/crate/mail-parser/0.11.2/source/src/core/header.rs> |
@@ -186,25 +186,22 @@ source informs the implementation.
 
 ## Identity and threading
 
-JMAP messages use the server `threadId` as authoritative. IMAP messages do not
-have a portable thread identifier, so the IMAP driver derives conversation IDs
-from RFC 5322 headers (`Message-ID`, `References`, `In-Reply-To`) and a stable
-fallback for malformed messages. Provider-specific stable IDs may improve
-deduplication when available, for example Gmail's `X-GM-MSGID`.
+JMAP messages use the server `threadId` as authoritative. Generic IMAP messages
+do not have a portable thread identifier, so the IMAP driver derives
+conversation IDs from RFC 5322 headers (`Message-ID`, `References`,
+`In-Reply-To`) and a stable fallback for malformed messages. Provider-specific
+stable IDs take precedence when available.
 
 When a server advertises Gmail's `X-GM-EXT-1` capability, the IMAP driver treats
-Gmail as a provider profile within the generic IMAP adapter. PostHaste carries
-local protocol crate patches that expose typed `X-GM-*` FETCH request and
-response data, but the IMAP adapter has not yet switched its metadata mapping to
-those fields. Until that business-logic wiring lands, the profile canonicalizes
-duplicate label observations by RFC `Message-ID` as the strongest identity used
-in fetched metadata and retains every per-mailbox UID as an
-`ImapMessageLocation`. This avoids duplicating the same Gmail message when it
-appears through multiple labels exposed as IMAP mailboxes. `X-GM-MSGID`,
-`X-GM-THRID`, and `X-GM-LABELS` are the preferred source for Gmail identity,
-threading, and labels once the adapter consumes the patched protocol types.
-Generic IMAP accounts continue to use `(mailbox, UIDVALIDITY, UID)` for message
-identity and RFC 5322 headers for conversation projection.
+Gmail as a provider profile within the generic IMAP adapter. Typed
+`X-GM-MSGID` is the canonical Gmail message identity when present, and typed
+`X-GM-THRID` is the canonical source conversation identity when present. RFC
+`Message-ID` remains a Gmail fallback only when `X-GM-MSGID` is absent. The
+adapter retains every per-mailbox UID as an `ImapMessageLocation`, so ordinary
+IMAP commands still address the selected mailbox, `UIDVALIDITY`, and UID even
+when multiple Gmail label observations collapse into one local message. Generic
+IMAP accounts continue to use `(mailbox, UIDVALIDITY, UID)` for message identity
+and RFC 5322 headers for conversation projection.
 
 Message IDs stored in PostHaste remain opaque and driver-owned. IMAP IDs should
 be stable across sessions and include enough server state to avoid UID reuse
@@ -276,7 +273,7 @@ with servers that expose both protocols.
 | imap-plan-explicit | MUST | IMAP mailbox sync mode is selected from explicit capabilities and stored state |
 | imap-mutation-plan-explicit | MUST | IMAP mutation strategy is selected from explicit capabilities and schedules resync when response state is insufficient |
 | imap-role-overrides-local | MUST | IMAP mailbox role assignments are local overrides over discovery, not remote SPECIAL-USE mutations |
-| gmail-extension-identity | SHOULD | Gmail IMAP accounts canonicalize duplicate label observations under one local message identity; X-GM-MSGID, X-GM-THRID, and X-GM-LABELS are the preferred provider fields when the typed IMAP layer exposes them |
+| gmail-extension-identity | SHOULD | Gmail IMAP accounts use typed X-GM-MSGID and X-GM-THRID as canonical identity when present, with RFC headers as fallback |
 | imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | oauth-refresh-runtime | MUST | OAuth access tokens are refreshed in the backend runtime before provider gateways receive XOAUTH2 credentials |

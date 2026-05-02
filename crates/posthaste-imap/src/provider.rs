@@ -26,7 +26,9 @@ impl ImapAdapterProviderProfile {
     }
 
     pub(crate) fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
-        if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
+        if self.profile.imap().canonicalizes_by_gmail_message_id() {
+            GmailCanonicalMessageProfile.project_headers(headers)
+        } else if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
             Rfc5322CanonicalMessageProfile.project_headers(headers)
         } else {
             headers
@@ -35,10 +37,31 @@ impl ImapAdapterProviderProfile {
 
     #[cfg(test)]
     pub(crate) fn canonical_message_id(&self, message: &MessageRecord) -> MessageId {
-        if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
+        if self.profile.imap().canonicalizes_by_gmail_message_id() {
+            GmailCanonicalMessageProfile.canonical_message_id(message)
+        } else if self.profile.imap().canonicalizes_by_rfc5322_message_id() {
             Rfc5322CanonicalMessageProfile.canonical_message_id(message)
         } else {
             message.id.clone()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GmailCanonicalMessageProfile;
+
+impl GmailCanonicalMessageProfile {
+    fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
+        Rfc5322CanonicalMessageProfile.project_headers_with_canonicalizer(headers, |message| {
+            self.canonical_message_id(message)
+        })
+    }
+
+    fn canonical_message_id(&self, message: &MessageRecord) -> MessageId {
+        if message.id.as_str().starts_with("imap:gmail:msgid:") {
+            message.id.clone()
+        } else {
+            Rfc5322CanonicalMessageProfile.canonical_message_id(message)
         }
     }
 }
@@ -48,10 +71,20 @@ pub(crate) struct Rfc5322CanonicalMessageProfile;
 
 impl Rfc5322CanonicalMessageProfile {
     fn project_headers(&self, headers: Vec<ImapMappedHeader>) -> Vec<ImapMappedHeader> {
+        self.project_headers_with_canonicalizer(headers, |message| {
+            self.canonical_message_id(message)
+        })
+    }
+
+    fn project_headers_with_canonicalizer(
+        &self,
+        headers: Vec<ImapMappedHeader>,
+        canonical_message_id: impl Fn(&MessageRecord) -> MessageId,
+    ) -> Vec<ImapMappedHeader> {
         let mut groups = BTreeMap::<MessageId, CanonicalMessageGroup>::new();
 
         for mut header in headers {
-            let canonical_id = self.canonical_message_id(&header.message);
+            let canonical_id = canonical_message_id(&header.message);
             header.message.id = canonical_id.clone();
             header.location.message_id = canonical_id.clone();
 

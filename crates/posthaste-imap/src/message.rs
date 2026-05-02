@@ -1,8 +1,9 @@
 use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
 use posthaste_domain::{
-    imap_message_id, ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId,
-    MessageId, MessageRecord, SystemKeyword, ThreadId, RFC3339_EPOCH,
+    gmail_message_id, gmail_thread_id, imap_message_id, ImapGmailMetadata, ImapMessageLocation,
+    ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId, MessageId, MessageRecord, SystemKeyword,
+    ThreadId, RFC3339_EPOCH,
 };
 
 use crate::ImapAdapterError;
@@ -40,10 +41,29 @@ pub fn imap_header_message_record(
     selected: &ImapSelectedMailbox,
     fetched: ImapFetchedHeader,
 ) -> Result<ImapMappedHeader, ImapAdapterError> {
+    imap_header_message_record_with_gmail_metadata(selected, fetched, ImapGmailMetadata::default())
+}
+
+/// Convert fetched IMAP headers plus typed Gmail metadata into a Posthaste
+/// message projection.
+///
+/// Gmail's `X-GM-MSGID` and `X-GM-THRID` are canonical when present. RFC 5322
+/// identity headers remain parsed and stored, but they are fallback identity
+/// inputs only when typed Gmail IDs are absent.
+///
+/// @spec docs/L0-providers#identity-and-threading
+/// @spec docs/L1-sync#body-lazy
+pub fn imap_header_message_record_with_gmail_metadata(
+    selected: &ImapSelectedMailbox,
+    fetched: ImapFetchedHeader,
+    gmail: ImapGmailMetadata,
+) -> Result<ImapMappedHeader, ImapAdapterError> {
     let parsed = MessageParser::default()
         .parse(&fetched.headers)
         .ok_or(ImapAdapterError::ParseMessageHeaders)?;
-    let message_id = imap_message_id(&fetched.mailbox_id, selected.uid_validity, fetched.uid);
+    let message_id = gmail.message_id.map(gmail_message_id).unwrap_or_else(|| {
+        imap_message_id(&fetched.mailbox_id, selected.uid_validity, fetched.uid)
+    });
     let rfc_message_id = parsed.message_id().map(str::to_string);
     let in_reply_to = parsed.in_reply_to().as_text().map(str::to_string);
     let references = parsed
@@ -56,7 +76,10 @@ pub fn imap_header_message_record(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let source_thread_id = imap_thread_id(&message_id, rfc_message_id.as_deref(), &references);
+    let source_thread_id = gmail
+        .thread_id
+        .map(gmail_thread_id)
+        .unwrap_or_else(|| imap_thread_id(&message_id, rfc_message_id.as_deref(), &references));
     let from = parsed.from().and_then(|address| address.first());
     let received_at = parsed
         .date()
@@ -149,7 +172,7 @@ fn imap_thread_id(
 
 #[cfg(test)]
 mod tests {
-    use posthaste_domain::{ImapUidValidity, MailboxId};
+    use posthaste_domain::{GmailMessageId, GmailThreadId, ImapUidValidity, MailboxId};
 
     use super::*;
 
@@ -196,6 +219,54 @@ mod tests {
         assert_eq!(mapped.message.raw_mime, None);
         assert_eq!(mapped.location.uid, ImapUid(42));
         assert_eq!(mapped.location.modseq, Some(ImapModSeq(777)));
+    }
+
+    #[test]
+    fn maps_typed_gmail_identity_and_preserves_imap_location_addressability() {
+        let selected = ImapSelectedMailbox {
+            mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+            mailbox_name: "INBOX".to_string(),
+            uid_validity: ImapUidValidity(9),
+            uid_next: None,
+            highest_modseq: None,
+        };
+
+        let mapped = imap_header_message_record_with_gmail_metadata(
+            &selected,
+            ImapFetchedHeader {
+                mailbox_id: selected.mailbox_id.clone(),
+                uid: ImapUid(42),
+                modseq: Some(ImapModSeq(777)),
+                flags: Vec::new(),
+                rfc822_size: 512,
+                has_attachment: false,
+                headers: b"From: Alice <alice@example.test>\r\nSubject: Hello\r\nMessage-ID: <unstable@example.test>\r\n\r\n".to_vec(),
+                updated_at: "2026-04-25T00:00:00Z".to_string(),
+            },
+            ImapGmailMetadata {
+                message_id: Some(GmailMessageId(1278455344230334865)),
+                thread_id: Some(GmailThreadId(1266894439832287888)),
+                labels: vec!["INBOX".into(), "\\Important".into()],
+            },
+        )
+        .expect("mapped Gmail header");
+
+        assert_eq!(
+            mapped.message.id.as_str(),
+            "imap:gmail:msgid:1278455344230334865"
+        );
+        assert_eq!(
+            mapped.message.source_thread_id.as_str(),
+            "imap:gmail:thrid:1266894439832287888"
+        );
+        assert_eq!(
+            mapped.message.rfc_message_id.as_deref(),
+            Some("unstable@example.test")
+        );
+        assert_eq!(mapped.location.mailbox_id, selected.mailbox_id);
+        assert_eq!(mapped.location.uid_validity, ImapUidValidity(9));
+        assert_eq!(mapped.location.uid, ImapUid(42));
+        assert_eq!(mapped.location.message_id, mapped.message.id);
     }
 
     #[test]

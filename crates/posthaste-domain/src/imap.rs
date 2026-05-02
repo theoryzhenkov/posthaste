@@ -40,6 +40,45 @@ pub struct GmailMessageId(pub u64);
 #[serde(transparent)]
 pub struct GmailThreadId(pub u64);
 
+/// Gmail label name from `X-GM-LABELS`.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct GmailLabel(pub String);
+
+impl GmailLabel {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for GmailLabel {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for GmailLabel {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+/// Typed Gmail metadata carried by IMAP FETCH.
+///
+/// These values are present only when the protocol layer has requested and
+/// parsed Gmail's `X-GM-*` FETCH extensions.
+///
+/// @spec docs/L0-providers#identity-and-threading
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImapGmailMetadata {
+    pub message_id: Option<GmailMessageId>,
+    pub thread_id: Option<GmailThreadId>,
+    pub labels: Vec<GmailLabel>,
+}
+
 /// Normalized IMAP server capabilities used by the sync planner.
 ///
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
@@ -655,8 +694,8 @@ mod tests {
         assert_eq!(
             features,
             ImapProviderFeatures {
-                message_identity: ImapMessageIdentitySource::Rfc5322MessageId,
-                thread_identity: ImapThreadIdentitySource::Rfc5322Headers,
+                message_identity: ImapMessageIdentitySource::GmailMessageId,
+                thread_identity: ImapThreadIdentitySource::GmailThreadId,
                 label_source: ImapLabelSource::GmailLabels,
             }
         );
