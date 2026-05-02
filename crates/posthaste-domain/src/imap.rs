@@ -76,6 +76,8 @@ impl From<String> for GmailLabel {
 pub struct ImapGmailMetadata {
     pub message_id: Option<GmailMessageId>,
     pub thread_id: Option<GmailThreadId>,
+    #[serde(default)]
+    pub labels_observed: bool,
     pub labels: Vec<GmailLabel>,
 }
 

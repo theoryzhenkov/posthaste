@@ -196,12 +196,23 @@ When a server advertises Gmail's `X-GM-EXT-1` capability, the IMAP driver treats
 Gmail as a provider profile within the generic IMAP adapter. Typed
 `X-GM-MSGID` is the canonical Gmail message identity when present, and typed
 `X-GM-THRID` is the canonical source conversation identity when present. RFC
-`Message-ID` remains a Gmail fallback only when `X-GM-MSGID` is absent. The
-adapter retains every per-mailbox UID as an `ImapMessageLocation`, so ordinary
-IMAP commands still address the selected mailbox, `UIDVALIDITY`, and UID even
-when multiple Gmail label observations collapse into one local message. Generic
-IMAP accounts continue to use `(mailbox, UIDVALIDITY, UID)` for message identity
-and RFC 5322 headers for conversation projection.
+`Message-ID` remains a Gmail fallback only when `X-GM-MSGID` is absent. When
+`X-GM-LABELS` is observed, Gmail labels are the stronger source for projected
+mailbox membership and Gmail-derived system keywords such as `$flagged`.
+Provider policy maps Gmail system labels and custom label names to discovered
+selectable mailboxes only; unknown labels do not create local mailboxes or JMAP
+keywords. Label absence is authoritative for discovered Gmail label-backed
+mailboxes, so stale local Inbox, Starred, Sent, and custom-label UID locations
+are deleted when the provider observation says the message is no longer there.
+All Mail is intentionally location-backed instead of absence-backed because
+Gmail does not consistently include it in `X-GM-LABELS`; a fetched All Mail UID
+or a previously stored non-stale All Mail location remains the proof for that
+mailbox. The adapter retains every fetched selected-mailbox UID as an
+`ImapMessageLocation`, so ordinary IMAP commands still address the selected
+mailbox, `UIDVALIDITY`, and UID even when multiple Gmail label observations
+collapse into one local message. Generic IMAP accounts and Gmail rows without
+`X-GM-LABELS` continue to use selected mailbox membership and RFC 5322 headers
+for projection.
 
 Message IDs stored in PostHaste remain opaque and driver-owned. IMAP IDs should
 be stable across sessions and include enough server state to avoid UID reuse
@@ -274,6 +285,7 @@ with servers that expose both protocols.
 | imap-mutation-plan-explicit | MUST | IMAP mutation strategy is selected from explicit capabilities and schedules resync when response state is insufficient |
 | imap-role-overrides-local | MUST | IMAP mailbox role assignments are local overrides over discovery, not remote SPECIAL-USE mutations |
 | gmail-extension-identity | SHOULD | Gmail IMAP accounts use typed X-GM-MSGID and X-GM-THRID as canonical identity when present, with RFC headers as fallback |
+| gmail-label-observation | SHOULD | Gmail IMAP rows with X-GM-LABELS use labels as the stronger source for mailbox membership and Gmail-derived system keywords |
 | imap-location-map | MUST | IMAP command locations are persisted separately from local message IDs |
 | smtp-send-sync | MUST | SMTP send success triggers provider sync rather than inventing a local sent message as authoritative |
 | oauth-refresh-runtime | MUST | OAuth access tokens are refreshed in the backend runtime before provider gateways receive XOAUTH2 credentials |

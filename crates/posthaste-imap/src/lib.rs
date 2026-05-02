@@ -44,7 +44,7 @@ pub use idle::imap_idle_event_stream;
 pub use mailbox::{examine_imap_mailbox, selected_mailbox_from_examine};
 pub use message::{
     imap_flag_keywords, imap_header_message_record, imap_header_message_record_with_gmail_metadata,
-    ImapFetchedHeader, ImapMappedHeader,
+    ImapFetchedHeader, ImapMailboxMembershipSource, ImapMappedHeader,
 };
 pub use mutation::{
     apply_imap_keyword_delta_by_location, copy_imap_message_to_mailbox_by_location,
