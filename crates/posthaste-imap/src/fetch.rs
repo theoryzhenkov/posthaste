@@ -593,6 +593,7 @@ pub fn fetched_header_from_items_with_metadata(
                 gmail.thread_id = Some(GmailThreadId(gmail_thread_id));
             }
             MessageDataItem::GmailLabels(labels) => {
+                gmail.labels_observed = true;
                 gmail.labels = labels
                     .into_iter()
                     .map(|label| GmailLabel::from(label.as_ref()))
@@ -754,6 +755,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["INBOX", "\\Important"]
         );
+        assert!(fetched.gmail.labels_observed);
         assert_eq!(fetched.header.uid, ImapUid(42));
     }
 

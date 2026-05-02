@@ -1,9 +1,9 @@
 use imap_client::imap_types::flag::Flag;
 use mail_parser::MessageParser;
 use posthaste_domain::{
-    gmail_message_id, gmail_thread_id, imap_message_id, ImapGmailMetadata, ImapMessageLocation,
-    ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId, MessageId, MessageRecord, SystemKeyword,
-    ThreadId, RFC3339_EPOCH,
+    gmail_message_id, gmail_thread_id, imap_message_id, GmailLabel, ImapGmailMetadata,
+    ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId, MessageId,
+    MessageRecord, SystemKeyword, ThreadId, RFC3339_EPOCH,
 };
 
 use crate::ImapAdapterError;
@@ -28,6 +28,15 @@ pub struct ImapFetchedHeader {
 pub struct ImapMappedHeader {
     pub message: MessageRecord,
     pub location: ImapMessageLocation,
+    pub gmail_labels: Option<Vec<GmailLabel>>,
+    pub mailbox_membership_source: ImapMailboxMembershipSource,
+    pub provider_absent_mailbox_ids: Vec<MailboxId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImapMailboxMembershipSource {
+    SelectedMailbox,
+    ProviderLabels,
 }
 
 /// Convert fetched IMAP RFC 822 headers into Posthaste's message projection.
@@ -58,6 +67,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
     fetched: ImapFetchedHeader,
     gmail: ImapGmailMetadata,
 ) -> Result<ImapMappedHeader, ImapAdapterError> {
+    let gmail_labels = gmail.labels_observed.then_some(gmail.labels);
     let parsed = MessageParser::default()
         .parse(&fetched.headers)
         .ok_or(ImapAdapterError::ParseMessageHeaders)?;
@@ -115,7 +125,13 @@ pub fn imap_header_message_record_with_gmail_metadata(
         updated_at: fetched.updated_at,
     };
 
-    Ok(ImapMappedHeader { message, location })
+    Ok(ImapMappedHeader {
+        message,
+        location,
+        gmail_labels,
+        mailbox_membership_source: ImapMailboxMembershipSource::SelectedMailbox,
+        provider_absent_mailbox_ids: Vec::new(),
+    })
 }
 
 /// Map IMAP system flags into the JMAP keyword vocabulary used by Posthaste.
@@ -246,6 +262,7 @@ mod tests {
             ImapGmailMetadata {
                 message_id: Some(GmailMessageId(1278455344230334865)),
                 thread_id: Some(GmailThreadId(1266894439832287888)),
+                labels_observed: true,
                 labels: vec!["INBOX".into(), "\\Important".into()],
             },
         )
