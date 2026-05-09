@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-04-29
-reviewed: 2026-04-29
+modified: 2026-05-09
+reviewed: 2026-05-09
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-providers
@@ -24,12 +24,19 @@ A JMAP mail client that brings MailMate's power-user features to a modern web UI
 
 ## Setup
 
-Two-phase setup. Requires `nix` and `direnv` installed.
+Requires `nix` and `direnv` installed. Create local environment files if they are missing, allow direnv, then run setup inside the flake dev shell:
 
 ```sh
-./bootstrap.sh   # phase 1: creates .envrc, .env, allows direnv
-# re-enter the directory so direnv activates the flake
-just setup       # phase 2: generates age key, initializes jj
+cp -n .env.example .env
+cp -n .envrc.example .envrc
+direnv allow
+just setup       # generate age key, init jj
+```
+
+## Updating from upstream templates
+
+```sh
+just template update
 ```
 
 ## Development
