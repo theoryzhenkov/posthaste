@@ -7,10 +7,29 @@
   };
 
   outputs =
-    { self, nixpkgs, theor-project }:
+    {
+      self,
+      nixpkgs,
+      theor-project,
+    }:
     let
       inherit (nixpkgs) lib;
-      forEachSystem = f: lib.genAttrs theor-project.lib.systems (system: f system (theor-project.lib.mkPkgs system));
+      forEachSystem =
+        f: lib.genAttrs theor-project.lib.systems (system: f system (theor-project.lib.mkPkgs system));
+
+      fragmentDir = ./nix/devshell.d;
+      loadFragments =
+        system: pkgs:
+        let
+          fragmentFiles =
+            if builtins.pathExists fragmentDir then
+              lib.sort (a: b: a < b) (
+                lib.filter (name: lib.hasSuffix ".nix" name) (builtins.attrNames (builtins.readDir fragmentDir))
+              )
+            else
+              [ ];
+        in
+        map (name: import (fragmentDir + "/${name}") { inherit pkgs system theor-project; }) fragmentFiles;
 
       shellHook = ''
         FLAKE_ROOT="$PWD"
@@ -27,57 +46,55 @@
       '';
     in
     {
-      devShells = forEachSystem (system: pkgs: {
-        default =
-          let
-            fragmentDir = ./nix/devshell.d;
-            fragmentFiles =
-              if builtins.pathExists fragmentDir then
-                lib.sort (a: b: a < b) (
-                  lib.filter (name: lib.hasSuffix ".nix" name) (builtins.attrNames (builtins.readDir fragmentDir))
-                )
-              else
-                [ ];
-            fragments = map (name: import (fragmentDir + "/${name}") { inherit pkgs system theor-project; }) fragmentFiles;
-            fragmentPackages = lib.concatMap (fragment: fragment.packages or [ ]) fragments;
-            fragmentEnv = lib.foldl' lib.recursiveUpdate { } (map (fragment: fragment.env or { }) fragments);
-            fragmentShellHook = lib.concatStringsSep "\n" (map (fragment: fragment.shellHook or "") fragments);
-          in
-          pkgs.mkShell {
-            packages =
-              theor-project.lib.toolPackages pkgs [
-                "git"
-                "jujutsu"
-                "just"
-                "sops"
-                "age"
-                "copier"
-              ]
-              ++ fragmentPackages;
-
-            env = fragmentEnv;
-
-            shellHook = shellHook + "\n" + fragmentShellHook;
-          };
-      });
-
-      checks = forEachSystem (system: pkgs: {
-        flake-policy =
-          if builtins.pathExists ./flake.lock then
+      devShells = forEachSystem (
+        system: pkgs: {
+          default =
             let
-              flakeLock = builtins.toFile "flake.lock" (builtins.readFile ./flake.lock);
+              fragments = loadFragments system pkgs;
+              fragmentPackages = lib.concatMap (fragment: fragment.packages or [ ]) fragments;
+              fragmentEnv = lib.foldl' lib.recursiveUpdate { } (map (fragment: fragment.env or { }) fragments);
+              fragmentShellHook = lib.concatStringsSep "\n" (map (fragment: fragment.shellHook or "") fragments);
             in
-            pkgs.runCommand "flake-policy" { } ''
-              root=$(mktemp -d)
-              cp ${flakeLock} "$root/flake.lock"
-              ${theor-project.packages.${system}.flakePolicy}/bin/theor-flake-policy "$root"
-              touch $out
-            ''
-          else
-            pkgs.runCommand "flake-policy-missing-lock" { } ''
-              echo "flake.lock is required for flake policy checks" >&2
-              exit 1
-            '';
-      });
+            pkgs.mkShell {
+              packages =
+                theor-project.lib.toolPackages pkgs [
+                  "git"
+                  "jujutsu"
+                  "just"
+                  "sops"
+                  "age"
+                  "copier"
+                ]
+                ++ fragmentPackages;
+
+              env = fragmentEnv;
+
+              shellHook = shellHook + "\n" + fragmentShellHook;
+            };
+        }
+      );
+
+      formatter = forEachSystem (_system: pkgs: pkgs.nixfmt);
+
+      checks = forEachSystem (
+        system: pkgs: {
+          flake-policy =
+            if builtins.pathExists ./flake.lock then
+              let
+                flakeLock = builtins.toFile "flake.lock" (builtins.readFile ./flake.lock);
+              in
+              pkgs.runCommand "flake-policy" { } ''
+                root=$(mktemp -d)
+                cp ${flakeLock} "$root/flake.lock"
+                ${theor-project.packages.${system}.flakePolicy}/bin/theor-flake-policy "$root"
+                touch $out
+              ''
+            else
+              pkgs.runCommand "flake-policy-missing-lock" { } ''
+                echo "flake.lock is required for flake policy checks" >&2
+                exit 1
+              '';
+        }
+      );
     };
 }
