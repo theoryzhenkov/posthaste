@@ -1,4 +1,8 @@
-{ pkgs, system, theor-project }:
+{
+  pkgs,
+  system,
+  theor-project,
+}:
 
 let
   playwrightBrowsers = pkks: pkks.playwright-driver.browsers;
@@ -27,32 +31,34 @@ let
   ];
 in
 {
-  packages =
+  packages = [
+    pkgs.gnupg
+    pkgs.rustc
+    pkgs.cargo
+    pkgs.rustfmt
+    pkgs.rust-analyzer
+    pkgs.pkg-config
+    pkgs.nodejs_22
+    pkgs.bun
+    pkgs.playwright-driver
+    (playwrightBrowsers pkgs)
+    pkgs.stalwart
+    pkgs.tmux
+    pkgs.overmind
+    pkgs.python3
+    pkgs.python3Packages.mkdocs-material
+  ]
+  ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
     [
-      pkgs.gnupg
-      pkgs.rustc
-      pkgs.cargo
-      pkgs.rustfmt
-      pkgs.rust-analyzer
-      pkgs.pkg-config
-      pkgs.nodejs_22
-      pkgs.bun
-      pkgs.playwright-driver
-      (playwrightBrowsers pkgs)
-      pkgs.stalwart
-      pkgs.tmux
-      pkgs.overmind
-      pkgs.python3
-      pkgs.python3Packages.mkdocs-material
-    ]
-    ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux ([
       pkgs.webkitgtk_4_1
       pkgs.libsoup_3
       pkgs.gtk3
       pkgs.glib-networking
       pkgs.openssl
       pkgs.libayatana-appindicator
-    ] ++ linuxBrowserRuntime);
+    ]
+    ++ linuxBrowserRuntime
+  );
 
   shellHook = ''
     export POSTHASTE_OAUTH_SECRETS_FILE="$FLAKE_ROOT/secrets/oauth.yaml"
