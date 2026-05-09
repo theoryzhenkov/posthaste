@@ -5,7 +5,7 @@ use posthaste_domain::{
     SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SmtpTransportSettings,
-    TransportSecurity, RFC3339_EPOCH,
+    TelemetryMode, TelemetrySettings, TransportSecurity, RFC3339_EPOCH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,8 @@ pub struct AppToml {
     pub logging: LoggingToml,
     #[serde(default)]
     pub cache: CachePolicyToml,
+    #[serde(default)]
+    pub telemetry: TelemetryToml,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -45,6 +47,52 @@ pub struct CachePolicyToml {
     pub cache_bodies: Option<bool>,
     pub cache_raw_messages: Option<bool>,
     pub cache_attachments: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TelemetryToml {
+    pub mode: Option<TelemetryModeToml>,
+    pub notice_version: Option<String>,
+    pub enabled_at: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryModeToml {
+    #[default]
+    Off,
+    Aggregate,
+    Product,
+}
+
+impl TelemetryToml {
+    fn to_telemetry_settings(&self) -> TelemetrySettings {
+        TelemetrySettings {
+            mode: match self.mode.clone().unwrap_or_default() {
+                TelemetryModeToml::Off => TelemetryMode::Off,
+                TelemetryModeToml::Aggregate => TelemetryMode::Aggregate,
+                TelemetryModeToml::Product => TelemetryMode::Product,
+            },
+            notice_version: self.notice_version.clone(),
+            enabled_at: self.enabled_at.clone(),
+            categories: self.categories.clone(),
+        }
+    }
+
+    fn from_telemetry_settings(settings: &TelemetrySettings) -> Self {
+        Self {
+            mode: Some(match settings.mode {
+                TelemetryMode::Off => TelemetryModeToml::Off,
+                TelemetryMode::Aggregate => TelemetryModeToml::Aggregate,
+                TelemetryMode::Product => TelemetryModeToml::Product,
+            }),
+            notice_version: settings.notice_version.clone(),
+            enabled_at: settings.enabled_at.clone(),
+            categories: settings.categories.clone(),
+        }
+    }
 }
 
 impl CachePolicyToml {
@@ -96,6 +144,7 @@ impl AppToml {
         Ok(AppSettings {
             default_account_id: self.default_source_id.as_deref().map(AccountId::from),
             cache_policy: self.cache.to_cache_policy(),
+            telemetry: self.telemetry.to_telemetry_settings(),
             automation_rules: self
                 .automations
                 .iter()
@@ -133,6 +182,7 @@ impl AppToml {
             daemon: existing.daemon.clone(),
             logging: existing.logging.clone(),
             cache: CachePolicyToml::from_cache_policy(&settings.cache_policy),
+            telemetry: TelemetryToml::from_telemetry_settings(&settings.telemetry),
         }
     }
 }
@@ -1149,6 +1199,7 @@ auth = "app_password"
             daemon: DaemonToml::default(),
             logging: LoggingToml::default(),
             cache: CachePolicyToml::default(),
+            telemetry: TelemetryToml::default(),
         };
         let toml_struct = AppToml::from_app_settings(&settings, &existing);
         let toml_string = toml::to_string_pretty(&toml_struct).unwrap();

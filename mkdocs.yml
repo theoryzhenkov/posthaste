@@ -77,3 +77,4 @@ nav:
       - Telemetry: L1-telemetry.md
   - Implementation (L2):
       - Transport: L2-transport.md
+      - Telemetry ingest: L2-telemetry-ingest.md

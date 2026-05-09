@@ -22,6 +22,43 @@ fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
     policy
 }
 
+fn normalize_telemetry_settings(
+    mut telemetry: TelemetrySettings,
+) -> Result<TelemetrySettings, ApiError> {
+    match telemetry.mode {
+        TelemetryMode::Off => {
+            telemetry.notice_version = None;
+            telemetry.enabled_at = None;
+            telemetry.categories.clear();
+        }
+        TelemetryMode::Aggregate | TelemetryMode::Product => {
+            if telemetry
+                .notice_version
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+                || telemetry
+                    .enabled_at
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty())
+                || telemetry.categories.is_empty()
+                || telemetry.categories.iter().any(|category| {
+                    !matches!(
+                        category.as_str(),
+                        "health" | "performance" | "cache" | "ui" | "profile"
+                    )
+                })
+            {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_telemetry_consent",
+                    "telemetry opt-in requires a notice version, timestamp, and approved categories",
+                ));
+            }
+        }
+    }
+    Ok(telemetry)
+}
+
 /// GET /v1/settings
 ///
 /// @spec docs/L1-api#settings
@@ -75,12 +112,28 @@ pub async fn patch_settings(
     if let Some(cache_policy) = request.cache_policy {
         settings.cache_policy = normalize_cache_policy(cache_policy);
     }
+    let telemetry_mode_was_set_to_off = request
+        .telemetry
+        .as_ref()
+        .is_some_and(|telemetry| telemetry.mode == TelemetryMode::Off);
+    if let Some(telemetry) = request.telemetry {
+        settings.telemetry = normalize_telemetry_settings(telemetry)?;
+    }
     validate_automation_rules(&settings.automation_rules)?;
     validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
     state
         .service
         .put_app_settings(&settings)
         .map_err(ApiError::from_service_error)?;
+    if telemetry_mode_was_set_to_off {
+        TelemetrySpool::purge_root(&state.telemetry_root).map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "telemetry_purge_failed",
+                format!("failed to delete pending telemetry: {error}"),
+            )
+        })?;
+    }
     if request.automation_rules.is_some() {
         state
             .service

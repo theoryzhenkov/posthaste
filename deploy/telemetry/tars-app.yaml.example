@@ -1,0 +1,8 @@
+# Copy to theor-ops: hosts/nixos/tars/apps/posthaste-telemetry/app.yaml
+# Before beta traffic, add a persistent /data volume via theor-ops app support
+# or a Nix override, and set POSTHASTE_TELEMETRY_INGEST_TOKEN in secrets.
+app: posthaste-telemetry
+image: ghcr.io/theoryzhenkov/posthaste/posthaste-telemetry-ingest:latest
+containerPort: 8080
+hostPort: 8104
+domain: telemetry.theor.net
