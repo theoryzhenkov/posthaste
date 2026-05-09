@@ -1,139 +1,83 @@
 {
-  description = "Posthaste dev shell";
+  description = "posthaste";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    flake-utils.url = "github:numtide/flake-utils";
+    theor-project.url = "git+ssh://git@github.com/theoryzhenkov/repo.nix_project.git";
+    nixpkgs.follows = "theor-project/nixpkgs";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs { inherit system overlays; };
+  outputs =
+    { self, nixpkgs, theor-project }:
+    let
+      inherit (nixpkgs) lib;
+      forEachSystem = f: lib.genAttrs theor-project.lib.systems (system: f system (theor-project.lib.mkPkgs system));
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" ];
-        };
+      shellHook = ''
+        FLAKE_ROOT="$PWD"
+        while [ "$FLAKE_ROOT" != "/" ] && [ ! -f "$FLAKE_ROOT/flake.nix" ]; do
+          FLAKE_ROOT="$(dirname "$FLAKE_ROOT")"
+        done
 
-        playwrightBrowsers = pkgs.playwright-driver.browsers;
-        linuxBrowserRuntime = with pkgs; [
-          glib
-          nspr
-          nss
-          dbus
-          atk
-          at-spi2-atk
-          cups
-          expat
-          libxkbcommon
-          pango
-          cairo
-          alsa-lib
-          udev
-          mesa
-          libx11
-          libxcomposite
-          libxdamage
-          libxext
-          libxfixes
-          libxrandr
-          libxcb
-        ];
-      in
-      {
-        devShells.default = pkgs.mkShell {
-          nativeBuildInputs = [
-            # Repository tooling
-            pkgs.git
-            pkgs.jujutsu
-            pkgs.just
-            pkgs.sops
-            pkgs.age
-            pkgs.gnupg
+        if [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
+          FLAKE_ROOT="$PWD"
+        fi
 
-            # Rust
-            rustToolchain
-            pkgs.pkg-config
+        export FLAKE_ROOT
+        export SOPS_AGE_KEY_FILE="$FLAKE_ROOT/.age-key"
+      '';
+    in
+    {
+      devShells = forEachSystem (system: pkgs: {
+        default =
+          let
+            fragmentDir = ./nix/devshell.d;
+            fragmentFiles =
+              if builtins.pathExists fragmentDir then
+                lib.sort (a: b: a < b) (
+                  lib.filter (name: lib.hasSuffix ".nix" name) (builtins.attrNames (builtins.readDir fragmentDir))
+                )
+              else
+                [ ];
+            fragments = map (name: import (fragmentDir + "/${name}") { inherit pkgs system theor-project; }) fragmentFiles;
+            fragmentPackages = lib.concatMap (fragment: fragment.packages or [ ]) fragments;
+            fragmentEnv = lib.foldl' lib.recursiveUpdate { } (map (fragment: fragment.env or { }) fragments);
+            fragmentShellHook = lib.concatStringsSep "\n" (map (fragment: fragment.shellHook or "") fragments);
+          in
+          pkgs.mkShell {
+            packages =
+              theor-project.lib.toolPackages pkgs [
+                "git"
+                "jujutsu"
+                "just"
+                "sops"
+                "age"
+                "copier"
+              ]
+              ++ fragmentPackages;
 
-            # Node / frontend
-            pkgs.nodejs_22
-            pkgs.bun
-            pkgs.playwright-driver
-            playwrightBrowsers
+            env = fragmentEnv;
 
-            # Local JMAP server for end-to-end dev/testing
-            pkgs.stalwart
+            shellHook = shellHook + "\n" + fragmentShellHook;
+          };
+      });
 
-            # Dev-stack process orchestrator (stalwart + daemon + vite/tauri)
-            pkgs.tmux
-            pkgs.overmind
-
-            # Docs (mkdocs-material via Python)
-            pkgs.python3
-            pkgs.python3Packages.mkdocs-material
-
-            # Tauri 2 build deps (Linux)
-          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux ([
-            pkgs.webkitgtk_4_1
-            pkgs.libsoup_3
-            pkgs.gtk3
-            pkgs.glib-networking
-            pkgs.openssl
-            pkgs.libayatana-appindicator
-          ] ++ linuxBrowserRuntime);
-
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux ([
-            pkgs.webkitgtk_4_1
-            pkgs.libsoup_3
-            pkgs.gtk3
-            pkgs.openssl
-          ] ++ linuxBrowserRuntime);
-
-          shellHook = ''
-            FLAKE_ROOT="$PWD"
-            while [ "$FLAKE_ROOT" != "/" ] && [ ! -f "$FLAKE_ROOT/flake.nix" ]; do
-              FLAKE_ROOT="$(dirname "$FLAKE_ROOT")"
-            done
-
-            if [ ! -f "$FLAKE_ROOT/flake.nix" ]; then
-              FLAKE_ROOT="$PWD"
-            fi
-
-            export FLAKE_ROOT
-            export SOPS_AGE_KEY_FILE="$FLAKE_ROOT/.age-key"
-            export POSTHASTE_OAUTH_SECRETS_FILE="$FLAKE_ROOT/secrets/oauth.yaml"
-            export GIO_EXTRA_MODULES="${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux
-              "${pkgs.glib-networking}/lib/gio/modules"}"
-            export PLAYWRIGHT_BROWSERS_PATH="${playwrightBrowsers}"
-            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-            export PLAYWRIGHT_NODEJS_PATH="${pkgs.nodejs_22}/bin/node"
-            export POSTHASTE_PLAYWRIGHT_CLI="${pkgs.playwright-driver}/cli.js"
-
-            posthaste_export_sops_secret() {
-              local secret_path="$1"
-              local env_name="$2"
-              local secret_value
-
-              if [ ! -f "$POSTHASTE_OAUTH_SECRETS_FILE" ] || [ ! -f "$SOPS_AGE_KEY_FILE" ]; then
-                return 0
-              fi
-
-              secret_value="$(sops --decrypt --extract "$secret_path" "$POSTHASTE_OAUTH_SECRETS_FILE" 2>/dev/null || true)"
-              if [ -n "$secret_value" ] && [ "$secret_value" != "null" ]; then
-                export "$env_name=$secret_value"
-              fi
-            }
-
-            posthaste_export_sops_secret '["google_oauth_client_secret"]' VITE_GOOGLE_OAUTH_CLIENT_SECRET
-            posthaste_export_sops_secret '["microsoft_oauth_client_secret"]' VITE_MICROSOFT_OAUTH_CLIENT_SECRET
-            unset -f posthaste_export_sops_secret
-          '';
-        };
-      }
-    );
+      checks = forEachSystem (system: pkgs: {
+        flake-policy =
+          if builtins.pathExists ./flake.lock then
+            let
+              flakeLock = builtins.toFile "flake.lock" (builtins.readFile ./flake.lock);
+            in
+            pkgs.runCommand "flake-policy" { } ''
+              root=$(mktemp -d)
+              cp ${flakeLock} "$root/flake.lock"
+              ${theor-project.packages.${system}.flakePolicy}/bin/theor-flake-policy "$root"
+              touch $out
+            ''
+          else
+            pkgs.runCommand "flake-policy-missing-lock" { } ''
+              echo "flake.lock is required for flake policy checks" >&2
+              exit 1
+            '';
+      });
+    };
 }

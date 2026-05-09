@@ -11,7 +11,7 @@ mod docs 'docs/justfile'
 default:
     @just --list
 
-# Phase 2: project setup (run inside the flake devShell, after ./bootstrap.sh)
+# Project setup (run inside the flake devShell).
 setup:
     ./setup.sh
 

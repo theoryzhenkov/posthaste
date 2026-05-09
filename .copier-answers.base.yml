@@ -1,0 +1,8 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY.
+_commit: v0.2.1
+_src_path: git@github.com:theoryzhenkov/repo_template.base.git
+github_owner: theoryzhenkov
+license_holder: theor
+license_year: '2026'
+project_description: ''
+project_name: posthaste

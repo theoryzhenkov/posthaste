@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Phase 2: project setup. Requires the flake devShell to be active
-# (age, git, sops, jj in PATH). Run `./bootstrap.sh` first.
+# Project setup: requires the flake devShell to be active (age, git, sops, jj in PATH).
 set -euo pipefail
-
-TEMPLATE_REMOTE_NAME="${TEMPLATE_REMOTE_NAME:-template}"
-TEMPLATE_REMOTE_URL="${TEMPLATE_REMOTE_URL:-git@github.com:theoryzhenkov/repo_template.base_mkdocs.git}"
 
 # -- tool check --
 missing=()
@@ -13,7 +9,7 @@ for tool in age-keygen git sops jj; do
 done
 if [ ${#missing[@]} -gt 0 ]; then
     echo "ERROR: missing tools: ${missing[*]}"
-    echo "Run ./bootstrap.sh first, or enter the devShell with 'nix develop'."
+    echo "Enter the devShell with 'nix develop' (or step into the directory so direnv activates the flake)."
     exit 1
 fi
 
@@ -41,16 +37,6 @@ if [ ! -d .jj ]; then
     echo "Initialized colocated jj repository"
 else
     echo "jj repository already exists, skipping"
-fi
-
-# -- template remote --
-if [ -n "$TEMPLATE_REMOTE_URL" ]; then
-    if git remote get-url "$TEMPLATE_REMOTE_NAME" >/dev/null 2>&1; then
-        echo "$TEMPLATE_REMOTE_NAME remote already exists, skipping"
-    else
-        git remote add "$TEMPLATE_REMOTE_NAME" "$TEMPLATE_REMOTE_URL"
-        echo "Added $TEMPLATE_REMOTE_NAME remote: $TEMPLATE_REMOTE_URL"
-    fi
 fi
 
 echo "Done."
