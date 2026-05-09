@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-16
+reviewed: 2026-05-16
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
@@ -119,6 +119,12 @@ hard_cap_bytes = 2147483648
 cache_bodies = true
 cache_raw_messages = false
 cache_attachments = false
+
+[telemetry]
+mode = "off"                    # "off", "aggregate", or "product"
+notice_version = "2026-05-beta-1" # optional, set only after opt-in
+enabled_at = "2026-05-09T12:00:00Z" # optional, set only after opt-in
+categories = ["health", "performance", "cache", "ui", "profile"]
 
 [daemon]
 bind = "127.0.0.1:2525"         # optional, daemon bind address

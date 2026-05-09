@@ -1,0 +1,130 @@
+# PostHaste beta telemetry event registry.
+# Every event uses only allowlisted low-cardinality enum/bucket fields.
+# Keep this dictionary in sync with crates/posthaste-telemetry-ingest/src/registry.rs.
+
+- name: app.startup.completed
+  version: 1
+  owner: observability
+  purpose: Measure startup reliability and coarse startup latency.
+  category: health
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    duration_bucket: { type: duration_bucket, required: true }
+    result: { type: enum, values: [ok, failed, cancelled], required: true }
+    reason_bucket: { type: enum, values: [none, auth, network, provider_rejected, local_store, timeout, schema, quota, consent, unknown], required: true }
+
+- name: sync.cycle.completed
+  version: 1
+  owner: sync
+  purpose: Measure sync reliability and coarse duration by driver/protocol.
+  category: health
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    driver_family: { type: enum, values: [jmap, imap_smtp, mock], required: true }
+    receive_protocol: { type: enum, values: [jmap, imap], required: true }
+    trigger: { type: enum, values: [startup, manual, push, poll, mutation, unknown], required: true }
+    duration_bucket: { type: duration_bucket, required: true }
+    result: { type: enum, values: [ok, failed, cancelled], required: true }
+    reason_bucket: { type: enum, values: [none, auth, network, provider_rejected, local_store, timeout, schema, quota, consent, unknown], required: true }
+    item_count_bucket: { type: count_bucket, required: true }
+
+- name: api.request.completed
+  version: 1
+  owner: api
+  purpose: Measure local API health without paths, query strings, IDs, or payloads.
+  category: performance
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    route_family: { type: enum, values: [settings, accounts, mailboxes, messages, conversations, compose, search, events, assets, unknown], required: true }
+    method_family: { type: enum, values: [get, post, patch, delete, other], required: true }
+    duration_bucket: { type: duration_bucket, required: true }
+    status_class: { type: enum, values: [2xx, 3xx, 4xx, 5xx, unknown], required: true }
+    payload_size_bucket: { type: byte_bucket, required: true }
+    result: { type: enum, values: [ok, failed, cancelled], required: true }
+
+- name: search.query.completed
+  version: 1
+  owner: search
+  purpose: Measure search latency and result-size distributions without query text.
+  category: performance
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    duration_bucket: { type: duration_bucket, required: true }
+    result_count_bucket: { type: count_bucket, required: true }
+    query_shape: { type: enum, values: [empty, simple_term, field_filter, boolean, advanced], required: true }
+    result: { type: enum, values: [ok, failed, cancelled], required: true }
+    reason_bucket: { type: enum, values: [none, auth, network, provider_rejected, local_store, timeout, schema, quota, consent, unknown], required: true }
+
+- name: cache.lookup.completed
+  version: 1
+  owner: cache
+  purpose: Measure cache hit/miss and lookup-cost distributions.
+  category: cache
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    cache_layer: { type: enum, values: [memory, sqlite, body_blob, raw_message], required: true }
+    result: { type: enum, values: [hit, miss, stale, error], required: true }
+    duration_bucket: { type: duration_bucket, required: true }
+    size_bucket: { type: byte_bucket, required: true }
+
+- name: telemetry.upload.completed
+  version: 1
+  owner: observability
+  purpose: Measure whether telemetry upload itself is working.
+  category: health
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    batch_size_bucket: { type: count_bucket, required: true }
+    result: { type: enum, values: [ok, failed, cancelled], required: true }
+    reason_bucket: { type: enum, values: [none, auth, network, provider_rejected, local_store, timeout, schema, quota, consent, unknown], required: true }
+
+- name: telemetry.event.dropped
+  version: 1
+  owner: observability
+  purpose: Measure local telemetry drops due to consent, schema, quota, or spool limits.
+  category: health
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    drop_reason: { type: enum, values: [consent_off, schema, quota, spool_full, too_old, unknown], required: true }
+    count_bucket: { type: count_bucket, required: true }
+
+- name: telemetry.schema.rejected
+  version: 1
+  owner: observability
+  purpose: Measure client/server schema drift without echoing rejected payloads.
+  category: health
+  sensitivity: anonymous_aggregate
+  modes: [aggregate, product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    event_family: { type: enum, values: [app, sync, api, search, cache, telemetry, unknown], required: true }
+    reject_reason: { type: enum, values: [unknown_event, unknown_field, invalid_value, banned_value, too_large, unknown], required: true }
+    count_bucket: { type: count_bucket, required: true }
+
+- name: profile.provider.recorded
+  version: 1
+  owner: accounts
+  purpose: Measure built-in provider share for beta planning; manual/custom providers report generic.
+  category: profile
+  sensitivity: product
+  modes: [product]
+  retention: { raw_days: 30, aggregate_months: 13 }
+  fields:
+    built_in_provider: { type: provider_enum, values: [fastmail, gmail, icloud, outlook, generic, development], required: true }
+    driver_family: { type: enum, values: [jmap, imap_smtp, mock], required: true }
+    auth_family: { type: enum, values: [oauth, app_credential, api_credential, manual_credential, development], required: true }
+    account_count_bucket: { type: count_bucket, required: true }

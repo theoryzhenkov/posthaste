@@ -1148,6 +1148,7 @@ mod tests {
                 supervisor,
                 event_sender,
                 account_logo_root: root.0.join("account-assets").join("logos"),
+                telemetry_root: root.0.join("state").join("telemetry"),
                 oauth_flows: Arc::new(OAuthFlowStore::default()),
             },
             secret_store,

@@ -1,14 +1,16 @@
 ---
 scope: L1
 summary: "Telemetry contracts: consent, event schema, local spool, upload, ingestion, retention, and analysis"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-16
+reviewed: 2026-05-16
 depends:
   - path: docs/L0-telemetry
   - path: docs/L1-logging
   - path: docs/L1-api
   - path: docs/L1-accounts
     section: "TOML schema"
+dependents:
+  - path: docs/L2-telemetry-ingest
 ---
 
 # Telemetry -- Contracts
@@ -44,8 +46,8 @@ The local consent record is stored in app settings:
 ```toml
 [telemetry]
 mode = "off"                   # "off", "aggregate", or "product"
-notice_version = "2026-04-beta-1"
-enabled_at = "2026-04-28T12:00:00Z" # optional, set only after opt-in
+notice_version = "2026-05-beta-1"
+enabled_at = "2026-05-09T12:00:00Z" # optional, set only after opt-in
 categories = ["health", "performance", "cache", "ui", "profile"]
 ```
 
@@ -141,10 +143,10 @@ The uploader sends batches of telemetry events. Every field is allowlisted and v
       "version": 1,
       "eventId": "9fb18840-1a4b-4f0a-b94d-9c5e4a8c40c2",
       "fields": {
-        "driverFamily": "jmap",
-        "durationBucket": "s5_15",
+        "driver_family": "jmap",
+        "duration_bucket": "s5_15",
         "result": "ok",
-        "reasonBucket": "none"
+        "reason_bucket": "none"
       }
     }
   ]
