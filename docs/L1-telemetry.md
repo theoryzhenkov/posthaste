@@ -287,7 +287,7 @@ The client may include a generic beta app token only if needed to distinguish of
 
 ## Ingestion endpoint
 
-The endpoint is not part of the local app API at `/v1`. It is a remote service endpoint owned by the release infrastructure. Beta v1 targets a PostHaste-owned service deployed on the operator's Hetzner machine.
+The endpoint is not part of the local app API at `/v1`. It is a remote service endpoint chosen by the build or operator. Official beta builds use PostHaste-controlled release infrastructure; self-hosted builds may point at any compatible HTTPS deployment.
 
 Server validation:
 

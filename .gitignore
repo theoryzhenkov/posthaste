@@ -40,6 +40,9 @@ result
 /.overmind.*.sock
 apps/desktop/gen/schemas/
 
+# local deployment notes
+**/LOCAL-*.md
+
 # editor
 .idea/
 .vscode/

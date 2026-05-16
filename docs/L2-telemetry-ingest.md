@@ -1,11 +1,13 @@
 ---
 scope: L2
-summary: "Dockerized beta telemetry ingestion service for Tars deployment"
+summary: "Dockerized beta telemetry ingestion service for self-hosted deployment"
 modified: 2026-05-16
 reviewed: 2026-05-16
 depends:
   - path: docs/L0-telemetry
   - path: docs/L1-telemetry
+dependents:
+  - path: deploy/telemetry/README
 ---
 
 # Telemetry ingest service -- L2
@@ -14,8 +16,8 @@ depends:
 
 `posthaste-telemetry-ingest` is the remote receiver for opt-in beta telemetry.
 It is separate from the local PostHaste mail API and never reads local log files.
-The first deployment target is the Tars app host, where apps are Docker images
-managed by NixOS/systemd and published through nginx + ACME.
+It runs as a small containerized HTTP service behind any HTTPS reverse proxy or
+container platform that can provide persistent storage for SQLite.
 
 ## Service boundary
 
@@ -56,7 +58,12 @@ limits and server/network failures retain it for retry.
 ## Runtime
 
 The remote binary is `posthaste-telemetry-ingest` from
-`crates/posthaste-telemetry-ingest`. Runtime configuration is environment-based:
+`crates/posthaste-telemetry-ingest`. The official repository publishes a
+container image as `ghcr.io/theoryzhenkov/posthaste/posthaste-telemetry-ingest`
+on `main` and manual dispatch. Production-style deployments should pin a commit
+SHA tag for repeatable beta rollout after a successful smoke test.
+
+Runtime configuration is environment-based:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -103,29 +110,20 @@ The source-controlled registry lives at `docs/telemetry/events.yaml`, with a
 matching Rust allowlist in `crates/posthaste-telemetry-ingest/src/registry.rs`.
 Changing telemetry collection requires updating both and adding tests.
 
-## Tars deployment fit
+## Container deployment requirements
 
-Tars apps are declared under `hosts/nixos/tars/apps/<app>/app.yaml` in
-theor-ops. For this service, the app should use the standard web-app shape:
+Run the service behind HTTPS and route only `/telemetry/v1/batches`, `/healthz`,
+and `/readyz` to the container. The container listens on port `8080` by default.
+A production-style deployment needs:
 
-```yaml
-app: posthaste-telemetry
-image: ghcr.io/theoryzhenkov/posthaste/posthaste-telemetry-ingest:latest
-containerPort: 8080
-hostPort: 8104
-domain: telemetry.theor.net
-```
+- a pinned image tag, preferably the commit SHA tag produced by CI
+- a persistent `/data` volume for SQLite raw rows and retry dedupe state
+- `POSTHASTE_TELEMETRY_INGEST_TOKEN` stored as a secret, not committed config
+- reverse-proxy access logs retained separately from telemetry data
+- an operator runbook for `POSTHASTE_TELEMETRY_DISABLED=true`
 
-The generated NixOS app module runs the container under systemd with
-`docker run`, maps `127.0.0.1:<hostPort>` to the container, and nginx terminates
-TLS for `domain`. The deployment still needs a shared ingest token in app secrets
-and a persistent volume entry before beta traffic is enabled. If the current Tars
-app generator cannot express the volume, either extend theor-ops app generation
-or add a small Nix override for this app:
-
-```nix
-volumes = [ "/var/lib/posthaste-telemetry:/data" ];
-```
+Do not enable beta telemetry without a persistent `/data` volume. Container
+replacement must not erase raw retention state or retry dedupe state.
 
 ## Docker image
 
@@ -138,7 +136,7 @@ app assets and does not need PostHaste account configuration.
 - The reverse proxy may keep IP/user-agent access logs for security, but those
   logs are not joined into telemetry tables and must retain for at most 7 days.
 - Routine analysis should query aggregate views once they exist, not raw rows.
-- Raw SQLite access on Tars should be limited to operators.
+- Raw SQLite access should be limited to operators.
 - The global kill switch is `POSTHASTE_TELEMETRY_DISABLED=true` plus an app
   restart.
 
@@ -151,5 +149,5 @@ app assets and does not need PostHaste account configuration.
 | validate-before-store | MUST | Unknown event names, fields, versions, and invalid enum values are rejected before SQLite writes |
 | aggregate-no-subject | MUST | Aggregate-mode payloads containing `subjectId` are rejected |
 | retry-dedupe-only | MUST | `eventId` is used only for retry dedupe and is not treated as an install, session, account, or user identity |
-| tars-volume-required | MUST | Tars deployment mounts persistent storage at `/data` before beta telemetry is enabled |
+| persistent-data-required | MUST | Deployment mounts persistent storage at `/data` before beta telemetry is enabled |
 | beta-token-required | MUST | Public beta deployment configures a shared ingest token and rejects requests without `Authorization: Bearer` |
