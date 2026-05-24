@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-05-09
-reviewed: 2026-05-09
+modified: 2026-04-29
+reviewed: 2026-04-29
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -11,7 +11,6 @@ depends:
   - path: docs/L1-jmap
 dependents:
   - path: docs/L1-ui
-  - path: docs/L1-telemetry
 ---
 
 # API domain -- L1
