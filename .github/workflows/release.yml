@@ -126,6 +126,21 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Promote nested desktop bundles
+        shell: bash
+        run: |
+          find release-assets -mindepth 2 -type f -print0 \
+            | while IFS= read -r -d '' file; do
+              base="$(basename "$file")"
+              target="release-assets/$base"
+              if [ -e "$target" ]; then
+                echo "release asset name collision: $target" >&2
+                exit 1
+              fi
+              mv "$file" "$target"
+            done
+          find release-assets -mindepth 1 -type d -empty -delete
+
       - name: Add release public key
         shell: bash
         run: cp keys/release-gpg-public.asc release-assets/
