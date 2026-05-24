@@ -5,7 +5,7 @@
  * @spec docs/L1-compose#mime-structure
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Loader2, Mail, Reply, Send } from 'lucide-react'
+import { ChevronDown, Forward, Loader2, Mail, Reply, Send } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -48,6 +48,7 @@ const MarkdownComposerEditor = lazy(() =>
 export type ComposeIntent =
   | { kind: 'new'; sourceId: string }
   | { kind: 'reply'; sourceId: string; messageId: string }
+  | { kind: 'forward'; sourceId: string; messageId: string }
 
 interface ComposeOverlayProps {
   intent: ComposeIntent
@@ -215,29 +216,25 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     queryKey: queryKeys.senderAddresses,
     queryFn: fetchSenderAddresses,
   })
+  const isMessageBasedCompose = intent.kind !== 'new'
   const replyContextQuery = useQuery({
-    queryKey:
-      intent.kind === 'reply'
-        ? ['reply-context', intent.sourceId, intent.messageId]
-        : ['reply-context', null],
+    queryKey: isMessageBasedCompose
+      ? ['reply-context', intent.sourceId, intent.messageId]
+      : ['reply-context', null],
     queryFn: () =>
       fetchReplyContext(
         intent.sourceId,
-        intent.kind === 'reply' ? intent.messageId : '',
+        isMessageBasedCompose ? intent.messageId : '',
       ),
-    enabled: intent.kind === 'reply',
+    enabled: isMessageBasedCompose,
   })
 
-  const composeKey =
-    intent.kind === 'reply'
-      ? `${intent.sourceId}:${intent.messageId}`
-      : intent.sourceId
+  const composeKey = isMessageBasedCompose
+    ? `${intent.sourceId}:${intent.messageId}`
+    : intent.sourceId
 
   const initialForm = useMemo<ComposeForm>(() => {
-    if (intent.kind === 'new') {
-      return EMPTY_FORM
-    }
-    if (!replyContextQuery.data) {
+    if (intent.kind === 'new' || !replyContextQuery.data) {
       return EMPTY_FORM
     }
     const quoted = replyContextQuery.data.quotedBody
@@ -245,17 +242,22 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       : ''
     return {
       from: '',
-      to: formatRecipients(replyContextQuery.data.to),
+      to:
+        intent.kind === 'reply'
+          ? formatRecipients(replyContextQuery.data.to)
+          : '',
       cc: '',
       bcc: '',
-      subject: replyContextQuery.data.replySubject,
+      subject:
+        intent.kind === 'reply'
+          ? replyContextQuery.data.replySubject
+          : replyContextQuery.data.forwardSubject,
       body: quoted,
     }
   }, [intent.kind, replyContextQuery.data])
-  const formResetKey =
-    intent.kind === 'reply'
-      ? `${composeKey}:${replyContextQuery.data ? 'ready' : 'loading'}`
-      : composeKey
+  const formResetKey = isMessageBasedCompose
+    ? `${composeKey}:${replyContextQuery.data ? 'ready' : 'loading'}`
+    : composeKey
   const [composeState, setComposeState] = useState(() => ({
     errorMessage: null as string | null,
     form: initialForm,
@@ -306,10 +308,10 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   )
 
   useEffect(() => {
-    if (intent.kind === 'reply' && replyContextQuery.data) {
+    if (isMessageBasedCompose && replyContextQuery.data) {
       requestAnimationFrame(() => bodyRef.current?.focus())
     }
-  }, [composeKey, intent.kind, replyContextQuery.data])
+  }, [composeKey, isMessageBasedCompose, replyContextQuery.data])
 
   useEffect(() => {
     const identity = identityQuery.data
@@ -421,8 +423,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     },
   })
 
-  const isPreparingReply =
-    intent.kind === 'reply' && replyContextQuery.isLoading
+  const isPreparingMessage =
+    isMessageBasedCompose && replyContextQuery.isLoading
   const fromLabel = useMemo(() => {
     if (form.from.trim().length > 0) {
       return form.from
@@ -510,7 +512,11 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   return (
     <FloatingPanel
       panelLabel={
-        intent.kind === 'reply' ? 'reply composer' : 'message composer'
+        intent.kind === 'reply'
+          ? 'reply composer'
+          : intent.kind === 'forward'
+            ? 'forward composer'
+            : 'message composer'
       }
       storageKey="posthaste.compose.panelOffset"
       zIndexClassName="z-[80]"
@@ -518,11 +524,21 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       header={
         <div className="flex h-11 min-w-0 items-center gap-2 px-3">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--brand-coral)_12%,transparent)] text-muted-foreground">
-            {intent.kind === 'reply' ? <Reply size={15} /> : <Mail size={15} />}
+            {intent.kind === 'reply' ? (
+              <Reply size={15} />
+            ) : intent.kind === 'forward' ? (
+              <Forward size={15} />
+            ) : (
+              <Mail size={15} />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">
-              {intent.kind === 'reply' ? 'Reply' : 'New Message'}
+              {intent.kind === 'reply'
+                ? 'Reply'
+                : intent.kind === 'forward'
+                  ? 'Forward'
+                  : 'New Message'}
             </div>
             <div className="truncate text-[11px] text-muted-foreground">
               {fromLabel}
@@ -626,10 +642,12 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       </div>
 
       <div className="min-h-0 flex-1 bg-[color-mix(in_oklab,var(--background)_62%,transparent)]">
-        {isPreparingReply ? (
+        {isPreparingMessage ? (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={16} className="animate-spin" />
-            Preparing reply...
+            {intent.kind === 'forward'
+              ? 'Preparing forward...'
+              : 'Preparing reply...'}
           </div>
         ) : (
           <Suspense
@@ -670,7 +688,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <Button
           type="button"
           onClick={handleSubmit}
-          disabled={sendMutation.isPending || isPreparingReply}
+          disabled={sendMutation.isPending || isPreparingMessage}
           className="bg-brand-coral text-white hover:bg-brand-coral/90"
         >
           {sendMutation.isPending ? (

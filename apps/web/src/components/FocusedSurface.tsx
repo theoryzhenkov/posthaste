@@ -6,8 +6,11 @@ import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
 import { closeCurrentSurfaceWindow, isTauriRuntime } from '@/desktop'
+import { useComposeIntent } from '@/hooks/useComposeIntent'
+import { useEmailActions } from '@/hooks/useEmailActions'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
 import { AttachmentSurface } from './AttachmentSurface'
+import { ComposeOverlay } from './ComposeOverlay'
 import { MessageDetail } from './MessageDetail'
 import { SettingsPanel } from './SettingsPanel'
 
@@ -26,10 +29,23 @@ export function FocusedSurface({
   onSearch,
   onSelectMessage,
 }: FocusedSurfaceProps) {
+  const selectedMessage = surface.kind === 'message' ? surface.params : null
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
     enabled: surface.kind === 'settings',
+  })
+  const actions = useEmailActions()
+  const {
+    closeCompose,
+    composeIntent,
+    forwardSelectedMessage,
+    replyToSelectedMessage,
+  } = useComposeIntent({
+    enabledAccounts: [],
+    onMissingSource: () => {},
+    selectedMessage,
+    selectedView: null,
   })
 
   useEffect(() => {
@@ -72,11 +88,24 @@ export function FocusedSurface({
   }
 
   return (
-    <MessageDetail
-      selection={surface.params}
-      onSearch={onSearch}
-      onSelectMessage={onSelectMessage ?? (() => {})}
-    />
+    <>
+      <MessageDetail
+        selection={surface.params}
+        onArchive={() =>
+          actions.archive({
+            sourceId: surface.params.sourceId,
+            messageId: surface.params.messageId,
+          })
+        }
+        onForward={forwardSelectedMessage}
+        onReply={replyToSelectedMessage}
+        onSearch={onSearch}
+        onSelectMessage={onSelectMessage ?? (() => {})}
+      />
+      {composeIntent && (
+        <ComposeOverlay intent={composeIntent} onClose={closeCompose} />
+      )}
+    </>
   )
 }
 
