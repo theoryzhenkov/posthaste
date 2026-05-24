@@ -64,7 +64,6 @@ nav:
       - Accounts: L0-accounts.md
       - Branding: L0-branding.md
       - Logging: L0-logging.md
-      - Telemetry: L0-telemetry.md
   - Design (L1):
       - JMAP: L1-jmap.md
       - Sync: L1-sync.md
@@ -74,6 +73,5 @@ nav:
       - API: L1-api.md
       - Accounts: L1-accounts.md
       - Logging: L1-logging.md
-      - Telemetry: L1-telemetry.md
   - Implementation (L2):
       - Transport: L2-transport.md
