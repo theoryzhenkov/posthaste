@@ -2,8 +2,16 @@ import { describe, expect, it } from 'bun:test'
 import type { InfiniteData } from '@tanstack/react-query'
 import { QueryClient } from '@tanstack/react-query'
 
-import type { DomainEvent, MessagePage, MessageSummary } from '../src/api/types'
-import { applyDomainEvent } from '../src/domainCache'
+import type {
+  AccountOverview,
+  DomainEvent,
+  MessagePage,
+  MessageSummary,
+} from '../src/api/types'
+import {
+  applyAccountMutationResult,
+  applyDomainEvent,
+} from '../src/domainCache'
 import { EVENT_TOPICS } from '../src/domainVocabulary'
 import {
   applyKeywordPatch,
@@ -59,6 +67,41 @@ function domainEvent(overrides: Partial<DomainEvent> = {}): DomainEvent {
   }
 }
 
+function accountOverview(
+  overrides: Partial<AccountOverview> = {},
+): AccountOverview {
+  return {
+    id: 'primary',
+    name: 'Primary',
+    fullName: null,
+    emailPatterns: ['*@example.com'],
+    driver: 'mock',
+    enabled: true,
+    appearance: { kind: 'initials', initials: 'P', colorHue: 120 },
+    connection: {
+      kind: 'manualCredentials',
+      provider: 'generic',
+      providerKind: 'generic',
+      auth: 'password',
+      username: 'primary@example.com',
+      imap: null,
+      smtp: null,
+      secret: { storage: 'env', configured: false, label: null },
+      baseUrl: null,
+    },
+    createdAt: '2026-04-28T12:00:00Z',
+    updatedAt: '2026-04-28T12:00:00Z',
+    isDefault: true,
+    status: 'ready',
+    push: 'connected',
+    lastSyncAt: '2026-04-28T12:00:00Z',
+    lastSyncError: null,
+    lastSyncErrorCode: null,
+    syncProgress: null,
+    ...overrides,
+  }
+}
+
 function seedMessageList(
   queryClient: QueryClient,
   queryKey: ReturnType<typeof queryKeys.messages>,
@@ -80,6 +123,54 @@ function cachedMessage(
 }
 
 describe('frontend domain cache contracts', () => {
+  // spec: docs/L0-testing#frontend-state-contracts
+  it('keeps account mutation responses from overwriting newer runtime readiness', () => {
+    const queryClient = createQueryClient()
+    const current = accountOverview({ status: 'ready', push: 'connected' })
+    const staleMutationResult = accountOverview({
+      name: 'Renamed Primary',
+      status: 'syncing',
+      push: 'reconnecting',
+      lastSyncAt: null,
+      syncProgress: {
+        syncId: 'sync-1',
+        trigger: 'startup',
+        startedAt: '2026-04-28T12:01:00Z',
+        stage: 'fetching',
+        detail: 'Fetching messages',
+        mailboxName: 'Inbox',
+        mailboxIndex: 1,
+        mailboxCount: 1,
+        messageCount: 1,
+        totalCount: 1,
+      },
+    })
+    queryClient.setQueryData(queryKeys.accounts, [current])
+    queryClient.setQueryData(queryKeys.account(current.id), current)
+
+    applyAccountMutationResult(queryClient, staleMutationResult)
+
+    expect(
+      queryClient.getQueryData<AccountOverview[]>(queryKeys.accounts),
+    ).toEqual([
+      {
+        ...staleMutationResult,
+        status: 'ready',
+        push: 'connected',
+        lastSyncAt: '2026-04-28T12:00:00Z',
+        syncProgress: null,
+      },
+    ])
+    expect(
+      queryClient.getQueryData<AccountOverview>(queryKeys.account(current.id)),
+    ).toMatchObject({
+      name: 'Renamed Primary',
+      status: 'ready',
+      push: 'connected',
+      syncProgress: null,
+    })
+  })
+
   // spec: docs/L0-testing#frontend-state-contracts
   it('keeps optimistic keyword changes visible across mailbox smart mailbox and tag views', () => {
     const queryClient = createQueryClient()

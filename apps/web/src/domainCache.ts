@@ -113,6 +113,25 @@ function statusPatchFromPayload(payload: DomainEvent['payload']) {
   }
 }
 
+function mergeAccountRuntime(
+  current: AccountOverview | undefined,
+  next: AccountOverview,
+): AccountOverview {
+  if (!current || next.status !== 'syncing' || current.status === 'syncing') {
+    return next
+  }
+
+  return {
+    ...next,
+    status: current.status,
+    push: current.push,
+    lastSyncAt: current.lastSyncAt,
+    lastSyncError: current.lastSyncError,
+    lastSyncErrorCode: current.lastSyncErrorCode,
+    syncProgress: current.syncProgress,
+  }
+}
+
 export function mergeAccountOverview(
   queryClient: QueryClient,
   account: AccountOverview,
@@ -127,11 +146,16 @@ export function mergeAccountOverview(
         return [...current, account]
       }
       return current.map((candidate) =>
-        candidate.id === account.id ? account : candidate,
+        candidate.id === account.id
+          ? mergeAccountRuntime(candidate, account)
+          : candidate,
       )
     },
   )
-  queryClient.setQueryData(queryKeys.account(account.id), account)
+  queryClient.setQueryData<AccountOverview>(
+    queryKeys.account(account.id),
+    (current) => mergeAccountRuntime(current, account),
+  )
 }
 
 export function removeAccountOverview(
