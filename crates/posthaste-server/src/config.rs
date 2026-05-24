@@ -31,9 +31,6 @@ pub struct DaemonSettings {
     pub cors_origin: String,
     pub poll_interval_seconds: u64,
     pub log_level: String,
-    pub telemetry_endpoint: Option<String>,
-    pub telemetry_ingest_token: Option<String>,
-    pub telemetry_upload_interval_seconds: u64,
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
@@ -99,49 +96,12 @@ pub fn read_daemon_settings(
         .or(app_toml.logging.level)
         .unwrap_or_else(|| "info".to_string());
 
-    let telemetry_endpoint = std::env::var("POSTHASTE_TELEMETRY_ENDPOINT")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .map(validate_telemetry_endpoint)
-        .transpose()?;
-    let telemetry_ingest_token = std::env::var("POSTHASTE_TELEMETRY_INGEST_TOKEN")
-        .ok()
-        .filter(|value| !value.is_empty());
-    let telemetry_upload_interval_seconds = std::env::var("POSTHASTE_TELEMETRY_UPLOAD_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(300);
-
     Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
         poll_interval_seconds,
         log_level,
-        telemetry_endpoint,
-        telemetry_ingest_token,
-        telemetry_upload_interval_seconds,
     })
-}
-
-fn validate_telemetry_endpoint(endpoint: String) -> Result<String, ConfigError> {
-    let parsed = reqwest::Url::parse(&endpoint)
-        .map_err(|error| ConfigError::Validation(format!("invalid telemetry endpoint: {error}")))?;
-    let is_https = parsed.scheme() == "https";
-    let is_local_http = parsed.scheme() == "http"
-        && parsed
-            .host_str()
-            .is_some_and(|host| matches!(host, "127.0.0.1" | "localhost" | "[::1]"));
-    if !is_https && !is_local_http {
-        return Err(ConfigError::Validation(
-            "telemetry endpoint must use https unless it targets localhost".to_string(),
-        ));
-    }
-    if !parsed.path().ends_with("/telemetry/v1/batches") {
-        return Err(ConfigError::Validation(
-            "telemetry endpoint must end with /telemetry/v1/batches".to_string(),
-        ));
-    }
-    Ok(endpoint)
 }
 
 /// Import a bootstrap TOML file: initialize defaults, then apply seed

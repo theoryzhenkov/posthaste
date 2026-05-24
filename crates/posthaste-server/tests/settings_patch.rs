@@ -13,8 +13,7 @@ use posthaste_domain::{
     AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, CachePolicy,
     ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, TelemetryMode,
-    TelemetrySettings, RFC3339_EPOCH,
+    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
 };
 use posthaste_server::api::{patch_settings, PatchSettingsRequest};
 use posthaste_server::supervisor::AccountSupervisor;
@@ -92,7 +91,6 @@ impl SettingsHarness {
                 supervisor,
                 event_sender,
                 account_logo_root: state_root.join("account-assets/logos"),
-                telemetry_root: state_root.join("telemetry"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
             }),
             config_root,
@@ -182,7 +180,6 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
             Json(PatchSettingsRequest {
                 default_account_id: None,
                 cache_policy: None,
-                telemetry: None,
                 automation_rules: Some(vec![source_rule("primary")]),
                 automation_drafts: None,
             }),
@@ -231,7 +228,6 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
             Json(PatchSettingsRequest {
                 default_account_id: Some(None),
                 cache_policy: None,
-                telemetry: None,
                 automation_rules: None,
                 automation_drafts: None,
             }),
@@ -265,7 +261,6 @@ async fn patch_settings_can_update_cache_policy() {
                     cache_raw_messages: false,
                     cache_attachments: false,
                 }),
-                telemetry: None,
                 automation_rules: None,
                 automation_drafts: None,
             }),
@@ -284,97 +279,6 @@ async fn patch_settings_can_update_cache_policy() {
         app_toml["cache"]["hard_cap_bytes"].as_integer(),
         Some(64 * 1024 * 1024)
     );
-}
-
-#[tokio::test]
-async fn patch_settings_can_update_telemetry_consent() {
-    let harness = SettingsHarness::new();
-
-    let Json(settings) = expect_settings_ok(
-        patch_settings(
-            State(harness.state.clone()),
-            Json(PatchSettingsRequest {
-                default_account_id: None,
-                cache_policy: None,
-                telemetry: Some(TelemetrySettings {
-                    mode: TelemetryMode::Aggregate,
-                    notice_version: Some("2026-05-beta-1".to_string()),
-                    enabled_at: Some("2026-05-09T12:00:00Z".to_string()),
-                    categories: vec!["health".to_string(), "performance".to_string()],
-                }),
-                automation_rules: None,
-                automation_drafts: None,
-            }),
-        )
-        .await,
-    );
-
-    assert_eq!(settings.telemetry.mode, TelemetryMode::Aggregate);
-    assert_eq!(
-        settings.telemetry.categories,
-        vec!["health".to_string(), "performance".to_string()]
-    );
-    let app_toml = harness.app_toml();
-    assert_eq!(app_toml["telemetry"]["mode"].as_str(), Some("aggregate"));
-    assert_eq!(
-        app_toml["telemetry"]["notice_version"].as_str(),
-        Some("2026-05-beta-1")
-    );
-}
-
-#[tokio::test]
-async fn patch_settings_normalizes_telemetry_off_and_rejects_incomplete_opt_in() {
-    let harness = SettingsHarness::new();
-    std::fs::create_dir_all(harness.state.telemetry_root.join("pending")).expect("telemetry dir");
-    std::fs::write(
-        harness.state.telemetry_root.join("pending/batch.json"),
-        "{}",
-    )
-    .expect("telemetry batch");
-
-    let Json(settings) = expect_settings_ok(
-        patch_settings(
-            State(harness.state.clone()),
-            Json(PatchSettingsRequest {
-                default_account_id: None,
-                cache_policy: None,
-                telemetry: Some(TelemetrySettings {
-                    mode: TelemetryMode::Off,
-                    notice_version: Some("2026-05-beta-1".to_string()),
-                    enabled_at: Some("2026-05-09T12:00:00Z".to_string()),
-                    categories: vec!["health".to_string()],
-                }),
-                automation_rules: None,
-                automation_drafts: None,
-            }),
-        )
-        .await,
-    );
-
-    assert_eq!(settings.telemetry.mode, TelemetryMode::Off);
-    assert_eq!(settings.telemetry.notice_version, None);
-    assert_eq!(settings.telemetry.enabled_at, None);
-    assert!(settings.telemetry.categories.is_empty());
-    assert!(!harness.state.telemetry_root.exists());
-
-    let error = patch_settings(
-        State(harness.state.clone()),
-        Json(PatchSettingsRequest {
-            default_account_id: None,
-            cache_policy: None,
-            telemetry: Some(TelemetrySettings {
-                mode: TelemetryMode::Aggregate,
-                notice_version: None,
-                enabled_at: None,
-                categories: Vec::new(),
-            }),
-            automation_rules: None,
-            automation_drafts: None,
-        }),
-    )
-    .await
-    .expect_err("settings patch should reject incomplete telemetry opt-in");
-    assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -402,7 +306,6 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
             Json(PatchSettingsRequest {
                 default_account_id: None,
                 cache_policy: None,
-                telemetry: None,
                 automation_rules: None,
                 automation_drafts: Some(vec![draft]),
             }),
@@ -434,7 +337,6 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
         Json(PatchSettingsRequest {
             default_account_id: Some(Some("missing".to_string())),
             cache_policy: None,
-            telemetry: None,
             automation_rules: None,
             automation_drafts: None,
         }),
@@ -475,7 +377,6 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         Json(PatchSettingsRequest {
             default_account_id: None,
             cache_policy: None,
-            telemetry: None,
             automation_rules: Some(vec![invalid_rule]),
             automation_drafts: None,
         }),

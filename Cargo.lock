@@ -3423,8 +3423,6 @@ dependencies = [
  "posthaste-imap",
  "posthaste-observability",
  "posthaste-store",
- "posthaste-telemetry",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3454,38 +3452,6 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
-]
-
-[[package]]
-name = "posthaste-telemetry"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "hmac",
- "posthaste-domain",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "posthaste-telemetry-ingest"
-version = "0.1.0"
-dependencies = [
- "axum",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tower",
- "uuid",
 ]
 
 [[package]]

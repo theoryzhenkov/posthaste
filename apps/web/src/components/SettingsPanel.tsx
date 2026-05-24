@@ -350,17 +350,8 @@ export function SettingsPanel({
   const defaultMutation = useMutation({
     mutationFn: (accountId: string | null) =>
       patchSettings({ defaultAccountId: accountId }),
-    onSuccess: async (settings) => {
-      queryClient.setQueryData(queryKeys.settings, settings)
+    onSuccess: async () => {
       invalidateAccountReadModels(queryClient)
-    },
-  })
-
-  const telemetryMutation = useMutation({
-    mutationFn: (telemetry: AppSettings['telemetry']) =>
-      patchSettings({ telemetry }),
-    onSuccess: (settings) => {
-      queryClient.setQueryData(queryKeys.settings, settings)
     },
   })
 
@@ -456,24 +447,10 @@ export function SettingsPanel({
               <GeneralPane
                 accounts={accounts}
                 defaultAccountId={settingsQuery.data?.defaultAccountId}
-                telemetry={settingsQuery.data?.telemetry}
                 onDefaultAccountChange={(accountId) =>
                   defaultMutation.mutate(accountId)
                 }
-                onTelemetryModeChange={(mode) => {
-                  telemetryMutation.mutate({
-                    mode,
-                    noticeVersion: mode === 'off' ? null : '2026-05-beta-1',
-                    enabledAt: mode === 'off' ? null : new Date().toISOString(),
-                    categories:
-                      mode === 'off'
-                        ? []
-                        : ['health', 'performance', 'cache', 'ui', 'profile'],
-                  })
-                }}
-                isPending={
-                  defaultMutation.isPending || telemetryMutation.isPending
-                }
+                isPending={defaultMutation.isPending}
               />
             </div>
           )}
