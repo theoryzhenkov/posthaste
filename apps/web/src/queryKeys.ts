@@ -18,6 +18,7 @@ export const queryKeys = {
   accounts: ['accounts'] as const,
   account: (accountId: string | null) => ['account', accountId] as const,
   senderAddresses: ['sender-addresses'] as const,
+  composeRecipientSuggestions: ['compose-recipient-suggestions'] as const,
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
   sidebar: ['sidebar'] as const,
   messagesRoot: ['messages'] as const,
