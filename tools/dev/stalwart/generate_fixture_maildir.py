@@ -417,7 +417,10 @@ def message_path(root: Path, fixture: MessageFixture, index: int) -> Path:
             for enabled, flag in ((fixture.flagged, "F"), (fixture.seen, "S"))
             if enabled
         )
-        return mailbox_root / "cur" / f"{int(fixture.when.timestamp())}.{index:02d}:2,{flags}"
+        # Keep checked-in fixture names portable across Windows checkouts. The
+        # dev seed script restores `!2,` to the Maildir `:2,` flag separator in
+        # its temporary staging directory before importing into Stalwart.
+        return mailbox_root / "cur" / f"{int(fixture.when.timestamp())}.{index:02d}!2,{flags}"
 
     return mailbox_root / "new" / f"{int(fixture.when.timestamp())}.{index:02d}"
 

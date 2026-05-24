@@ -164,9 +164,9 @@ describe('frontend domain cache contracts', () => {
       true,
     )
     expect(queryClient.getQueryState(mailboxList)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(queryKeys.smartMailboxes)?.isInvalidated).toBe(
-      true,
-    )
+    expect(
+      queryClient.getQueryState(queryKeys.smartMailboxes)?.isInvalidated,
+    ).toBe(true)
     expect(queryClient.getQueryState(messageList)?.isInvalidated).toBe(true)
   })
 })
