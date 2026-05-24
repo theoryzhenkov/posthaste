@@ -626,10 +626,6 @@ function SettingsRail({
           })}
         </div>
       </nav>
-
-      <div className="hidden shrink-0 px-6 py-5 font-mono text-[11px] text-sidebar-foreground/45 md:block">
-        v1.0.0 · JMAP 0.3
-      </div>
     </aside>
   )
 }
