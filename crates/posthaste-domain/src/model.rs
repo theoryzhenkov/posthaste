@@ -182,47 +182,9 @@ pub struct AppSettings {
     #[serde(default)]
     pub cache_policy: CachePolicy,
     #[serde(default)]
-    pub telemetry: TelemetrySettings,
-    #[serde(default)]
     pub automation_rules: Vec<AutomationRule>,
     #[serde(default)]
     pub automation_drafts: Vec<AutomationRule>,
-}
-
-/// User consent state for beta telemetry collection.
-///
-/// @spec docs/L1-telemetry#consent
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TelemetrySettings {
-    pub mode: TelemetryMode,
-    pub notice_version: Option<String>,
-    pub enabled_at: Option<String>,
-    #[serde(default)]
-    pub categories: Vec<String>,
-}
-
-impl Default for TelemetrySettings {
-    fn default() -> Self {
-        Self {
-            mode: TelemetryMode::Off,
-            notice_version: None,
-            enabled_at: None,
-            categories: Vec::new(),
-        }
-    }
-}
-
-/// Telemetry consent mode. Telemetry is off by default.
-///
-/// @spec docs/L1-telemetry#consent
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TelemetryMode {
-    #[default]
-    Off,
-    Aggregate,
-    Product,
 }
 
 /// Backend driver type for an account.

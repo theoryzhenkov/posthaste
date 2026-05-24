@@ -286,11 +286,6 @@ pub mod events {
     pub const STORE_SYNC_BATCH_APPLIED: LogEvent = LogEvent::new("store.sync.batch_applied");
     pub const STORE_SYNC_BATCH_APPLYING: LogEvent = LogEvent::new("store.sync.batch_applying");
 
-    pub const TELEMETRY_SPOOL_WRITE_FAILED: LogEvent =
-        LogEvent::new("telemetry.spool.write_failed");
-    pub const TELEMETRY_UPLOAD_COMPLETED: LogEvent = LogEvent::new("telemetry.upload.completed");
-    pub const TELEMETRY_UPLOAD_FAILED: LogEvent = LogEvent::new("telemetry.upload.failed");
-
     pub const SUPERVISOR_ACCOUNT_DISABLED: LogEvent = LogEvent::new("supervisor.account.disabled");
     pub const SUPERVISOR_ACCOUNT_REMOVED: LogEvent = LogEvent::new("supervisor.account.removed");
     pub const SUPERVISOR_ACCOUNT_RUNTIME_STARTED: LogEvent =

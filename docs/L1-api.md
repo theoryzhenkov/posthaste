@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-05-16
-reviewed: 2026-05-16
+modified: 2026-05-09
+reviewed: 2026-05-09
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -23,11 +23,6 @@ All endpoints are prefixed with `/v1`.
 In browser-localhost mode, `posthaste serve` serves the built React frontend on non-API paths and keeps all JSON/SSE endpoints under `/v1`. Unknown `/v1` paths return API 404s rather than the frontend shell.
 
 ### Settings
-
-`AppSettings` includes `defaultAccountId`, `cachePolicy`, `automationRules`,
-`automationDrafts`, and `telemetry`. `telemetry.mode` is `off`, `aggregate`, or
-`product`; fresh/default settings use `off`. `PATCH /settings` accepts the same
-`telemetry` object so the UI can persist explicit beta consent.
 
 | Method | Path                        | Handler                   | Request                        | Response                        |
 | ------ | --------------------------- | ------------------------- | ------------------------------ | ------------------------------- |

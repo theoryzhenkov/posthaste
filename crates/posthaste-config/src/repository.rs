@@ -65,7 +65,6 @@ impl TomlConfigRepository {
             daemon: Default::default(),
             logging: Default::default(),
             cache: Default::default(),
-            telemetry: Default::default(),
         };
         write_app_toml(&self.config_root, &app)?;
 

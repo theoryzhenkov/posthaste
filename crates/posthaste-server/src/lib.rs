@@ -11,7 +11,7 @@ pub mod supervisor;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
@@ -20,11 +20,8 @@ use axum::Router;
 use dotenvy::dotenv;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
-use posthaste_observability::{events, ph_info, ph_warn};
+use posthaste_observability::{events, ph_info};
 use posthaste_store::DatabaseStore;
-use posthaste_telemetry::{
-    upload_pending, TelemetryEvent, TelemetryResult, TelemetrySpool, UploadConfig,
-};
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -32,7 +29,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
 
-use crate::config::{resolve_roots, DaemonSettings};
+use crate::config::resolve_roots;
 use crate::oauth::OAuthFlowStore;
 use crate::secret::SystemSecretStore;
 use crate::supervisor::AccountSupervisor;
@@ -48,7 +45,6 @@ pub struct AppState {
     pub supervisor: Arc<AccountSupervisor>,
     pub event_sender: broadcast::Sender<DomainEvent>,
     pub account_logo_root: PathBuf,
-    pub telemetry_root: PathBuf,
     pub oauth_flows: Arc<OAuthFlowStore>,
 }
 
@@ -62,56 +58,6 @@ impl AppState {
             let _ = self.event_sender.send(event.clone());
         }
     }
-}
-
-fn spawn_telemetry_upload_worker(
-    telemetry_root: PathBuf,
-    service: Arc<MailService>,
-    runtime: &DaemonSettings,
-) {
-    let Some(endpoint) = runtime.telemetry_endpoint.clone() else {
-        return;
-    };
-    let config = UploadConfig {
-        endpoint,
-        ingest_token: runtime.telemetry_ingest_token.clone(),
-    };
-    let interval_seconds = runtime.telemetry_upload_interval_seconds.max(60);
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let mut interval = tokio::time::interval(Duration::from_secs(interval_seconds));
-        loop {
-            interval.tick().await;
-            let Ok(settings) = service.get_app_settings() else {
-                continue;
-            };
-            if matches!(
-                settings.telemetry.mode,
-                posthaste_domain::TelemetryMode::Off
-            ) {
-                continue;
-            }
-            match upload_pending(&telemetry_root, &config, &client).await {
-                Ok(outcome) if outcome.uploaded > 0 || outcome.discarded > 0 => {
-                    ph_info!(
-                        events::TELEMETRY_UPLOAD_COMPLETED,
-                        uploaded_count = outcome.uploaded,
-                        retained_count = outcome.retained,
-                        discarded_count = outcome.discarded,
-                        "uploaded telemetry batches"
-                    );
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    ph_warn!(
-                        events::TELEMETRY_UPLOAD_FAILED,
-                        error = %error,
-                        "failed to upload telemetry batches"
-                    );
-                }
-            }
-        }
-    });
 }
 
 /// Handle returned by [`start_server`]. Holds the bound address, the server
@@ -143,7 +89,6 @@ async fn api_not_found() -> StatusCode {
 /// @spec docs/L0-api#axum
 /// @spec docs/L1-accounts#initialization
 pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
-    let startup_started_at = Instant::now();
     #[cfg(debug_assertions)]
     dotenv().ok();
 
@@ -207,31 +152,6 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor.start_account(&source).await;
     }
 
-    let telemetry_settings = service
-        .get_app_settings()
-        .expect("failed to load app settings")
-        .telemetry;
-    let telemetry_spool = TelemetrySpool::new(
-        &roots.state_root,
-        telemetry_settings,
-        env!("CARGO_PKG_VERSION").to_string(),
-    );
-    if let Err(error) = telemetry_spool.emit(TelemetryEvent::app_startup_completed(
-        startup_started_at.elapsed(),
-        TelemetryResult::Ok,
-    )) {
-        ph_warn!(
-            events::TELEMETRY_SPOOL_WRITE_FAILED,
-            error = %error,
-            "failed to spool telemetry event"
-        );
-    }
-    spawn_telemetry_upload_worker(
-        roots.state_root.join("telemetry"),
-        service.clone(),
-        &runtime,
-    );
-
     let state = Arc::new(AppState {
         service,
         store,
@@ -239,7 +159,6 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor,
         event_sender,
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
-        telemetry_root: roots.state_root.join("telemetry"),
         oauth_flows: Arc::new(OAuthFlowStore::default()),
     });
 

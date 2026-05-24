@@ -32,8 +32,6 @@ posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-store = { path = "../posthaste-store" }
-posthaste-telemetry = { path = "../posthaste-telemetry" }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

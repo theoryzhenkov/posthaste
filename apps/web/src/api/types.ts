@@ -21,20 +21,9 @@ export interface MailEndpointSettings {
 }
 
 /** @spec docs/L1-api#endpoint-table */
-export type TelemetryMode = 'off' | 'aggregate' | 'product'
-
-/** @spec docs/L1-telemetry#consent */
-export interface TelemetrySettings {
-  mode: TelemetryMode
-  noticeVersion: string | null
-  enabledAt: string | null
-  categories: string[]
-}
-
 export interface AppSettings {
   defaultAccountId: string | null
   cachePolicy: CachePolicy
-  telemetry: TelemetrySettings
   automationRules: AutomationRule[]
   automationDrafts: AutomationRule[]
 }

@@ -23,11 +23,9 @@ use posthaste_domain::{
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
-    TelemetryMode, TelemetrySettings, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED,
+    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use posthaste_observability::{events, ph_warn};
-use posthaste_telemetry::TelemetrySpool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs;
@@ -294,7 +292,6 @@ pub struct PatchSettingsRequest {
     #[serde(default)]
     pub default_account_id: Option<Option<String>>,
     pub cache_policy: Option<CachePolicy>,
-    pub telemetry: Option<TelemetrySettings>,
     pub automation_rules: Option<Vec<AutomationRule>>,
     pub automation_drafts: Option<Vec<AutomationRule>>,
 }
