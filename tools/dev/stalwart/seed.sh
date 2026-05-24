@@ -133,7 +133,7 @@ ensure_jmap_identity() {
 }
 
 stage_fixture_maildir() {
-  local staged_root source rel dir mailbox_dir target_dir
+  local staged_root source rel dir mailbox_dir target_dir base target_name
   staged_root="$(mktemp -d)"
   mkdir -p "$staged_root/cur" "$staged_root/new" "$staged_root/tmp"
 
@@ -151,7 +151,9 @@ stage_fixture_maildir() {
       target_dir="$staged_root/$mailbox_dir"
     fi
     mkdir -p "$target_dir/cur" "$target_dir/new" "$target_dir/tmp"
-    cp "$source" "$target_dir/cur/$(basename "$source")"
+    base="$(basename "$source")"
+    target_name="${base/!2,/:2,}"
+    cp "$source" "$target_dir/cur/$target_name"
   done < <(find "$FIXTURE_ROOT" -type f | sort)
 
   printf '%s\n' "$staged_root"
