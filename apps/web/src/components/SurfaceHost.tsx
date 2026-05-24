@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
-import { X } from 'lucide-react'
+import { ExternalLink, X } from 'lucide-react'
+import { toast } from 'sonner'
 
+import { openSurfaceInSeparateWindow } from '@/desktop'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { Button } from './ui/button'
 import { FocusedSurface } from './FocusedSurface'
@@ -49,9 +51,35 @@ export function SurfaceHost({
     return null
   }
 
+  function handleOpenInWindow() {
+    void openSurfaceInSeparateWindow(surface)
+      .then(() => {
+        if (canClose) {
+          onClose()
+        }
+      })
+      .catch((error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to open window',
+        )
+      })
+  }
+
   if (surface.kind === 'settings') {
     return (
       <div className="fixed inset-0 z-[2100] bg-background text-foreground">
+        <div className="absolute right-3 top-3 z-10 flex gap-1">
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Open settings in separate window"
+            title="Open in window"
+            onClick={handleOpenInWindow}
+          >
+            <ExternalLink size={15} strokeWidth={1.7} />
+          </Button>
+        </div>
         <FocusedSurface
           surface={surface}
           canClose={canClose}
@@ -70,6 +98,16 @@ export function SurfaceHost({
             {surfaceTitle(surface)}
           </p>
         </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Open surface in separate window"
+          title="Open in window"
+          onClick={handleOpenInWindow}
+        >
+          <ExternalLink size={15} strokeWidth={1.7} />
+        </Button>
         <Button
           type="button"
           size="icon-sm"
