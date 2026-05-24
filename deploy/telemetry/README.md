@@ -1,12 +1,3 @@
----
-scope: L3
-summary: "Telemetry ingest container smoke test and deployment notes"
-modified: 2026-05-16
-reviewed: 2026-05-16
-depends:
-  - path: docs/L2-telemetry-ingest
----
-
 # PostHaste telemetry ingest deployment
 
 This directory packages the beta telemetry receiver. It is a remote service for
@@ -48,31 +39,28 @@ curl -fsS -X POST http://127.0.0.1:8104/telemetry/v1/batches \
   }'
 ```
 
-## Published image
+## Tars fit
 
-The telemetry image workflow publishes `deploy/telemetry/Dockerfile` on `main`
-and manual dispatch:
+The Tars app system in theor-ops expects one app directory with an `app.yaml`.
+Use `deploy/telemetry/tars-app.yaml.example` as the starting point:
 
 ```text
-ghcr.io/theoryzhenkov/posthaste/posthaste-telemetry-ingest:latest
-ghcr.io/theoryzhenkov/posthaste/posthaste-telemetry-ingest:<commit-sha>
+hosts/nixos/tars/apps/posthaste-telemetry/app.yaml
 ```
 
-Use the SHA tag for production-style beta deployments once the workflow has run.
+Then run `just app generate` and deploy from theor-ops.
 
-## Production deployment
+Tars currently generates systemd `docker run` services from YAML. Before beta
+traffic is enabled, configure `POSTHASTE_TELEMETRY_INGEST_TOKEN` via app secrets
+and add persistent storage for SQLite, equivalent to:
 
-Run the container behind an HTTPS reverse proxy or managed container platform.
-Before beta traffic is enabled, configure `POSTHASTE_TELEMETRY_INGEST_TOKEN` as
-a secret and mount persistent storage at `/data`, equivalent to:
-
-```yaml
-volumes:
-  - /var/lib/posthaste-telemetry:/data
+```nix
+volumes = [ "/var/lib/posthaste-telemetry:/data" ];
 ```
 
-Do not enable beta telemetry without this volume. Container replacement must not
-erase raw retention state or retry dedupe state.
+If the app generator cannot express that volume yet, extend theor-ops or add a
+small Nix override for this app. Do not enable beta telemetry without this
+volume, or container replacement will erase all raw and dedupe state.
 
 ## Runtime variables
 

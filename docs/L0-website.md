@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Public PostHaste product showcase site, visual direction, and container deployment"
-modified: 2026-05-16
-reviewed: 2026-05-16
+modified: 2026-04-25
+reviewed: 2026-04-25
 depends:
   - path: README
   - path: docs/L0-branding

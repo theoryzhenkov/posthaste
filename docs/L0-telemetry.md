@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Beta telemetry collection for application health, performance, and cache behavior"
-modified: 2026-05-16
-reviewed: 2026-05-16
+modified: 2026-04-28
+reviewed: 2026-04-28
 depends:
   - path: README
   - path: docs/L0-logging
@@ -45,7 +45,7 @@ In scope:
 - On-device event emission for application health, performance, cache, sync, send/receive protocol share, UI, configuration-profile, uploader, and error-bucket signals
 - Local telemetry spool under `<data_dir>/telemetry/`, not `<data_dir>/logs/`
 - Upload worker with bounded retry, backoff, and queue limits
-- Server-side ingestion endpoint hosted on operator-controlled infrastructure, with strict schema validation, size limits, rate limits, duplicate handling, and short raw retention
+- PostHaste-owned server-side ingestion endpoint, hosted on the operator's own Hetzner machine for beta v1, with strict schema validation, size limits, rate limits, duplicate handling, and short raw retention
 - Aggregate analysis tables and dashboards for beta health
 - Public/internal telemetry dictionary listing event names, fields, purpose, sensitivity class, and retention
 
