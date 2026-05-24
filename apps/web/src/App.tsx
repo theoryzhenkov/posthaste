@@ -253,6 +253,7 @@ function MailClient({
   const {
     closeCompose,
     composeIntent,
+    forwardSelectedMessage: handleForward,
     openCompose: handleCompose,
     replyToSelectedMessage: handleReply,
   } = useComposeIntent({
@@ -510,6 +511,9 @@ function MailClient({
                 <ResizablePanel id="message-detail" minSize="300px">
                   <MessageDetail
                     selection={selectedMessage}
+                    onArchive={handleArchive}
+                    onForward={handleForward}
+                    onReply={handleReply}
                     onSelectMessage={handleSelectMessage}
                     onSearch={handleSearch}
                   />

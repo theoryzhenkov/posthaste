@@ -50,6 +50,9 @@ interface MessageSelection extends SourceMessageRef {
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null
+  onArchive: () => void
+  onForward: () => void
+  onReply: () => void
   onSelectMessage: (message: MessageSummary) => void
   onSearch?: (query: string, append?: boolean) => void
 }
@@ -99,6 +102,9 @@ function formatAbsoluteDate(value: string): string {
  */
 export function MessageDetail({
   selection,
+  onArchive,
+  onForward,
+  onReply,
   onSelectMessage,
   onSearch,
 }: MessageDetailProps) {
@@ -305,7 +311,8 @@ export function MessageDetail({
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Button
-                  disabled
+                  aria-label="Reply"
+                  onClick={onReply}
                   size="icon-sm"
                   title="Reply"
                   type="button"
@@ -314,7 +321,8 @@ export function MessageDetail({
                   <Reply size={14} strokeWidth={1.6} />
                 </Button>
                 <Button
-                  disabled
+                  aria-label="Forward"
+                  onClick={onForward}
                   size="icon-sm"
                   title="Forward"
                   type="button"
@@ -323,7 +331,8 @@ export function MessageDetail({
                   <Forward size={14} strokeWidth={1.6} />
                 </Button>
                 <Button
-                  disabled
+                  aria-label="Archive"
+                  onClick={onArchive}
                   size="icon-sm"
                   title="Archive"
                   type="button"
