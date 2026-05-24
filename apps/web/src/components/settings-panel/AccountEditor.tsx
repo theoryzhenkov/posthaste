@@ -210,7 +210,7 @@ export function AccountEditor({
         }
       />
 
-      {existingAccount?.syncProgress && (
+      {existingAccount?.status === 'syncing' && existingAccount.syncProgress && (
         <div className="-mt-4 mb-4">
           <SyncProgressMeter account={existingAccount} />
         </div>

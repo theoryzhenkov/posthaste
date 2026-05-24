@@ -324,7 +324,7 @@ export function statusTone(status: AccountOverview['status']): string {
 
 export function syncProgressLabel(account: AccountOverview): string | null {
   const progress = account.syncProgress
-  if (!progress) {
+  if (account.status !== 'syncing' || !progress) {
     return null
   }
 
