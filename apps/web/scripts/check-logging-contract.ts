@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 const sourceRoot = join(root, 'src')
 const allowedPinoImport = 'src/logger.ts'
 const allowedEventLiteral = 'src/logEvents.ts'
@@ -21,7 +22,7 @@ function visit(dir: string, files: string[] = []): string[] {
 }
 
 for (const file of visit(sourceRoot)) {
-  const rel = relative(root, file)
+  const rel = relative(root, file).replaceAll('\\', '/')
   const source = readFileSync(file, 'utf8')
 
   if (rel !== allowedPinoImport && /from ['"]pino['"]/.test(source)) {
