@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-04-28
-reviewed: 2026-04-29
+modified: 2026-05-24
+reviewed: 2026-05-24
 depends:
   - path: docs/L0-ui
   - path: docs/L0-testing
@@ -175,7 +175,7 @@ Message result previews use the global message search endpoint so the palette do
 
 ## Settings And Overlays
 
-Settings opens through the shared `SurfaceHost` as a focused settings surface. On web, the host renders the settings panel over the app; on desktop, the same serializable descriptor can be mapped to a native settings window.
+Settings opens through the shared `SurfaceHost` as a focused settings surface. On web, the host renders the settings panel over the app and exposes an open-in-window control for focused surfaces; on desktop, the same serializable descriptor can be mapped to a native settings window.
 
 The connected accounts list and main sidebar account headers use the account's configured mark as the leading visual identity. Account health is shown separately as a small status dot next to the account name, not as the row's primary icon. When `AccountOverview.syncProgress` is present, the connected accounts list and account editor show the current phase as a compact label with a progress meter. The UI renders backend-provided detail text and mailbox counters, but it does not parse raw logs.
 
@@ -183,7 +183,7 @@ Settings detail pages use shared settings primitives: a centered `SettingsPage`,
 
 Account editing follows that shared property-page pattern. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
 
-Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved or pinned so the user can keep reading and interacting with the underlying mail UI.
+Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved, pinned, resized, or expanded so the user can keep reading and interacting with the underlying mail UI.
 
 Compose exposes `From` as editable text with suggestions instead of a fixed
 select. Suggestions include configured account addresses, the current provider
