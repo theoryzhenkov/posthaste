@@ -153,6 +153,7 @@ interface SettingsPanelProps {
   onActiveAccountChange: (accountId: string | null) => void
   onNavigate: (surface: SettingsSurfaceDescriptor) => void
   onClose?: () => void
+  showBackToApp?: boolean
   shell?: 'page' | 'overlay'
 }
 
@@ -169,6 +170,7 @@ export function SettingsPanel({
   onActiveAccountChange,
   onNavigate,
   onClose,
+  showBackToApp = true,
   shell = 'page',
 }: SettingsPanelProps) {
   const queryClient = useQueryClient()
@@ -436,7 +438,7 @@ export function SettingsPanel({
         activeCategory={activeCategory}
         accountCount={accounts.length}
         smartMailboxCount={smartMailboxSummaries.length}
-        onClose={onClose}
+        onClose={showBackToApp ? onClose : undefined}
         onSelect={handleSelectCategory}
       />
 

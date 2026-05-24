@@ -62,6 +62,7 @@ export function FocusedSurface({
             ? (onClose ?? (() => void closeCurrentSurfaceWindow()))
             : undefined
         }
+        showBackToApp={onClose !== undefined || !isTauriRuntime()}
         shell="overlay"
       />
     )

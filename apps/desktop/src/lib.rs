@@ -4,10 +4,13 @@ use posthaste_observability::{
 };
 use posthaste_server::ServerConfig;
 use serde::Deserialize;
+use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::webview::WebviewWindow;
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_utils::config::WebviewUrl;
+
+const CLOSE_WINDOW_MENU_ID: &str = "close-window";
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -232,6 +235,11 @@ struct EmbeddedBackend {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
+                close_focused_webview_window(app);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             log_from_frontend,
             open_surface_window
@@ -255,6 +263,8 @@ pub fn run() {
             app.manage(handle);
             app.manage(EmbeddedBackend { port });
 
+            app.set_menu(build_app_menu(app)?)?;
+
             build_window(
                 app.handle(),
                 "main",
@@ -271,7 +281,32 @@ pub fn run() {
         .expect("error while running Posthaste");
 }
 
-fn build_window<M: Manager<R>, R: tauri::Runtime>(
+fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<R>> {
+    let close_window = MenuItem::with_id(
+        manager,
+        CLOSE_WINDOW_MENU_ID,
+        "Close Window",
+        true,
+        Some("CmdOrCtrl+W"),
+    )?;
+    let file_menu = SubmenuBuilder::new(manager, "File")
+        .item(&close_window)
+        .build()?;
+
+    MenuBuilder::new(manager).item(&file_menu).build()
+}
+
+fn close_focused_webview_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+    {
+        let _ = window.close();
+    }
+}
+
+fn build_window<M: Manager<R>, R: Runtime>(
     manager: &M,
     label: &str,
     path: &str,
