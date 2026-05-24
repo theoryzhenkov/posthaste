@@ -5,7 +5,7 @@
  * @spec docs/L1-compose#mime-structure
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Loader2, Mail, Reply, Send } from 'lucide-react'
+import { ChevronDown, Forward, Loader2, Mail, Reply, Send } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 
 import {
   fetchAccounts,
+  fetchConversations,
   fetchIdentity,
   fetchReplyContext,
   fetchSenderAddresses,
@@ -31,6 +32,13 @@ import type {
   Recipient,
   SendMessageInput,
 } from '@/api/types'
+import {
+  buildRecipientSuggestionOptions,
+  filterAddressSuggestions,
+  formatAddressSuggestion,
+  insertAddressSuggestion,
+  type AddressSuggestionOption,
+} from '@/composeAddressSuggestions'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
@@ -48,6 +56,7 @@ const MarkdownComposerEditor = lazy(() =>
 export type ComposeIntent =
   | { kind: 'new'; sourceId: string }
   | { kind: 'reply'; sourceId: string; messageId: string }
+  | { kind: 'forward'; sourceId: string; messageId: string }
 
 interface ComposeOverlayProps {
   intent: ComposeIntent
@@ -215,29 +224,30 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     queryKey: queryKeys.senderAddresses,
     queryFn: fetchSenderAddresses,
   })
+  const recipientSuggestionQuery = useQuery({
+    queryKey: queryKeys.composeRecipientSuggestions,
+    queryFn: () =>
+      fetchConversations({ limit: 75, sort: 'date', sortDir: 'desc' }),
+  })
+  const isMessageBasedCompose = intent.kind !== 'new'
   const replyContextQuery = useQuery({
-    queryKey:
-      intent.kind === 'reply'
-        ? ['reply-context', intent.sourceId, intent.messageId]
-        : ['reply-context', null],
+    queryKey: isMessageBasedCompose
+      ? ['reply-context', intent.sourceId, intent.messageId]
+      : ['reply-context', null],
     queryFn: () =>
       fetchReplyContext(
         intent.sourceId,
-        intent.kind === 'reply' ? intent.messageId : '',
+        isMessageBasedCompose ? intent.messageId : '',
       ),
-    enabled: intent.kind === 'reply',
+    enabled: isMessageBasedCompose,
   })
 
-  const composeKey =
-    intent.kind === 'reply'
-      ? `${intent.sourceId}:${intent.messageId}`
-      : intent.sourceId
+  const composeKey = isMessageBasedCompose
+    ? `${intent.kind}:${intent.sourceId}:${intent.messageId}`
+    : `new:${intent.sourceId}`
 
   const initialForm = useMemo<ComposeForm>(() => {
-    if (intent.kind === 'new') {
-      return EMPTY_FORM
-    }
-    if (!replyContextQuery.data) {
+    if (intent.kind === 'new' || !replyContextQuery.data) {
       return EMPTY_FORM
     }
     const quoted = replyContextQuery.data.quotedBody
@@ -245,17 +255,22 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       : ''
     return {
       from: '',
-      to: formatRecipients(replyContextQuery.data.to),
+      to:
+        intent.kind === 'reply'
+          ? formatRecipients(replyContextQuery.data.to)
+          : '',
       cc: '',
       bcc: '',
-      subject: replyContextQuery.data.replySubject,
+      subject:
+        intent.kind === 'reply'
+          ? replyContextQuery.data.replySubject
+          : replyContextQuery.data.forwardSubject,
       body: quoted,
     }
   }, [intent.kind, replyContextQuery.data])
-  const formResetKey =
-    intent.kind === 'reply'
-      ? `${composeKey}:${replyContextQuery.data ? 'ready' : 'loading'}`
-      : composeKey
+  const formResetKey = isMessageBasedCompose
+    ? `${composeKey}:${replyContextQuery.data ? 'ready' : 'loading'}`
+    : composeKey
   const [composeState, setComposeState] = useState(() => ({
     errorMessage: null as string | null,
     form: initialForm,
@@ -306,10 +321,10 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   )
 
   useEffect(() => {
-    if (intent.kind === 'reply' && replyContextQuery.data) {
+    if (isMessageBasedCompose && replyContextQuery.data) {
       requestAnimationFrame(() => bodyRef.current?.focus())
     }
-  }, [composeKey, intent.kind, replyContextQuery.data])
+  }, [composeKey, isMessageBasedCompose, replyContextQuery.data])
 
   useEffect(() => {
     const identity = identityQuery.data
@@ -350,6 +365,13 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       intent.sourceId,
       senderAddressQuery.data,
     ],
+  )
+  const recipientSuggestions = useMemo(
+    () =>
+      buildRecipientSuggestionOptions(accountsQuery.data ?? [], [
+        recipientSuggestionQuery.data,
+      ]),
+    [accountsQuery.data, recipientSuggestionQuery.data],
   )
   const displayedFromOptions = useMemo(() => {
     const needle = form.from.trim().toLowerCase()
@@ -421,8 +443,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     },
   })
 
-  const isPreparingReply =
-    intent.kind === 'reply' && replyContextQuery.isLoading
+  const isPreparingMessage =
+    isMessageBasedCompose && replyContextQuery.isLoading
   const fromLabel = useMemo(() => {
     if (form.from.trim().length > 0) {
       return form.from
@@ -510,19 +532,33 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   return (
     <FloatingPanel
       panelLabel={
-        intent.kind === 'reply' ? 'reply composer' : 'message composer'
+        intent.kind === 'reply'
+          ? 'reply composer'
+          : intent.kind === 'forward'
+            ? 'forward composer'
+            : 'message composer'
       }
       storageKey="posthaste.compose.panelOffset"
       zIndexClassName="z-[80]"
-      className="flex h-[min(760px,calc(100vh-40px))] max-w-[860px] flex-col"
+      className="flex h-[min(760px,calc(100vh-40px))] w-[min(860px,calc(100vw-2rem))] flex-col"
       header={
         <div className="flex h-11 min-w-0 items-center gap-2 px-3">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--brand-coral)_12%,transparent)] text-muted-foreground">
-            {intent.kind === 'reply' ? <Reply size={15} /> : <Mail size={15} />}
+            {intent.kind === 'reply' ? (
+              <Reply size={15} />
+            ) : intent.kind === 'forward' ? (
+              <Forward size={15} />
+            ) : (
+              <Mail size={15} />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">
-              {intent.kind === 'reply' ? 'Reply' : 'New Message'}
+              {intent.kind === 'reply'
+                ? 'Reply'
+                : intent.kind === 'forward'
+                  ? 'Forward'
+                  : 'New Message'}
             </div>
             <div className="truncate text-[11px] text-muted-foreground">
               {fromLabel}
@@ -593,26 +629,26 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           </div>
         </ComposeLine>
         <ComposeLine label="To">
-          <Input
+          <RecipientSuggestionInput
             value={form.to}
             autoFocus={intent.kind === 'new'}
-            onChange={(event) => setField('to', event.target.value)}
-            className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
+            onChange={(value) => setField('to', value)}
+            suggestions={recipientSuggestions}
             placeholder="name@example.com"
           />
         </ComposeLine>
         <ComposeLine label="Cc">
-          <Input
+          <RecipientSuggestionInput
             value={form.cc}
-            onChange={(event) => setField('cc', event.target.value)}
-            className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
+            onChange={(value) => setField('cc', value)}
+            suggestions={recipientSuggestions}
           />
         </ComposeLine>
         <ComposeLine label="Bcc">
-          <Input
+          <RecipientSuggestionInput
             value={form.bcc}
-            onChange={(event) => setField('bcc', event.target.value)}
-            className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
+            onChange={(value) => setField('bcc', value)}
+            suggestions={recipientSuggestions}
           />
         </ComposeLine>
         <ComposeLine label="Subject">
@@ -626,10 +662,12 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       </div>
 
       <div className="min-h-0 flex-1 bg-[color-mix(in_oklab,var(--background)_62%,transparent)]">
-        {isPreparingReply ? (
+        {isPreparingMessage ? (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={16} className="animate-spin" />
-            Preparing reply...
+            {intent.kind === 'forward'
+              ? 'Preparing forward...'
+              : 'Preparing reply...'}
           </div>
         ) : (
           <Suspense
@@ -670,7 +708,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <Button
           type="button"
           onClick={handleSubmit}
-          disabled={sendMutation.isPending || isPreparingReply}
+          disabled={sendMutation.isPending || isPreparingMessage}
           className="bg-brand-coral text-white hover:bg-brand-coral/90"
         >
           {sendMutation.isPending ? (
@@ -682,6 +720,65 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         </Button>
       </div>
     </FloatingPanel>
+  )
+}
+
+function RecipientSuggestionInput({
+  autoFocus = false,
+  onChange,
+  placeholder,
+  suggestions,
+  value,
+}: {
+  autoFocus?: boolean
+  onChange: (value: string) => void
+  placeholder?: string
+  suggestions: AddressSuggestionOption[]
+  value: string
+}) {
+  const [focused, setFocused] = useState(false)
+  const displayedSuggestions = useMemo(
+    () => filterAddressSuggestions(suggestions, value),
+    [suggestions, value],
+  )
+
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        autoFocus={autoFocus}
+        onBlur={() => {
+          window.setTimeout(() => setFocused(false), 120)
+        }}
+        onChange={(event) => onChange(event.target.value)}
+        onFocus={() => setFocused(true)}
+        className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
+        placeholder={placeholder}
+      />
+      {focused && displayedSuggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-8 z-20 max-h-56 overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+          {displayedSuggestions.map((suggestion) => (
+            <button
+              key={suggestion.email.toLowerCase()}
+              type="button"
+              className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-[var(--hover-bg)]"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(insertAddressSuggestion(value, suggestion))
+                setFocused(false)
+              }}
+            >
+              <span className="min-w-0 truncate">
+                {formatAddressSuggestion(suggestion)}
+              </span>
+              <span className="max-w-32 truncate text-[11px] text-muted-foreground">
+                {suggestion.sourceLabel}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -210,11 +210,12 @@ export function AccountEditor({
         }
       />
 
-      {existingAccount?.syncProgress && (
-        <div className="-mt-4 mb-4">
-          <SyncProgressMeter account={existingAccount} />
-        </div>
-      )}
+      {existingAccount?.status === 'syncing' &&
+        existingAccount.syncProgress && (
+          <div className="-mt-4 mb-4">
+            <SyncProgressMeter account={existingAccount} />
+          </div>
+        )}
 
       {existingAccount?.lastSyncError && (
         <div className="mt-4">

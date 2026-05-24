@@ -68,6 +68,7 @@ fn message(
         subject: Some(format!("Subject {id}")),
         from_name: Some(from_name.to_string()),
         from_email: Some(from_email.to_string()),
+        to: Vec::new(),
         preview: Some(format!("Preview {id}")),
         received_at: "2026-03-31T10:00:00Z".to_string(),
         has_attachment: false,

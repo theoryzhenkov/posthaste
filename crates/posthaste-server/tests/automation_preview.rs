@@ -152,6 +152,7 @@ fn message(id: &str, from_name: &str, received_at: &str) -> MessageRecord {
         subject: Some(format!("Subject {id}")),
         from_name: Some(from_name.to_string()),
         from_email: Some(format!("{id}@example.test")),
+        to: Vec::new(),
         preview: Some(format!("Preview {id}")),
         received_at: received_at.to_string(),
         has_attachment: false,

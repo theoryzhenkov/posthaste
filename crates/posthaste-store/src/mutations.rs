@@ -376,10 +376,10 @@ fn upsert_message_record_tx(
     tx.execute(
         "INSERT INTO message (
             account_id, id, thread_id, conversation_id, remote_blob_id, subject,
-            normalized_subject, from_name, from_email, preview, received_at,
+            normalized_subject, from_name, from_email, to_json, preview, received_at,
             has_attachment, size, is_read, is_flagged, rfc_message_id, in_reply_to,
             references_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(account_id, id) DO UPDATE SET
             thread_id = excluded.thread_id,
             conversation_id = excluded.conversation_id,
@@ -388,6 +388,7 @@ fn upsert_message_record_tx(
             normalized_subject = excluded.normalized_subject,
             from_name = excluded.from_name,
             from_email = excluded.from_email,
+            to_json = excluded.to_json,
             preview = excluded.preview,
             received_at = excluded.received_at,
             has_attachment = excluded.has_attachment,
@@ -410,6 +411,7 @@ fn upsert_message_record_tx(
             normalized_subject(message.subject.as_deref()),
             message.from_name,
             message.from_email,
+            serde_json::to_string(&message.to).map_err(json_to_store_error)?,
             message.preview,
             message.received_at,
             bool_to_i64(message.has_attachment),

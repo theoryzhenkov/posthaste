@@ -36,7 +36,7 @@ pub(crate) fn query_messages_by_rule(
     let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
     let sql = format!(
         "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
-                m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
+                m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                 m.is_read, m.is_flagged
          FROM message m
          JOIN source_projection a ON a.source_id = m.account_id
@@ -96,6 +96,7 @@ pub(crate) fn query_message_page(
                 m.subject,
                 m.from_name,
                 m.from_email,
+                m.to_json,
                 m.preview,
                 m.received_at,
                 m.has_attachment,
@@ -117,6 +118,7 @@ pub(crate) fn query_message_page(
             subject,
             from_name,
             from_email,
+            to_json,
             preview,
             received_at,
             has_attachment,
@@ -132,7 +134,7 @@ pub(crate) fn query_message_page(
     let rows = statement
         .query_map(params_from_iter(params), |row| {
             let summary = row_to_message_summary_row(row)?;
-            let sort_key_value: rusqlite::types::Value = row.get(13)?;
+            let sort_key_value: rusqlite::types::Value = row.get(14)?;
             Ok((summary, sort_key_value))
         })
         .map_err(sql_to_store_error)?;
@@ -345,6 +347,7 @@ pub(crate) fn query_conversations(
                 m.subject,
                 m.from_name,
                 m.from_email,
+                m.to_json,
                 m.preview,
                 m.received_at,
                 m.has_attachment,

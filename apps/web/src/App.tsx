@@ -14,6 +14,7 @@ import {
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { shouldForceAccountSettings } from './accountSetup'
 import {
   fetchAccounts,
   fetchMessage,
@@ -138,7 +139,11 @@ function MailClient({
     theme.setMode(theme.resolvedMode === 'dark' ? 'light' : 'dark')
   }, [theme])
 
-  const { data: accounts = [], isLoading } = useQuery({
+  const {
+    data: accounts = [],
+    isLoading,
+    isSuccess: hasLoadedAccounts,
+  } = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
   })
@@ -155,7 +160,10 @@ function MailClient({
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
     : null
-  const shouldForceSettings = accounts.length === 0
+  const shouldForceSettings = shouldForceAccountSettings({
+    accounts,
+    accountsQuerySucceeded: hasLoadedAccounts,
+  })
   const {
     effectiveSurface,
     isSettingsSurfaceOpen,
@@ -253,6 +261,7 @@ function MailClient({
   const {
     closeCompose,
     composeIntent,
+    forwardSelectedMessage: handleForward,
     openCompose: handleCompose,
     replyToSelectedMessage: handleReply,
   } = useComposeIntent({
@@ -510,6 +519,11 @@ function MailClient({
                 <ResizablePanel id="message-detail" minSize="300px">
                   <MessageDetail
                     selection={selectedMessage}
+                    accounts={accounts}
+                    sidebar={sidebar}
+                    onArchive={handleArchive}
+                    onForward={handleForward}
+                    onReply={handleReply}
                     onSelectMessage={handleSelectMessage}
                     onSearch={handleSearch}
                   />
