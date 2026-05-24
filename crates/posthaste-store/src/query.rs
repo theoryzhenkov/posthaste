@@ -1,5 +1,6 @@
 use super::*;
-use posthaste_domain::{BlobId, MessageAttachment};
+use posthaste_domain::{BlobId, MessageAttachment, Recipient};
+use rusqlite::types::Type;
 
 fn row_to_message_attachment(
     row: &rusqlite::Row<'_>,
@@ -75,6 +76,7 @@ pub(crate) struct MessageSummaryRow {
     pub(crate) subject: Option<String>,
     pub(crate) from_name: Option<String>,
     pub(crate) from_email: Option<String>,
+    pub(crate) to: Vec<Recipient>,
     pub(crate) preview: Option<String>,
     pub(crate) received_at: String,
     pub(crate) has_attachment: bool,
@@ -123,6 +125,7 @@ pub(crate) fn hydrate_message_summaries(
                 subject: row.subject,
                 from_name: row.from_name,
                 from_email: row.from_email,
+                to: row.to,
                 preview: row.preview,
                 received_at: row.received_at,
                 has_attachment: row.has_attachment,
@@ -228,7 +231,7 @@ pub(crate) fn query_message_detail_tx(
     let mut statement = tx
         .prepare(
             "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
-                    m.from_name, m.from_email, m.preview, m.received_at, m.has_attachment,
+                    m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
              JOIN source_projection a
@@ -248,11 +251,12 @@ pub(crate) fn query_message_detail_tx(
                 subject: row.get(5)?,
                 from_name: row.get(6)?,
                 from_email: row.get(7)?,
-                preview: row.get(8)?,
-                received_at: row.get(9)?,
-                has_attachment: row.get::<_, i64>(10)? != 0,
-                is_read: row.get::<_, i64>(11)? != 0,
-                is_flagged: row.get::<_, i64>(12)? != 0,
+                to: parse_recipients_json(row.get(8)?)?,
+                preview: row.get(9)?,
+                received_at: row.get(10)?,
+                has_attachment: row.get::<_, i64>(11)? != 0,
+                is_read: row.get::<_, i64>(12)? != 0,
+                is_flagged: row.get::<_, i64>(13)? != 0,
                 mailbox_ids: Vec::new(),
                 keywords: Vec::new(),
             })
@@ -320,12 +324,18 @@ pub(crate) fn row_to_message_summary_row(
         subject: row.get(5)?,
         from_name: row.get(6)?,
         from_email: row.get(7)?,
-        preview: row.get(8)?,
-        received_at: row.get(9)?,
-        has_attachment: row.get::<_, i64>(10)? != 0,
-        is_read: row.get::<_, i64>(11)? != 0,
-        is_flagged: row.get::<_, i64>(12)? != 0,
+        to: parse_recipients_json(row.get(8)?)?,
+        preview: row.get(9)?,
+        received_at: row.get(10)?,
+        has_attachment: row.get::<_, i64>(11)? != 0,
+        is_read: row.get::<_, i64>(12)? != 0,
+        is_flagged: row.get::<_, i64>(13)? != 0,
     })
+}
+
+fn parse_recipients_json(value: String) -> Result<Vec<Recipient>, rusqlite::Error> {
+    serde_json::from_str(&value)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error)))
 }
 
 /// Bulk-fetches mailbox IDs for a set of messages in chunks.

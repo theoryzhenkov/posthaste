@@ -38,6 +38,7 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
                 normalized_subject TEXT,
                 from_name TEXT,
                 from_email TEXT,
+                to_json TEXT NOT NULL DEFAULT '[]',
                 preview TEXT,
                 received_at TEXT NOT NULL,
                 has_attachment INTEGER NOT NULL DEFAULT 0,
@@ -279,6 +280,12 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
             ",
         )
         .map_err(sql_to_store_error)?;
+    ensure_column(
+        connection,
+        "message",
+        "to_json",
+        "ALTER TABLE message ADD COLUMN to_json TEXT NOT NULL DEFAULT '[]'",
+    )?;
     ensure_column(
         connection,
         "cache_rescore_queue",

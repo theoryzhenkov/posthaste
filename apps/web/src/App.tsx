@@ -510,6 +510,8 @@ function MailClient({
                 <ResizablePanel id="message-detail" minSize="300px">
                   <MessageDetail
                     selection={selectedMessage}
+                    accounts={accounts}
+                    sidebar={sidebar}
                     onSelectMessage={handleSelectMessage}
                     onSearch={handleSearch}
                   />

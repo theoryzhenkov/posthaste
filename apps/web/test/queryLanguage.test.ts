@@ -36,6 +36,7 @@ const message: MessageSummary = {
   subject: 'Welcome',
   fromName: 'Posthaste Author',
   fromEmail: 'author@posthaste.test',
+  to: [],
   preview: 'Account creation',
   receivedAt: '2026-04-24T00:00:00Z',
   hasAttachment: false,
