@@ -1,4 +1,4 @@
-import { GripHorizontal, Pin, X } from 'lucide-react'
+import { GripHorizontal, Maximize2, Minimize2, Pin, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -239,6 +239,7 @@ export function FloatingPanel({
   onClose,
 }: FloatingPanelProps) {
   const [isPinned, setIsPinned] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [activeRails, setActiveRails] = useState<ActiveRails>({
     x: null,
@@ -323,6 +324,9 @@ export function FloatingPanel({
   }, [closeIgnoreSelector, isPinned, onClose])
 
   function handleDragStart(event: React.PointerEvent<HTMLButtonElement>) {
+    if (isExpanded) {
+      return
+    }
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     const panel = panelRef.current?.getBoundingClientRect()
@@ -385,7 +389,8 @@ export function FloatingPanel({
   return (
     <div
       className={cn(
-        'pointer-events-none fixed inset-0 flex items-start justify-center px-4 pt-[54px]',
+        'pointer-events-none fixed inset-0 flex items-start justify-center px-4',
+        isExpanded ? 'pt-4' : 'pt-[54px]',
         zIndexClassName,
       )}
       aria-live="polite"
@@ -439,9 +444,14 @@ export function FloatingPanel({
         className={cn(
           'pointer-events-auto w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
           className,
+          isExpanded
+            ? 'h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)]'
+            : 'max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] min-h-48 min-w-72 resize',
         )}
         style={{
-          transform: `translate(${panelOffset.x}px, ${panelOffset.y}px)`,
+          transform: isExpanded
+            ? undefined
+            : `translate(${panelOffset.x}px, ${panelOffset.y}px)`,
         }}
       >
         <div
@@ -475,6 +485,25 @@ export function FloatingPanel({
                 onClick={() => setIsPinned((pinned) => !pinned)}
               >
                 <Pin size={15} strokeWidth={1.8} />
+              </button>
+              <button
+                type="button"
+                aria-pressed={isExpanded}
+                title={
+                  isExpanded ? `Restore ${panelLabel}` : `Expand ${panelLabel}`
+                }
+                className={cn(
+                  'ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-[color-mix(in_oklab,var(--brand-coral)_11%,transparent)] hover:text-foreground',
+                  isExpanded &&
+                    'bg-[color-mix(in_oklab,var(--brand-coral)_15%,transparent)] text-foreground',
+                )}
+                onClick={() => setIsExpanded((expanded) => !expanded)}
+              >
+                {isExpanded ? (
+                  <Minimize2 size={15} strokeWidth={1.8} />
+                ) : (
+                  <Maximize2 size={15} strokeWidth={1.8} />
+                )}
               </button>
             </div>
             <div className="min-w-0 flex-1">{header}</div>

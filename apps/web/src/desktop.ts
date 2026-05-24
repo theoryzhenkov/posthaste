@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import type { SurfaceDescriptor } from './surfaces'
 import { surfaceRoute } from './surfaces'
+import { surfaceWindowUrl } from './surfaceWindow'
 import {
   currentSurfaceDepth,
   isSurfaceHistoryState,
@@ -19,6 +20,21 @@ export async function openDesktopSurface(
   surface: SurfaceDescriptor,
 ): Promise<void> {
   await invoke('open_surface_window', { surface })
+}
+
+export async function openSurfaceInSeparateWindow(
+  surface: SurfaceDescriptor,
+): Promise<void> {
+  if (isTauriRuntime()) {
+    await openDesktopSurface(surface)
+    return
+  }
+
+  window.open(
+    surfaceWindowUrl(window.location, surface),
+    '_blank',
+    'popup,width=1100,height=820,resizable=yes,scrollbars=yes',
+  )
 }
 
 export async function closeCurrentSurfaceWindow(): Promise<void> {

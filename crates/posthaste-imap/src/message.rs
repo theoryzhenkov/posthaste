@@ -3,7 +3,7 @@ use mail_parser::MessageParser;
 use posthaste_domain::{
     gmail_message_id, gmail_thread_id, imap_message_id, GmailLabel, ImapGmailMetadata,
     ImapMessageLocation, ImapModSeq, ImapSelectedMailbox, ImapUid, MailboxId, MessageId,
-    MessageRecord, SystemKeyword, ThreadId, RFC3339_EPOCH,
+    MessageRecord, Recipient, SystemKeyword, ThreadId, RFC3339_EPOCH,
 };
 
 use crate::ImapAdapterError;
@@ -91,6 +91,20 @@ pub fn imap_header_message_record_with_gmail_metadata(
         .map(gmail_thread_id)
         .unwrap_or_else(|| imap_thread_id(&message_id, rfc_message_id.as_deref(), &references));
     let from = parsed.from().and_then(|address| address.first());
+    let to = parsed
+        .to()
+        .map(|addresses| {
+            addresses
+                .iter()
+                .filter_map(|address| {
+                    Some(Recipient {
+                        name: address.name.as_ref().map(|name| name.to_string()),
+                        email: address.address.as_ref()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let received_at = parsed
         .date()
         .map(|date| date.to_rfc3339())
@@ -103,6 +117,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         subject: parsed.subject().map(str::to_string),
         from_name: from.and_then(|addr| addr.name.as_ref().map(|name| name.to_string())),
         from_email: from.and_then(|addr| addr.address.as_ref().map(|email| email.to_string())),
+        to,
         preview: None,
         received_at,
         has_attachment: fetched.has_attachment,

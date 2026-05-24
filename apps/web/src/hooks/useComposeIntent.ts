@@ -52,6 +52,17 @@ export function useComposeIntent({
     })
   }, [selectedMessage])
 
+  const forwardSelectedMessage = useCallback(() => {
+    if (!selectedMessage) {
+      return
+    }
+    setComposeIntent({
+      kind: 'forward',
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    })
+  }, [selectedMessage])
+
   const closeCompose = useCallback(() => {
     setComposeIntent(null)
   }, [])
@@ -59,6 +70,7 @@ export function useComposeIntent({
   return {
     closeCompose,
     composeIntent,
+    forwardSelectedMessage,
     openCompose,
     replyToSelectedMessage,
   }

@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-24
+reviewed: 2026-05-24
 depends:
   - path: docs/L0-compose
   - path: docs/L1-jmap
@@ -115,6 +115,14 @@ also selects the account used to submit the message. Free-form addresses are
 allowed so catch-all domains such as `*@example.com` can send from
 `anything@example.com`; the provider remains authoritative by accepting or
 rejecting the send. The backend cache is updated only after a successful send.
+
+## Recipient suggestions
+
+The `To`, `Cc`, and `Bcc` fields are editable comma-separated text fields with
+suggestions. Suggested values may come from configured account concrete sender
+addresses and recent message correspondents already available through the
+conversation API. Suggestions only fill the active comma- or semicolon-delimited
+recipient token; users may still enter free-form recipients.
 
 ## Reply quoting
 
