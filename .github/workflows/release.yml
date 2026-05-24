@@ -145,7 +145,7 @@ jobs:
         with:
           subject-path: release-assets/*
 
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign release artifacts with cosign
         shell: bash
