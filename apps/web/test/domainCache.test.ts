@@ -35,6 +35,7 @@ function messageSummary(
     subject: 'Project update',
     fromName: 'A Sender',
     fromEmail: 'sender@example.com',
+    to: [],
     preview: 'Here is the update',
     receivedAt: '2026-04-28T12:00:00Z',
     hasAttachment: false,

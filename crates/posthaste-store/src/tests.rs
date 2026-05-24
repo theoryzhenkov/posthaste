@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_domain::{
-    search, MessageRecord, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    search, MessageRecord, Recipient, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, SyncCursor,
 };
@@ -32,6 +32,7 @@ fn sample_message(
         subject: Some("Hello".to_string()),
         from_name: Some("Alice".to_string()),
         from_email: Some("alice@example.com".to_string()),
+        to: Vec::new(),
         preview: Some("Preview".to_string()),
         received_at: "2026-03-31T10:00:00Z".to_string(),
         has_attachment: false,
@@ -1463,6 +1464,29 @@ fn account_scoped_reads_do_not_leak() -> Result<(), StoreError> {
         detail_a.raw_message.as_ref().unwrap().path,
         detail_b.raw_message.as_ref().unwrap().path
     );
+    Ok(())
+}
+
+#[test]
+fn message_detail_preserves_recipients() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    let mut message = sample_message("sent-message", "sent", Some("mime"));
+    message.to = vec![Recipient {
+        name: Some("Bob Recipient".to_string()),
+        email: "bob@example.com".to_string(),
+    }];
+    seed_messages(&store, &account, vec![message], "state-1")?;
+
+    let detail = store
+        .get_message_detail(&account, &MessageId::from("sent-message"))?
+        .unwrap();
+    assert_eq!(detail.summary.to.len(), 1);
+    assert_eq!(detail.summary.to[0].name.as_deref(), Some("Bob Recipient"));
+    assert_eq!(detail.summary.to[0].email, "bob@example.com");
     Ok(())
 }
 

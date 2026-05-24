@@ -1,5 +1,7 @@
 use jmap_client::mailbox;
-use posthaste_domain::{BlobId, MailboxId, MailboxRecord, MessageId, MessageRecord, RFC3339_EPOCH};
+use posthaste_domain::{
+    BlobId, MailboxId, MailboxRecord, MessageId, MessageRecord, Recipient, RFC3339_EPOCH,
+};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
@@ -31,8 +33,8 @@ pub(crate) fn to_mailbox_record(mailbox: &jmap_client::mailbox::Mailbox) -> Mail
 
 /// Convert a `jmap_client::email::Email` to the domain `MessageRecord`.
 ///
-/// Extracts metadata-only properties (subject, sender, preview, keywords,
-/// mailbox membership, threading headers). Body fields are left as `None`
+/// Extracts metadata-only properties (subject, sender, recipients, preview,
+/// keywords, mailbox membership, threading headers). Body fields are left as `None`
 /// because bodies are fetched lazily on first view.
 ///
 /// @spec docs/L1-jmap#core-types
@@ -48,6 +50,18 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
             )
         })
         .unwrap_or((None, None));
+    let to = email
+        .to()
+        .map(|addresses| {
+            addresses
+                .iter()
+                .map(|address| Recipient {
+                    name: address.name().map(String::from),
+                    email: address.email().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     MessageRecord {
         id: MessageId(email.id().unwrap_or_default().to_string()),
         source_thread_id: posthaste_domain::ThreadId(
@@ -57,6 +71,7 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
         subject: email.subject().map(String::from),
         from_name,
         from_email,
+        to,
         preview: email.preview().map(String::from),
         received_at: email
             .received_at()
