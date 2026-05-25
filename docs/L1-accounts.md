@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-25
+reviewed: 2026-05-25
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
@@ -67,6 +67,20 @@ A `ConfigSnapshot` holds the full in-memory state: `app_settings`, `sources`, an
 ```toml
 schema_version = 1
 default_source_id = "primary"   # optional
+
+[appearance]
+mode = "dark"                   # "light", "dark", or "system"
+palettePreset = "neutral"      # visual palette preset
+density = "compact"            # "compact", "cozy", or "comfortable"
+accentHue = 45                  # 0..360
+
+[[appearance.glassTheme.blooms]]
+id = "bloom-1"
+hue = 285
+x = 20.0
+y = 10.0
+opacity = 0.35
+radius = 45.0
 
 [[automations]]
 id = "rule-newsletters"
@@ -164,7 +178,7 @@ sqlite_busy_timeout_seconds = 5
 sender_address_cache_cap = 40
 ```
 
-`AppToml` converts bidirectionally to `AppSettings`. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `cache` section configures optional-content cache caps and layer eligibility; `hard_cap_bytes` is normalized to at least `soft_cap_bytes`. The `daemon` section is only read at startup and not exposed through the API. `[daemon.runtime]` is optional and contains backend operational tunables only; missing fields use the current runtime defaults, and default runtime tuning is omitted when app settings are re-serialized.
+`AppToml` converts bidirectionally to `AppSettings`. `appearance` stores global UI theme preferences shared by all app windows, including theme mode, palette preset, density, accent hue, and glass bloom parameters. `automations` are active global backend rules with explicit triggers, smart-mailbox-style conditions, actions, and backfill behavior. `draft_automations` persist incomplete editor state and are never executed by the sync engine. Account or mailbox restrictions are ordinary conditions such as `source_id`, `source_name`, `mailbox_id`, `mailbox_name`, or `mailbox_role`. Actions mutate JMAP state through the backend command path, so the server remains authoritative. The `cache` section configures optional-content cache caps and layer eligibility; `hard_cap_bytes` is normalized to at least `soft_cap_bytes`. The `daemon` section is only read at startup and not exposed through the API. `[daemon.runtime]` is optional and contains backend operational tunables only; missing fields use the current runtime defaults, and default runtime tuning is omitted when app settings are re-serialized.
 
 ### sources/{id}.toml
 
