@@ -35,8 +35,8 @@ use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use crate::oauth::{
-    OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthProviderProfile, OAuthTokenService,
-    OAuthTokenSet, PendingOAuthFlow,
+    OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthProviderProfile,
+    OAuthTokenService, OAuthTokenSet, PendingOAuthFlow,
 };
 use crate::{observability, sanitize, AppState};
 
@@ -965,17 +965,18 @@ pub async fn complete_account_oauth(
                 "OAuth callback is missing code",
             )
         })?;
-    let flow = state
-        .oauth_flows
-        .remove(&query.state)
-        .await
-        .ok_or_else(|| {
-            ApiError::new(
+    let flow = match state.oauth_flows.begin_completion(&query.state).await {
+        OAuthFlowCompletion::Pending(flow) => flow,
+        OAuthFlowCompletion::Completing => return Ok(oauth_processing_html()),
+        OAuthFlowCompletion::Completed => return Ok(oauth_success_html()),
+        OAuthFlowCompletion::Unknown => {
+            return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_oauth_callback",
                 "OAuth callback state is unknown or already used",
-            )
-        })?;
+            ));
+        }
+    };
     let oauth = OAuthTokenService::new().map_err(ServiceError::from)?;
     let exchange = oauth
         .exchange_authorization_code(OAuthAuthorizationCodeExchange {
@@ -999,9 +1000,20 @@ pub async fn complete_account_oauth(
         }
     }
 
-    Ok(Html(
+    state.oauth_flows.mark_completed(query.state).await;
+    Ok(oauth_success_html())
+}
+
+fn oauth_success_html() -> Html<String> {
+    Html(
         "<!doctype html><meta charset=\"utf-8\"><title>Posthaste OAuth</title><p>Authentication complete. You can return to Posthaste.</p>".to_string(),
-    ))
+    )
+}
+
+fn oauth_processing_html() -> Html<String> {
+    Html(
+        "<!doctype html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"1\"><title>Posthaste OAuth</title><p>Authentication is still completing. This page will refresh automatically.</p>".to_string(),
+    )
 }
 
 fn validate_oauth_start_request<'a>(
