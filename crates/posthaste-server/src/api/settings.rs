@@ -97,7 +97,7 @@ pub async fn patch_settings(
     append_and_publish_config_event(
         &state,
         EVENT_TOPIC_SETTINGS_UPDATED,
-        vec![resource("appSettings", "updated", None, None)],
+        vec![ResourceChange::app_settings_updated()],
         json!({
             "scope": "app",
             "changed": changed,
