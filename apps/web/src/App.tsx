@@ -217,8 +217,6 @@ function MailClient({
   })
   const isMessageDetailOpen = selectedMessage !== null
 
-  useDaemonEvents()
-
   const {
     messageDefaultLayout,
     onMessageLayoutChanged,
@@ -630,6 +628,11 @@ function MailClient({
   )
 }
 
+function DaemonEventBridge() {
+  useDaemonEvents()
+  return null
+}
+
 /**
  * Root App component: wraps `MailClient` in a `QueryClientProvider`.
  * @spec docs/L1-ui#component-hierarchy
@@ -641,6 +644,7 @@ export default function App() {
   return (
     <DesignThemeProvider>
       <QueryClientProvider client={queryClient}>
+        <DaemonEventBridge />
         {isStandaloneSurface ? (
           <Suspense
             fallback={
