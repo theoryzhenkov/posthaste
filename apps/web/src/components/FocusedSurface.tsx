@@ -5,7 +5,11 @@ import { fetchAccounts, fetchSidebar } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
-import { closeCurrentSurfaceWindow, isTauriRuntime } from '@/desktop'
+import {
+  closeCurrentSurfaceWindow,
+  isTauriRuntime,
+  listenForDesktopCloseRequest,
+} from '@/desktop'
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
@@ -127,6 +131,18 @@ export function FocusedSurfaceDocument({
       return
     }
 
+    let unlisten: (() => void) | null = null
+    let disposed = false
+    void listenForDesktopCloseRequest(() => {
+      void closeCurrentSurfaceWindow()
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten()
+        return
+      }
+      unlisten = nextUnlisten
+    })
+
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') {
         event.preventDefault()
@@ -135,7 +151,11 @@ export function FocusedSurfaceDocument({
     }
 
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      disposed = true
+      unlisten?.()
+      window.removeEventListener('keydown', handleKeyDown)
+    }
   }, [])
 
   return (
