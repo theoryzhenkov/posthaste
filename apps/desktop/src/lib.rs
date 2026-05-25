@@ -296,12 +296,14 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
     MenuBuilder::new(manager).item(&file_menu).build()
 }
 
+fn is_closeable_surface_window_label(label: &str) -> bool {
+    label == "settings" || label.starts_with("message-") || label.starts_with("attachment-")
+}
+
 fn close_focused_webview_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app
-        .webview_windows()
-        .into_values()
-        .find(|window| window.is_focused().unwrap_or(false))
-    {
+    if let Some(window) = app.webview_windows().into_values().find(|window| {
+        window.is_focused().unwrap_or(false) && is_closeable_surface_window_label(window.label())
+    }) {
         let _ = window.close();
     }
 }
@@ -503,6 +505,18 @@ mod tests {
             surface_route(&surface),
             "/surface/attachment?sourceId=source%3Aprimary&messageId=message%201&attachmentId=part%2F2"
         );
+    }
+
+    #[test]
+    fn closeable_surface_window_labels_exclude_main_window() {
+        assert!(!is_closeable_surface_window_label("main"));
+        assert!(is_closeable_surface_window_label("settings"));
+        assert!(is_closeable_surface_window_label(
+            "message-0123456789abcdef"
+        ));
+        assert!(is_closeable_surface_window_label(
+            "attachment-0123456789abcdef"
+        ));
     }
 
     #[test]

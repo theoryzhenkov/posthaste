@@ -316,11 +316,6 @@ export interface PatchMailboxInput {
  * Compact message metadata used in conversation rows and thread switchers.
  * @spec docs/L1-ui#messagelist
  */
-export interface Recipient {
-  name: string | null
-  email: string
-}
-
 export interface MessageSummary {
   id: string
   sourceId: string
