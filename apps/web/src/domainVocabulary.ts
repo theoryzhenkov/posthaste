@@ -70,3 +70,11 @@ export const EVENT_TOPICS = {
 } as const
 
 export type DomainEventTopic = (typeof EVENT_TOPICS)[keyof typeof EVENT_TOPICS]
+
+export const KNOWN_DOMAIN_EVENT_TOPICS: ReadonlySet<string> = new Set(
+  Object.values(EVENT_TOPICS),
+)
+
+export function isDomainEventTopic(topic: string): topic is DomainEventTopic {
+  return KNOWN_DOMAIN_EVENT_TOPICS.has(topic)
+}
