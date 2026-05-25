@@ -230,6 +230,145 @@ describe('frontend domain cache contracts', () => {
   })
 
   // spec: docs/L0-testing#frontend-state-contracts
+  it('invalidates settings and sidebar read models when app settings change', () => {
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
+    queryClient.setQueryData(queryKeys.sidebar, { sources: [] })
+    queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: EVENT_TOPICS.SettingsUpdated,
+        accountId: 'app',
+        messageId: null,
+        mailboxId: null,
+        payload: { scope: 'app' },
+      }),
+    )
+
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.sidebar)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
+  })
+
+  it('invalidates broad read models when config reloads', () => {
+    const queryClient = createQueryClient()
+    const smartMailbox = queryKeys.smartMailbox('sm-work')
+    const messageDetailKey = ['message', 'primary', 'message-1'] as const
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
+    queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
+    queryClient.setQueryData(queryKeys.sidebar, { sources: [] })
+    queryClient.setQueryData(queryKeys.smartMailboxes, [])
+    queryClient.setQueryData(smartMailbox, { id: 'sm-work' })
+    queryClient.setQueryData(messageDetailKey, { id: 'message-1' })
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: EVENT_TOPICS.ConfigReloaded,
+        accountId: 'app',
+        messageId: null,
+        mailboxId: null,
+        payload: { resources: [{ kind: 'config', operation: 'reloaded' }] },
+      }),
+    )
+
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
+    expect(
+      queryClient.getQueryState(queryKeys.smartMailboxes)?.isInvalidated,
+    ).toBe(true)
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
+  })
+
+  it('invalidates smart mailbox read models when smart mailbox config changes', () => {
+    const queryClient = createQueryClient()
+    const smartMailbox = queryKeys.smartMailbox('sm-work')
+    const messageList = queryKeys.messages({
+      kind: 'smart-mailbox',
+      id: 'sm-work',
+    })
+    queryClient.setQueryData(queryKeys.smartMailboxes, [])
+    queryClient.setQueryData(smartMailbox, { id: 'sm-work' })
+    queryClient.setQueryData(queryKeys.sidebar, { sources: [] })
+    seedMessageList(queryClient, messageList, messageSummary())
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: EVENT_TOPICS.SmartMailboxUpdated,
+        accountId: 'app',
+        messageId: null,
+        mailboxId: null,
+        payload: { smartMailboxId: 'sm-work' },
+      }),
+    )
+
+    expect(
+      queryClient.getQueryState(queryKeys.smartMailboxes)?.isInvalidated,
+    ).toBe(true)
+    expect(queryClient.getQueryState(smartMailbox)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.sidebar)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(messageList)?.isInvalidated).toBe(true)
+  })
+
+  it('invalidates message details after full sync repair events', () => {
+    const queryClient = createQueryClient()
+    const messageDetailKey = ['message', 'primary', 'message-1'] as const
+    const conversationKey = ['conversation', 'conversation-1'] as const
+    queryClient.setQueryData(messageDetailKey, { id: 'message-1' })
+    queryClient.setQueryData(conversationKey, { id: 'conversation-1' })
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: EVENT_TOPICS.SyncCompleted,
+        messageId: null,
+        mailboxId: null,
+        payload: { mode: 'fullMetadata' },
+      }),
+    )
+
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(conversationKey)?.isInvalidated).toBe(true)
+  })
+
+  it('invalidates target message detail when a body is cached', () => {
+    const queryClient = createQueryClient()
+    const messageDetailKey = ['message', 'primary', 'message-1'] as const
+    queryClient.setQueryData(messageDetailKey, { id: 'message-1' })
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({ topic: EVENT_TOPICS.MessageBodyCached }),
+    )
+
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
+  })
+
   it('invalidates mailbox read models when a mailbox changes remotely', () => {
     const queryClient = createQueryClient()
     const mailboxList = queryKeys.mailboxes('primary')

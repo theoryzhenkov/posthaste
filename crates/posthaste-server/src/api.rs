@@ -22,8 +22,11 @@ use posthaste_domain::{
     ServiceErrorKind, SetKeywordsCommand, SharedGateway, SidebarResponse, SmartMailbox,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
+    SyncTrigger, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
+    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
+    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 use posthaste_observability::{events, ph_warn};
 use serde::{Deserialize, Serialize};
@@ -54,17 +57,28 @@ pub use smart_mailboxes::{
 };
 
 use account_support::{
-    account_overview, account_secret_ref, append_and_publish_account_event, apply_account_patch,
-    apply_secret_instruction, default_account_appearance, delete_managed_secret,
-    generate_account_id_seed, generate_smart_mailbox_id, internal_error,
-    normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
-    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
+    account_overview, account_secret_ref, append_and_publish_account_event,
+    append_and_publish_config_event, apply_account_patch, apply_secret_instruction,
+    config_resource, default_account_appearance, delete_managed_secret, generate_account_id_seed,
+    generate_smart_mailbox_id, internal_error, normalize_account_appearance,
+    normalize_automation_rules, normalize_email_patterns, normalize_optional, resource,
+    store_error_to_api, validate_account_settings, validate_automation_drafts,
     validate_automation_rules, validate_logo_image_id, validate_secret_request,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
+
+/// Request body for a manual source sync command.
+///
+/// @spec docs/L1-api#sync-and-events
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerSyncRequest {
+    #[serde(default)]
+    pub mode: SyncMode,
+}
 
 /// Query parameters for conversation list endpoints.
 ///
@@ -1358,6 +1372,34 @@ pub async fn reload_config(
         }
     }
 
+    let mut resources = vec![config_resource("reloaded")];
+    resources.extend(
+        diff.added_sources
+            .iter()
+            .map(|id| resource("account", "created", Some(id.as_str()), Some(id))),
+    );
+    resources.extend(
+        diff.changed_sources
+            .iter()
+            .map(|id| resource("account", "updated", Some(id.as_str()), Some(id))),
+    );
+    resources.extend(
+        diff.removed_sources
+            .iter()
+            .map(|id| resource("account", "deleted", Some(id.as_str()), Some(id))),
+    );
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_CONFIG_RELOADED,
+        resources,
+        json!({
+            "addedSourceCount": diff.added_sources.len(),
+            "changedSourceCount": diff.changed_sources.len(),
+            "removedSourceCount": diff.removed_sources.len(),
+        }),
+    )
+    .map_err(store_error_to_api)?;
+
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -1898,14 +1940,22 @@ fn require_live_gateway(
 pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
+    request: Option<Json<TriggerSyncRequest>>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let account_id = AccountId(source_id);
+    let mode = request
+        .map(|Json(request)| request.mode)
+        .unwrap_or_default();
     let event_count = state
         .supervisor
-        .sync_account(&account_id)
+        .sync_account_with_mode(&account_id, mode)
         .await
         .map_err(ApiError::from_service_error)?;
-    Ok(Json(json!({ "ok": true, "eventCount": event_count })))
+    Ok(Json(json!({
+        "ok": true,
+        "eventCount": event_count,
+        "mode": mode.as_str(),
+    })))
 }
 
 /// GET /v1/events

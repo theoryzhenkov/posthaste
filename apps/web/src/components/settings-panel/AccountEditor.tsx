@@ -110,7 +110,7 @@ export function AccountEditor({
   onSaved: (account: AccountOverview) => Promise<void>
   onVerified: () => Promise<void>
   onCommand: (
-    action: 'enable' | 'disable' | 'delete' | 'sync',
+    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata',
     account: AccountOverview,
   ) => void
   isCommandPending: boolean
@@ -606,7 +606,7 @@ function AccountActions({
 }: {
   account: AccountOverview
   onCommand: (
-    action: 'enable' | 'disable' | 'delete' | 'sync',
+    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata',
     account: AccountOverview,
   ) => void
   isCommandPending: boolean
@@ -622,6 +622,18 @@ function AccountActions({
       >
         Sync
       </Button>
+      {account.driver === 'jmap' && (
+        <Button
+          size="sm"
+          variant="ghost"
+          type="button"
+          onClick={() => onCommand('repairMetadata', account)}
+          disabled={isCommandPending}
+          title="Re-fetch all message metadata for this account"
+        >
+          Repair metadata
+        </Button>
+      )}
       <Button
         size="sm"
         variant="ghost"
@@ -644,7 +656,7 @@ function DangerSection({
 }: {
   account: AccountOverview
   onCommand: (
-    action: 'enable' | 'disable' | 'delete' | 'sync',
+    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata',
     account: AccountOverview,
   ) => void
   isCommandPending: boolean

@@ -7,9 +7,13 @@ use posthaste_domain::{
     MessageRecord, SyncCursor, SyncObject,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
+use serde_json::json;
 
 use crate::conversions::{to_mailbox_record, to_message_record};
 use crate::live::map_gateway_error;
+
+const EMAIL_CURSOR_KIND: &str = "jmap-email";
+const EMAIL_METADATA_VERSION: u64 = 2;
 
 /// Result of a mailbox sync cycle (delta or full).
 ///
@@ -69,8 +73,8 @@ pub(crate) async fn fetch_email_sync(
     client: &Client,
     since_state: Option<&str>,
 ) -> Result<MessageSync, GatewayError> {
-    match since_state.and_then(non_empty_state) {
-        Some(state) => match fetch_email_delta(client, state).await {
+    match since_state.and_then(decode_email_cursor_state) {
+        Some(state) => match fetch_email_delta(client, &state).await {
             Ok(sync) => Ok(sync),
             Err(GatewayError::CannotCalculateChanges) => {
                 ph_warn!(
@@ -226,7 +230,7 @@ async fn fetch_email_delta(
         replace_all_messages: false,
         cursor: SyncCursor {
             object_type: SyncObject::Message,
-            state: current_state,
+            state: encode_email_cursor_state(&current_state),
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
@@ -354,7 +358,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
         replace_all_messages: true,
         cursor: SyncCursor {
             object_type: SyncObject::Message,
-            state: state.unwrap_or_default(),
+            state: encode_email_cursor_state(&state.unwrap_or_default()),
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
     })
@@ -364,7 +368,30 @@ fn non_empty_state(state: &str) -> Option<&str> {
     (!state.is_empty()).then_some(state)
 }
 
-fn email_metadata_properties() -> [email::Property; 15] {
+pub(crate) fn encode_email_cursor_state(server_state: &str) -> String {
+    json!({
+        "kind": EMAIL_CURSOR_KIND,
+        "metadataVersion": EMAIL_METADATA_VERSION,
+        "state": server_state,
+    })
+    .to_string()
+}
+
+pub(crate) fn decode_email_cursor_state(state: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(state).ok()?;
+    let kind = value.get("kind")?.as_str()?;
+    let metadata_version = value.get("metadataVersion")?.as_u64()?;
+    if kind != EMAIL_CURSOR_KIND || metadata_version != EMAIL_METADATA_VERSION {
+        return None;
+    }
+    value
+        .get("state")?
+        .as_str()
+        .and_then(non_empty_state)
+        .map(String::from)
+}
+
+fn email_metadata_properties() -> [email::Property; 16] {
     [
         email::Property::Id,
         email::Property::ThreadId,
@@ -376,6 +403,7 @@ fn email_metadata_properties() -> [email::Property; 15] {
         email::Property::To,
         email::Property::Preview,
         email::Property::ReceivedAt,
+        email::Property::SentAt,
         email::Property::HasAttachment,
         email::Property::Size,
         email::Property::MessageId,
@@ -405,10 +433,28 @@ mod tests {
     }
 
     #[test]
+    fn email_cursor_state_requires_current_metadata_version() {
+        let encoded = super::encode_email_cursor_state("server-state-1");
+
+        assert_eq!(
+            super::decode_email_cursor_state(&encoded),
+            Some("server-state-1".to_string())
+        );
+        assert_eq!(super::decode_email_cursor_state("server-state-1"), None);
+        assert_eq!(
+            super::decode_email_cursor_state(
+                r#"{"kind":"jmap-email","metadataVersion":1,"state":"server-state-1"}"#,
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn email_metadata_sync_requests_threading_headers_and_recipients() {
         let properties = super::email_metadata_properties();
 
         assert!(properties.contains(&email::Property::To));
+        assert!(properties.contains(&email::Property::SentAt));
         assert!(properties.contains(&email::Property::MessageId));
         assert!(properties.contains(&email::Property::References));
         assert!(properties.contains(&email::Property::InReplyTo));
@@ -441,7 +487,10 @@ mod tests {
             .expect("empty cursor should trigger full sync");
 
         assert!(sync.messages.is_empty());
-        assert_eq!(sync.cursor.state, "email-state-1");
+        assert_eq!(
+            super::decode_email_cursor_state(&sync.cursor.state),
+            Some("email-state-1".to_string())
+        );
 
         let seen_methods = app_state
             .seen_methods

@@ -49,6 +49,9 @@ export type ConversationPageSlice = {
  * @spec docs/L1-ui#data-fetching
  */
 export const mailKeys = {
+  messageRoot: queryKeys.messageDetailsRoot,
+  conversationRoot: queryKeys.conversationDetailsRoot,
+  conversationSummaryRoot: queryKeys.conversationSummariesRoot,
   message: (sourceId: string, messageId: string) =>
     ['message', sourceId, messageId] as const,
   conversation: (conversationId: string) =>

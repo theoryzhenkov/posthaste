@@ -42,6 +42,7 @@ import type {
   SmartMailboxSummary,
   StartOAuthResponse,
   StartProviderOAuthInput,
+  SyncMode,
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
@@ -644,13 +645,26 @@ export async function performMessageCommand(
   }
 }
 
+interface TriggerSyncInput {
+  sourceId: string
+  mode?: SyncMode
+}
+
+function normalizeTriggerSyncInput(
+  input: string | TriggerSyncInput,
+): TriggerSyncInput {
+  return typeof input === 'string' ? { sourceId: input } : input
+}
+
 /** @spec docs/L1-api#endpoint-table */
 export async function triggerSync(
-  sourceId: string,
-): Promise<{ ok: boolean; eventCount: number }> {
-  return request<{ ok: boolean; eventCount: number }>(
+  input: string | TriggerSyncInput,
+): Promise<{ ok: boolean; eventCount: number; mode: SyncMode }> {
+  const { sourceId, mode = 'incremental' } = normalizeTriggerSyncInput(input)
+  return jsonRequest<{ ok: boolean; eventCount: number; mode: SyncMode }>(
     `/sources/${sourceId}/commands/sync`,
-    { method: 'POST' },
+    'POST',
+    { mode },
   )
 }
 

@@ -38,6 +38,18 @@ pub async fn create_smart_mailbox(
         .service
         .save_smart_mailbox(&smart_mailbox)
         .map_err(ApiError::from_service_error)?;
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_SMART_MAILBOX_CREATED,
+        vec![resource(
+            "smartMailbox",
+            "created",
+            Some(smart_mailbox.id.as_str()),
+            None,
+        )],
+        json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+    )
+    .map_err(store_error_to_api)?;
     Ok(Json(smart_mailbox))
 }
 
@@ -84,6 +96,18 @@ pub async fn patch_smart_mailbox(
         .service
         .save_smart_mailbox(&smart_mailbox)
         .map_err(ApiError::from_service_error)?;
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+        vec![resource(
+            "smartMailbox",
+            "updated",
+            Some(smart_mailbox.id.as_str()),
+            None,
+        )],
+        json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+    )
+    .map_err(store_error_to_api)?;
     Ok(Json(smart_mailbox))
 }
 
@@ -94,10 +118,23 @@ pub async fn delete_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
+    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
     state
         .service
-        .delete_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
+        .delete_smart_mailbox(&smart_mailbox_id)
         .map_err(ApiError::from_service_error)?;
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_SMART_MAILBOX_DELETED,
+        vec![resource(
+            "smartMailbox",
+            "deleted",
+            Some(smart_mailbox_id.as_str()),
+            None,
+        )],
+        json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
+    )
+    .map_err(store_error_to_api)?;
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -115,6 +152,13 @@ pub async fn reset_default_smart_mailboxes(
         .service
         .reset_default_smart_mailboxes()
         .map_err(ApiError::from_service_error)?;
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_SMART_MAILBOX_RESET,
+        vec![resource("smartMailbox", "reset", None, None)],
+        json!({ "scope": "smartMailboxes" }),
+    )
+    .map_err(store_error_to_api)?;
     state
         .service
         .list_smart_mailboxes()

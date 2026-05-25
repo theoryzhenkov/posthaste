@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-05-02
-reviewed: 2026-05-02
+modified: 2026-05-25
+reviewed: 2026-05-25
 depends:
   - path: docs/L0-providers
   - path: docs/L0-sync
@@ -38,7 +38,7 @@ missed-tick behavior. Startup, manual, and push-triggered syncs therefore reset
 the next poll deadline instead of allowing an overdue periodic tick to run
 immediately after a long cycle.
 
-For each cycle, the engine loads stored cursors from SQLite, then syncs mailbox state and email state. There is no standalone thread delta fetch for the local conversation list; thread and conversation projections are derived from synced Email records, using JMAP `threadId` as the authoritative grouping key for JMAP accounts.
+For each cycle, the engine loads stored cursors from SQLite, then syncs mailbox state and email state. There is no standalone thread delta fetch for the local conversation list; thread and conversation projections are derived from synced Email records, using JMAP `threadId` as the authoritative grouping key for JMAP accounts. Manual sync commands can request `incremental` or `fullMetadata` mode. `fullMetadata` drops the stored message cursor for that cycle so the provider performs an authoritative message metadata snapshot. JMAP sync requests both `sentAt` and `receivedAt`; the local message date prefers `sentAt` for user-visible chronology and falls back to `receivedAt` when needed. The email cursor stores a local metadata-version wrapper around the server state so metadata projection changes can trigger one authoritative full snapshot for existing local rows.
 
 The runtime emits INFO-level structured progress logs for sync start, provider discovery, mailbox/message fetch phases, store writes, and sync completion/failure. Each sync cycle has a `sync_id` span field so nested gateway and store events can be queried as one operation. IMAP sync logs per-mailbox planning decisions, conservative STATUS no-op skips, per-mailbox header fetch start/completion, and chunked header fetch progress; JMAP full snapshots log ID discovery and metadata chunk progress. These diagnostics are intentionally backend logs first; user-facing progress UI consumes a smaller account progress model rather than raw log lines.
 
@@ -307,7 +307,7 @@ This matters because the frontend keeps many pages cached while live updates kee
 - message deletions emit `message.updated`
 - mailbox membership changes can emit `message.arrived` and `message.mailboxes_changed`
 
-These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. The frontend consumes that ordered stream and decides whether to invalidate or merge.
+These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. Event payloads include a `resources` array when the changed resource can be expressed generically. SSE is a transport for durable resource-change facts, not a procedural frontend command channel. A successful sync appends `sync.completed` with the trigger, mode, batch counts, and sync/message/mailbox resources. Settings writes append `settings.updated`; smart mailbox config writes append `smart_mailbox.*`; config reload appends `config.reloaded`. Separate desktop windows consume the same backend stream, map resources to read-model invalidations, then refetch authoritative state through REST.
 
 Account runtime transitions emit `account.status_changed`. Its payload includes
 `status`, `push`, `lastSyncAt`, `lastSyncError`, `lastSyncErrorCode`, and

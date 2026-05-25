@@ -11,7 +11,7 @@ import {
   findConversationIdForMessage,
   mailKeys,
 } from './mailState'
-import { EVENT_TOPICS } from './domainVocabulary'
+import { EVENT_TOPICS, type DomainEventTopic } from './domainVocabulary'
 import { queryKeys } from './queryKeys'
 
 function isStringArray(value: unknown): value is string[] {
@@ -172,6 +172,55 @@ export function removeAccountOverview(
   })
 }
 
+function invalidateMessageListReadModels(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot })
+}
+
+function invalidateMessageDetailReadModels(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: mailKeys.messageRoot })
+  void queryClient.invalidateQueries({ queryKey: mailKeys.conversationRoot })
+  void queryClient.invalidateQueries({
+    queryKey: mailKeys.conversationSummaryRoot,
+  })
+}
+
+function invalidateSmartMailboxReadModels(
+  queryClient: QueryClient,
+  smartMailboxId?: string | null,
+) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+  if (smartMailboxId) {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.smartMailbox(smartMailboxId),
+    })
+  } else {
+    void queryClient.invalidateQueries({ queryKey: ['smart-mailbox'] })
+  }
+  void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+  invalidateMessageListReadModels(queryClient)
+}
+
+function invalidateMailboxReadModels(
+  queryClient: QueryClient,
+  accountId: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.mailboxes(accountId),
+  })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+  invalidateMessageListReadModels(queryClient)
+}
+
+function invalidateAccountRuntimeReadModels(
+  queryClient: QueryClient,
+  accountId: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.accounts })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.account(accountId) })
+}
+
 export function invalidateAccountReadModels(
   queryClient: QueryClient,
   accountId?: string,
@@ -187,7 +236,7 @@ export function invalidateAccountReadModels(
     })
   }
   void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-  void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
+  invalidateMessageListReadModels(queryClient)
 }
 
 export function applyAccountMutationResult(
@@ -222,117 +271,145 @@ function applyAccountStatusPatch(
   return true
 }
 
-function applyMessageEvent(queryClient: QueryClient, event: DomainEvent) {
+function invalidateTargetMessageReadModels(
+  queryClient: QueryClient,
+  event: DomainEvent,
+) {
   const target = eventTarget(event)
-
-  switch (event.topic) {
-    case EVENT_TOPICS.MessageArrived: {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-      return
-    }
-    case EVENT_TOPICS.MessageKeywordsChanged: {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-
-      const keywords = event.payload.keywords
-      const patched =
-        target && isStringArray(keywords)
-          ? applyKeywordEventPatch(queryClient, target, keywords)
-          : false
-
-      if (target && !patched) {
-        void queryClient.invalidateQueries({
-          queryKey: mailKeys.message(target.sourceId, target.messageId),
-        })
-        const conversationId = findConversationIdForMessage(queryClient, target)
-        if (conversationId) {
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversation(conversationId),
-          })
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversationSummary(conversationId),
-          })
-        }
-      }
-      return
-    }
-    case EVENT_TOPICS.MessageMailboxesChanged: {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-      if (target) {
-        void queryClient.invalidateQueries({
-          queryKey: mailKeys.message(target.sourceId, target.messageId),
-        })
-        const conversationId = findConversationIdForMessage(queryClient, target)
-        if (conversationId) {
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversation(conversationId),
-          })
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversationSummary(conversationId),
-          })
-        }
-      }
-      return
-    }
-    case EVENT_TOPICS.MessageUpdated: {
-      if (target) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-        void queryClient.invalidateQueries({
-          queryKey: mailKeys.message(target.sourceId, target.messageId),
-        })
-        const conversationId =
-          payloadConversationId(event.payload) ??
-          findConversationIdForMessage(queryClient, target)
-        if (conversationId) {
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversation(conversationId),
-          })
-          void queryClient.invalidateQueries({
-            queryKey: mailKeys.conversationSummary(conversationId),
-          })
-        }
-      }
-    }
+  if (!target) {
+    invalidateMessageDetailReadModels(queryClient)
+    return
+  }
+  void queryClient.invalidateQueries({
+    queryKey: mailKeys.message(target.sourceId, target.messageId),
+  })
+  const conversationId =
+    payloadConversationId(event.payload) ??
+    findConversationIdForMessage(queryClient, target)
+  if (conversationId) {
+    void queryClient.invalidateQueries({
+      queryKey: mailKeys.conversation(conversationId),
+    })
+    void queryClient.invalidateQueries({
+      queryKey: mailKeys.conversationSummary(conversationId),
+    })
   }
 }
 
-export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
-  switch (event.topic) {
-    case EVENT_TOPICS.AccountCreated:
-    case EVENT_TOPICS.AccountStatusChanged: {
-      if (
-        event.topic === EVENT_TOPICS.AccountStatusChanged &&
-        applyAccountStatusPatch(queryClient, event.accountId, event.payload)
-      ) {
-        return
-      }
-      invalidateAccountReadModels(queryClient, event.accountId)
-      return
-    }
-    case EVENT_TOPICS.AccountUpdated: {
-      invalidateAccountReadModels(queryClient, event.accountId)
-      return
-    }
-    case EVENT_TOPICS.MailboxUpdated: {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.mailboxes(event.accountId),
+type EventHandler = (queryClient: QueryClient, event: DomainEvent) => void
+
+const eventHandlers = {
+  [EVENT_TOPICS.SettingsUpdated]: (queryClient) => {
+    invalidateAccountReadModels(queryClient)
+    invalidateSmartMailboxReadModels(queryClient)
+  },
+  [EVENT_TOPICS.ConfigReloaded]: (queryClient) => {
+    invalidateAccountReadModels(queryClient)
+    invalidateSmartMailboxReadModels(queryClient)
+    invalidateMessageDetailReadModels(queryClient)
+  },
+  [EVENT_TOPICS.SmartMailboxCreated]: (queryClient, event) => {
+    invalidateSmartMailboxReadModels(
+      queryClient,
+      event.payload.smartMailboxId as string | undefined,
+    )
+  },
+  [EVENT_TOPICS.SmartMailboxUpdated]: (queryClient, event) => {
+    invalidateSmartMailboxReadModels(
+      queryClient,
+      event.payload.smartMailboxId as string | undefined,
+    )
+  },
+  [EVENT_TOPICS.SmartMailboxDeleted]: (queryClient, event) => {
+    const smartMailboxId = event.payload.smartMailboxId as string | undefined
+    if (smartMailboxId) {
+      queryClient.removeQueries({
+        queryKey: queryKeys.smartMailbox(smartMailboxId),
+        exact: true,
       })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-      return
     }
-    case EVENT_TOPICS.AccountDeleted: {
-      removeAccountOverview(queryClient, event.accountId)
-      invalidateAccountReadModels(queryClient)
-      return
+    invalidateSmartMailboxReadModels(queryClient, smartMailboxId)
+  },
+  [EVENT_TOPICS.SmartMailboxReset]: (queryClient) => {
+    invalidateSmartMailboxReadModels(queryClient)
+  },
+  [EVENT_TOPICS.SyncCompleted]: (queryClient, event) => {
+    invalidateAccountReadModels(queryClient, event.accountId)
+    invalidateSmartMailboxReadModels(queryClient)
+    invalidateMessageDetailReadModels(queryClient)
+  },
+  [EVENT_TOPICS.SyncFailed]: (queryClient, event) => {
+    invalidateAccountRuntimeReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.AccountCreated]: (queryClient, event) => {
+    invalidateAccountReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.AccountStatusChanged]: (queryClient, event) => {
+    if (!applyAccountStatusPatch(queryClient, event.accountId, event.payload)) {
+      invalidateAccountRuntimeReadModels(queryClient, event.accountId)
     }
-    default:
-      applyMessageEvent(queryClient, event)
+  },
+  [EVENT_TOPICS.AccountUpdated]: (queryClient, event) => {
+    invalidateAccountReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.AccountDeleted]: (queryClient, event) => {
+    removeAccountOverview(queryClient, event.accountId)
+    invalidateAccountReadModels(queryClient)
+    invalidateSmartMailboxReadModels(queryClient)
+    invalidateMessageDetailReadModels(queryClient)
+  },
+  [EVENT_TOPICS.MailboxUpdated]: (queryClient, event) => {
+    invalidateMailboxReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.MessageArrived]: (queryClient) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+    invalidateMessageListReadModels(queryClient)
+  },
+  [EVENT_TOPICS.MessageKeywordsChanged]: (queryClient, event) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+    invalidateMessageListReadModels(queryClient)
+
+    const target = eventTarget(event)
+    const keywords = event.payload.keywords
+    const patched =
+      target && isStringArray(keywords)
+        ? applyKeywordEventPatch(queryClient, target, keywords)
+        : false
+    if (!patched) {
+      invalidateTargetMessageReadModels(queryClient, event)
+    }
+  },
+  [EVENT_TOPICS.MessageBodyCached]: (queryClient, event) => {
+    invalidateTargetMessageReadModels(queryClient, event)
+  },
+  [EVENT_TOPICS.MessageMailboxesChanged]: (queryClient, event) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
+    invalidateMessageListReadModels(queryClient)
+    invalidateTargetMessageReadModels(queryClient, event)
+  },
+  [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {
+    invalidateMessageListReadModels(queryClient)
+    invalidateTargetMessageReadModels(queryClient, event)
+  },
+  [EVENT_TOPICS.PushConnected]: (queryClient, event) => {
+    invalidateAccountRuntimeReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.PushDisconnected]: (queryClient, event) => {
+    invalidateAccountRuntimeReadModels(queryClient, event.accountId)
+  },
+} satisfies Record<DomainEventTopic, EventHandler>
+
+function isDomainEventTopic(topic: string): topic is DomainEventTopic {
+  return Object.values(EVENT_TOPICS).includes(topic as DomainEventTopic)
+}
+
+export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
+  if (!isDomainEventTopic(event.topic)) {
+    invalidateAccountReadModels(queryClient)
+    return
   }
+  eventHandlers[event.topic](queryClient, event)
 }

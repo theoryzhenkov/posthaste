@@ -22,6 +22,10 @@ export const queryKeys = {
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
   sidebar: ['sidebar'] as const,
   messagesRoot: ['messages'] as const,
+  conversationsRoot: ['conversations'] as const,
+  messageDetailsRoot: ['message'] as const,
+  conversationDetailsRoot: ['conversation'] as const,
+  conversationSummariesRoot: ['conversation-summary'] as const,
   messages: (
     selection: MessageQuerySelection,
     query?: string,

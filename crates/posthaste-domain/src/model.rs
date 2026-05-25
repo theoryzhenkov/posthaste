@@ -112,6 +112,36 @@ pub const EVENT_TOPIC_SYNC_COMPLETED: &str = "sync.completed";
 /// @spec docs/L1-sync#error-handling
 pub const EVENT_TOPIC_SYNC_FAILED: &str = "sync.failed";
 
+/// Event topic emitted when application settings change.
+///
+/// @spec docs/L1-api#settings
+pub const EVENT_TOPIC_SETTINGS_UPDATED: &str = "settings.updated";
+
+/// Event topic emitted after an external config reload.
+///
+/// @spec docs/L1-api#sync-and-events
+pub const EVENT_TOPIC_CONFIG_RELOADED: &str = "config.reloaded";
+
+/// Event topic emitted when a smart mailbox is created.
+///
+/// @spec docs/L1-api#smart-mailbox-crud
+pub const EVENT_TOPIC_SMART_MAILBOX_CREATED: &str = "smart_mailbox.created";
+
+/// Event topic emitted when a smart mailbox is updated.
+///
+/// @spec docs/L1-api#smart-mailbox-crud
+pub const EVENT_TOPIC_SMART_MAILBOX_UPDATED: &str = "smart_mailbox.updated";
+
+/// Event topic emitted when a smart mailbox is deleted.
+///
+/// @spec docs/L1-api#smart-mailbox-crud
+pub const EVENT_TOPIC_SMART_MAILBOX_DELETED: &str = "smart_mailbox.deleted";
+
+/// Event topic emitted when default smart mailboxes are reset.
+///
+/// @spec docs/L1-api#smart-mailbox-crud
+pub const EVENT_TOPIC_SMART_MAILBOX_RESET: &str = "smart_mailbox.reset";
+
 /// Event topic emitted when message metadata changes (keywords, mailboxes).
 ///
 /// @spec docs/L1-sync#event-propagation
@@ -744,6 +774,27 @@ pub struct SyncCursor {
     pub updated_at: String,
 }
 
+impl SyncCursor {
+    /// Return the provider state token stored in this cursor.
+    ///
+    /// Most cursors store the provider token directly. Some JMAP email cursors
+    /// wrap the provider token with local metadata versioning so Posthaste can
+    /// force a full metadata refresh when its projection changes.
+    pub fn provider_state(&self) -> String {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&self.state) else {
+            return self.state.clone();
+        };
+        if value.get("kind").and_then(serde_json::Value::as_str) != Some("jmap-email") {
+            return self.state.clone();
+        }
+        value
+            .get("state")
+            .and_then(serde_json::Value::as_str)
+            .map(String::from)
+            .unwrap_or_else(|| self.state.clone())
+    }
+}
+
 /// JMAP object type that participates in delta sync.
 ///
 /// @spec docs/L1-sync#state-management
@@ -760,6 +811,30 @@ impl SyncObject {
             Self::Mailbox => "mailbox",
             Self::Message => "message",
         }
+    }
+}
+
+/// User-requested sync mode.
+///
+/// @spec docs/L1-sync#sync-loop
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncMode {
+    #[default]
+    Incremental,
+    FullMetadata,
+}
+
+impl SyncMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Incremental => "incremental",
+            Self::FullMetadata => "fullMetadata",
+        }
+    }
+
+    pub fn requires_full_message_metadata(self) -> bool {
+        matches!(self, Self::FullMetadata)
     }
 }
 
