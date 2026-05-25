@@ -320,6 +320,25 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
         .item(&close_window)
         .build()?;
 
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = SubmenuBuilder::new(manager, manager.package_info().name.clone())
+            .about(None)
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others()
+            .separator()
+            .quit()
+            .build()?;
+        return MenuBuilder::new(manager)
+            .item(&app_menu)
+            .item(&file_menu)
+            .build();
+    }
+
+    #[cfg(not(target_os = "macos"))]
     MenuBuilder::new(manager).item(&file_menu).build()
 }
 
