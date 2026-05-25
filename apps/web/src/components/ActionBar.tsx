@@ -50,16 +50,6 @@ interface ToolbarChipProps {
   title: string
 }
 
-function TrafficLights() {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="size-3 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
-      <span className="size-3 rounded-full bg-[#febc2e] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
-      <span className="size-3 rounded-full bg-[#28c940] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.2)]" />
-    </div>
-  )
-}
-
 function Divider() {
   return <div className="mx-1.5 h-[18px] w-px bg-border-soft" />
 }
@@ -163,8 +153,7 @@ export function ActionBar({
 }: ActionBarProps) {
   return (
     <header className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
-      <TrafficLights />
-      <div className="w-4" />
+      <div data-tauri-drag-region className="w-[78px] shrink-0" />
 
       <ToolbarChip
         icon={<PenSquare size={14} strokeWidth={1.6} />}
@@ -237,7 +226,7 @@ export function ActionBar({
         title="Open message"
       />
 
-      <div className="flex-1" />
+      <div data-tauri-drag-region className="flex-1 self-stretch" />
 
       <CommandSearchControl
         searchQuery={searchQuery}
