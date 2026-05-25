@@ -391,10 +391,11 @@ export function MessageDetail({
                   <Reply size={14} strokeWidth={1.6} />
                 </Button>
                 <Button
-                  aria-label="Forward"
+                  aria-label="Forward (not available yet)"
+                  disabled
                   onClick={onForward}
                   size="icon-sm"
-                  title="Forward"
+                  title="Forward will be enabled after forwarded headers and attachments are implemented"
                   type="button"
                   variant="ghost"
                 >

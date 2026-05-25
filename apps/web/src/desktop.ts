@@ -30,11 +30,14 @@ export async function openSurfaceInSeparateWindow(
     return
   }
 
-  window.open(
+  const openedWindow = window.open(
     surfaceWindowUrl(window.location, surface),
     '_blank',
     'popup,width=1100,height=820,resizable=yes,scrollbars=yes',
   )
+  if (!openedWindow) {
+    throw new Error('Popup blocked. Allow popups for Posthaste and try again.')
+  }
 }
 
 export async function closeCurrentSurfaceWindow(): Promise<void> {
