@@ -389,12 +389,22 @@ fn build_window<M: Manager<R>, R: Runtime>(
     height: f64,
     port: u16,
 ) -> tauri::Result<WebviewWindow<R>> {
-    let window = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
+    let builder = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
         .initialization_script(backend_init_script(port))
         .title(title)
         .inner_size(width, height)
-        .resizable(true)
-        .build()?;
+        .resizable(true);
+    #[cfg(target_os = "macos")]
+    let builder = if is_main_window_label(label) {
+        builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .traffic_light_position(tauri::LogicalPosition::new(14.0, 15.0))
+    } else {
+        builder
+    };
+
+    let window = builder.build()?;
     remember_focused_window(&window);
     Ok(window)
 }
