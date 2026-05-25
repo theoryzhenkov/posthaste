@@ -252,19 +252,71 @@ pub struct PendingOAuthFlow {
     pub nonce: String,
 }
 
+const OAUTH_COMPLETION_STATE_TTL_SECONDS: i64 = 10 * 60;
+
+#[derive(Debug)]
+enum StoredOAuthFlow {
+    Pending(PendingOAuthFlow),
+    Completing(OffsetDateTime),
+    Completed(OffsetDateTime),
+}
+
+pub enum OAuthFlowCompletion {
+    Pending(PendingOAuthFlow),
+    Completing,
+    Completed,
+    Unknown,
+}
+
 #[derive(Default)]
 pub struct OAuthFlowStore {
-    flows: Mutex<HashMap<String, PendingOAuthFlow>>,
+    flows: Mutex<HashMap<String, StoredOAuthFlow>>,
 }
 
 impl OAuthFlowStore {
     pub async fn insert(&self, state: String, flow: PendingOAuthFlow) {
-        self.flows.lock().await.insert(state, flow);
+        self.flows
+            .lock()
+            .await
+            .insert(state, StoredOAuthFlow::Pending(flow));
     }
 
-    pub async fn remove(&self, state: &str) -> Option<PendingOAuthFlow> {
-        self.flows.lock().await.remove(state)
+    pub async fn begin_completion(&self, state: &str) -> OAuthFlowCompletion {
+        let now = OffsetDateTime::now_utc();
+        let mut flows = self.flows.lock().await;
+        prune_terminal_oauth_states(&mut flows, now);
+        match flows.remove(state) {
+            Some(StoredOAuthFlow::Pending(flow)) => {
+                flows.insert(state.to_string(), StoredOAuthFlow::Completing(now));
+                OAuthFlowCompletion::Pending(flow)
+            }
+            Some(StoredOAuthFlow::Completing(started_at)) => {
+                flows.insert(state.to_string(), StoredOAuthFlow::Completing(started_at));
+                OAuthFlowCompletion::Completing
+            }
+            Some(StoredOAuthFlow::Completed(completed_at)) => {
+                flows.insert(state.to_string(), StoredOAuthFlow::Completed(completed_at));
+                OAuthFlowCompletion::Completed
+            }
+            None => OAuthFlowCompletion::Unknown,
+        }
     }
+
+    pub async fn mark_completed(&self, state: String) {
+        self.flows
+            .lock()
+            .await
+            .insert(state, StoredOAuthFlow::Completed(OffsetDateTime::now_utc()));
+    }
+}
+
+fn prune_terminal_oauth_states(flows: &mut HashMap<String, StoredOAuthFlow>, now: OffsetDateTime) {
+    flows.retain(|_, flow| match flow {
+        StoredOAuthFlow::Pending(_) => true,
+        StoredOAuthFlow::Completing(started_at) | StoredOAuthFlow::Completed(started_at) => {
+            now - *started_at < Duration::seconds(OAUTH_COMPLETION_STATE_TTL_SECONDS)
+        }
+    });
 }
 
 #[derive(Clone)]
@@ -1080,7 +1132,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
     }
 
     #[tokio::test]
-    async fn flow_store_removes_pending_state_once() {
+    async fn flow_store_transitions_pending_state_once() {
         let store = OAuthFlowStore::default();
         let profile = OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile");
         let flow = PendingOAuthFlow {
@@ -1095,8 +1147,29 @@ TaMgUWVodLXy+lMRbtUQ97M=
 
         store.insert("state".to_string(), flow).await;
 
-        assert!(store.remove("state").await.is_some());
-        assert!(store.remove("state").await.is_none());
+        assert!(matches!(
+            store.begin_completion("state").await,
+            OAuthFlowCompletion::Pending(_)
+        ));
+        assert!(matches!(
+            store.begin_completion("state").await,
+            OAuthFlowCompletion::Completing
+        ));
+    }
+
+    #[tokio::test]
+    async fn flow_store_remembers_completed_states_for_duplicate_callbacks() {
+        let store = OAuthFlowStore::default();
+
+        assert!(matches!(
+            store.begin_completion("state").await,
+            OAuthFlowCompletion::Unknown
+        ));
+        store.mark_completed("state".to_string()).await;
+        assert!(matches!(
+            store.begin_completion("state").await,
+            OAuthFlowCompletion::Completed
+        ));
     }
 
     fn signed_id_token(kid: &str, nonce: &str) -> (String, JwkSet) {
