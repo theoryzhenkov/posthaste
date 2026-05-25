@@ -105,6 +105,32 @@ jobs:
           )
           test -n "$(find "$out" -type f -print -quit)"
 
+      - name: Build desktop devtools bundles
+        shell: bash
+        run: |
+          rm -rf target/release/bundle apps/desktop/target/release/bundle
+          bun run tauri build --ci --no-sign --features devtools --config '{"productName":"Posthaste DevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null}}'
+
+      - name: Collect desktop devtools bundles
+        shell: bash
+        run: |
+          out="target/distribute/desktop-devtools-${{ matrix.platform }}"
+          mkdir -p "$out"
+          while IFS= read -r file; do
+            cp "$file" "$out/"
+          done < <(
+            find target/release/bundle apps/desktop/target/release/bundle \
+              -type f \( \
+                -name '*.AppImage' -o \
+                -name '*.deb' -o \
+                -name '*.dmg' -o \
+                -name '*.exe' -o \
+                -name '*.msi' -o \
+                -name '*.rpm' \
+              \) 2>/dev/null
+          )
+          test -n "$(find "$out" -type f -print -quit)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: posthaste-${{ matrix.platform }}
@@ -112,6 +138,7 @@ jobs:
           path: |
             target/distribute/posthaste-serve-*.tar.gz
             target/distribute/desktop-${{ matrix.platform }}/*
+            target/distribute/desktop-devtools-${{ matrix.platform }}/*
 
   publish:
     name: Publish GitHub Release

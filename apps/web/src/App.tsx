@@ -644,7 +644,7 @@ export default function App() {
   return (
     <DesignThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <DaemonEventBridge />
+        <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
         {isStandaloneSurface ? (
           <Suspense
             fallback={

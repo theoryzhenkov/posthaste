@@ -9,19 +9,20 @@ use axum::response::IntoResponse;
 use axum::Json;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
-    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, CachePolicy,
-    ConfigRepository, DomainEvent, MailService, MailStore, SecretRef, SecretStore,
+    AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
+    AppSettings, AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
+    CachePolicy, ConfigRepository, DomainEvent, MailService, MailStore, SecretRef, SecretStore,
     SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxValue, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
-    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
-    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED, RFC3339_EPOCH,
+    SmartMailboxValue, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
+    EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
+    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
+    EVENT_TOPIC_SMART_MAILBOX_UPDATED, RFC3339_EPOCH,
 };
 use posthaste_server::api::{
-    create_smart_mailbox, delete_smart_mailbox, patch_settings, patch_smart_mailbox, reload_config,
-    reset_default_smart_mailboxes, CreateSmartMailboxRequest, PatchSettingsRequest,
-    PatchSmartMailboxRequest,
+    create_smart_mailbox, delete_smart_mailbox, patch_account, patch_settings, patch_smart_mailbox,
+    reload_config, reset_default_smart_mailboxes, CreateSmartMailboxRequest, PatchAccountRequest,
+    PatchSettingsRequest, PatchSmartMailboxRequest,
 };
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::AppState;
@@ -208,6 +209,42 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
         serde_json::json!(["defaultAccount"])
     );
     assert_eq!(event.payload["resources"][0]["kind"], "appSettings");
+}
+
+#[tokio::test]
+async fn patch_account_appearance_publishes_account_updated_resource_event() {
+    let harness = SettingsHarness::new();
+    harness.save_account("primary", "Primary");
+    let receiver = harness.state.event_sender.subscribe();
+
+    let _ = expect_api_ok(
+        patch_account(
+            State(harness.state.clone()),
+            Path("primary".to_string()),
+            Json(PatchAccountRequest {
+                name: None,
+                full_name: None,
+                email_patterns: None,
+                driver: None,
+                enabled: None,
+                appearance: Some(AccountAppearance::Initials {
+                    initials: "Z".to_string(),
+                    color_hue: 240,
+                }),
+                secret: None,
+                transport: None,
+            }),
+        )
+        .await,
+        "account patch should succeed",
+    );
+
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_ACCOUNT_UPDATED);
+    assert_eq!(event.account_id.as_str(), "primary");
+    assert_eq!(event.payload["resources"][0]["kind"], "account");
+    assert_eq!(event.payload["resources"][0]["operation"], "updated");
+    assert_eq!(event.payload["resources"][0]["id"], "primary");
 }
 
 #[tokio::test]
