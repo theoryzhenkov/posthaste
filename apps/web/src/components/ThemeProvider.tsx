@@ -79,6 +79,15 @@ function storedGlassTheme(): GlassThemeParameters {
   }
 }
 
+function isDesignThemeStorageKey(key: string | null): boolean {
+  return Boolean(
+    key &&
+    Object.values(designStorageKeys).includes(
+      key as (typeof designStorageKeys)[keyof typeof designStorageKeys],
+    ),
+  )
+}
+
 function readInitialThemeState(): DesignThemePreferences {
   if (typeof window === 'undefined') {
     return {
@@ -102,6 +111,20 @@ function readInitialThemeState(): DesignThemePreferences {
 export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
   const [preferences, setPreferences] = useState(readInitialThemeState)
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea === localStorage &&
+        isDesignThemeStorageKey(event.key)
+      ) {
+        setPreferences(readInitialThemeState())
+      }
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [])
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
     accentHue,
     glassTheme,
