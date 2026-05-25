@@ -13,6 +13,8 @@ use tauri_plugin_shell::ShellExt;
 use tauri_utils::config::WebviewUrl;
 
 const CLOSE_WINDOW_MENU_ID: &str = "close-window";
+#[cfg(any(debug_assertions, feature = "devtools"))]
+const TOGGLE_DEVTOOLS_MENU_ID: &str = "toggle-devtools";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -275,6 +277,10 @@ pub fn run() {
             if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
                 close_remembered_webview_window(app);
             }
+            #[cfg(any(debug_assertions, feature = "devtools"))]
+            if event.id().as_ref() == TOGGLE_DEVTOOLS_MENU_ID {
+                toggle_remembered_webview_devtools(app);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             log_from_frontend,
@@ -331,6 +337,20 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
         .item(&close_window)
         .build()?;
 
+    #[cfg(any(debug_assertions, feature = "devtools"))]
+    let view_menu = {
+        let toggle_devtools = MenuItem::with_id(
+            manager,
+            TOGGLE_DEVTOOLS_MENU_ID,
+            "Toggle Developer Tools",
+            true,
+            Some("CmdOrCtrl+Alt+I"),
+        )?;
+        SubmenuBuilder::new(manager, "View")
+            .item(&toggle_devtools)
+            .build()?
+    };
+
     #[cfg(target_os = "macos")]
     {
         let app_menu = SubmenuBuilder::new(manager, manager.package_info().name.clone())
@@ -343,14 +363,19 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
             .separator()
             .quit()
             .build()?;
-        return MenuBuilder::new(manager)
-            .item(&app_menu)
-            .item(&file_menu)
-            .build();
+        let builder = MenuBuilder::new(manager).item(&app_menu).item(&file_menu);
+        #[cfg(any(debug_assertions, feature = "devtools"))]
+        let builder = builder.item(&view_menu);
+        return builder.build();
     }
 
     #[cfg(not(target_os = "macos"))]
-    MenuBuilder::new(manager).item(&file_menu).build()
+    {
+        let builder = MenuBuilder::new(manager).item(&file_menu);
+        #[cfg(any(debug_assertions, feature = "devtools"))]
+        let builder = builder.item(&view_menu);
+        builder.build()
+    }
 }
 
 fn is_main_window_label(label: &str) -> bool {
@@ -387,6 +412,33 @@ fn close_remembered_webview_window<R: Runtime>(app: &AppHandle<R>) {
         app.state::<FocusedWindowLabel>().set(label.clone());
         let _ = request_close_for_window_label(app, &label);
     }
+}
+
+#[cfg(any(debug_assertions, feature = "devtools"))]
+fn toggle_remembered_webview_devtools<R: Runtime>(app: &AppHandle<R>) {
+    let remembered_label = app.state::<FocusedWindowLabel>().get();
+    if let Some(window) = app.get_webview_window(&remembered_label) {
+        toggle_webview_devtools(&window);
+        return;
+    }
+
+    if let Some(window) = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+    {
+        app.state::<FocusedWindowLabel>().set(window.label());
+        toggle_webview_devtools(&window);
+    }
+}
+
+#[cfg(any(debug_assertions, feature = "devtools"))]
+fn toggle_webview_devtools<R: Runtime>(window: &WebviewWindow<R>) {
+    if window.is_devtools_open() {
+        window.close_devtools();
+        return;
+    }
+    window.open_devtools();
 }
 
 fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {

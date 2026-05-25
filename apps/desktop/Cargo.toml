@@ -7,6 +7,9 @@ edition = "2021"
 name = "posthaste_desktop_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
+[features]
+devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
