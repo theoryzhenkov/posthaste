@@ -1,16 +1,13 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   applyRootTheme,
   appendGlassBloom,
-  defaultAccentHue,
-  defaultPalettePresetId,
-  defaultThemeMode,
-  defaultUiDensity,
   designStorageKeys,
   getSystemThemeMode,
-  normalizeGlassThemeParameters,
   isPalettePresetId,
   isThemeMode,
   isUiDensity,
+  normalizeGlassThemeParameters,
   normalizeAccentHue,
   parseAccentHue,
   removeGlassBloom as removeGlassBloomFromTheme,
@@ -23,6 +20,16 @@ import {
   type ThemeMode,
   type UiDensity,
 } from '@/design'
+import { fetchSettings, patchSettings } from '@/api/client'
+import type { AppSettings } from '@/api/types'
+import { queryKeys } from '@/queryKeys'
+import {
+  appAppearanceFromPreferences,
+  defaultThemePreferences,
+  preferencesFromAppAppearance,
+  shouldMigrateStoredThemePreferences,
+  type DesignThemePreferences,
+} from '@/themeSettings'
 import {
   useCallback,
   useEffect,
@@ -39,27 +46,23 @@ interface DesignThemeProviderProps {
   children: ReactNode
 }
 
-interface DesignThemePreferences {
-  accentHue: number
-  density: UiDensity
-  glassTheme: GlassThemeParameters
-  mode: ThemeMode
-  palettePreset: PalettePresetId
-}
+const themeMigrationStorageKey = 'posthaste.themeMigratedToAppSettings.v1'
 
 function storedThemeMode(): ThemeMode {
   const value = localStorage.getItem(designStorageKeys.themeMode)
-  return value && isThemeMode(value) ? value : defaultThemeMode
+  return value && isThemeMode(value) ? value : defaultThemePreferences().mode
 }
 
 function storedPalettePreset(): PalettePresetId {
   const value = localStorage.getItem(designStorageKeys.palettePreset)
-  return value && isPalettePresetId(value) ? value : defaultPalettePresetId
+  return value && isPalettePresetId(value)
+    ? value
+    : defaultThemePreferences().palettePreset
 }
 
 function storedDensity(): UiDensity {
   const value = localStorage.getItem(designStorageKeys.uiDensity)
-  return value && isUiDensity(value) ? value : defaultUiDensity
+  return value && isUiDensity(value) ? value : defaultThemePreferences().density
 }
 
 function storedAccentHue(): number {
@@ -79,24 +82,9 @@ function storedGlassTheme(): GlassThemeParameters {
   }
 }
 
-function isDesignThemeStorageKey(key: string | null): boolean {
-  return Boolean(
-    key &&
-    Object.values(designStorageKeys).includes(
-      key as (typeof designStorageKeys)[keyof typeof designStorageKeys],
-    ),
-  )
-}
-
-function readInitialThemeState(): DesignThemePreferences {
+function readStoredThemePreferences(): DesignThemePreferences {
   if (typeof window === 'undefined') {
-    return {
-      accentHue: defaultAccentHue,
-      glassTheme: normalizeGlassThemeParameters(null),
-      mode: defaultThemeMode,
-      palettePreset: defaultPalettePresetId,
-      density: defaultUiDensity,
-    }
+    return defaultThemePreferences()
   }
 
   return {
@@ -108,23 +96,80 @@ function readInitialThemeState(): DesignThemePreferences {
   }
 }
 
+function hasCompletedThemeMigration() {
+  return localStorage.getItem(themeMigrationStorageKey) === 'complete'
+}
+
 export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
-  const [preferences, setPreferences] = useState(readInitialThemeState)
+  const queryClient = useQueryClient()
+  const [initialStoredPreferences] = useState(readStoredThemePreferences)
+  const [optimisticPreferences, setOptimisticPreferences] =
+    useState<DesignThemePreferences | null>(null)
+
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: fetchSettings,
+  })
+  const { mutate: saveAppearance } = useMutation({
+    mutationFn: (appearance: ReturnType<typeof appAppearanceFromPreferences>) =>
+      patchSettings({ appearance }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData<AppSettings>(queryKeys.settings, settings)
+      setOptimisticPreferences(null)
+    },
+  })
+
+  const serverAppearance = settingsQuery.data?.appearance
+  const shouldMigrate = Boolean(
+    serverAppearance &&
+    !hasCompletedThemeMigration() &&
+    shouldMigrateStoredThemePreferences(
+      serverAppearance,
+      initialStoredPreferences,
+    ),
+  )
+  const serverPreferences = serverAppearance
+    ? preferencesFromAppAppearance(serverAppearance)
+    : null
+  const preferences =
+    optimisticPreferences ??
+    (shouldMigrate
+      ? initialStoredPreferences
+      : (serverPreferences ?? initialStoredPreferences))
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
 
   useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.storageArea === localStorage &&
-        isDesignThemeStorageKey(event.key)
-      ) {
-        setPreferences(readInitialThemeState())
-      }
+    if (!serverAppearance || hasCompletedThemeMigration()) {
+      return
     }
 
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [])
+    if (shouldMigrate) {
+      saveAppearance(appAppearanceFromPreferences(initialStoredPreferences), {
+        onSuccess: () =>
+          localStorage.setItem(themeMigrationStorageKey, 'complete'),
+      })
+      return
+    }
+
+    localStorage.setItem(themeMigrationStorageKey, 'complete')
+  }, [
+    initialStoredPreferences,
+    saveAppearance,
+    serverAppearance,
+    shouldMigrate,
+  ])
+
+  useEffect(() => {
+    if (!optimisticPreferences) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      saveAppearance(appAppearanceFromPreferences(optimisticPreferences))
+    }, 300)
+    return () => window.clearTimeout(timeout)
+  }, [optimisticPreferences, saveAppearance])
+
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
     accentHue,
     glassTheme,
@@ -167,87 +212,78 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
     return () => query.removeEventListener('change', handleSystemChange)
   }, [accentHue, density, glassTheme, mode, palettePreset])
 
-  const persistGlassTheme = useCallback(
-    (nextGlassTheme: GlassThemeParameters) => {
-      let currentParameters: Record<string, unknown> = {}
-      const stored = localStorage.getItem(designStorageKeys.themeParameters)
-      if (stored) {
-        try {
-          currentParameters = JSON.parse(stored) as Record<string, unknown>
-        } catch {
-          currentParameters = {}
-        }
-      }
-      localStorage.setItem(
-        designStorageKeys.themeParameters,
-        JSON.stringify({ ...currentParameters, glass: nextGlassTheme }),
-      )
+  const updatePreferences = useCallback(
+    (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
+      setOptimisticPreferences((current) => updater(current ?? preferences))
     },
-    [],
+    [preferences],
   )
 
-  const setAccentHue = useCallback((nextHue: number) => {
-    const hue = normalizeAccentHue(nextHue)
-    localStorage.setItem(designStorageKeys.accentHue, String(hue))
-    setPreferences((current) => ({ ...current, accentHue: hue }))
-  }, [])
+  const setAccentHue = useCallback(
+    (nextHue: number) => {
+      updatePreferences((current) => ({
+        ...current,
+        accentHue: normalizeAccentHue(nextHue),
+      }))
+    },
+    [updatePreferences],
+  )
 
   const addGlassBloom = useCallback(
     (patch?: GlassBloomPatch) => {
       const result = appendGlassBloom(glassTheme, patch)
-      persistGlassTheme(result.parameters)
-      setPreferences((current) => ({
+      updatePreferences((current) => ({
         ...current,
         glassTheme: result.parameters,
       }))
       return result.bloom.id
     },
-    [glassTheme, persistGlassTheme],
+    [glassTheme, updatePreferences],
   )
 
   const removeGlassBloom = useCallback(
     (bloomId: GlassBloomId) => {
-      setPreferences((current) => {
-        const nextGlassTheme = removeGlassBloomFromTheme(
-          current.glassTheme,
-          bloomId,
-        )
-        persistGlassTheme(nextGlassTheme)
-        return { ...current, glassTheme: nextGlassTheme }
-      })
+      updatePreferences((current) => ({
+        ...current,
+        glassTheme: removeGlassBloomFromTheme(current.glassTheme, bloomId),
+      }))
     },
-    [persistGlassTheme],
+    [updatePreferences],
   )
 
   const setGlassBloom = useCallback(
     (bloomId: GlassBloomId, patch: GlassBloomPatch) => {
-      setPreferences((current) => {
-        const nextGlassTheme = updateGlassBloom(
-          current.glassTheme,
-          bloomId,
-          patch,
-        )
-        persistGlassTheme(nextGlassTheme)
-        return { ...current, glassTheme: nextGlassTheme }
-      })
+      updatePreferences((current) => ({
+        ...current,
+        glassTheme: updateGlassBloom(current.glassTheme, bloomId, patch),
+      }))
     },
-    [persistGlassTheme],
+    [updatePreferences],
   )
 
-  const setMode = useCallback((nextMode: ThemeMode) => {
-    localStorage.setItem(designStorageKeys.themeMode, nextMode)
-    setPreferences((current) => ({ ...current, mode: nextMode }))
-  }, [])
+  const setMode = useCallback(
+    (nextMode: ThemeMode) => {
+      updatePreferences((current) => ({ ...current, mode: nextMode }))
+    },
+    [updatePreferences],
+  )
 
-  const setPalettePreset = useCallback((nextPreset: PalettePresetId) => {
-    localStorage.setItem(designStorageKeys.palettePreset, nextPreset)
-    setPreferences((current) => ({ ...current, palettePreset: nextPreset }))
-  }, [])
+  const setPalettePreset = useCallback(
+    (nextPreset: PalettePresetId) => {
+      updatePreferences((current) => ({
+        ...current,
+        palettePreset: nextPreset,
+      }))
+    },
+    [updatePreferences],
+  )
 
-  const setDensity = useCallback((nextDensity: UiDensity) => {
-    localStorage.setItem(designStorageKeys.uiDensity, nextDensity)
-    setPreferences((current) => ({ ...current, density: nextDensity }))
-  }, [])
+  const setDensity = useCallback(
+    (nextDensity: UiDensity) => {
+      updatePreferences((current) => ({ ...current, density: nextDensity }))
+    },
+    [updatePreferences],
+  )
 
   const value = useMemo<DesignThemeContextValue>(
     () => ({

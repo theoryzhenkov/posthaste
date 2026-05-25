@@ -63,6 +63,7 @@ impl TomlConfigRepository {
             automations: Vec::new(),
             draft_automations: Vec::new(),
             daemon: Default::default(),
+            appearance: Default::default(),
             logging: Default::default(),
             cache: Default::default(),
         };

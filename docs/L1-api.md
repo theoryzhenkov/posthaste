@@ -125,7 +125,7 @@ SSE events are durable declarative facts, not frontend commands. Every mutating 
 
 | Mutation | Event topic | Resource payload |
 | --- | --- | --- |
-| `PATCH /settings` | `settings.updated` | `appSettings.updated`, plus `changed[]` section names |
+| `PATCH /settings` | `settings.updated` | `appSettings.updated`, plus `changed[]` section names (`appearance`, `cachePolicy`, `defaultAccount`, `automationRules`, `automationDrafts`) |
 | account create/update/delete/enable/disable/logo/OAuth | `account.created`, `account.updated`, `account.deleted` | `account.{created,updated,deleted}` |
 | `POST /smart-mailboxes` | `smart_mailbox.created` | `smartMailbox.created` |
 | `PATCH /smart-mailboxes/{id}` | `smart_mailbox.updated` | `smartMailbox.updated` |
@@ -234,6 +234,8 @@ diagnostic source.
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
 
 **Automation rules**: `AppSettings` and `PatchSettingsRequest` include `automationRules` for active rules and `automationDrafts` for persisted incomplete editor state. Each rule has `id`, `name`, `enabled`, `triggers`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. Account and mailbox restrictions are ordinary query conditions, not a separate rule scope. PATCH replaces the full active rule list when `automationRules` is present and preserves it when omitted; the same replacement rule applies to `automationDrafts`. Active rule IDs must be unique, active rules need at least one trigger and one action, tag actions must target non-system keywords, and move actions must target a non-empty mailbox ID. Draft rule IDs must be present and unique across active and draft rules, but draft names, triggers, and actions may be incomplete. Draft rules are not executed and do not enqueue backfill. When `automationRules` is present, the backend saves the rules and enqueues durable low-priority backfill jobs for enabled accounts if the current enabled backfill-rule fingerprint has not already completed.
+
+**Global appearance**: `AppSettings` and `PatchSettingsRequest` include `appearance` for app-wide UI theme preferences: `mode` (`light`, `dark`, `system`), `palettePreset`, `density`, `accentHue`, and `glassTheme.blooms[]`. PATCH preserves the existing appearance when omitted. A successful change emits `settings.updated` with `changed[]` containing `appearance`, so other windows refetch app settings and apply the same theme.
 
 **Cache policy**: `AppSettings` and `PatchSettingsRequest` include `cachePolicy` with `softCapBytes`, `hardCapBytes`, `cacheBodies`, `cacheRawMessages`, and `cacheAttachments`. PATCH preserves the existing policy when omitted. When provided, the backend normalizes `hardCapBytes` to be at least `softCapBytes` before persisting the settings.
 
