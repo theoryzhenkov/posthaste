@@ -9,9 +9,9 @@ use posthaste_domain::{
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
     GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,
     PushNotification, PushStatus, PushStreamEvent, RemoteIdleScope, RemoteObservationPolicy,
-    ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind, SharedGateway, SyncProgress,
-    SyncProgressReporter, SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
-    EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind, SharedGateway, SyncMode,
+    SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
+    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{
@@ -69,6 +69,7 @@ struct ManagedRuntime {
 enum RuntimeCommand {
     Trigger {
         trigger: SyncTrigger,
+        mode: SyncMode,
         reply: oneshot::Sender<Result<usize, ServiceError>>,
     },
     TriggerOnly {
@@ -245,6 +246,18 @@ impl AccountSupervisor {
     ///
     /// @spec docs/L1-api#sync-and-events
     pub async fn sync_account(&self, account_id: &AccountId) -> Result<usize, ServiceError> {
+        self.sync_account_with_mode(account_id, SyncMode::Incremental)
+            .await
+    }
+
+    /// Send a manual sync trigger with an explicit mode and await its result.
+    ///
+    /// @spec docs/L1-api#sync-and-events
+    pub async fn sync_account_with_mode(
+        &self,
+        account_id: &AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, ServiceError> {
         let runtimes = self.runtimes.read().await;
         let runtime = runtimes
             .get(account_id.as_str())
@@ -254,6 +267,7 @@ impl AccountSupervisor {
             .command_tx
             .send(RuntimeCommand::Trigger {
                 trigger: SyncTrigger::Manual,
+                mode,
                 reply: reply_tx,
             })
             .await
@@ -367,6 +381,7 @@ async fn run_account_runtime(
         &shared,
         &account,
         SyncTrigger::Startup,
+        SyncMode::Incremental,
         &mut connection,
         None,
     )
@@ -423,7 +438,15 @@ async fn handle_poll_tick(
     account: &AccountSettings,
     connection: &mut AccountRuntimeConnectionState,
 ) {
-    let _ = process_sync_trigger(shared, account, SyncTrigger::Poll, connection, None).await;
+    let _ = process_sync_trigger(
+        shared,
+        account,
+        SyncTrigger::Poll,
+        SyncMode::Incremental,
+        connection,
+        None,
+    )
+    .await;
 }
 
 async fn handle_backfill_tick(
@@ -459,12 +482,25 @@ async fn handle_runtime_command(
     command: RuntimeCommand,
 ) -> bool {
     match command {
-        RuntimeCommand::Trigger { trigger, reply } => {
-            let _ = process_sync_trigger(shared, account, trigger, connection, Some(reply)).await;
+        RuntimeCommand::Trigger {
+            trigger,
+            mode,
+            reply,
+        } => {
+            let _ =
+                process_sync_trigger(shared, account, trigger, mode, connection, Some(reply)).await;
             true
         }
         RuntimeCommand::TriggerOnly { trigger } => {
-            let _ = process_sync_trigger(shared, account, trigger, connection, None).await;
+            let _ = process_sync_trigger(
+                shared,
+                account,
+                trigger,
+                SyncMode::Incremental,
+                connection,
+                None,
+            )
+            .await;
             true
         }
         RuntimeCommand::CacheMaintenance {
@@ -507,8 +543,15 @@ async fn handle_push_event(
             if !push_notification_triggers_sync(remote_observation, notification) {
                 return false;
             }
-            let _ =
-                process_sync_trigger(shared, account, SyncTrigger::Push, connection, None).await;
+            let _ = process_sync_trigger(
+                shared,
+                account,
+                SyncTrigger::Push,
+                SyncMode::Incremental,
+                connection,
+                None,
+            )
+            .await;
             true
         }
         PushStreamEvent::Connected { transport } => {
@@ -875,6 +918,7 @@ async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
+    mode: SyncMode,
     connection: &mut AccountRuntimeConnectionState,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
@@ -887,7 +931,7 @@ async fn process_sync_trigger(
         trigger = trigger.as_str()
     );
 
-    process_sync_trigger_inner(shared, account, trigger, connection, reply, sync_id)
+    process_sync_trigger_inner(shared, account, trigger, mode, connection, reply, sync_id)
         .instrument(span)
         .await
 }
@@ -896,6 +940,7 @@ async fn process_sync_trigger_inner(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     trigger: SyncTrigger,
+    mode: SyncMode,
     connection: &mut AccountRuntimeConnectionState,
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
     sync_id: String,
@@ -942,9 +987,10 @@ async fn process_sync_trigger_inner(
                 );
                 shared
                     .service
-                    .sync_account(
+                    .sync_account_with_mode(
                         &account_id,
                         trigger.clone(),
+                        mode,
                         connection.gateway.as_ref(),
                         Some(progress),
                     )

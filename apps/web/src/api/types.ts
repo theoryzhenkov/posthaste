@@ -394,6 +394,9 @@ export interface SourceMessageRef {
   messageId: string
 }
 
+/** @spec docs/L1-api#sync-and-events */
+export type SyncMode = 'incremental' | 'fullMetadata'
+
 /** @spec docs/L1-search#smart-mailbox-data-model */
 export type SmartMailboxKind = 'default' | 'user'
 

@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "JMAP session, method calls, type system, push, error model"
-modified: 2026-04-27
-reviewed: 2026-04-27
+modified: 2026-05-25
+reviewed: 2026-05-25
 depends:
   - path: docs/L0-jmap
 dependents:
@@ -32,7 +32,7 @@ Requests include the RFC capability URIs required by the called methods in `usin
 These come from `jmap-client` and are not reimplemented:
 
 - `Id` -- opaque server-assigned string identifier
-- `Email` -- message metadata: `id`, `threadId`, `mailboxIds`, `keywords` (flags), `from`, `to`, `subject`, `receivedAt`, `hasAttachment`, `preview`, `bodyStructure`
+- `Email` -- message metadata: `id`, `threadId`, `mailboxIds`, `keywords` (flags), `from`, `to`, `subject`, `receivedAt`, `sentAt`, `hasAttachment`, `preview`, `bodyStructure`
 - `Mailbox` -- folder or label: `id`, `name`, `parentId`, `role` (inbox, drafts, sent, trash, etc.), `totalEmails`, `unreadEmails`
 - `Thread` -- server-authoritative thread: `id`, `emailIds` (ordered)
 - `Identity` -- sender identity: `id`, `name`, `email`, `replyTo`, `bcc`
@@ -87,6 +87,8 @@ JmapError
 All server communication goes through a single `JmapClient` instance per local account, configured with the mapped server account ID. Method calls are batched when independent (e.g., `Email/query` + `Email/get` via result references). State strings from responses are persisted atomically with the data they describe; this prevents the client from losing track of sync position if it crashes mid-processing.
 
 Property lists are explicit. If a sync path omits a property from `Email/get`, the store must either preserve the old local value for that property or treat the response as a partial update. An omitted property is not the same as a server `null` value.
+
+For user-visible message chronology, PostHaste prefers JMAP `sentAt` when present and falls back to `receivedAt`. `receivedAt` is still requested because servers may omit or fail to derive `sentAt`, but imported mail can legitimately share a server import `receivedAt` timestamp.
 
 No Fastmail-specific extensions appear in core types. The type system uses only properties defined in RFC 8620 and RFC 8621.
 

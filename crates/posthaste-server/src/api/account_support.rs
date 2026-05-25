@@ -779,6 +779,45 @@ pub(super) fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {
         .collect()
 }
 
+pub(super) const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
+
+/// Build a declarative resource-change payload item.
+///
+/// @spec docs/L1-sync#event-propagation
+pub(super) fn resource(
+    kind: &str,
+    operation: &str,
+    id: Option<&str>,
+    account_id: Option<&AccountId>,
+) -> serde_json::Value {
+    let mut resource = serde_json::Map::from_iter([
+        ("kind".to_string(), json!(kind)),
+        ("operation".to_string(), json!(operation)),
+    ]);
+    if let Some(id) = id {
+        resource.insert("id".to_string(), json!(id));
+    }
+    if let Some(account_id) = account_id {
+        resource.insert("accountId".to_string(), json!(account_id.as_str()));
+    }
+    serde_json::Value::Object(resource)
+}
+
+/// Build a broad config resource-change payload item.
+///
+/// @spec docs/L1-sync#event-propagation
+pub(super) fn config_resource(operation: &str) -> serde_json::Value {
+    resource("config", operation, None, None)
+}
+
+fn account_operation_from_topic(topic: &str) -> &str {
+    match topic {
+        EVENT_TOPIC_ACCOUNT_CREATED => "created",
+        EVENT_TOPIC_ACCOUNT_DELETED => "deleted",
+        _ => "updated",
+    }
+}
+
 /// Append an account lifecycle event to the event log and broadcast it.
 ///
 /// @spec docs/L1-sync#event-propagation
@@ -787,12 +826,41 @@ pub(super) fn append_and_publish_account_event(
     account_id: &AccountId,
     topic: &str,
 ) -> Result<(), posthaste_domain::StoreError> {
+    let operation = account_operation_from_topic(topic);
     let event = state.store.append_event(
         account_id,
         topic,
         None,
         None,
-        json!({ "accountId": account_id.as_str() }),
+        json!({
+            "accountId": account_id.as_str(),
+            "resources": [resource("account", operation, Some(account_id.as_str()), Some(account_id))],
+        }),
+    )?;
+    state.publish_events(&[event]);
+    Ok(())
+}
+
+/// Append a global config/resource event to the event log and broadcast it.
+///
+/// @spec docs/L1-sync#event-propagation
+pub(super) fn append_and_publish_config_event(
+    state: &Arc<AppState>,
+    topic: &str,
+    resources: Vec<serde_json::Value>,
+    extra: serde_json::Value,
+) -> Result<(), posthaste_domain::StoreError> {
+    let mut payload = match extra {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    payload.insert("resources".to_string(), serde_json::Value::Array(resources));
+    let event = state.store.append_event(
+        &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
+        topic,
+        None,
+        None,
+        serde_json::Value::Object(payload),
     )?;
     state.publish_events(&[event]);
     Ok(())
@@ -1183,6 +1251,30 @@ mod tests {
         fn record(&self, call: SecretStoreCall) {
             self.calls.lock().expect("calls lock").push(call);
         }
+    }
+
+    #[test]
+    fn account_events_include_declarative_resource_payload() {
+        let test = test_app_state();
+        let state = Arc::new(test.state);
+        let account_id = AccountId::from("primary");
+        append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+            .expect("account event should append");
+
+        let events = state
+            .service
+            .list_events(&EventFilter {
+                account_id: Some(account_id.clone()),
+                topic: Some(EVENT_TOPIC_ACCOUNT_UPDATED.to_string()),
+                mailbox_id: None,
+                after_seq: None,
+            })
+            .expect("events should list");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload["accountId"], account_id.as_str());
+        assert_eq!(events[0].payload["resources"][0]["kind"], "account");
+        assert_eq!(events[0].payload["resources"][0]["operation"], "updated");
+        assert_eq!(events[0].payload["resources"][0]["id"], account_id.as_str());
     }
 
     impl SecretStore for RecordingSecretStore {

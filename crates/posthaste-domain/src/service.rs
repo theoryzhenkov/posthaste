@@ -12,7 +12,7 @@ use crate::{
     MessagePage, MessageSortField, MessageSummary, SendMessageRequest, ServiceError,
     SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
     SmartMailboxId, SmartMailboxRule, SmartMailboxStore, SmartMailboxSummary, SortDirection,
-    SourceDataStore, SourceProjectionStore, SyncObject, SyncStateStore, SyncTrigger,
+    SourceDataStore, SourceProjectionStore, SyncMode, SyncObject, SyncStateStore, SyncTrigger,
     SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
     EVENT_TOPIC_SYNC_FAILED,
 };
@@ -580,7 +580,31 @@ impl MailService {
         gateway: &dyn MailGateway,
         progress: Option<crate::SyncProgressReporter>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
-        let cursors = self.sync_state.get_sync_cursors(account_id)?;
+        self.sync_account_with_mode(
+            account_id,
+            trigger,
+            SyncMode::Incremental,
+            gateway,
+            progress,
+        )
+        .await
+    }
+
+    /// Run a sync cycle with an explicit user-requested mode.
+    ///
+    /// @spec docs/L1-sync#sync-loop
+    pub async fn sync_account_with_mode(
+        &self,
+        account_id: &AccountId,
+        trigger: SyncTrigger,
+        mode: SyncMode,
+        gateway: &dyn MailGateway,
+        progress: Option<crate::SyncProgressReporter>,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let mut cursors = self.sync_state.get_sync_cursors(account_id)?;
+        if mode.requires_full_message_metadata() {
+            cursors.retain(|cursor| cursor.object_type != SyncObject::Message);
+        }
         let batch = gateway.sync(account_id, &cursors, progress.clone()).await?;
         if let Some(progress) = progress {
             progress.report(crate::SyncProgress {
@@ -645,6 +669,12 @@ impl MailService {
                 "deletedMessageCount": batch.deleted_message_ids.len(),
                 "automationEventCount": action_count,
                 "trigger": trigger.as_str(),
+                "mode": mode.as_str(),
+                "resources": [
+                    { "kind": "sync", "operation": "completed", "accountId": account_id.as_str(), "mode": mode.as_str() },
+                    { "kind": "mailbox", "operation": "refreshed", "accountId": account_id.as_str() },
+                    { "kind": "message", "operation": "refreshed", "accountId": account_id.as_str() },
+                ],
                 "postCommitErrors": post_commit_errors,
             }),
         )?;
@@ -674,6 +704,10 @@ impl MailService {
                     "message": message,
                     "trigger": trigger.as_str(),
                     "stage": stage,
+                    "resources": [
+                        { "kind": "sync", "operation": "failed", "accountId": account_id.as_str() },
+                        { "kind": "accountRuntime", "operation": "updated", "accountId": account_id.as_str() },
+                    ],
                 }),
             )
             .map_err(Into::into)

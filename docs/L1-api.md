@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-05-24
-reviewed: 2026-04-29
+modified: 2026-05-25
+reviewed: 2026-05-25
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -113,9 +113,29 @@ across accounts for compose autosuggest.
 
 | Method | Path                                 | Handler         | Request       | Response             |
 | ------ | ------------------------------------ | --------------- | ------------- | -------------------- |
-| POST   | `/sources/{source_id}/commands/sync` | `trigger_sync`  | --            | `{ ok, eventCount }` |
+| POST   | `/sources/{source_id}/commands/sync` | `trigger_sync`  | `TriggerSyncRequest` | `{ ok, eventCount, mode }` |
 | POST   | `/config:reload`                     | `reload_config` | --            | `OkResponse`         |
 | GET    | `/events`                            | `stream_events` | `EventsQuery` | SSE stream           |
+
+`TriggerSyncRequest.mode` defaults to `incremental`. `fullMetadata` performs an authoritative message metadata refresh for the account while preserving optional body/blob cache entries where possible.
+
+## SSE resource-change contract
+
+SSE events are durable declarative facts, not frontend commands. Every mutating settings/config endpoint must append and publish a resource-change event after the durable write succeeds. The frontend maps changed resources to read-model invalidations, then refetches truth through normal REST endpoints.
+
+| Mutation | Event topic | Resource payload |
+| --- | --- | --- |
+| `PATCH /settings` | `settings.updated` | `appSettings.updated`, plus `changed[]` section names |
+| account create/update/delete/enable/disable/logo/OAuth | `account.created`, `account.updated`, `account.deleted` | `account.{created,updated,deleted}` |
+| `POST /smart-mailboxes` | `smart_mailbox.created` | `smartMailbox.created` |
+| `PATCH /smart-mailboxes/{id}` | `smart_mailbox.updated` | `smartMailbox.updated` |
+| `DELETE /smart-mailboxes/{id}` | `smart_mailbox.deleted` | `smartMailbox.deleted` |
+| `POST /smart-mailboxes:reset-defaults` | `smart_mailbox.reset` | `smartMailbox.reset` |
+| `PATCH /sources/{source_id}/mailboxes/{mailbox_id}` | `mailbox.updated`/sync events | `mailbox.updated` |
+| `POST /sources/{source_id}/commands/sync` | `sync.completed` or `sync.failed` | `sync.completed`/`sync.failed`, with mode when available |
+| `POST /config:reload` | `config.reloaded` | `config.reloaded`, plus source account resources from the diff |
+
+Global config events use the reserved event account id `app` because the current event log schema requires an `account_id`. Unfiltered `/events` consumers receive them; account-filtered consumers must subscribe to the global stream as well if they need app-wide settings changes.
 
 ## Error format
 

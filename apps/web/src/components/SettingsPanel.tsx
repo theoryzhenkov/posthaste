@@ -362,7 +362,7 @@ export function SettingsPanel({
       action,
       account,
     }: {
-      action: 'enable' | 'disable' | 'delete' | 'sync'
+      action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata'
       account: AccountOverview
     }) => {
       switch (action) {
@@ -374,6 +374,8 @@ export function SettingsPanel({
           return deleteAccount(account.id)
         case 'sync':
           return triggerSync(account.id)
+        case 'repairMetadata':
+          return triggerSync({ sourceId: account.id, mode: 'fullMetadata' })
       }
     },
     onMutate: () => {
