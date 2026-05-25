@@ -9,6 +9,7 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::webview::WebviewWindow;
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
+use tauri_plugin_shell::ShellExt;
 use tauri_utils::config::WebviewUrl;
 
 const CLOSE_WINDOW_MENU_ID: &str = "close-window";
@@ -201,6 +202,15 @@ fn is_safe_log_token(value: char) -> bool {
 }
 
 #[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    validate_external_url(&url)?;
+    #[allow(deprecated)]
+    app.shell()
+        .open(url, None)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(), String> {
     let label = surface_window_label(&surface);
     if let Some(window) = app.get_webview_window(&label) {
@@ -268,6 +278,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             log_from_frontend,
+            open_external_url,
             open_surface_window
         ])
         .setup(|app| {
@@ -426,6 +437,14 @@ fn build_window<M: Manager<R>, R: Runtime>(
     let window = builder.build()?;
     remember_focused_window(&window);
     Ok(window)
+}
+
+fn validate_external_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "external URL is invalid".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(()),
+        _ => Err("external URL must use http or https".to_string()),
+    }
 }
 
 fn backend_init_script(port: u16) -> String {
@@ -659,6 +678,18 @@ mod tests {
             surface_route(&surface),
             "/surface/settings?category=accounts&targetKind=account&accountId=primary"
         );
+    }
+
+    #[test]
+    fn external_url_validation_accepts_http_urls() {
+        assert!(validate_external_url("https://accounts.example.test/oauth").is_ok());
+        assert!(validate_external_url("http://127.0.0.1/callback").is_ok());
+    }
+
+    #[test]
+    fn external_url_validation_rejects_non_web_urls() {
+        assert!(validate_external_url("file:///tmp/secret").is_err());
+        assert!(validate_external_url("not a url").is_err());
     }
 
     #[test]

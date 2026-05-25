@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { buildOAuthRedirectUri, startProviderOAuth } from '../../api/client'
 import type { AccountOverview, ProviderKind } from '../../api/types'
 import { providerOAuthClientCredentials } from '../../config/oauthProviders'
+import { openExternalUrl } from '../../desktop'
 import { AccountMark } from '../AccountMark'
 import { AccountEditor } from './AccountEditor'
 import { SyncProgressMeter } from './SyncProgressMeter'
@@ -226,8 +227,21 @@ function AccountsEmptyState({
   )
 }
 
+class OAuthOpenError extends Error {
+  readonly authorizationUrl: string
+
+  constructor(message: string, authorizationUrl: string) {
+    super(message)
+    this.name = 'OAuthOpenError'
+    this.authorizationUrl = authorizationUrl
+  }
+}
+
 function AccountSetupChoice({ onManual }: { onManual: () => void }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [fallbackAuthorizationUrl, setFallbackAuthorizationUrl] = useState<
+    string | null
+  >(null)
   const [startedProvider, setStartedProvider] = useState<ProviderKind | null>(
     null,
   )
@@ -240,20 +254,36 @@ function AccountSetupChoice({ onManual }: { onManual: () => void }) {
           `${providerLabel(provider)} OAuth client ID is not configured`,
         )
       }
-      return startProviderOAuth({
+      const session = await startProviderOAuth({
         provider,
         clientId,
         clientSecret: credentials?.clientSecret,
         redirectUri: buildOAuthRedirectUri(),
       })
+      try {
+        await openExternalUrl(session.authorizationUrl)
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Could not open the authorization URL.'
+        throw new OAuthOpenError(message, session.authorizationUrl)
+      }
+      return { provider }
     },
-    onSuccess: (session, provider) => {
+    onSuccess: ({ provider }) => {
       setErrorMessage(null)
+      setFallbackAuthorizationUrl(null)
       setStartedProvider(provider)
-      window.open(session.authorizationUrl, '_blank', 'noopener,noreferrer')
     },
     onError: (error: Error) => {
       setStartedProvider(null)
+      if (error instanceof OAuthOpenError) {
+        setFallbackAuthorizationUrl(error.authorizationUrl)
+        setErrorMessage(error.message)
+        return
+      }
+      setFallbackAuthorizationUrl(null)
       setErrorMessage(error.message)
     },
   })
@@ -293,6 +323,19 @@ function AccountSetupChoice({ onManual }: { onManual: () => void }) {
       )}
       {errorMessage && (
         <p className="mt-4 text-[12px] text-destructive">{errorMessage}</p>
+      )}
+      {fallbackAuthorizationUrl && (
+        <p className="mt-2 break-all text-[12px] text-muted-foreground">
+          Open this authorization URL manually:{' '}
+          <a
+            className="text-primary underline underline-offset-2"
+            href={fallbackAuthorizationUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {fallbackAuthorizationUrl}
+          </a>
+        </p>
       )}
     </div>
   )

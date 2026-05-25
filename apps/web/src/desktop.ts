@@ -19,6 +19,20 @@ export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+export async function openExternalUrl(url: string): Promise<void> {
+  if (isTauriRuntime()) {
+    await invoke('open_external_url', { url })
+    return
+  }
+
+  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!openedWindow) {
+    throw new Error(
+      'Popup blocked. Copy the authorization URL and open it in your browser.',
+    )
+  }
+}
+
 export async function openDesktopSurface(
   surface: SurfaceDescriptor,
 ): Promise<void> {
