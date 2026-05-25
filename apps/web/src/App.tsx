@@ -642,8 +642,8 @@ export default function App() {
   const isStandaloneSurface = isTauriRuntime() && routeSurface !== null
 
   return (
-    <DesignThemeProvider>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <DesignThemeProvider>
         <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
         {isStandaloneSurface ? (
           <Suspense
@@ -667,7 +667,7 @@ export default function App() {
             className: 'font-sans text-sm',
           }}
         />
-      </QueryClientProvider>
-    </DesignThemeProvider>
+      </DesignThemeProvider>
+    </QueryClientProvider>
   )
 }

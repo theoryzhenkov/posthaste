@@ -20,9 +20,42 @@ export interface MailEndpointSettings {
   security: TransportSecurity
 }
 
+export type ThemeMode = 'light' | 'dark' | 'system'
+export type PalettePresetId =
+  | 'neutral'
+  | 'paperInk'
+  | 'brutalist'
+  | 'glass'
+  | 'acid'
+  | 'marzipan'
+  | 'botanical'
+export type UiDensity = 'compact' | 'cozy' | 'comfortable'
+
+export interface AppGlassBloomSettings {
+  id: string
+  hue: number
+  x: number
+  y: number
+  opacity: number
+  radius: number
+}
+
+export interface AppGlassThemeSettings {
+  blooms: AppGlassBloomSettings[]
+}
+
+export interface AppAppearanceSettings {
+  mode: ThemeMode
+  palettePreset: PalettePresetId
+  density: UiDensity
+  accentHue: number
+  glassTheme: AppGlassThemeSettings
+}
+
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
   defaultAccountId: string | null
+  appearance: AppAppearanceSettings
   cachePolicy: CachePolicy
   automationRules: AutomationRule[]
   automationDrafts: AutomationRule[]
