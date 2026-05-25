@@ -260,6 +260,39 @@ describe('frontend domain cache contracts', () => {
     )
   })
 
+  it('invalidates account-backed read models when account appearance changes', () => {
+    const queryClient = createQueryClient()
+    const account = accountOverview()
+    queryClient.setQueryData(queryKeys.accounts, [account])
+    queryClient.setQueryData(queryKeys.account(account.id), account)
+    queryClient.setQueryData(queryKeys.sidebar, { sources: [] })
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: EVENT_TOPICS.AccountUpdated,
+        accountId: account.id,
+        messageId: null,
+        mailboxId: null,
+        payload: {
+          resources: [
+            { kind: 'account', operation: 'updated', id: account.id },
+          ],
+        },
+      }),
+    )
+
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
+    expect(
+      queryClient.getQueryState(queryKeys.account(account.id))?.isInvalidated,
+    ).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.sidebar)?.isInvalidated).toBe(
+      true,
+    )
+  })
+
   it('invalidates broad read models when config reloads', () => {
     const queryClient = createQueryClient()
     const smartMailbox = queryKeys.smartMailbox('sm-work')
