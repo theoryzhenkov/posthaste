@@ -41,11 +41,9 @@ pub async fn create_smart_mailbox(
     append_and_publish_config_event(
         &state,
         EVENT_TOPIC_SMART_MAILBOX_CREATED,
-        vec![resource(
-            "smartMailbox",
-            "created",
-            Some(smart_mailbox.id.as_str()),
-            None,
+        vec![ResourceChange::smart_mailbox(
+            ResourceOperation::Created,
+            &smart_mailbox.id,
         )],
         json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
     )
@@ -99,11 +97,9 @@ pub async fn patch_smart_mailbox(
     append_and_publish_config_event(
         &state,
         EVENT_TOPIC_SMART_MAILBOX_UPDATED,
-        vec![resource(
-            "smartMailbox",
-            "updated",
-            Some(smart_mailbox.id.as_str()),
-            None,
+        vec![ResourceChange::smart_mailbox(
+            ResourceOperation::Updated,
+            &smart_mailbox.id,
         )],
         json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
     )
@@ -126,11 +122,9 @@ pub async fn delete_smart_mailbox(
     append_and_publish_config_event(
         &state,
         EVENT_TOPIC_SMART_MAILBOX_DELETED,
-        vec![resource(
-            "smartMailbox",
-            "deleted",
-            Some(smart_mailbox_id.as_str()),
-            None,
+        vec![ResourceChange::smart_mailbox(
+            ResourceOperation::Deleted,
+            &smart_mailbox_id,
         )],
         json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
     )
@@ -155,7 +149,7 @@ pub async fn reset_default_smart_mailboxes(
     append_and_publish_config_event(
         &state,
         EVENT_TOPIC_SMART_MAILBOX_RESET,
-        vec![resource("smartMailbox", "reset", None, None)],
+        vec![ResourceChange::smart_mailbox_reset()],
         json!({ "scope": "smartMailboxes" }),
     )
     .map_err(store_error_to_api)?;

@@ -59,11 +59,11 @@ pub use smart_mailboxes::{
 use account_support::{
     account_overview, account_secret_ref, append_and_publish_account_event,
     append_and_publish_config_event, apply_account_patch, apply_secret_instruction,
-    config_resource, default_account_appearance, delete_managed_secret, generate_account_id_seed,
+    default_account_appearance, delete_managed_secret, generate_account_id_seed,
     generate_smart_mailbox_id, internal_error, normalize_account_appearance,
-    normalize_automation_rules, normalize_email_patterns, normalize_optional, resource,
-    store_error_to_api, validate_account_settings, validate_automation_drafts,
-    validate_automation_rules, validate_logo_image_id, validate_secret_request,
+    normalize_automation_rules, normalize_email_patterns, normalize_optional, store_error_to_api,
+    validate_account_settings, validate_automation_drafts, validate_automation_rules,
+    validate_logo_image_id, validate_secret_request, ResourceChange, ResourceOperation,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -1384,21 +1384,21 @@ pub async fn reload_config(
         }
     }
 
-    let mut resources = vec![config_resource("reloaded")];
+    let mut resources = vec![ResourceChange::config_reloaded()];
     resources.extend(
         diff.added_sources
             .iter()
-            .map(|id| resource("account", "created", Some(id.as_str()), Some(id))),
+            .map(|id| ResourceChange::account(ResourceOperation::Created, id)),
     );
     resources.extend(
         diff.changed_sources
             .iter()
-            .map(|id| resource("account", "updated", Some(id.as_str()), Some(id))),
+            .map(|id| ResourceChange::account(ResourceOperation::Updated, id)),
     );
     resources.extend(
         diff.removed_sources
             .iter()
-            .map(|id| resource("account", "deleted", Some(id.as_str()), Some(id))),
+            .map(|id| ResourceChange::account(ResourceOperation::Deleted, id)),
     );
     append_and_publish_config_event(
         &state,
