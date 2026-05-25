@@ -11,11 +11,23 @@ import {
   findConversationIdForMessage,
   mailKeys,
 } from './mailState'
-import { EVENT_TOPICS, type DomainEventTopic } from './domainVocabulary'
+import {
+  EVENT_TOPICS,
+  isDomainEventTopic,
+  type DomainEventTopic,
+} from './domainVocabulary'
 import { queryKeys } from './queryKeys'
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function payloadString(
+  payload: DomainEvent['payload'],
+  key: string,
+): string | undefined {
+  const value = payload[key]
+  return typeof value === 'string' ? value : undefined
 }
 
 function payloadConversationId(payload: DomainEvent['payload']): string | null {
@@ -296,53 +308,169 @@ function invalidateTargetMessageReadModels(
   }
 }
 
+interface ResourceChange {
+  accountId?: string
+  id?: string
+  kind: string
+  operation: string
+}
+
+function isResourceChange(value: unknown): value is ResourceChange {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const resource = value as Record<string, unknown>
+  return (
+    typeof resource.kind === 'string' &&
+    typeof resource.operation === 'string' &&
+    (resource.id === undefined || typeof resource.id === 'string') &&
+    (resource.accountId === undefined || typeof resource.accountId === 'string')
+  )
+}
+
+function resourceChangesFromPayload(
+  payload: DomainEvent['payload'],
+): ResourceChange[] {
+  return Array.isArray(payload.resources)
+    ? payload.resources.filter(isResourceChange)
+    : []
+}
+
+function applyResourceInvalidation(
+  queryClient: QueryClient,
+  event: DomainEvent,
+  resource: ResourceChange,
+): boolean {
+  const accountId = resource.accountId ?? event.accountId
+  switch (resource.kind) {
+    case 'appSettings':
+      invalidateAccountReadModels(queryClient)
+      invalidateSmartMailboxReadModels(queryClient)
+      return true
+    case 'config':
+      invalidateAccountReadModels(queryClient)
+      invalidateSmartMailboxReadModels(queryClient)
+      invalidateMessageDetailReadModels(queryClient)
+      return true
+    case 'account': {
+      const targetAccountId = resource.id ?? accountId
+      if (resource.operation === 'deleted') {
+        removeAccountOverview(queryClient, targetAccountId)
+        invalidateAccountReadModels(queryClient)
+        invalidateSmartMailboxReadModels(queryClient)
+        invalidateMessageDetailReadModels(queryClient)
+        return true
+      }
+      invalidateAccountReadModels(queryClient, targetAccountId)
+      return true
+    }
+    case 'smartMailbox':
+      if (resource.operation === 'deleted' && resource.id) {
+        queryClient.removeQueries({
+          queryKey: queryKeys.smartMailbox(resource.id),
+          exact: true,
+        })
+      }
+      invalidateSmartMailboxReadModels(queryClient, resource.id)
+      return true
+    case 'mailbox':
+      invalidateMailboxReadModels(queryClient, accountId)
+      return true
+    case 'sync':
+      invalidateAccountReadModels(queryClient, accountId)
+      invalidateSmartMailboxReadModels(queryClient)
+      invalidateMessageDetailReadModels(queryClient)
+      return true
+    case 'message':
+      invalidateMessageListReadModels(queryClient)
+      return true
+    default:
+      return false
+  }
+}
+
+function applyResourceInvalidations(
+  queryClient: QueryClient,
+  event: DomainEvent,
+): boolean {
+  return resourceChangesFromPayload(event.payload)
+    .map((resource) => applyResourceInvalidation(queryClient, event, resource))
+    .some(Boolean)
+}
+
+function applyResourceInvalidationsOrFallback(
+  queryClient: QueryClient,
+  event: DomainEvent,
+  fallback: EventHandler,
+) {
+  if (!applyResourceInvalidations(queryClient, event)) {
+    fallback(queryClient, event)
+  }
+}
+
 type EventHandler = (queryClient: QueryClient, event: DomainEvent) => void
 
 const eventHandlers = {
-  [EVENT_TOPICS.SettingsUpdated]: (queryClient) => {
-    invalidateAccountReadModels(queryClient)
-    invalidateSmartMailboxReadModels(queryClient)
+  [EVENT_TOPICS.SettingsUpdated]: (queryClient, event) => {
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateAccountReadModels(client)
+      invalidateSmartMailboxReadModels(client)
+    })
   },
-  [EVENT_TOPICS.ConfigReloaded]: (queryClient) => {
-    invalidateAccountReadModels(queryClient)
-    invalidateSmartMailboxReadModels(queryClient)
-    invalidateMessageDetailReadModels(queryClient)
+  [EVENT_TOPICS.ConfigReloaded]: (queryClient, event) => {
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateAccountReadModels(client)
+      invalidateSmartMailboxReadModels(client)
+      invalidateMessageDetailReadModels(client)
+    })
   },
   [EVENT_TOPICS.SmartMailboxCreated]: (queryClient, event) => {
-    invalidateSmartMailboxReadModels(
-      queryClient,
-      event.payload.smartMailboxId as string | undefined,
-    )
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateSmartMailboxReadModels(
+        client,
+        payloadString(event.payload, 'smartMailboxId'),
+      )
+    })
   },
   [EVENT_TOPICS.SmartMailboxUpdated]: (queryClient, event) => {
-    invalidateSmartMailboxReadModels(
-      queryClient,
-      event.payload.smartMailboxId as string | undefined,
-    )
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateSmartMailboxReadModels(
+        client,
+        payloadString(event.payload, 'smartMailboxId'),
+      )
+    })
   },
   [EVENT_TOPICS.SmartMailboxDeleted]: (queryClient, event) => {
-    const smartMailboxId = event.payload.smartMailboxId as string | undefined
-    if (smartMailboxId) {
-      queryClient.removeQueries({
-        queryKey: queryKeys.smartMailbox(smartMailboxId),
-        exact: true,
-      })
-    }
-    invalidateSmartMailboxReadModels(queryClient, smartMailboxId)
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      const smartMailboxId = payloadString(event.payload, 'smartMailboxId')
+      if (smartMailboxId) {
+        client.removeQueries({
+          queryKey: queryKeys.smartMailbox(smartMailboxId),
+          exact: true,
+        })
+      }
+      invalidateSmartMailboxReadModels(client, smartMailboxId)
+    })
   },
-  [EVENT_TOPICS.SmartMailboxReset]: (queryClient) => {
-    invalidateSmartMailboxReadModels(queryClient)
+  [EVENT_TOPICS.SmartMailboxReset]: (queryClient, event) => {
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateSmartMailboxReadModels(client)
+    })
   },
   [EVENT_TOPICS.SyncCompleted]: (queryClient, event) => {
-    invalidateAccountReadModels(queryClient, event.accountId)
-    invalidateSmartMailboxReadModels(queryClient)
-    invalidateMessageDetailReadModels(queryClient)
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateAccountReadModels(client, event.accountId)
+      invalidateSmartMailboxReadModels(client)
+      invalidateMessageDetailReadModels(client)
+    })
   },
   [EVENT_TOPICS.SyncFailed]: (queryClient, event) => {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
   },
   [EVENT_TOPICS.AccountCreated]: (queryClient, event) => {
-    invalidateAccountReadModels(queryClient, event.accountId)
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateAccountReadModels(client, event.accountId)
+    })
   },
   [EVENT_TOPICS.AccountStatusChanged]: (queryClient, event) => {
     if (!applyAccountStatusPatch(queryClient, event.accountId, event.payload)) {
@@ -350,13 +478,17 @@ const eventHandlers = {
     }
   },
   [EVENT_TOPICS.AccountUpdated]: (queryClient, event) => {
-    invalidateAccountReadModels(queryClient, event.accountId)
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      invalidateAccountReadModels(client, event.accountId)
+    })
   },
   [EVENT_TOPICS.AccountDeleted]: (queryClient, event) => {
-    removeAccountOverview(queryClient, event.accountId)
-    invalidateAccountReadModels(queryClient)
-    invalidateSmartMailboxReadModels(queryClient)
-    invalidateMessageDetailReadModels(queryClient)
+    applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
+      removeAccountOverview(client, event.accountId)
+      invalidateAccountReadModels(client)
+      invalidateSmartMailboxReadModels(client)
+      invalidateMessageDetailReadModels(client)
+    })
   },
   [EVENT_TOPICS.MailboxUpdated]: (queryClient, event) => {
     invalidateMailboxReadModels(queryClient, event.accountId)
@@ -401,10 +533,6 @@ const eventHandlers = {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
   },
 } satisfies Record<DomainEventTopic, EventHandler>
-
-function isDomainEventTopic(topic: string): topic is DomainEventTopic {
-  return Object.values(EVENT_TOPICS).includes(topic as DomainEventTopic)
-}
 
 export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
   if (!isDomainEventTopic(event.topic)) {
