@@ -39,8 +39,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.platform }}
+          cache-on-failure: true
 
       - uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -72,7 +83,7 @@ jobs:
 
       - name: Build desktop bundles
         shell: bash
-        run: bun run tauri build --ci --no-sign
+        run: bun run tauri build --ci --no-sign --config '{"build":{"beforeBuildCommand":null}}'
 
       - name: Collect desktop bundles
         shell: bash
