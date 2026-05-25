@@ -781,40 +781,103 @@ pub(super) fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {
 
 pub(super) const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
 
-/// Build a declarative resource-change payload item.
+/// Typed resource kind values serialized in domain event `resources[]` payloads.
 ///
 /// @spec docs/L1-sync#event-propagation
-pub(super) fn resource(
-    kind: &str,
-    operation: &str,
-    id: Option<&str>,
-    account_id: Option<&AccountId>,
-) -> serde_json::Value {
-    let mut resource = serde_json::Map::from_iter([
-        ("kind".to_string(), json!(kind)),
-        ("operation".to_string(), json!(operation)),
-    ]);
-    if let Some(id) = id {
-        resource.insert("id".to_string(), json!(id));
-    }
-    if let Some(account_id) = account_id {
-        resource.insert("accountId".to_string(), json!(account_id.as_str()));
-    }
-    serde_json::Value::Object(resource)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum ResourceKind {
+    Account,
+    AppSettings,
+    Config,
+    SmartMailbox,
 }
 
-/// Build a broad config resource-change payload item.
+/// Typed resource operation values serialized in domain event `resources[]` payloads.
 ///
 /// @spec docs/L1-sync#event-propagation
-pub(super) fn config_resource(operation: &str) -> serde_json::Value {
-    resource("config", operation, None, None)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum ResourceOperation {
+    Created,
+    Updated,
+    Deleted,
+    Reset,
+    Reloaded,
 }
 
-fn account_operation_from_topic(topic: &str) -> &str {
+/// Declarative resource-change payload item for domain events.
+///
+/// The serialized shape is intentionally stable:
+/// `{ kind, operation, id?, accountId? }`.
+///
+/// @spec docs/L1-sync#event-propagation
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ResourceChange {
+    kind: ResourceKind,
+    operation: ResourceOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_id: Option<String>,
+}
+
+impl ResourceChange {
+    pub(super) fn account(operation: ResourceOperation, account_id: &AccountId) -> Self {
+        Self {
+            kind: ResourceKind::Account,
+            operation,
+            id: Some(account_id.as_str().to_string()),
+            account_id: Some(account_id.as_str().to_string()),
+        }
+    }
+
+    pub(super) fn app_settings_updated() -> Self {
+        Self {
+            kind: ResourceKind::AppSettings,
+            operation: ResourceOperation::Updated,
+            id: None,
+            account_id: None,
+        }
+    }
+
+    pub(super) fn config_reloaded() -> Self {
+        Self {
+            kind: ResourceKind::Config,
+            operation: ResourceOperation::Reloaded,
+            id: None,
+            account_id: None,
+        }
+    }
+
+    pub(super) fn smart_mailbox(
+        operation: ResourceOperation,
+        smart_mailbox_id: &SmartMailboxId,
+    ) -> Self {
+        Self {
+            kind: ResourceKind::SmartMailbox,
+            operation,
+            id: Some(smart_mailbox_id.as_str().to_string()),
+            account_id: None,
+        }
+    }
+
+    pub(super) fn smart_mailbox_reset() -> Self {
+        Self {
+            kind: ResourceKind::SmartMailbox,
+            operation: ResourceOperation::Reset,
+            id: None,
+            account_id: None,
+        }
+    }
+}
+
+fn account_operation_from_topic(topic: &str) -> ResourceOperation {
     match topic {
-        EVENT_TOPIC_ACCOUNT_CREATED => "created",
-        EVENT_TOPIC_ACCOUNT_DELETED => "deleted",
-        _ => "updated",
+        EVENT_TOPIC_ACCOUNT_CREATED => ResourceOperation::Created,
+        EVENT_TOPIC_ACCOUNT_DELETED => ResourceOperation::Deleted,
+        _ => ResourceOperation::Updated,
     }
 }
 
@@ -834,7 +897,7 @@ pub(super) fn append_and_publish_account_event(
         None,
         json!({
             "accountId": account_id.as_str(),
-            "resources": [resource("account", operation, Some(account_id.as_str()), Some(account_id))],
+            "resources": [ResourceChange::account(operation, account_id)],
         }),
     )?;
     state.publish_events(&[event]);
@@ -847,14 +910,14 @@ pub(super) fn append_and_publish_account_event(
 pub(super) fn append_and_publish_config_event(
     state: &Arc<AppState>,
     topic: &str,
-    resources: Vec<serde_json::Value>,
+    resources: Vec<ResourceChange>,
     extra: serde_json::Value,
 ) -> Result<(), posthaste_domain::StoreError> {
     let mut payload = match extra {
         serde_json::Value::Object(map) => map,
         _ => serde_json::Map::new(),
     };
-    payload.insert("resources".to_string(), serde_json::Value::Array(resources));
+    payload.insert("resources".to_string(), json!(resources));
     let event = state.store.append_event(
         &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
         topic,
@@ -1251,6 +1314,42 @@ mod tests {
         fn record(&self, call: SecretStoreCall) {
             self.calls.lock().expect("calls lock").push(call);
         }
+    }
+
+    #[test]
+    fn resource_change_serializes_wire_compatible_json() {
+        let account_id = AccountId::from("primary");
+        assert_eq!(
+            serde_json::to_value(ResourceChange::account(
+                ResourceOperation::Updated,
+                &account_id,
+            ))
+            .expect("resource change should serialize"),
+            json!({
+                "kind": "account",
+                "operation": "updated",
+                "id": "primary",
+                "accountId": "primary",
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(ResourceChange::app_settings_updated())
+                .expect("resource change should serialize"),
+            json!({
+                "kind": "appSettings",
+                "operation": "updated",
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(ResourceChange::smart_mailbox_reset())
+                .expect("resource change should serialize"),
+            json!({
+                "kind": "smartMailbox",
+                "operation": "reset",
+            }),
+        );
     }
 
     #[test]
