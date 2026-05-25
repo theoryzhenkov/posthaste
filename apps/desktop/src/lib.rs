@@ -4,13 +4,16 @@ use posthaste_observability::{
 };
 use posthaste_server::ServerConfig;
 use serde::Deserialize;
+use std::sync::Mutex;
 use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::webview::WebviewWindow;
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
 use tauri_utils::config::WebviewUrl;
 
 const CLOSE_WINDOW_MENU_ID: &str = "close-window";
+const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
+const MAIN_WINDOW_LABEL: &str = "main";
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -226,6 +229,29 @@ struct EmbeddedBackend {
     port: u16,
 }
 
+struct FocusedWindowLabel {
+    label: Mutex<String>,
+}
+
+impl FocusedWindowLabel {
+    fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: Mutex::new(label.into()),
+        }
+    }
+
+    fn get(&self) -> String {
+        self.label
+            .lock()
+            .expect("focused label lock poisoned")
+            .clone()
+    }
+
+    fn set(&self, label: impl Into<String>) {
+        *self.label.lock().expect("focused label lock poisoned") = label.into();
+    }
+}
+
 /// Run the Posthaste desktop application.
 ///
 /// Starts the embedded Axum backend on an OS-assigned port, then opens a Tauri
@@ -237,7 +263,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .on_menu_event(|app, event| {
             if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
-                close_focused_webview_window(app);
+                close_remembered_webview_window(app);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -262,12 +288,13 @@ pub fn run() {
             );
             app.manage(handle);
             app.manage(EmbeddedBackend { port });
+            app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
 
             app.set_menu(build_app_menu(app)?)?;
 
             build_window(
                 app.handle(),
-                "main",
+                MAIN_WINDOW_LABEL,
                 "index.html",
                 "Posthaste",
                 1200.0,
@@ -296,16 +323,61 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
     MenuBuilder::new(manager).item(&file_menu).build()
 }
 
+fn is_main_window_label(label: &str) -> bool {
+    label == MAIN_WINDOW_LABEL
+}
+
 fn is_closeable_surface_window_label(label: &str) -> bool {
     label == "settings" || label.starts_with("message-") || label.starts_with("attachment-")
 }
 
-fn close_focused_webview_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.webview_windows().into_values().find(|window| {
-        window.is_focused().unwrap_or(false) && is_closeable_surface_window_label(window.label())
-    }) {
-        let _ = window.close();
+fn remember_focused_window<R: Runtime>(window: &WebviewWindow<R>) {
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    app.state::<FocusedWindowLabel>().set(label.clone());
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Focused(true)) {
+            app.state::<FocusedWindowLabel>().set(label.clone());
+        }
+    });
+}
+
+fn close_remembered_webview_window<R: Runtime>(app: &AppHandle<R>) {
+    let remembered_label = app.state::<FocusedWindowLabel>().get();
+    if request_close_for_window_label(app, &remembered_label) {
+        return;
     }
+
+    if let Some(window) = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+    {
+        let label = window.label().to_string();
+        app.state::<FocusedWindowLabel>().set(label.clone());
+        let _ = request_close_for_window_label(app, &label);
+    }
+}
+
+fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    if is_main_window_label(label) {
+        let _ = app.emit_to(
+            EventTarget::webview_window(MAIN_WINDOW_LABEL),
+            CLOSE_WINDOW_REQUESTED_EVENT,
+            (),
+        );
+        return true;
+    }
+
+    if !is_closeable_surface_window_label(label) {
+        return false;
+    }
+
+    let Some(window) = app.get_webview_window(label) else {
+        return false;
+    };
+    let _ = window.close();
+    true
 }
 
 fn build_window<M: Manager<R>, R: Runtime>(
@@ -317,12 +389,14 @@ fn build_window<M: Manager<R>, R: Runtime>(
     height: f64,
     port: u16,
 ) -> tauri::Result<WebviewWindow<R>> {
-    WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
+    let window = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
         .initialization_script(backend_init_script(port))
         .title(title)
         .inner_size(width, height)
         .resizable(true)
-        .build()
+        .build()?;
+    remember_focused_window(&window);
+    Ok(window)
 }
 
 fn backend_init_script(port: u16) -> String {
@@ -508,7 +582,9 @@ mod tests {
     }
 
     #[test]
-    fn closeable_surface_window_labels_exclude_main_window() {
+    fn closeable_window_labels_distinguish_main_and_surface_windows() {
+        assert!(is_main_window_label("main"));
+        assert!(!is_main_window_label("settings"));
         assert!(!is_closeable_surface_window_label("main"));
         assert!(is_closeable_surface_window_label("settings"));
         assert!(is_closeable_surface_window_label(
