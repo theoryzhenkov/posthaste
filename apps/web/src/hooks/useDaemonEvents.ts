@@ -47,6 +47,13 @@ export function useDaemonEvents() {
       buildEventsUrl({ afterSeq: Number.isFinite(afterSeq) ? afterSeq : null }),
     )
 
+    source.onerror = (error) => {
+      syncLogger.warn(
+        { event: LOG_EVENTS.daemonEventStreamError, error },
+        'daemon event stream disconnected or failed',
+      )
+    }
+
     source.onmessage = (event) => {
       let payload: DomainEvent
       try {

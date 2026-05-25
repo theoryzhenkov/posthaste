@@ -45,7 +45,7 @@ export function AccountsPane({
   onBackToAccounts: () => void
   onCreateAccount: () => void
   onCommand: (
-    action: 'enable' | 'disable' | 'delete' | 'sync',
+    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata',
     account: AccountOverview,
   ) => void
   onSaved: (account: AccountOverview) => Promise<void>
@@ -54,7 +54,7 @@ export function AccountsPane({
     unknown,
     Error,
     {
-      action: 'enable' | 'disable' | 'delete' | 'sync'
+      action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata'
       account: AccountOverview
     },
     unknown

@@ -49,6 +49,12 @@ export const KNOWN_SYSTEM_KEYWORDS = [
 export const EVENT_TOPICS = {
   SyncCompleted: 'sync.completed',
   SyncFailed: 'sync.failed',
+  SettingsUpdated: 'settings.updated',
+  ConfigReloaded: 'config.reloaded',
+  SmartMailboxCreated: 'smart_mailbox.created',
+  SmartMailboxUpdated: 'smart_mailbox.updated',
+  SmartMailboxDeleted: 'smart_mailbox.deleted',
+  SmartMailboxReset: 'smart_mailbox.reset',
   MessageUpdated: 'message.updated',
   MessageKeywordsChanged: 'message.keywords_changed',
   MessageBodyCached: 'message.body_cached',

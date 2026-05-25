@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -11,11 +11,18 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
     AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, CachePolicy,
-    ConfigRepository, MailService, MailStore, SecretRef, SecretStore, SecretStoreError,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, RFC3339_EPOCH,
+    ConfigRepository, DomainEvent, MailService, MailStore, SecretRef, SecretStore,
+    SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    SmartMailboxValue, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
+    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
+    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED, RFC3339_EPOCH,
 };
-use posthaste_server::api::{patch_settings, PatchSettingsRequest};
+use posthaste_server::api::{
+    create_smart_mailbox, delete_smart_mailbox, patch_settings, patch_smart_mailbox, reload_config,
+    reset_default_smart_mailboxes, CreateSmartMailboxRequest, PatchSettingsRequest,
+    PatchSmartMailboxRequest,
+};
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::AppState;
 use posthaste_store::DatabaseStore;
@@ -122,15 +129,34 @@ impl SettingsHarness {
     }
 }
 
+fn expect_api_ok<T>(
+    result: Result<Json<T>, posthaste_server::api::ApiError>,
+    context: &str,
+) -> Json<T> {
+    match result {
+        Ok(value) => value,
+        Err(error) => panic!("{context}, got {}", error.into_response().status()),
+    }
+}
+
 fn expect_settings_ok(
     result: Result<Json<AppSettings>, posthaste_server::api::ApiError>,
 ) -> Json<AppSettings> {
-    match result {
-        Ok(settings) => settings,
-        Err(error) => panic!(
-            "settings patch should succeed, got {}",
-            error.into_response().status()
-        ),
+    expect_api_ok(result, "settings patch should succeed")
+}
+
+fn smart_rule_for_source(account_id: &str) -> SmartMailboxRule {
+    SmartMailboxRule {
+        root: SmartMailboxGroup {
+            operator: SmartMailboxGroupOperator::All,
+            negated: false,
+            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                field: SmartMailboxField::SourceId,
+                operator: SmartMailboxOperator::Equals,
+                negated: false,
+                value: SmartMailboxValue::String(account_id.to_string()),
+            })],
+        },
     }
 }
 
@@ -140,23 +166,151 @@ fn source_rule(account_id: &str) -> AutomationRule {
         name: "Newsletters".to_string(),
         enabled: true,
         triggers: vec![AutomationTrigger::MessageArrived],
-        condition: SmartMailboxRule {
-            root: SmartMailboxGroup {
-                operator: SmartMailboxGroupOperator::All,
-                negated: false,
-                nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                    field: SmartMailboxField::SourceId,
-                    operator: SmartMailboxOperator::Equals,
-                    negated: false,
-                    value: SmartMailboxValue::String(account_id.to_string()),
-                })],
-            },
-        },
+        condition: smart_rule_for_source(account_id),
         actions: vec![AutomationAction::ApplyTag {
             tag: "newsletter".to_string(),
         }],
         backfill: true,
     }
+}
+
+async fn receive_event(mut receiver: broadcast::Receiver<DomainEvent>) -> DomainEvent {
+    tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("event should arrive")
+        .expect("event should be broadcast")
+}
+
+#[tokio::test]
+async fn patch_settings_publishes_settings_updated_resource_event() {
+    let harness = SettingsHarness::new();
+    harness.save_account("primary", "Primary");
+    let receiver = harness.state.event_sender.subscribe();
+
+    let _ = expect_settings_ok(
+        patch_settings(
+            State(harness.state.clone()),
+            Json(PatchSettingsRequest {
+                default_account_id: Some(Some("primary".to_string())),
+                automation_rules: None,
+                automation_drafts: None,
+                cache_policy: None,
+            }),
+        )
+        .await,
+    );
+
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_SETTINGS_UPDATED);
+    assert_eq!(event.payload["scope"], "app");
+    assert_eq!(
+        event.payload["changed"],
+        serde_json::json!(["defaultAccount"])
+    );
+    assert_eq!(event.payload["resources"][0]["kind"], "appSettings");
+}
+
+#[tokio::test]
+async fn smart_mailbox_mutations_publish_resource_events() {
+    let harness = SettingsHarness::new();
+    harness.save_account("primary", "Primary");
+
+    let receiver = harness.state.event_sender.subscribe();
+    let created = expect_api_ok(
+        create_smart_mailbox(
+            State(harness.state.clone()),
+            Json(CreateSmartMailboxRequest {
+                name: "Work".to_string(),
+                position: Some(10),
+                rule: smart_rule_for_source("primary"),
+            }),
+        )
+        .await,
+        "smart mailbox create should succeed",
+    )
+    .0;
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_CREATED);
+    assert_eq!(event.payload["smartMailboxId"], created.id.as_str());
+    assert_eq!(event.payload["resources"][0]["operation"], "created");
+
+    let receiver = harness.state.event_sender.subscribe();
+    let _ = expect_api_ok(
+        patch_smart_mailbox(
+            State(harness.state.clone()),
+            Path(created.id.as_str().to_string()),
+            Json(PatchSmartMailboxRequest {
+                name: Some("Work updated".to_string()),
+                position: None,
+                rule: None,
+            }),
+        )
+        .await,
+        "smart mailbox patch should succeed",
+    );
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_UPDATED);
+    assert_eq!(event.payload["resources"][0]["operation"], "updated");
+
+    let receiver = harness.state.event_sender.subscribe();
+    let _ = expect_api_ok(
+        delete_smart_mailbox(
+            State(harness.state.clone()),
+            Path(created.id.as_str().to_string()),
+        )
+        .await,
+        "smart mailbox delete should succeed",
+    );
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_DELETED);
+    assert_eq!(event.payload["resources"][0]["operation"], "deleted");
+}
+
+#[tokio::test]
+async fn reload_config_publishes_declarative_resource_event() {
+    let harness = SettingsHarness::new();
+    std::fs::write(
+        harness.config_root.join("sources/reloaded.toml"),
+        r#"
+id = "reloaded"
+name = "Reloaded"
+driver = "mock"
+enabled = true
+"#,
+    )
+    .expect("source config should write");
+    let receiver = harness.state.event_sender.subscribe();
+
+    let _ = expect_api_ok(
+        reload_config(State(harness.state.clone())).await,
+        "config reload should succeed",
+    );
+
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_CONFIG_RELOADED);
+    assert_eq!(event.account_id.as_str(), "app");
+    assert_eq!(event.payload["addedSourceCount"], 1);
+    assert_eq!(event.payload["resources"][0]["kind"], "config");
+    assert_eq!(event.payload["resources"][0]["operation"], "reloaded");
+    assert_eq!(event.payload["resources"][1]["kind"], "account");
+    assert_eq!(event.payload["resources"][1]["operation"], "created");
+    assert_eq!(event.payload["resources"][1]["id"], "reloaded");
+}
+
+#[tokio::test]
+async fn reset_default_smart_mailboxes_publishes_resource_event() {
+    let harness = SettingsHarness::new();
+    let receiver = harness.state.event_sender.subscribe();
+
+    let _ = expect_api_ok(
+        reset_default_smart_mailboxes(State(harness.state.clone())).await,
+        "reset defaults should succeed",
+    );
+
+    let event = receive_event(receiver).await;
+    assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_RESET);
+    assert_eq!(event.payload["resources"][0]["kind"], "smartMailbox");
+    assert_eq!(event.payload["resources"][0]["operation"], "reset");
 }
 
 #[tokio::test]

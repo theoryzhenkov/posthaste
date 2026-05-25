@@ -29,13 +29,16 @@ impl MailService {
         let expected_state = self
             .sync_state
             .get_cursor(account_id, SyncObject::Message)?;
+        let expected_provider_state = expected_state
+            .as_ref()
+            .map(|cursor| cursor.provider_state());
         let mutation_result = match mutation {
             MessageMutation::SetKeywords(command) => {
                 gateway
                     .set_keywords(
                         account_id,
                         message_id,
-                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                        expected_provider_state.as_deref(),
                         command,
                     )
                     .await
@@ -45,18 +48,14 @@ impl MailService {
                     .replace_mailboxes(
                         account_id,
                         message_id,
-                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
+                        expected_provider_state.as_deref(),
                         &command.mailbox_ids,
                     )
                     .await
             }
             MessageMutation::Destroy => {
                 gateway
-                    .destroy_message(
-                        account_id,
-                        message_id,
-                        expected_state.as_ref().map(|cursor| cursor.state.as_str()),
-                    )
+                    .destroy_message(account_id, message_id, expected_provider_state.as_deref())
                     .await
             }
         };

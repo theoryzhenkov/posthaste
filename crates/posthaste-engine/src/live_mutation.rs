@@ -273,7 +273,10 @@ pub(crate) async fn destroy_message(
 /// @spec docs/L1-jmap#core-types
 /// @spec docs/L1-sync#state-management
 fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayError> {
-    sync_object_mutation_outcome(SyncObject::Message, state)
+    sync_object_mutation_outcome(
+        SyncObject::Message,
+        crate::sync::encode_email_cursor_state(&state),
+    )
 }
 
 fn sync_object_mutation_outcome(
@@ -447,7 +450,10 @@ mod tests {
             message_mutation_outcome("message-9".to_string()).expect("cursor should build");
         let cursor = outcome.cursor.expect("cursor should be present");
         assert_eq!(cursor.object_type, SyncObject::Message);
-        assert_eq!(cursor.state, "message-9");
+        assert_eq!(
+            crate::sync::decode_email_cursor_state(&cursor.state),
+            Some("message-9".to_string())
+        );
         assert!(!cursor.updated_at.is_empty());
     }
 }

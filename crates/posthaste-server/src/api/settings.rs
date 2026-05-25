@@ -72,15 +72,38 @@ pub async fn patch_settings(
     if let Some(automation_drafts) = &request.automation_drafts {
         settings.automation_drafts = normalize_automation_rules(automation_drafts);
     }
-    if let Some(cache_policy) = request.cache_policy {
-        settings.cache_policy = normalize_cache_policy(cache_policy);
+    if let Some(cache_policy) = &request.cache_policy {
+        settings.cache_policy = normalize_cache_policy(cache_policy.clone());
     }
     validate_automation_rules(&settings.automation_rules)?;
     validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
+    let mut changed = Vec::new();
+    if request.default_account_id.is_some() {
+        changed.push("defaultAccount");
+    }
+    if request.automation_rules.is_some() {
+        changed.push("automationRules");
+    }
+    if request.automation_drafts.is_some() {
+        changed.push("automationDrafts");
+    }
+    if request.cache_policy.is_some() {
+        changed.push("cachePolicy");
+    }
     state
         .service
         .put_app_settings(&settings)
         .map_err(ApiError::from_service_error)?;
+    append_and_publish_config_event(
+        &state,
+        EVENT_TOPIC_SETTINGS_UPDATED,
+        vec![resource("appSettings", "updated", None, None)],
+        json!({
+            "scope": "app",
+            "changed": changed,
+        }),
+    )
+    .map_err(store_error_to_api)?;
     if request.automation_rules.is_some() {
         state
             .service
