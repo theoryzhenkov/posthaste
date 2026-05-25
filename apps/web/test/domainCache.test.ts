@@ -260,6 +260,35 @@ describe('frontend domain cache contracts', () => {
     )
   })
 
+  it('falls back to broad app invalidation for unknown event topics', () => {
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
+    queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
+    queryClient.setQueryData(queryKeys.sidebar, { sources: [] })
+
+    applyDomainEvent(
+      queryClient,
+      domainEvent({
+        topic: 'future.topic',
+        accountId: 'app',
+        messageId: null,
+        mailboxId: null,
+      }),
+    )
+
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.sidebar)?.isInvalidated).toBe(
+      true,
+    )
+  })
+
   it('invalidates account-backed read models when account appearance changes', () => {
     const queryClient = createQueryClient()
     const account = accountOverview()
