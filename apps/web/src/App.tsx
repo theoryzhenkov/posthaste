@@ -11,7 +11,14 @@ import {
   useMutation,
   useQuery,
 } from '@tanstack/react-query'
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import { Loader2, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { shouldForceAccountSettings } from './accountSetup'
@@ -29,7 +36,11 @@ import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
-import { isTauriRuntime } from './desktop'
+import {
+  closeCurrentSurfaceWindow,
+  isTauriRuntime,
+  listenForDesktopCloseRequest,
+} from './desktop'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -172,6 +183,30 @@ function MailClient({
     routeSurface,
     shouldForceSettings,
   })
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    let disposed = false
+
+    void listenForDesktopCloseRequest(() => {
+      if (effectiveSurface && !shouldRenderForcedSettings) {
+        closeWebSurface()
+        return
+      }
+      void closeCurrentSurfaceWindow()
+    }).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten()
+        return
+      }
+      unlisten = nextUnlisten
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [effectiveSurface, shouldRenderForcedSettings])
+
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)

@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -11,6 +12,8 @@ import {
   surfaceHistoryState,
   surfaceUrl,
 } from './surfaceHistory'
+
+export const CLOSE_WINDOW_REQUESTED_EVENT = 'posthaste://close-window-requested'
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -38,6 +41,15 @@ export async function openSurfaceInSeparateWindow(
   if (!openedWindow) {
     throw new Error('Popup blocked. Allow popups for Posthaste and try again.')
   }
+}
+
+export async function listenForDesktopCloseRequest(
+  handler: () => void,
+): Promise<() => void> {
+  if (!isTauriRuntime()) {
+    return () => {}
+  }
+  return listen(CLOSE_WINDOW_REQUESTED_EVENT, handler)
 }
 
 export async function closeCurrentSurfaceWindow(): Promise<void> {
