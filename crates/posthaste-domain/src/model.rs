@@ -1199,6 +1199,7 @@ pub struct MessageRecord {
     pub subject: Option<String>,
     pub from_name: Option<String>,
     pub from_email: Option<String>,
+    #[serde(default)]
     pub to: Vec<Recipient>,
     pub preview: Option<String>,
     pub received_at: String,
@@ -1703,6 +1704,33 @@ mod tests {
             assert_eq!(error.code(), code);
             assert_eq!(error.kind().code(), code);
         }
+    }
+
+    #[test]
+    fn message_record_deserializes_without_recipients() {
+        let record: MessageRecord = serde_json::from_value(serde_json::json!({
+            "id": "message-1",
+            "sourceThreadId": "thread-1",
+            "remoteBlobId": null,
+            "subject": "Legacy message",
+            "fromName": null,
+            "fromEmail": "sender@example.com",
+            "preview": null,
+            "receivedAt": "2026-05-24T00:00:00Z",
+            "hasAttachment": false,
+            "size": 0,
+            "mailboxIds": [],
+            "keywords": [],
+            "bodyHtml": null,
+            "bodyText": null,
+            "rawMime": null,
+            "rfcMessageId": null,
+            "inReplyTo": null,
+            "references": []
+        }))
+        .expect("legacy message record should deserialize");
+
+        assert!(record.to.is_empty());
     }
 
     #[test]

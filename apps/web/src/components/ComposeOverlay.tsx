@@ -230,8 +230,9 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       fetchConversations({ limit: 75, sort: 'date', sortDir: 'desc' }),
   })
   const isMessageBasedCompose = intent.kind !== 'new'
+  const requiresMessageContext = intent.kind === 'reply'
   const replyContextQuery = useQuery({
-    queryKey: isMessageBasedCompose
+    queryKey: requiresMessageContext
       ? ['reply-context', intent.sourceId, intent.messageId]
       : ['reply-context', null],
     queryFn: () =>
@@ -239,7 +240,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         intent.sourceId,
         isMessageBasedCompose ? intent.messageId : '',
       ),
-    enabled: isMessageBasedCompose,
+    enabled: requiresMessageContext,
   })
 
   const composeKey = isMessageBasedCompose
@@ -443,8 +444,12 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     },
   })
 
+  const isWaitingForMessageContext =
+    requiresMessageContext && !replyContextQuery.data
   const isPreparingMessage =
-    isMessageBasedCompose && replyContextQuery.isLoading
+    isWaitingForMessageContext && !replyContextQuery.isError
+  const isForwardUnavailable = intent.kind === 'forward'
+  const fieldsDisabled = isWaitingForMessageContext || isForwardUnavailable
   const fromLabel = useMemo(() => {
     if (form.from.trim().length > 0) {
       return form.from
@@ -493,6 +498,17 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   }
 
   const handleSubmit = useCallback(() => {
+    if (isForwardUnavailable) {
+      setErrorMessage(
+        'Forward is disabled until forwarded headers and attachments are implemented.',
+      )
+      return
+    }
+    if (isWaitingForMessageContext) {
+      setErrorMessage('Wait for the message context to finish loading.')
+      return
+    }
+
     const input = buildSendInput(form)
     if (intent.kind === 'reply' && replyContextQuery.data) {
       input.inReplyTo = replyContextQuery.data.inReplyTo
@@ -511,6 +527,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
   }, [
     form,
     intent.kind,
+    isForwardUnavailable,
+    isWaitingForMessageContext,
     replyContextQuery.data,
     resolveSubmissionSourceId,
     sendMutation,
@@ -573,6 +591,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           <div className="relative flex min-w-0 items-center gap-1">
             <Input
               value={form.from}
+              disabled={fieldsDisabled}
               onBlur={() => {
                 window.setTimeout(() => {
                   setFromInputFocused(false)
@@ -593,6 +612,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
               size="icon"
               className="size-7 shrink-0 text-muted-foreground hover:bg-[var(--hover-bg)]"
               title="Choose sender"
+              disabled={fieldsDisabled}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 setFromInputFocused(true)
@@ -632,6 +652,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           <RecipientSuggestionInput
             value={form.to}
             autoFocus={intent.kind === 'new'}
+            disabled={fieldsDisabled}
             onChange={(value) => setField('to', value)}
             suggestions={recipientSuggestions}
             placeholder="name@example.com"
@@ -640,6 +661,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <ComposeLine label="Cc">
           <RecipientSuggestionInput
             value={form.cc}
+            disabled={fieldsDisabled}
             onChange={(value) => setField('cc', value)}
             suggestions={recipientSuggestions}
           />
@@ -647,6 +669,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <ComposeLine label="Bcc">
           <RecipientSuggestionInput
             value={form.bcc}
+            disabled={fieldsDisabled}
             onChange={(value) => setField('bcc', value)}
             suggestions={recipientSuggestions}
           />
@@ -654,6 +677,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <ComposeLine label="Subject">
           <Input
             value={form.subject}
+            disabled={fieldsDisabled}
             onChange={(event) => setField('subject', event.target.value)}
             className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
             placeholder="Subject"
@@ -662,12 +686,19 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       </div>
 
       <div className="min-h-0 flex-1 bg-[color-mix(in_oklab,var(--background)_62%,transparent)]">
-        {isPreparingMessage ? (
+        {isForwardUnavailable ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            Forwarding is disabled until forwarded headers and attachments are
+            implemented.
+          </div>
+        ) : isPreparingMessage ? (
           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 size={16} className="animate-spin" />
-            {intent.kind === 'forward'
-              ? 'Preparing forward...'
-              : 'Preparing reply...'}
+            Preparing reply...
+          </div>
+        ) : replyContextQuery.isError ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-destructive">
+            Could not prepare this reply. Close the composer and try again.
           </div>
         ) : (
           <Suspense
@@ -695,7 +726,10 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
             errorMessage ? 'text-destructive' : 'text-muted-foreground',
           )}
         >
-          {errorMessage ?? 'Ready'}
+          {errorMessage ??
+            (isForwardUnavailable
+              ? 'Forward is not available in this dogfood build.'
+              : 'Ready')}
         </div>
         <Button
           type="button"
@@ -708,7 +742,7 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
         <Button
           type="button"
           onClick={handleSubmit}
-          disabled={sendMutation.isPending || isPreparingMessage}
+          disabled={sendMutation.isPending || fieldsDisabled}
           className="bg-brand-coral text-white hover:bg-brand-coral/90"
         >
           {sendMutation.isPending ? (
@@ -725,12 +759,14 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
 
 function RecipientSuggestionInput({
   autoFocus = false,
+  disabled = false,
   onChange,
   placeholder,
   suggestions,
   value,
 }: {
   autoFocus?: boolean
+  disabled?: boolean
   onChange: (value: string) => void
   placeholder?: string
   suggestions: AddressSuggestionOption[]
@@ -747,6 +783,7 @@ function RecipientSuggestionInput({
       <Input
         value={value}
         autoFocus={autoFocus}
+        disabled={disabled}
         onBlur={() => {
           window.setTimeout(() => setFocused(false), 120)
         }}
@@ -755,7 +792,7 @@ function RecipientSuggestionInput({
         className="h-7 border-border bg-background/45 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring/25"
         placeholder={placeholder}
       />
-      {focused && displayedSuggestions.length > 0 && (
+      {!disabled && focused && displayedSuggestions.length > 0 && (
         <div className="absolute left-0 right-0 top-8 z-20 max-h-56 overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg">
           {displayedSuggestions.map((suggestion) => (
             <button
