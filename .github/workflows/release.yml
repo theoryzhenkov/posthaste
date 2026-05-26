@@ -82,8 +82,25 @@ jobs:
           POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
 
       - name: Build desktop bundles
+        if: runner.os != 'macOS'
         shell: bash
         run: bun run tauri build --ci --no-sign --config '{"build":{"beforeBuildCommand":null}}'
+
+      - name: Build ad-hoc signed macOS desktop bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bun run tauri build --ci --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+
+      - name: Verify macOS desktop app signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          found=0
+          while IFS= read -r app; do
+            found=1
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done < <(find target/release/bundle apps/desktop/target/release/bundle -type d -name '*.app' 2>/dev/null)
+          test "$found" -eq 1
 
       - name: Collect desktop bundles
         shell: bash
@@ -106,10 +123,29 @@ jobs:
           test -n "$(find "$out" -type f -print -quit)"
 
       - name: Build desktop devtools bundles
+        if: runner.os != 'macOS'
         shell: bash
         run: |
           rm -rf target/release/bundle apps/desktop/target/release/bundle
           bun run tauri build --ci --no-sign --features devtools --config '{"productName":"Posthaste DevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null}}'
+
+      - name: Build ad-hoc signed macOS desktop devtools bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          rm -rf target/release/bundle apps/desktop/target/release/bundle
+          bun run tauri build --ci --features devtools --config '{"productName":"Posthaste DevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+
+      - name: Verify macOS desktop devtools app signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          found=0
+          while IFS= read -r app; do
+            found=1
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done < <(find target/release/bundle apps/desktop/target/release/bundle -type d -name '*.app' 2>/dev/null)
+          test "$found" -eq 1
 
       - name: Collect desktop devtools bundles
         shell: bash
@@ -182,6 +218,14 @@ jobs:
       - name: Add release public key
         shell: bash
         run: cp keys/release-gpg-public.asc release-assets/
+
+      - name: Add macOS launch note
+        shell: bash
+        run: |
+          cat > release-assets/MACOS-INSTALL.txt <<'EOF'
+          macOS dogfood builds are ad-hoc signed but not notarized.
+          Drag Posthaste.app to Applications. On first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
+          EOF
 
       - name: Generate checksums
         shell: bash
