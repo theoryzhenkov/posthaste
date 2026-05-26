@@ -145,7 +145,10 @@ UI and backend waits use semantic readiness, not sleeps.
 Frontend surfaces expose stable markers:
 
 ```text
+state.app.loading.test
 state.app.ready.test
+state.app.error.test
+state.settings.loading.test
 state.settings.ready.test
 state.settings.error.test
 state.message-detail.ready.test
