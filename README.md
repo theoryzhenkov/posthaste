@@ -1,8 +1,8 @@
 ---
 scope: root
 summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-05-09
-reviewed: 2026-05-09
+modified: 2026-05-26
+reviewed: 2026-05-26
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-providers
@@ -15,6 +15,7 @@ dependents:
   - path: docs/L0-ui
   - path: docs/L0-logging
   - path: docs/L0-testing
+  - path: docs/L0-lab
   - path: docs/L0-website
 ---
 
@@ -44,11 +45,11 @@ just template update
 The full local dev stacks run through Overmind in the Nix dev shell:
 
 ```sh
-just dev-web       # Stalwart + seed + posthaste serve --api-only + Vite
-just dev-desktop   # Stalwart + seed + Tauri dev shell
-just dev-services  # Stalwart + seed + posthaste serve --api-only
-just dev-smoke     # Validate dev-stack path wiring without starting services
-just frontend dev  # Vite only, assumes the backend is already running
+just dev web       # Stalwart + seed + posthaste serve --api-only + Vite
+just dev desktop   # Stalwart + seed + Tauri dev shell
+just dev services  # Stalwart + seed + posthaste serve --api-only
+just dev smoke     # Validate dev-stack path wiring without starting services
+just web dev       # Vite only, assumes the backend is already running
 just desktop dev   # Tauri only, assumes Stalwart is already running if needed
 just desktop test  # Desktop Rust tests with constrained Cargo parallelism
 just build-serve   # Build web assets plus the browser-localhost server binary

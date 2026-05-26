@@ -59,6 +59,8 @@ nav:
       - Search: L0-search.md
       - Compose: L0-compose.md
       - UI: L0-ui.md
+      - Testing: L0-testing.md
+      - Lab: L0-lab.md
       - Website: L0-website.md
       - API: L0-api.md
       - Accounts: L0-accounts.md
@@ -71,6 +73,7 @@ nav:
       - Compose: L1-compose.md
       - UI: L1-ui.md
       - API: L1-api.md
+      - Lab: L1-lab.md
       - Accounts: L1-accounts.md
       - Logging: L1-logging.md
   - Implementation (L2):

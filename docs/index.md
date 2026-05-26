@@ -52,6 +52,7 @@ Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handl
 - **[Compose](L0-compose.md)** -- Markdown composition, MIME assembly, send/draft lifecycle
 - **[UI](L0-ui.md)** -- Web UI, React components, conversation list, HTML rendering, keyboard model
 - **[Testing](L0-testing.md)** -- Executable behavior contracts, red-first coverage, provider parity
+- **[Lab](L0-lab.md)** -- Autonomous verification control plane, fixtures, app drivers, and artifact diagnostics
 - **[Website](L0-website.md)** -- Public product showcase site and static Docker deployment
 - **[Accounts](L0-accounts.md)** -- Multi-account scoping (deferred, L0-only)
 - **[API](L0-api.md)** -- REST API + SSE boundary, Axum handlers, pagination, error mapping
