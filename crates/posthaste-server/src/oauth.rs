@@ -256,13 +256,13 @@ const OAUTH_COMPLETION_STATE_TTL_SECONDS: i64 = 10 * 60;
 
 #[derive(Debug)]
 enum StoredOAuthFlow {
-    Pending(PendingOAuthFlow),
+    Pending(Box<PendingOAuthFlow>),
     Completing(OffsetDateTime),
     Completed(OffsetDateTime),
 }
 
 pub enum OAuthFlowCompletion {
-    Pending(PendingOAuthFlow),
+    Pending(Box<PendingOAuthFlow>),
     Completing,
     Completed,
     Unknown,
@@ -278,7 +278,7 @@ impl OAuthFlowStore {
         self.flows
             .lock()
             .await
-            .insert(state, StoredOAuthFlow::Pending(flow));
+            .insert(state, StoredOAuthFlow::Pending(Box::new(flow)));
     }
 
     pub async fn begin_completion(&self, state: &str) -> OAuthFlowCompletion {

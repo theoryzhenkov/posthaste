@@ -1151,6 +1151,7 @@ auth = "app_password"
             automations: Vec::new(),
             draft_automations: Vec::new(),
             daemon: DaemonToml::default(),
+            appearance: AppAppearanceSettings::default(),
             logging: LoggingToml::default(),
             cache: CachePolicyToml::default(),
         };
