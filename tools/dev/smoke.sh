@@ -65,10 +65,34 @@ run_layout_smoke web 0
 run_layout_smoke desktop 1
 run_layout_smoke services 2
 
-just --dry-run dev-web >/dev/null
-just --dry-run dev-desktop >/dev/null
-just --dry-run dev-services >/dev/null
-just --dry-run frontend dev >/dev/null
-just --dry-run desktop dev >/dev/null
+require_recipe() {
+  just --dry-run "$@" >/dev/null 2>&1
+}
+
+reject_recipe() {
+  if just --dry-run "$@" >/dev/null 2>&1; then
+    echo "legacy recipe should not exist: just $*" >&2
+    exit 1
+  fi
+}
+
+require_recipe dev web
+require_recipe dev desktop
+require_recipe dev services
+require_recipe dev smoke
+require_recipe dev log path
+require_recipe dev log tail
+require_recipe dev log query --event http.request.completed
+require_recipe web dev
+require_recipe desktop dev
+
+reject_recipe dev-web
+reject_recipe dev-desktop
+reject_recipe dev-services
+reject_recipe dev-smoke
+reject_recipe server-log-path
+reject_recipe server-log-tail
+reject_recipe server-log-query
+reject_recipe frontend dev
 
 echo "Dev layout smoke passed."

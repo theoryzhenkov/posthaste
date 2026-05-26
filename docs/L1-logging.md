@@ -1,14 +1,16 @@
 ---
 scope: L1
 summary: "Logging contracts: crate layout, span conventions, config schema, event content rules, frontend logger interface"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-26
+reviewed: 2026-05-26
 depends:
   - path: docs/L0-logging
   - path: docs/L1-accounts
     section: "Config schema"
   - path: docs/L1-api
     section: "Axum router"
+dependents:
+  - path: docs/L1-lab
 ---
 
 # Logging — Contracts
@@ -62,14 +64,14 @@ level = "info"          # One of: error, warn, info, debug, trace
 
 ### Log querying
 
-Dev stacks expose the active persisted log path through `just server-log-path` and follow it with `just server-log-tail`. Structured JSONL logs are queried with:
+Dev stacks expose the active persisted log path through `just dev log path` and follow it with `just dev log tail`. Structured JSONL logs are queried with:
 
 ```sh
-just server-log-query --account local-stalwart --message sync completed
-just server-log-query --event http.request.completed --operation-kind mail.search
-just server-log-query --sync-id 6f2a4a72-0c59-4d89-9d4e-2a2b9f2c4a87
-just server-log-query --operation-id op_9fd8 --json --limit 50
-just server-log-query --target posthaste_imap --json --limit 20
+just dev log query --account local-stalwart --message sync completed
+just dev log query --event http.request.completed --operation-kind mail.search
+just dev log query --sync-id 6f2a4a72-0c59-4d89-9d4e-2a2b9f2c4a87
+just dev log query --operation-id op_9fd8 --json --limit 50
+just dev log query --target posthaste_imap --json --limit 20
 ```
 
 The query helper supports filtering by level, target substring, event name, account ID, sync ID, request ID, operation ID, operation kind, operation source, session ID, message substring, timestamp lower bound, and compact JSON output. Structured field filters check event fields plus active span fields so events emitted from nested spans still match.
