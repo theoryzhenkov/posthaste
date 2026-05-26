@@ -1,0 +1,17 @@
+# Lab control-plane recipes
+
+set working-directory := '../..'
+
+# List suites from the lab registry.
+suite *args:
+    cargo run -p posthaste-lab -- suite {{ args }}
+
+# Create a lab run manifest/summary for selected suites without executing them yet.
+verify *args:
+    cargo run -p posthaste-lab -- verify {{ args }}
+
+# Cheap lab skeleton smoke: unit tests, registry loading, and non-executing verify.
+smoke:
+    cargo test -p posthaste-lab
+    cargo run -p posthaste-lab -- suite list
+    cargo run -p posthaste-lab -- verify suite.api.settings.dev --run-root target/lab/smoke

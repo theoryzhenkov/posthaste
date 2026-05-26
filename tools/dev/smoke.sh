@@ -85,6 +85,8 @@ require_recipe dev log tail
 require_recipe dev log query --event http.request.completed
 require_recipe web dev
 require_recipe desktop dev
+require_recipe lab suite list
+require_recipe lab verify suite.api.settings.dev
 
 reject_recipe dev-web
 reject_recipe dev-desktop
@@ -94,5 +96,7 @@ reject_recipe server-log-path
 reject_recipe server-log-tail
 reject_recipe server-log-query
 reject_recipe frontend dev
+reject_recipe lab-suite-list
+reject_recipe lab-verify
 
 echo "Dev layout smoke passed."

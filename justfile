@@ -7,6 +7,7 @@ mod web 'apps/web/justfile'
 mod site 'apps/site/justfile'
 mod desktop 'apps/desktop/justfile'
 mod dev 'tools/dev/justfile'
+mod lab 'tools/lab/justfile'
 mod docs 'docs/justfile'
 
 default:
