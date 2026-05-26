@@ -3397,6 +3397,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-lab"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "toml 0.8.2",
+ "uuid",
+]
+
+[[package]]
 name = "posthaste-observability"
 version = "0.1.0"
 dependencies = [
