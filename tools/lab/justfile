@@ -15,3 +15,12 @@ smoke:
     cargo test -p posthaste-lab
     cargo run -p posthaste-lab -- suite list
     cargo run -p posthaste-lab -- verify suite.api.settings.dev --run-root target/lab/smoke
+
+# Typecheck and format-check the optional Tauri Playwright lab files.
+tauri-check:
+    bun --cwd=apps/web run tsc -p ../../tools/lab/tauri-playwright/tsconfig.json --noEmit
+    bun --cwd=apps/web run prettier ../../tools/lab/tauri-playwright --check
+
+# Optional graphical Linux Tauri smoke through tauri-playwright.
+tauri-smoke *args:
+    bash tools/lab/tauri-playwright/smoke.sh {{ args }}
