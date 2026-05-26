@@ -17,9 +17,12 @@
     "site:check": "bun --cwd=apps/site run check",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "lab:tauri-playwright": "playwright test --config tools/lab/tauri-playwright/playwright.config.ts --project=tauri-main"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@srsholmes/tauri-playwright": "0.2.2",
     "@tauri-apps/cli": "2.10.1"
   }
 }
