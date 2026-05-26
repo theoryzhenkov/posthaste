@@ -9,6 +9,10 @@
  * @spec docs/L1-ui#messagedetail-and-emailframe
  * @spec docs/L0-ui#html-email-rendering
  */
+import { useEffect, useMemo, useRef } from 'react'
+
+import { openExternalUrl } from '../desktop'
+import { externalEmailLinkUrl } from '../emailLinks'
 import { cn } from '../lib/utils'
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
@@ -29,7 +33,9 @@ export function EmailFrame({
   className,
   title = 'Email content',
 }: EmailFrameProps) {
-  const wrappedHtml = `<!DOCTYPE html>
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const wrappedHtml = useMemo(
+    () => `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -74,10 +80,60 @@ export function EmailFrame({
     </style>
 </head>
 <body>${html}</body>
-</html>`
+</html>`,
+    [html],
+  )
+
+  useEffect(() => {
+    const frame = iframeRef.current
+    if (!frame) {
+      return
+    }
+
+    let unbindClickHandler: (() => void) | null = null
+    const bindClickHandler = () => {
+      unbindClickHandler?.()
+      const document = frame.contentDocument
+      if (!document) {
+        return
+      }
+
+      const handleClick = (event: MouseEvent) => {
+        const target = event.target as {
+          closest?: (selector: string) => Element | null
+          parentElement?: Element | null
+        } | null
+        const element = target?.closest ? target : target?.parentElement
+        const anchor = element?.closest?.('a[href]')
+        const href = externalEmailLinkUrl(anchor?.getAttribute('href') ?? null)
+        if (!href) {
+          return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        void openExternalUrl(href).catch((error: unknown) => {
+          console.error('Failed to open email link externally', error)
+        })
+      }
+
+      document.addEventListener('click', handleClick)
+      unbindClickHandler = () =>
+        document.removeEventListener('click', handleClick)
+    }
+
+    frame.addEventListener('load', bindClickHandler)
+    bindClickHandler()
+
+    return () => {
+      frame.removeEventListener('load', bindClickHandler)
+      unbindClickHandler?.()
+    }
+  }, [wrappedHtml])
 
   return (
     <iframe
+      ref={iframeRef}
       className={cn('block h-full w-full border-0 bg-transparent', className)}
       sandbox="allow-same-origin"
       srcDoc={wrappedHtml}
