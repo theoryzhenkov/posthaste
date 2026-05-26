@@ -47,6 +47,7 @@ import {
   type MailboxEditorTarget,
 } from './settings-panel/SmartMailboxesPane'
 import { brandAccents } from '../design/tokens'
+import { settingsReadinessStateFromQueries } from '../labReadiness'
 import {
   applyAccountMutationResult,
   invalidateAccountReadModels,
@@ -425,12 +426,34 @@ export function SettingsPanel({
       : effectiveSmartMailboxTarget === 'new'
         ? 'mailbox:new'
         : `mailbox:${effectiveSmartMailboxTarget}:${'rule' in (editingSmartMailbox ?? {}) ? 'full' : 'summary'}:${editingSmartMailbox?.updatedAt ?? 'pending'}`
+  const settingsReadinessState = settingsReadinessStateFromQueries([
+    {
+      isLoading: settingsQuery.isLoading,
+      isError: settingsQuery.isError,
+    },
+    {
+      isLoading: smartMailboxListQuery.isLoading,
+      isError: smartMailboxListQuery.isError,
+    },
+    {
+      enabled: editorAccountId !== null,
+      isLoading: accountQuery.isLoading,
+      isError: accountQuery.isError,
+    },
+    {
+      enabled: editingSmartMailboxId !== null,
+      isLoading: smartMailboxQuery.isLoading,
+      isError: smartMailboxQuery.isError,
+    },
+  ])
+
   function handleSelectCategory(category: SettingsCategory) {
     onNavigate(settingsCategorySurface(category))
   }
 
   return (
     <section
+      data-posthaste-state={settingsReadinessState}
       className={cn(
         'flex h-full min-h-0 w-full flex-col overflow-hidden text-card-foreground md:flex-row',
         shell === 'overlay' ? 'bg-background' : 'bg-card',

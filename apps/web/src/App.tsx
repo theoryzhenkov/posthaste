@@ -61,6 +61,10 @@ import {
   useEffectiveSurface,
   useRouteSurface,
 } from './hooks/useSurfaceRouting'
+import {
+  appReadinessStateFromAccountsQuery,
+  LAB_READINESS_STATES,
+} from './labReadiness'
 import { mailKeys, type MailSelection } from './mailState'
 import { queryKeys } from './queryKeys'
 import {
@@ -143,6 +147,7 @@ function MailClient({
 
   const {
     data: accounts = [],
+    isError: hasAccountsError,
     isLoading,
     isSuccess: hasLoadedAccounts,
   } = useQuery({
@@ -424,9 +429,18 @@ function MailClient({
     setSelectedMessage(null)
   }
 
+  const appReadinessState = appReadinessStateFromAccountsQuery({
+    isLoading,
+    isSuccess: hasLoadedAccounts,
+    isError: hasAccountsError,
+  })
+
   if (isLoading) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3"
+        data-posthaste-state={LAB_READINESS_STATES.appLoading}
+      >
         <Loader2 size={24} className="animate-spin text-muted-foreground" />
         <p className="text-sm text-muted-foreground">Setting up...</p>
       </div>
@@ -434,7 +448,10 @@ function MailClient({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div
+      className="flex h-full flex-col overflow-hidden"
+      data-posthaste-state={appReadinessState}
+    >
       <ActionBar
         isDarkMode={theme.resolvedMode === 'dark'}
         isFlagged={selectedMessageQuery.data?.isFlagged ?? false}
