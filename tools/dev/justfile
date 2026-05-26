@@ -1,0 +1,21 @@
+# Dev-stack recipes
+
+set working-directory := '../..'
+
+mod log 'logs/justfile'
+
+# Start Stalwart + seed + server + Vite with Overmind.
+web:
+    bash tools/dev/overmind/launch.sh web
+
+# Start Stalwart + seed + Tauri with Overmind.
+desktop:
+    bash tools/dev/overmind/launch.sh desktop
+
+# Start Stalwart + seed + server with Overmind.
+services:
+    bash tools/dev/overmind/launch.sh services
+
+# Validate dev stack paths and recipe wiring without starting services.
+smoke:
+    bash tools/dev/smoke.sh

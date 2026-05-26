@@ -1,0 +1,15 @@
+# Dev log recipes
+
+set working-directory := '../../..'
+
+# Print the current or expected persisted server log path for dev.
+path:
+    @tools/dev/overmind/server-log-path.sh
+
+# Follow the persisted server log file used by the dev stack.
+tail:
+    @tail -F "$(tools/dev/overmind/server-log-path.sh)"
+
+# Query the persisted JSONL server log.
+query *args:
+    @bash tools/dev/logs/query.sh {{ args }}

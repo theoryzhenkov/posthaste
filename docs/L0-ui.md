@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Why the frontend owns interaction, the handoff-led UI direction, and shell model"
-modified: 2026-05-25
-reviewed: 2026-05-25
+modified: 2026-05-26
+reviewed: 2026-05-26
 depends:
   - path: README
   - path: docs/L0-api
@@ -10,6 +10,7 @@ depends:
 dependents:
   - path: docs/L1-ui
   - path: docs/L0-website
+  - path: docs/L0-lab
 ---
 
 # UI Domain -- L0

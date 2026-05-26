@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Executable behavior contracts, red-first coverage, and provider parity test strategy"
-modified: 2026-04-28
-reviewed: 2026-04-28
+modified: 2026-05-26
+reviewed: 2026-05-26
 depends:
   - path: README
   - path: docs/L0-providers
@@ -13,6 +13,8 @@ dependents:
   - path: docs/L1-sync
   - path: docs/L1-api
   - path: docs/L1-ui
+  - path: docs/L0-lab
+  - path: docs/L1-lab
 ---
 
 # Testing domain -- L0

@@ -161,7 +161,7 @@ mkdir -p \
 rm -f "$POSTHASTE_STATE_ROOT/.stalwart-seed-ready"
 
 log_path="$("$root/tools/dev/overmind/server-log-path.sh")"
-echo "Persisted server log: $log_path (tail with 'just server-log-tail')"
+echo "Persisted server log: $log_path (tail with 'just dev log tail')"
 echo "Dev ports: Stalwart $POSTHASTE_STALWART_URL, IMAP 127.0.0.1:$POSTHASTE_STALWART_IMAP_PORT, SMTP 127.0.0.1:$POSTHASTE_STALWART_SMTP_PORT, API http://127.0.0.1:$POSTHASTE_SERVER_PORT, Web http://$POSTHASTE_VITE_HOST:$POSTHASTE_VITE_PORT"
 
 if [[ "${POSTHASTE_DEV_STACK_SMOKE:-}" == "1" ]]; then

@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "REST API + SSE boundary between Rust backend and web frontend"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-05-26
+reviewed: 2026-05-26
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -12,6 +12,7 @@ dependents:
   - path: docs/L1-api
   - path: docs/L1-sync
   - path: docs/L1-ui
+  - path: docs/L0-lab
 ---
 
 # API domain -- L0
