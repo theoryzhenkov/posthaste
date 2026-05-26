@@ -22,6 +22,14 @@ All endpoints are prefixed with `/v1`.
 
 In browser-localhost mode, `posthaste serve` serves the built React frontend on non-API paths and keeps all JSON/SSE endpoints under `/v1`. Unknown `/v1` paths return API 404s rather than the frontend shell.
 
+### Health
+
+| Method | Path      | Handler  | Request | Response         |
+| ------ | --------- | -------- | ------- | ---------------- |
+| GET    | `/health` | `health` | --      | `HealthResponse` |
+
+`HealthResponse` contains only `status: "ok"` for product API readiness; richer lab diagnostics are not exposed by this endpoint.
+
 ### Settings
 
 | Method | Path                        | Handler                   | Request                        | Response                        |
