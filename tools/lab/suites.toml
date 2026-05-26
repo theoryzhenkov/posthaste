@@ -1,0 +1,31 @@
+# PostHaste Lab suite registry.
+# Suite IDs use docs-compatible nested TOML tables that flatten to canonical IDs.
+
+[suite.api.settings.dev]
+level = "integration"
+targets = ["daemon"]
+profile = "profile.lab.empty.dev"
+runners = ["runner.cargo.test.dev"]
+tags = ["api", "settings", "fast"]
+paths = [
+  "crates/posthaste-server/src/api/settings.rs",
+  "crates/posthaste-server/tests/settings_patch.rs",
+]
+command = "cargo test -p posthaste-server --test settings_patch"
+artifacts = ["log.backend.jsonl.dev"]
+
+[suite.dev.smoke.local]
+level = "smoke"
+targets = ["dev"]
+profile = "profile.lab.empty.local"
+runners = ["runner.just.dev.local"]
+tags = ["dev", "smoke", "fast"]
+paths = [
+  "justfile",
+  "tools/dev/justfile",
+  "tools/dev/logs/justfile",
+  "tools/dev/smoke.sh",
+  "tools/lab/justfile",
+]
+command = "just dev smoke"
+artifacts = ["artifact.summary.dev.local"]
