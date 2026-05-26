@@ -32,8 +32,10 @@ import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
+import { FocusedSurfaceDocument } from './components/FocusedSurface'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
+import { SurfaceHost } from './components/SurfaceHost'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import {
@@ -85,17 +87,6 @@ const ComposeOverlay = lazy(() =>
     default: module.ComposeOverlay,
   })),
 )
-const SurfaceHost = lazy(() =>
-  import('./components/SurfaceHost').then((module) => ({
-    default: module.SurfaceHost,
-  })),
-)
-const FocusedSurfaceDocument = lazy(() =>
-  import('./components/FocusedSurface').then((module) => ({
-    default: module.FocusedSurfaceDocument,
-  })),
-)
-
 /** @spec docs/L1-ui#data-fetching */
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -615,14 +606,12 @@ function MailClient({
         </Suspense>
       )}
       {effectiveSurface && (
-        <Suspense fallback={null}>
-          <SurfaceHost
-            surface={effectiveSurface}
-            canClose={!shouldRenderForcedSettings}
-            onClose={closeWebSurface}
-            onSearch={handleSearch}
-          />
-        </Suspense>
+        <SurfaceHost
+          surface={effectiveSurface}
+          canClose={!shouldRenderForcedSettings}
+          onClose={closeWebSurface}
+          onSearch={handleSearch}
+        />
       )}
     </div>
   )
@@ -646,18 +635,7 @@ export default function App() {
       <DesignThemeProvider>
         <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
         {isStandaloneSurface ? (
-          <Suspense
-            fallback={
-              <div className="flex h-screen items-center justify-center bg-background text-foreground">
-                <Loader2
-                  size={18}
-                  className="animate-spin text-muted-foreground"
-                />
-              </div>
-            }
-          >
-            <FocusedSurfaceDocument surface={routeSurface} />
-          </Suspense>
+          <FocusedSurfaceDocument surface={routeSurface} />
         ) : (
           <MailClient routeSurface={routeSurface} />
         )}
