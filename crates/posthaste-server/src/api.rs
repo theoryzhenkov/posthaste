@@ -71,6 +71,15 @@ use cursor_support::{
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
 
+/// Product API readiness response.
+///
+/// @spec docs/L1-api#health
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthResponse {
+    pub status: &'static str,
+}
+
 /// Request body for a manual source sync command.
 ///
 /// @spec docs/L1-api#sync-and-events
@@ -629,6 +638,13 @@ fn secret_ref_after_write_request(
         )),
         SecretWriteMode::Clear => Ok(None),
     }
+}
+
+/// GET /v1/health
+///
+/// @spec docs/L1-api#health
+pub async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
 }
 
 /// GET /v1/accounts

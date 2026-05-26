@@ -207,6 +207,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         );
 
     let api = Router::new()
+        .route("/health", get(api::health))
         .route(
             "/settings",
             get(api::get_settings).patch(api::patch_settings),

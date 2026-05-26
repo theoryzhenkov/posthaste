@@ -154,13 +154,13 @@ state.compose.ready.test
 
 The DOM representation may use `data-testid` or `data-posthaste-state`, but the suite registry and lab reports refer to canonical state IDs. Loading states that can block a user must have a reachable error state with diagnostic context. Infinite spinners are test failures.
 
-The daemon should expose a minimal product health endpoint and richer lab-only diagnostics as planned lab contracts:
+The daemon exposes a minimal product health endpoint; richer lab-only diagnostics remain planned lab contracts:
 
-| Planned endpoint | Mode | Purpose |
+| Endpoint | Mode | Purpose |
 |---|---|---|
 | `GET /v1/health` | product and lab | Process/API readiness without sensitive state |
-| `GET /v1/lab/health` | lab only | Config root, fixture, account convergence, event stream, and side-effect recorder state |
-| `GET /v1/lab/opened-urls` | lab only | External URL requests captured by the lab opener adapter |
+| `GET /v1/lab/health` | lab only, planned | Config root, fixture, account convergence, event stream, and side-effect recorder state |
+| `GET /v1/lab/opened-urls` | lab only, planned | External URL requests captured by the lab opener adapter |
 
 When implemented, lab endpoints must refuse non-loopback use and must not expose credentials, message bodies, tokens, or raw provider payloads.
 

@@ -15,7 +15,7 @@ use posthaste_domain::{
     SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_server::api::{
-    list_mailboxes, list_source_messages, ApiError, ListSourceMessagesQuery,
+    health, list_mailboxes, list_source_messages, ApiError, ListSourceMessagesQuery,
 };
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::AppState;
@@ -190,6 +190,15 @@ async fn response_json(response: Response) -> (StatusCode, Value) {
         .expect("response body should read");
     let json = serde_json::from_slice(&body).expect("response body should be JSON");
     (status, json)
+}
+
+// spec: docs/L1-api#health
+#[tokio::test]
+async fn health_returns_only_product_readiness_status() {
+    let (status, body) = response_json(health().await.into_response()).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({ "status": "ok" }));
 }
 
 // spec: docs/L0-testing#api-boundary-contracts
