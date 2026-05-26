@@ -1,0 +1,16 @@
+{
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "e2e-playwright-main",
+          "description": "E2E-only Playwright permission for the main window",
+          "windows": ["main"],
+          "permissions": ["playwright:default"]
+        }
+      ]
+    }
+  }
+}

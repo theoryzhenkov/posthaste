@@ -17,6 +17,11 @@ const CLOSE_WINDOW_MENU_ID: &str = "close-window";
 const TOGGLE_DEVTOOLS_MENU_ID: &str = "toggle-devtools";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
+#[cfg(feature = "e2e-testing")]
+const DEFAULT_TAURI_PLAYWRIGHT_SOCKET: &str = "/tmp/tauri-playwright.sock";
+
+#[cfg(all(feature = "e2e-testing", not(target_os = "linux")))]
+compile_error!("PostHaste e2e-testing is Linux-only; macOS release smoke remains manual");
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -271,7 +276,7 @@ impl FocusedWindowLabel {
 /// as `window.__POSTHASTE_PORT__` so the frontend can discover the backend.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .on_menu_event(|app, event| {
             if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
@@ -320,9 +325,39 @@ pub fn run() {
             )?;
 
             Ok(())
-        })
+        });
+
+    #[cfg(feature = "e2e-testing")]
+    let builder = builder.plugin(e2e_playwright_plugin());
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running Posthaste");
+}
+
+#[cfg(feature = "e2e-testing")]
+fn e2e_playwright_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let socket_path = std::env::var("POSTHASTE_E2E_SOCKET")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .expect(
+            "POSTHASTE_E2E_SOCKET must be set to a non-empty private per-run Unix socket path \
+             when the e2e-testing feature is enabled",
+        );
+    if socket_path == DEFAULT_TAURI_PLAYWRIGHT_SOCKET {
+        panic!(
+            "POSTHASTE_E2E_SOCKET must be a private per-run socket path, not \
+             /tmp/tauri-playwright.sock"
+        );
+    }
+
+    let config = tauri_plugin_playwright::PluginConfig {
+        socket_path: Some(socket_path),
+        tcp_port: None,
+        window_label: Some(MAIN_WINDOW_LABEL.to_string()),
+    };
+    tauri_plugin_playwright::init_with_config(config)
 }
 
 fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<R>> {
