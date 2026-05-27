@@ -13,7 +13,7 @@ fi
 random_suffix() {
   python3 - <<'PY'
 import uuid
-print(uuid.uuid4().hex)
+print(uuid.uuid4().hex[:16])
 PY
 }
 
@@ -29,7 +29,7 @@ reproduction_command() {
   done
 }
 
-run_root="${POSTHASTE_LAB_TAURI_RUN_ROOT:-$root/target/lab/tauri-playwright-smoke}"
+run_root="${POSTHASTE_LAB_TAURI_RUN_ROOT:-$root/target/lab/tpw}"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(random_suffix)"
 run_dir="$run_root/$run_id"
 artifact_dir="$run_dir/artifacts"
@@ -39,7 +39,7 @@ secrets_root="$run_dir/secrets"
 playwright_log="$artifact_dir/playwright.log"
 playwright_results="$artifact_dir/playwright-results.json"
 playwright_output_dir="$artifact_dir/playwright-output"
-socket_path="$run_dir/tauri-playwright.sock"
+socket_path="$run_dir/pw.sock"
 reproduction="$(reproduction_command "$@")"
 
 mkdir -p "$artifact_dir" "$config_root" "$state_root" "$secrets_root"
@@ -51,6 +51,63 @@ export POSTHASTE_E2E_SOCKET="$socket_path"
 export POSTHASTE_CONFIG_ROOT="$config_root"
 export POSTHASTE_STATE_ROOT="$state_root"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+cleanup_lab_processes() {
+  python3 - "$run_dir" <<'PY'
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+run_dir = sys.argv[1].encode()
+managed_terms = (
+    b"posthaste-desktop",
+    b"tauri dev",
+    b"bun run tauri dev",
+    b"bun run web:dev",
+    b"vite --host 127.0.0.1 --port 5173 --strictPort",
+)
+current_pid = os.getpid()
+matched = []
+proc_root = Path("/proc")
+if not proc_root.exists():
+    raise SystemExit(0)
+for proc_dir in proc_root.iterdir():
+    if not proc_dir.name.isdigit():
+        continue
+    pid = int(proc_dir.name)
+    if pid == current_pid:
+        continue
+    try:
+        environ = (proc_dir / "environ").read_bytes()
+        cmdline = (proc_dir / "cmdline").read_bytes().replace(b"\0", b" ")
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        continue
+    if b"POSTHASTE_LAB_RUN_DIR=" + run_dir + b"\0" not in environ:
+        continue
+    if not any(term in cmdline for term in managed_terms):
+        continue
+    try:
+        os.kill(pid, signal.SIGTERM)
+        matched.append(pid)
+    except ProcessLookupError:
+        pass
+
+if matched:
+    time.sleep(0.5)
+for pid in matched:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        continue
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+PY
+}
+trap cleanup_lab_processes EXIT
 
 cat >"$run_dir/run.env" <<EOF
 POSTHASTE_LAB_RUN_DIR=$POSTHASTE_LAB_RUN_DIR
@@ -120,6 +177,14 @@ summary = {
 (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 PY
 }
+
+if ((${#socket_path} > 100)); then
+  echo "Lab Tauri Playwright smoke socket path is too long for Unix sockets: $socket_path" >&2
+  echo "Use a shorter POSTHASTE_LAB_TAURI_RUN_ROOT." >&2
+  echo "Run dir: $run_dir" >&2
+  write_lab_artifacts "blocked" "socket path too long" 78
+  exit 78
+fi
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "Lab Tauri Playwright smoke is Linux-only for now." >&2

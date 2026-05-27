@@ -3337,6 +3337,7 @@ dependencies = [
  "posthaste-observability",
  "posthaste-server",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-playwright",
