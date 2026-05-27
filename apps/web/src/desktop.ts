@@ -19,6 +19,19 @@ export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+export function currentDesktopWindowLabel(): string | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  const label = (window as unknown as Record<string, unknown>)
+    .__POSTHASTE_WINDOW_LABEL__
+  return typeof label === 'string' ? label : null
+}
+
+export function isMainDesktopWindow(): boolean {
+  return currentDesktopWindowLabel() === 'main'
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   if (isTauriRuntime()) {
     await invoke('open_external_url', { url })

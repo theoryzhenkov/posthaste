@@ -12,13 +12,14 @@ use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_utils::config::WebviewUrl;
 
+#[cfg(feature = "e2e-testing")]
+mod e2e;
+
 const CLOSE_WINDOW_MENU_ID: &str = "close-window";
 #[cfg(any(debug_assertions, feature = "devtools"))]
 const TOGGLE_DEVTOOLS_MENU_ID: &str = "toggle-devtools";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
-#[cfg(feature = "e2e-testing")]
-const DEFAULT_TAURI_PLAYWRIGHT_SOCKET: &str = "/tmp/tauri-playwright.sock";
 
 #[cfg(all(feature = "e2e-testing", not(target_os = "linux")))]
 compile_error!("PostHaste e2e-testing is Linux-only; macOS release smoke remains manual");
@@ -276,88 +277,76 @@ impl FocusedWindowLabel {
 /// as `window.__POSTHASTE_PORT__` so the frontend can discover the backend.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
-                close_remembered_webview_window(app);
-            }
-            #[cfg(any(debug_assertions, feature = "devtools"))]
-            if event.id().as_ref() == TOGGLE_DEVTOOLS_MENU_ID {
-                toggle_remembered_webview_devtools(app);
-            }
-        })
-        .invoke_handler(tauri::generate_handler![
-            log_from_frontend,
-            open_external_url,
-            open_surface_window
-        ])
-        .setup(|app| {
-            let config = ServerConfig {
-                extra_cors_origins: vec![
-                    "https://tauri.localhost".to_string(),
-                    "tauri://localhost".to_string(),
-                ],
-                bind_address_override: Some("127.0.0.1:0".to_string()),
-                frontend_dist: None,
-            };
-            let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
-            let port = handle.addr.port();
-            ph_info!(
-                events::DESKTOP_BACKEND_STARTED,
-                addr = %handle.addr,
-                "embedded backend started"
-            );
-            app.manage(handle);
-            app.manage(EmbeddedBackend { port });
-            app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
+    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
 
-            app.set_menu(build_app_menu(app)?)?;
-
-            build_window(
-                app.handle(),
-                MAIN_WINDOW_LABEL,
-                "index.html",
-                "Posthaste",
-                1200.0,
-                800.0,
-                port,
-            )?;
-
-            Ok(())
-        });
+    let builder = builder.on_menu_event(|app, event| {
+        if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
+            close_remembered_webview_window(app);
+        }
+        #[cfg(any(debug_assertions, feature = "devtools"))]
+        if event.id().as_ref() == TOGGLE_DEVTOOLS_MENU_ID {
+            toggle_remembered_webview_devtools(app);
+        }
+    });
 
     #[cfg(feature = "e2e-testing")]
-    let builder = builder.plugin(e2e_playwright_plugin());
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        log_from_frontend,
+        open_external_url,
+        open_surface_window,
+        e2e::posthaste_e2e_result
+    ]);
+    #[cfg(not(feature = "e2e-testing"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        log_from_frontend,
+        open_external_url,
+        open_surface_window
+    ]);
+
+    let builder = builder.setup(|app| {
+        let config = ServerConfig {
+            extra_cors_origins: vec![
+                "https://tauri.localhost".to_string(),
+                "tauri://localhost".to_string(),
+                "http://127.0.0.1:5173".to_string(),
+            ],
+            bind_address_override: Some("127.0.0.1:0".to_string()),
+            frontend_dist: None,
+        };
+        let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
+        let port = handle.addr.port();
+        ph_info!(
+            events::DESKTOP_BACKEND_STARTED,
+            addr = %handle.addr,
+            "embedded backend started"
+        );
+        app.manage(handle);
+        app.manage(EmbeddedBackend { port });
+        app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
+        #[cfg(feature = "e2e-testing")]
+        app.manage(e2e::E2eBridgeState::default());
+
+        app.set_menu(build_app_menu(app)?)?;
+
+        build_window(
+            app.handle(),
+            MAIN_WINDOW_LABEL,
+            "index.html",
+            "Posthaste",
+            1200.0,
+            800.0,
+            port,
+        )?;
+
+        #[cfg(feature = "e2e-testing")]
+        e2e::start_e2e_bridge(app.handle().clone());
+
+        Ok(())
+    });
 
     builder
         .run(tauri::generate_context!())
         .expect("error while running Posthaste");
-}
-
-#[cfg(feature = "e2e-testing")]
-fn e2e_playwright_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    let socket_path = std::env::var("POSTHASTE_E2E_SOCKET")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .expect(
-            "POSTHASTE_E2E_SOCKET must be set to a non-empty private per-run Unix socket path \
-             when the e2e-testing feature is enabled",
-        );
-    if socket_path == DEFAULT_TAURI_PLAYWRIGHT_SOCKET {
-        panic!(
-            "POSTHASTE_E2E_SOCKET must be a private per-run socket path, not \
-             /tmp/tauri-playwright.sock"
-        );
-    }
-
-    let config = tauri_plugin_playwright::PluginConfig {
-        socket_path: Some(socket_path),
-        tcp_port: None,
-        window_label: Some(MAIN_WINDOW_LABEL.to_string()),
-    };
-    tauri_plugin_playwright::init_with_config(config)
 }
 
 fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<R>> {
@@ -507,7 +496,7 @@ fn build_window<M: Manager<R>, R: Runtime>(
     port: u16,
 ) -> tauri::Result<WebviewWindow<R>> {
     let builder = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
-        .initialization_script(backend_init_script(port))
+        .initialization_script(backend_init_script(port, label))
         .title(title)
         .inner_size(width, height)
         .resizable(true);
@@ -534,10 +523,23 @@ fn validate_external_url(url: &str) -> Result<(), String> {
     }
 }
 
-fn backend_init_script(port: u16) -> String {
-    format!(
-        "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});"
-    )
+fn backend_init_script(port: u16, window_label: &str) -> String {
+    let window_label_json =
+        serde_json::to_string(window_label).expect("window label should serialize to JSON");
+    let script = format!(
+        "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
+         Object.defineProperty(window, '__POSTHASTE_WINDOW_LABEL__', {{ value: {window_label_json}, writable: false }});"
+    );
+    #[cfg(feature = "e2e-testing")]
+    {
+        let mut script = script;
+        script.push_str(e2e::bridge_initialization_script());
+        script
+    }
+    #[cfg(not(feature = "e2e-testing"))]
+    {
+        script
+    }
 }
 
 fn surface_route(surface: &SurfaceDescriptor) -> String {

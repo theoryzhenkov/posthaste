@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Lab suite registry, profiles, drivers, artifacts, command names, and Tauri automation contracts"
-modified: 2026-05-26
-reviewed: 2026-05-26
+modified: 2026-05-27
+reviewed: 2026-05-27
 depends:
   - path: docs/L0-lab
   - path: docs/L0-testing
@@ -181,20 +181,20 @@ The driver ladder is:
 
 The `tauri-playwright` bridge is acceptable only behind an e2e feature:
 
-- `feature.e2e-testing` enables the optional `tauri-plugin-playwright` dependency.
-- `POSTHASTE_E2E_SOCKET` supplies a private per-run Unix socket path that PostHaste passes into `tauri_plugin_playwright::PluginConfig`; the test fixture uses the same path as `mcpSocket`.
+- `feature.e2e-testing` enables the optional `tauri-plugin-playwright` dependency and the PostHaste Linux e2e bridge.
+- `POSTHASTE_E2E_SOCKET` supplies a private per-run Unix socket path; the test fixture uses the same path as `mcpSocket`.
 - The default `/tmp/tauri-playwright.sock` is never used.
-- `playwright:default` capability is added only through an e2e config override.
-- `withGlobalTauri` is enabled only in the e2e config override if the bridge requires it; normal desktop config keeps the tighter production setting.
+- The `playwright:default` capability is included only when the e2e feature selects the e2e capability file.
+- `withGlobalTauri` is enabled only in the e2e config override because the app-side bridge uses Tauri events and invoke; normal desktop config keeps the tighter production setting.
 - Linux CI runs the Tauri bridge under a real or virtual display (`xvfb-run` or equivalent) with WebKitGTK dependencies installed.
-- Normal release builds and DevTools dogfood builds do not include the plugin, permission, global Tauri injection, or bridge marker.
-- Initial Linux suites target the `main` window. Separate settings/message/attachment windows are added only after multi-window label handling is proven reliable.
+- Normal release builds and DevTools dogfood builds do not include the permission, global Tauri injection, private socket bridge, or bridge marker.
+- Initial Linux suites target the first ready Lab surface. Separate settings/message/attachment control is added only after multi-window label handling is proven reliable.
 
 Go/no-go for the spike:
 
 | Outcome | Decision |
 |---|---|
-| Can launch Linux Tauri with isolated profile and wait for `state.app.ready.test` | Continue |
+| Can launch Linux Tauri with isolated profile and wait for `state.app.ready.test` or a forced first-run `state.settings.ready.test` | Continue |
 | Can open settings and wait for `state.settings.ready.test` with screenshot/trace on failure | Continue |
 | Can record external URL opener requests without opening a browser | Continue |
 | Requires broad production config weakening or global unauthenticated sockets | Stop |
