@@ -21,7 +21,7 @@
     "lab:tauri-playwright": "playwright test --config tools/lab/tauri-playwright/playwright.config.ts --project=tauri-main"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "1.58.2",
     "@srsholmes/tauri-playwright": "0.2.2",
     "@tauri-apps/cli": "2.10.1"
   }

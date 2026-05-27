@@ -40,6 +40,7 @@ import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import {
   closeCurrentSurfaceWindow,
+  isMainDesktopWindow,
   isTauriRuntime,
   listenForDesktopCloseRequest,
 } from './desktop'
@@ -645,7 +646,8 @@ function DaemonEventBridge() {
  */
 export default function App() {
   const routeSurface = useRouteSurface()
-  const isStandaloneSurface = isTauriRuntime() && routeSurface !== null
+  const isStandaloneSurface =
+    isTauriRuntime() && routeSurface !== null && !isMainDesktopWindow()
 
   return (
     <QueryClientProvider client={queryClient}>

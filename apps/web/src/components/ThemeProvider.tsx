@@ -120,22 +120,36 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
   })
 
   const serverAppearance = settingsQuery.data?.appearance
-  const shouldMigrate = Boolean(
-    serverAppearance &&
-    !hasCompletedThemeMigration() &&
-    shouldMigrateStoredThemePreferences(
-      serverAppearance,
-      initialStoredPreferences,
-    ),
+  const shouldMigrate = useMemo(
+    () =>
+      Boolean(
+        serverAppearance &&
+        !hasCompletedThemeMigration() &&
+        shouldMigrateStoredThemePreferences(
+          serverAppearance,
+          initialStoredPreferences,
+        ),
+      ),
+    [initialStoredPreferences, serverAppearance],
   )
-  const serverPreferences = serverAppearance
-    ? preferencesFromAppAppearance(serverAppearance)
-    : null
-  const preferences =
-    optimisticPreferences ??
-    (shouldMigrate
-      ? initialStoredPreferences
-      : (serverPreferences ?? initialStoredPreferences))
+  const serverPreferences = useMemo(
+    () =>
+      serverAppearance ? preferencesFromAppAppearance(serverAppearance) : null,
+    [serverAppearance],
+  )
+  const preferences = useMemo(
+    () =>
+      optimisticPreferences ??
+      (shouldMigrate
+        ? initialStoredPreferences
+        : (serverPreferences ?? initialStoredPreferences)),
+    [
+      initialStoredPreferences,
+      optimisticPreferences,
+      serverPreferences,
+      shouldMigrate,
+    ],
+  )
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
 
   useEffect(() => {
