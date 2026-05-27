@@ -6,15 +6,15 @@ set working-directory := '../..'
 suite *args:
     cargo run -p posthaste-lab -- suite {{ args }}
 
-# Create a lab run manifest/summary for selected suites without executing them yet.
+# Execute selected suites and write a lab manifest/summary.
 verify *args:
     cargo run -p posthaste-lab -- verify {{ args }}
 
-# Cheap lab skeleton smoke: unit tests, registry loading, and non-executing verify.
+# Cheap non-graphical lab smoke: unit tests, registry loading, and executable suites.
 smoke:
     cargo test -p posthaste-lab
     cargo run -p posthaste-lab -- suite list
-    cargo run -p posthaste-lab -- verify suite.api.settings.dev --run-root target/lab/smoke
+    cargo run -p posthaste-lab -- verify --tag lab-smoke --run-root target/lab/smoke
 
 # Typecheck and format-check the optional Tauri Playwright lab files.
 tauri-check:

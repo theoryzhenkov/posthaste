@@ -1,14 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Child, Command as ProcessCommand, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-const EXECUTION_NOT_IMPLEMENTED_REASON: &str = "execution not implemented in registry skeleton";
+const DEFAULT_SUITE_TIMEOUT_SECONDS: u64 = 300;
 const REDACTED: &str = "<redacted>";
 const KNOWN_ID_TYPES: &[&str] = &[
     "suite", "runner", "profile", "fixture", "artifact", "log", "state", "cmd",
@@ -35,6 +37,19 @@ pub enum LabError {
     WriteFile { path: String, source: io::Error },
     #[error("failed to create directory {path}: {source}")]
     CreateDir { path: String, source: io::Error },
+    #[error("failed to spawn suite {suite_id}: {source}")]
+    SpawnSuite { suite_id: String, source: io::Error },
+    #[error("failed to {action} suite {suite_id}: {source}")]
+    RunSuite {
+        suite_id: String,
+        action: &'static str,
+        source: io::Error,
+    },
+    #[error("failed to capture {stream} for suite {suite_id}")]
+    CaptureSuiteStream {
+        suite_id: String,
+        stream: &'static str,
+    },
     #[error("failed to parse registry TOML: {0}")]
     ParseToml(#[from] toml::de::Error),
     #[error("failed to serialize lab artifact JSON: {0}")]
@@ -53,6 +68,20 @@ pub enum LabError {
     ChangedSelectionUnsupported,
     #[error("usage error: {0}")]
     Usage(String),
+    #[error("verification failed; summary: {summary_path}")]
+    VerificationFailed { summary_path: String },
+    #[error("verification blocked; summary: {summary_path}")]
+    VerificationBlocked { summary_path: String },
+}
+
+impl LabError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::VerificationFailed { .. } => 1,
+            Self::VerificationBlocked { .. } => 78,
+            _ => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -71,6 +100,8 @@ pub struct SuiteEntry {
     #[serde(default)]
     pub paths: Vec<String>,
     pub command: String,
+    #[serde(default, alias = "timeout_seconds")]
+    pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub artifacts: Vec<String>,
     #[serde(default)]
@@ -299,6 +330,8 @@ pub struct SelectedSuite {
     pub tags: Vec<String>,
     pub paths: Vec<String>,
     pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
     pub artifacts: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<String>,
@@ -316,6 +349,7 @@ impl SelectedSuite {
             tags: entry.tags.clone(),
             paths: entry.paths.clone(),
             command: entry.command.clone(),
+            timeout_seconds: entry.timeout_seconds,
             artifacts: entry.artifacts.clone(),
             risk: entry.risk.clone(),
         }
@@ -338,6 +372,7 @@ pub struct VerifyOutput {
     pub manifest_path: PathBuf,
     pub summary_path: PathBuf,
     pub selected_suite_count: usize,
+    pub status: LabStatus,
 }
 
 pub fn write_verify_run(
@@ -364,10 +399,15 @@ where
 
     let run_id = new_run_id();
     let run_dir = options.run_root.join(&run_id);
+    let config_dir = run_dir.join("state.config");
+    let data_dir = run_dir.join("state.data");
+    let secrets_dir = run_dir.join("state.secrets");
+    let artifact_dir = run_dir.join("artifacts");
     create_dir(&run_dir)?;
-    create_dir(&run_dir.join("state.config"))?;
-    create_dir(&run_dir.join("state.data"))?;
-    create_dir(&run_dir.join("state.secrets"))?;
+    create_dir(&config_dir)?;
+    create_dir(&data_dir)?;
+    create_dir(&secrets_dir)?;
+    create_dir(&artifact_dir)?;
 
     let profiles = selected_suites
         .iter()
@@ -381,13 +421,39 @@ where
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let artifacts = selected_suites
+    let declared_artifacts = selected_suites
         .iter()
         .flat_map(|suite| suite.artifacts.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
     let reproduction_command = reproduction_command(&options.argv);
+
+    let mut suite_results = Vec::new();
+    for suite in &selected_suites {
+        suite_results.push(execute_suite(
+            suite,
+            &run_dir,
+            &artifact_dir,
+            &config_dir,
+            &data_dir,
+            &secrets_dir,
+        )?);
+    }
+
+    let status = aggregate_status(&suite_results);
+    let first_failure = suite_results
+        .iter()
+        .find(|result| result.status != LabStatus::Passed)
+        .map(|result| result.suite_id.clone());
+    let mut artifacts = declared_artifacts.clone();
+    artifacts.extend(
+        suite_results
+            .iter()
+            .flat_map(|result| [result.stdout_path.clone(), result.stderr_path.clone()]),
+    );
+    artifacts.sort();
+    artifacts.dedup();
 
     let manifest = LabManifest {
         schema_version: 1,
@@ -398,6 +464,7 @@ where
         reproduction_command: reproduction_command.clone(),
         registry_path: options.registry_path.display().to_string(),
         selected_suites: selected_suites.clone(),
+        suite_results: suite_results.clone(),
         selection: SelectionRecord::from_criteria(&options.criteria),
         commit_id: best_effort_commit_id(),
         platform: PlatformInfo::current(),
@@ -416,16 +483,17 @@ where
     let summary = LabSummary {
         schema_version: 1,
         run_id: run_id.clone(),
-        status: LabStatus::Blocked,
-        reason: EXECUTION_NOT_IMPLEMENTED_REASON.to_string(),
+        status,
+        reason: summary_reason(status, &suite_results),
         selected_suite_count: selected_suites.len(),
         selected_suites: selected_suites
             .iter()
             .map(|suite| suite.id.clone())
             .collect(),
-        first_failure: None,
+        suite_results,
+        first_failure,
         reproduction_command,
-        important_log_excerpts: Vec::new(),
+        important_log_excerpts: important_log_excerpts(&manifest.suite_results),
         artifacts,
     };
 
@@ -440,7 +508,325 @@ where
         manifest_path,
         summary_path,
         selected_suite_count: selected_suites.len(),
+        status,
     })
+}
+
+fn execute_suite(
+    suite: &SelectedSuite,
+    run_dir: &Path,
+    artifact_dir: &Path,
+    config_dir: &Path,
+    data_dir: &Path,
+    secrets_dir: &Path,
+) -> LabResult<SuiteExecutionRecord> {
+    let suite_artifact_dir = artifact_dir.join(path_safe_suite_id(&suite.id));
+    create_dir(&suite_artifact_dir)?;
+    let stdout_path = suite_artifact_dir.join("stdout.log");
+    let stderr_path = suite_artifact_dir.join("stderr.log");
+    let timeout_seconds = suite
+        .timeout_seconds
+        .unwrap_or(DEFAULT_SUITE_TIMEOUT_SECONDS);
+    let timeout = Duration::from_secs(timeout_seconds);
+
+    let mut command = shell_command(&suite.command);
+    configure_command_for_timeout(&mut command);
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("POSTHASTE_LAB_RUN_DIR", run_dir)
+        .env("POSTHASTE_CONFIG_ROOT", config_dir)
+        .env("POSTHASTE_STATE_ROOT", data_dir)
+        .env("POSTHASTE_SECRETS_ROOT", secrets_dir);
+
+    let started = Instant::now();
+    let mut child = command.spawn().map_err(|source| LabError::SpawnSuite {
+        suite_id: suite.id.clone(),
+        source,
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| LabError::CaptureSuiteStream {
+            suite_id: suite.id.clone(),
+            stream: "stdout",
+        })?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| LabError::CaptureSuiteStream {
+            suite_id: suite.id.clone(),
+            stream: "stderr",
+        })?;
+    let stdout_reader = read_stream_in_background(stdout);
+    let stderr_reader = read_stream_in_background(stderr);
+
+    let mut timed_out = false;
+    let exit_status = loop {
+        if let Some(status) = child.try_wait().map_err(|source| LabError::RunSuite {
+            suite_id: suite.id.clone(),
+            action: "poll",
+            source,
+        })? {
+            break Some(status);
+        }
+        if started.elapsed() >= timeout {
+            timed_out = true;
+            break Some(terminate_timed_out_child(&mut child, &suite.id)?);
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+
+    let duration_ms = started.elapsed().as_millis();
+    let stdout = join_stream_reader(stdout_reader).map_err(|()| LabError::CaptureSuiteStream {
+        suite_id: suite.id.clone(),
+        stream: "stdout",
+    })?;
+    let stderr = join_stream_reader(stderr_reader).map_err(|()| LabError::CaptureSuiteStream {
+        suite_id: suite.id.clone(),
+        stream: "stderr",
+    })?;
+    write_bytes(&stdout_path, &stdout)?;
+    write_bytes(&stderr_path, &stderr)?;
+
+    let (exit_code, signal) = exit_status
+        .as_ref()
+        .map(exit_status_parts)
+        .unwrap_or((None, None));
+    let (status, reason) = suite_status(timed_out, exit_code, signal);
+
+    Ok(SuiteExecutionRecord {
+        suite_id: suite.id.clone(),
+        command: suite.command.clone(),
+        status,
+        reason,
+        exit_code,
+        signal,
+        timed_out,
+        duration_ms,
+        timeout_seconds,
+        stdout_path: stdout_path.display().to_string(),
+        stderr_path: stderr_path.display().to_string(),
+    })
+}
+
+fn shell_command(command: &str) -> ProcessCommand {
+    #[cfg(windows)]
+    {
+        let mut process = ProcessCommand::new("cmd");
+        process.args(["/C", command]);
+        process
+    }
+    #[cfg(not(windows))]
+    {
+        let mut process = ProcessCommand::new("sh");
+        process.args(["-c", command]);
+        process
+    }
+}
+
+fn configure_command_for_timeout(command: &mut ProcessCommand) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
+
+fn terminate_timed_out_child(child: &mut Child, suite_id: &str) -> LabResult<ExitStatus> {
+    #[cfg(unix)]
+    {
+        terminate_unix_process_group(child, suite_id)?;
+    }
+    #[cfg(not(unix))]
+    {
+        child.kill().map_err(|source| LabError::RunSuite {
+            suite_id: suite_id.to_string(),
+            action: "kill timed-out",
+            source,
+        })?;
+    }
+    child.wait().map_err(|source| LabError::RunSuite {
+        suite_id: suite_id.to_string(),
+        action: "wait for timed-out",
+        source,
+    })
+}
+
+#[cfg(unix)]
+fn terminate_unix_process_group(child: &mut Child, suite_id: &str) -> LabResult<()> {
+    let process_group = format!("-{}", child.id());
+    let _ = ProcessCommand::new("kill")
+        .args(["-TERM", "--", &process_group])
+        .status();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if child
+            .try_wait()
+            .map_err(|source| LabError::RunSuite {
+                suite_id: suite_id.to_string(),
+                action: "poll timed-out",
+                source,
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let kill_status = ProcessCommand::new("kill")
+        .args(["-KILL", "--", &process_group])
+        .status();
+    if kill_status.is_err() {
+        child.kill().map_err(|source| LabError::RunSuite {
+            suite_id: suite_id.to_string(),
+            action: "kill timed-out",
+            source,
+        })?;
+    }
+    Ok(())
+}
+
+fn read_stream_in_background<R>(mut reader: R) -> thread::JoinHandle<io::Result<Vec<u8>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output)?;
+        Ok(output)
+    })
+}
+
+fn join_stream_reader(handle: thread::JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>, ()> {
+    handle.join().map_err(|_| ())?.map_err(|_| ())
+}
+
+fn write_bytes(path: &Path, bytes: &[u8]) -> LabResult<()> {
+    fs::write(path, bytes).map_err(|source| LabError::WriteFile {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn path_safe_suite_id(id: &str) -> String {
+    id.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn exit_status_parts(status: &ExitStatus) -> (Option<i32>, Option<i32>) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        (status.code(), status.signal())
+    }
+    #[cfg(not(unix))]
+    {
+        (status.code(), None)
+    }
+}
+
+fn suite_status(
+    timed_out: bool,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+) -> (LabStatus, String) {
+    if timed_out {
+        return (LabStatus::Failed, "suite command timed out".to_string());
+    }
+    match exit_code {
+        Some(0) => (
+            LabStatus::Passed,
+            "suite command exited successfully".to_string(),
+        ),
+        Some(78) => (
+            LabStatus::Blocked,
+            "suite command reported blocked status 78".to_string(),
+        ),
+        Some(code) => (
+            LabStatus::Failed,
+            format!("suite command exited with status {code}"),
+        ),
+        None => match signal {
+            Some(signal) => (
+                LabStatus::Failed,
+                format!("suite command terminated by signal {signal}"),
+            ),
+            None => (
+                LabStatus::Failed,
+                "suite command ended without an exit status".to_string(),
+            ),
+        },
+    }
+}
+
+fn aggregate_status(results: &[SuiteExecutionRecord]) -> LabStatus {
+    if results
+        .iter()
+        .any(|result| result.status == LabStatus::Failed)
+    {
+        return LabStatus::Failed;
+    }
+    if results
+        .iter()
+        .any(|result| result.status == LabStatus::Blocked)
+    {
+        return LabStatus::Blocked;
+    }
+    if results
+        .iter()
+        .all(|result| result.status == LabStatus::Skipped)
+    {
+        return LabStatus::Skipped;
+    }
+    LabStatus::Passed
+}
+
+fn summary_reason(status: LabStatus, results: &[SuiteExecutionRecord]) -> String {
+    match status {
+        LabStatus::Passed => "all selected suites passed".to_string(),
+        LabStatus::Failed | LabStatus::Blocked => results
+            .iter()
+            .find(|result| result.status == status)
+            .map(|result| result.reason.clone())
+            .unwrap_or_else(|| format!("verification ended with status {status:?}")),
+        LabStatus::Skipped => "all selected suites were skipped".to_string(),
+    }
+}
+
+fn important_log_excerpts(results: &[SuiteExecutionRecord]) -> Vec<String> {
+    results
+        .iter()
+        .filter(|result| result.status != LabStatus::Passed)
+        .flat_map(|result| {
+            let stderr_excerpt = tail_text_file(Path::new(&result.stderr_path), 20)
+                .map(|excerpt| format!("{} stderr:\n{}", result.suite_id, excerpt));
+            let stdout_excerpt = tail_text_file(Path::new(&result.stdout_path), 20)
+                .map(|excerpt| format!("{} stdout:\n{}", result.suite_id, excerpt));
+            [stderr_excerpt, stdout_excerpt]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn tail_text_file(path: &Path, max_lines: usize) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let lines = text.lines().rev().take(max_lines).collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(lines.into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 
 fn create_dir(path: &Path) -> LabResult<()> {
@@ -477,6 +863,7 @@ struct LabManifest {
     reproduction_command: String,
     registry_path: String,
     selected_suites: Vec<SelectedSuite>,
+    suite_results: Vec<SuiteExecutionRecord>,
     selection: SelectionRecord,
     commit_id: Option<String>,
     platform: PlatformInfo,
@@ -500,16 +887,36 @@ struct LabSummary {
     reason: String,
     selected_suite_count: usize,
     selected_suites: Vec<String>,
+    suite_results: Vec<SuiteExecutionRecord>,
     first_failure: Option<String>,
     reproduction_command: String,
     important_log_excerpts: Vec<String>,
     artifacts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum LabStatus {
+pub enum LabStatus {
+    Passed,
+    Failed,
     Blocked,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SuiteExecutionRecord {
+    suite_id: String,
+    command: String,
+    status: LabStatus,
+    reason: String,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    timed_out: bool,
+    duration_ms: u128,
+    timeout_seconds: u64,
+    stdout_path: String,
+    stderr_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -715,7 +1122,16 @@ fn run_verify_command(argv: Vec<String>, args: &[String]) -> LabResult<()> {
     println!("Manifest: {}", output.manifest_path.display());
     println!("Summary: {}", output.summary_path.display());
     println!("Selected suites: {}", output.selected_suite_count);
-    Ok(())
+    println!("Status: {:?}", output.status);
+    match output.status {
+        LabStatus::Passed => Ok(()),
+        LabStatus::Blocked => Err(LabError::VerificationBlocked {
+            summary_path: output.summary_path.display().to_string(),
+        }),
+        LabStatus::Failed | LabStatus::Skipped => Err(LabError::VerificationFailed {
+            summary_path: output.summary_path.display().to_string(),
+        }),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -911,7 +1327,8 @@ fixture = "fixture.mail.basic.test"
 runners = ["runner.cargo.test.dev"]
 tags = ["api", "settings", "fast"]
 paths = ["crates/posthaste-server/tests/settings_patch.rs"]
-command = "cargo test -p posthaste-server --test settings_patch"
+command = "printf 'settings stdout\\n'; printf 'settings stderr\\n' >&2"
+timeout_seconds = 5
 artifacts = ["log.backend.jsonl.dev"]
 
 [suite.dev.smoke.local]
@@ -921,7 +1338,8 @@ profile = "profile.lab.empty.local"
 runners = ["runner.just.dev.local"]
 tags = ["dev", "smoke", "fast"]
 paths = ["tools/dev/smoke.sh", "justfile"]
-command = "just dev smoke"
+command = "printf 'dev smoke\\n'"
+timeout_seconds = 5
 artifacts = ["artifact.summary.dev.local"]
 "#
     }
@@ -1089,9 +1507,116 @@ artifacts = ["artifact.summary.dev.local"]
             &fs::read_to_string(&output.summary_path).expect("summary should be readable"),
         )
         .unwrap();
-        assert_eq!(summary["status"], "blocked");
-        assert_eq!(summary["reason"], EXECUTION_NOT_IMPLEMENTED_REASON);
+        assert_eq!(summary["status"], "passed");
+        assert_eq!(summary["reason"], "all selected suites passed");
         assert_eq!(summary["selectedSuiteCount"], 1);
+        assert_eq!(summary["suiteResults"][0]["exitCode"], 0);
+        assert_eq!(summary["suiteResults"][0]["timedOut"], false);
+        let stdout_path = summary["suiteResults"][0]["stdoutPath"].as_str().unwrap();
+        let stderr_path = summary["suiteResults"][0]["stderrPath"].as_str().unwrap();
+        assert_eq!(
+            fs::read_to_string(stdout_path).unwrap(),
+            "settings stdout\n"
+        );
+        assert_eq!(
+            fs::read_to_string(stderr_path).unwrap(),
+            "settings stderr\n"
+        );
+
+        fs::remove_dir_all(temp_root).ok();
+    }
+
+    #[test]
+    fn maps_blocked_exit_code_to_blocked_summary() {
+        let registry = SuiteRegistry::from_toml_str(
+            r#"
+[suite.blocked.demo]
+level = "smoke"
+targets = ["daemon"]
+runners = ["runner.shell.test"]
+tags = ["blocked"]
+paths = []
+command = "printf 'display unavailable\\n' >&2; exit 78"
+timeout_seconds = 5
+"#,
+        )
+        .unwrap();
+        let temp_root =
+            std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+
+        let output = write_verify_run_with_env(
+            &registry,
+            VerifyOptions {
+                run_root: temp_root.clone(),
+                registry_path: PathBuf::from("tools/lab/suites.toml"),
+                argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
+                criteria: SelectionCriteria::default(),
+            },
+            std::iter::empty::<(String, String)>(),
+        )
+        .unwrap();
+
+        let summary: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&output.summary_path).expect("summary should be readable"),
+        )
+        .unwrap();
+        assert_eq!(output.status, LabStatus::Blocked);
+        assert_eq!(summary["status"], "blocked");
+        assert_eq!(summary["suiteResults"][0]["exitCode"], 78);
+        assert_eq!(summary["firstFailure"], "suite.blocked.demo");
+        assert!(summary["importantLogExcerpts"][0]
+            .as_str()
+            .unwrap()
+            .contains("display unavailable"));
+
+        fs::remove_dir_all(temp_root).ok();
+    }
+
+    #[test]
+    fn terminates_timed_out_suite_and_records_stdout_stderr() {
+        let registry = SuiteRegistry::from_toml_str(
+            r#"
+[suite.timeout.demo]
+level = "smoke"
+targets = ["daemon"]
+runners = ["runner.shell.test"]
+tags = ["timeout"]
+paths = []
+command = "printf 'before sleep\\n'; printf 'still waiting\\n' >&2; sleep 2"
+timeout_seconds = 1
+"#,
+        )
+        .unwrap();
+        let temp_root =
+            std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+
+        let output = write_verify_run_with_env(
+            &registry,
+            VerifyOptions {
+                run_root: temp_root.clone(),
+                registry_path: PathBuf::from("tools/lab/suites.toml"),
+                argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
+                criteria: SelectionCriteria::default(),
+            },
+            std::iter::empty::<(String, String)>(),
+        )
+        .unwrap();
+
+        let summary: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&output.summary_path).expect("summary should be readable"),
+        )
+        .unwrap();
+        assert_eq!(output.status, LabStatus::Failed);
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["suiteResults"][0]["timedOut"], true);
+        assert_eq!(
+            summary["suiteResults"][0]["reason"],
+            "suite command timed out"
+        );
+        let stdout_path = summary["suiteResults"][0]["stdoutPath"].as_str().unwrap();
+        let stderr_path = summary["suiteResults"][0]["stderrPath"].as_str().unwrap();
+        assert_eq!(fs::read_to_string(stdout_path).unwrap(), "before sleep\n");
+        assert_eq!(fs::read_to_string(stderr_path).unwrap(), "still waiting\n");
 
         fs::remove_dir_all(temp_root).ok();
     }
