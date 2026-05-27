@@ -50,6 +50,7 @@ export POSTHASTE_REPO_ROOT="$root"
 export POSTHASTE_E2E_SOCKET="$socket_path"
 export POSTHASTE_CONFIG_ROOT="$config_root"
 export POSTHASTE_STATE_ROOT="$state_root"
+export POSTHASTE_SECRETS_ROOT="$secrets_root"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 cleanup_lab_processes() {
@@ -114,6 +115,7 @@ POSTHASTE_LAB_RUN_DIR=$POSTHASTE_LAB_RUN_DIR
 POSTHASTE_E2E_SOCKET=$POSTHASTE_E2E_SOCKET
 POSTHASTE_CONFIG_ROOT=$POSTHASTE_CONFIG_ROOT
 POSTHASTE_STATE_ROOT=$POSTHASTE_STATE_ROOT
+POSTHASTE_SECRETS_ROOT=$POSTHASTE_SECRETS_ROOT
 EOF
 : >"$playwright_log"
 
@@ -202,6 +204,14 @@ if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
     echo "Run dir: $run_dir" >&2
     echo "Install/provide xvfb-run, run from a graphical session, or set POSTHASTE_E2E_ALLOW_NO_DISPLAY=1 to try anyway." >&2
     write_lab_artifacts "blocked" "display unavailable" 78
+    exit 78
+  fi
+elif [[ -n "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]] && command -v xset >/dev/null 2>&1; then
+  if ! xset q >/dev/null 2>&1; then
+    echo "Lab Tauri Playwright smoke cannot access DISPLAY=${DISPLAY}." >&2
+    echo "Run dir: $run_dir" >&2
+    echo "Refresh display authorization (for example, realm display-env) or unset DISPLAY to use xvfb-run when available." >&2
+    write_lab_artifacts "blocked" "display authorization unavailable" 78
     exit 78
   fi
 fi

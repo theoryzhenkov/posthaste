@@ -85,7 +85,8 @@ Lab orchestration should eventually expose a dedicated CLI:
 
 ```sh
 posthaste-lab suite list
-posthaste-lab verify suite.api.settings.dev
+posthaste-lab verify suite.api.health.dev
+posthaste-lab verify --tag lab-smoke
 posthaste-lab verify --tag settings --target web
 posthaste-lab verify --changed
 posthaste-lab launch web --profile profile.lab.empty.dev
@@ -207,7 +208,7 @@ Every lab run writes `manifest.json` and `summary.json`.
 `manifest.json` records:
 
 - command and canonical command ID (`cmd.*`)
-- suite IDs selected and selection rationale
+- suite IDs selected, selection rationale, and per-suite execution records
 - commit ID, platform, machine ID, tool versions
 - profile and fixture IDs
 - environment variables after redaction
@@ -217,6 +218,7 @@ Every lab run writes `manifest.json` and `summary.json`.
 `summary.json` records:
 
 - status: `passed`, `failed`, `skipped`, or `blocked`
+- per-suite status, duration, timeout flag, exit code, and stdout/stderr artifact paths
 - first failure suite and step
 - reproduction command
 - important log excerpts
