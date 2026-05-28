@@ -743,7 +743,7 @@ fn existing_report_artifact_path(raw_path: &str, run_dir: &Path) -> Option<Strin
     if !is_allowed_report_artifact_path(&canonical_path, run_dir) {
         return None;
     }
-    Some(path.display().to_string())
+    Some(canonical_path.display().to_string())
 }
 
 fn is_allowed_report_artifact_path(canonical_path: &Path, run_dir: &Path) -> bool {
@@ -1670,7 +1670,7 @@ mkdir -p "$POSTHASTE_LAB_RUN_DIR/nested/artifacts"
 printf '{"status":"failed","reason":"nested smoke failed","exitCode":1,"runDir":"%s"}\n' "$POSTHASTE_LAB_RUN_DIR/nested" > "$POSTHASTE_LAB_RUN_DIR/nested/summary.json"
 printf 'nested playwright failure detail\n' > "$POSTHASTE_LAB_RUN_DIR/nested/artifacts/playwright.log"
 printf 'TOKEN=should-not-be-in-summary\n' > "$POSTHASTE_SECRETS_ROOT/leak.log"
-printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/summary.json"
+printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/../nested/summary.json"
 printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/artifacts/playwright.log"
 printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/missing.json"
 printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_SECRETS_ROOT/leak.log"
