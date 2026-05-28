@@ -40,6 +40,7 @@ import {
   type AddressSuggestionOption,
 } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
+import { openSurfaceInSeparateWindow } from '@/desktop'
 import {
   EMPTY_COMPOSE_FORM,
   buildSendInput,
@@ -50,6 +51,7 @@ import {
 } from '@/composeMessage'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
+import { composeSurface } from '@/surfaces'
 
 import { FloatingPanel } from './FloatingPanel'
 import type { MarkdownComposerEditorHandle } from './MarkdownComposerEditor'
@@ -225,6 +227,9 @@ export function ComposeOverlay({
   }))
   const [fromMenuOpen, setFromMenuOpen] = useState(false)
   const [fromInputFocused, setFromInputFocused] = useState(false)
+  const [editedResetKey, setEditedResetKey] = useState<string | null>(null)
+  const [isOpeningWindow, setIsOpeningWindow] = useState(false)
+  const editedResetKeyRef = useRef<string | null>(null)
 
   const needsFormReset = composeState.resetKey !== formResetKey
   const form = needsFormReset ? initialForm : composeState.form
@@ -258,9 +263,11 @@ export function ComposeOverlay({
   )
   const setField = useCallback(
     <K extends keyof ComposeForm>(field: K, value: ComposeForm[K]) => {
+      editedResetKeyRef.current = formResetKey
+      setEditedResetKey(formResetKey)
       setForm((current) => ({ ...current, [field]: value }))
     },
-    [setForm],
+    [formResetKey, setForm],
   )
   const handleBodyChange = useCallback(
     (value: string) => setField('body', value),
@@ -480,6 +487,24 @@ export function ComposeOverlay({
     sendMutation,
     setErrorMessage,
   ])
+
+  const hasUserEdited = editedResetKey === formResetKey
+  const openInitialComposeInWindow = useCallback(() => {
+    const openingResetKey = formResetKey
+    setIsOpeningWindow(true)
+    void openSurfaceInSeparateWindow(composeSurface(intent))
+      .then(() => {
+        if (editedResetKeyRef.current !== openingResetKey) {
+          onClose()
+        }
+      })
+      .catch((error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to open window',
+        )
+      })
+      .finally(() => setIsOpeningWindow(false))
+  }, [formResetKey, intent, onClose])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -716,6 +741,11 @@ export function ComposeOverlay({
       className="flex flex-col"
       header={header}
       onClose={onClose}
+      onOpenInWindow={
+        !hasUserEdited && !isOpeningWindow
+          ? openInitialComposeInWindow
+          : undefined
+      }
     >
       {content}
     </FloatingPanel>
