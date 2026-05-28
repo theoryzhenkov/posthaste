@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import type { SurfaceDescriptor } from './surfaces'
 import { surfaceRoute } from './surfaces'
+import { surfaceWindowPolicy } from './surfaceWindowPolicy'
 import { surfaceWindowUrl } from './surfaceWindow'
 import {
   currentSurfaceDepth,
@@ -71,7 +72,7 @@ export async function openSurfaceInSeparateWindow(
 }
 
 export function surfacePopupFeatures(surface: SurfaceDescriptor): string {
-  const { width, height } = surfacePopupSize(surface)
+  const { width, height } = surfaceWindowPolicy(surface).popupSize
   return [
     'popup',
     `width=${width}`,
@@ -79,20 +80,6 @@ export function surfacePopupFeatures(surface: SurfaceDescriptor): string {
     'resizable=yes',
     'scrollbars=yes',
   ].join(',')
-}
-
-function surfacePopupSize(surface: SurfaceDescriptor): {
-  width: number
-  height: number
-} {
-  switch (surface.kind) {
-    case 'attachment':
-      return { width: 1100, height: 820 }
-    case 'settings':
-      return { width: 980, height: 720 }
-    case 'message':
-      return { width: 900, height: 760 }
-  }
 }
 
 export async function listenForDesktopCloseRequest(
