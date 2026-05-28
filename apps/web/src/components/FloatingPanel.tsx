@@ -1,4 +1,11 @@
-import { GripHorizontal, Maximize2, Minimize2, Pin, X } from 'lucide-react'
+import {
+  ExternalLink,
+  GripHorizontal,
+  Maximize2,
+  Minimize2,
+  Pin,
+  X,
+} from 'lucide-react'
 import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -31,6 +38,7 @@ interface FloatingPanelProps {
   storageKey: string
   zIndexClassName?: string
   onClose: () => void
+  onOpenInWindow?: () => void
 }
 
 function readStoredPanelOffset(storageKey: string): PanelOffset {
@@ -75,6 +83,7 @@ export function FloatingPanel({
   storageKey,
   zIndexClassName = 'z-[70]',
   onClose,
+  onOpenInWindow,
 }: FloatingPanelProps) {
   const [isPinned, setIsPinned] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
@@ -347,6 +356,16 @@ export function FloatingPanel({
               >
                 <Pin size={15} strokeWidth={1.8} />
               </button>
+              {onOpenInWindow && (
+                <button
+                  type="button"
+                  title={`Open ${panelLabel} in window`}
+                  className="ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-[color-mix(in_oklab,var(--brand-coral)_11%,transparent)] hover:text-foreground"
+                  onClick={onOpenInWindow}
+                >
+                  <ExternalLink size={15} strokeWidth={1.8} />
+                </button>
+              )}
               <button
                 type="button"
                 aria-pressed={isExpanded}
