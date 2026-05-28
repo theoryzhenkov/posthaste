@@ -1,7 +1,7 @@
 ---
 scope: L1
 summary: "Lab suite registry, profiles, drivers, artifacts, command names, and Tauri automation contracts"
-modified: 2026-05-27
+modified: 2026-05-28
 reviewed: 2026-05-27
 depends:
   - path: docs/L0-lab
@@ -213,16 +213,18 @@ Every lab run writes `manifest.json` and `summary.json`.
 - profile and fixture IDs
 - environment variables after redaction
 - process tree and ports/sockets
-- artifact paths
+- artifact paths, including explicit nested suite artifact paths emitted by runners
 
 `summary.json` records:
 
 - status: `passed`, `failed`, `skipped`, or `blocked`
-- per-suite status, duration, timeout flag, exit code, and stdout/stderr artifact paths
+- per-suite status, duration, timeout flag, exit code, stdout/stderr artifact paths, and discovered nested artifact paths
 - first failure suite and step
 - reproduction command
 - important log excerpts
 - links to screenshots, traces, videos, and backend/frontend logs
+
+Runners may add nested artifacts to the parent report by printing lines with the exact prefix `POSTHASTE_LAB_ARTIFACT_PATH=` followed by an existing file or directory path. The path must remain under the active `POSTHASTE_LAB_RUN_DIR`; paths with secret-like segments are ignored.
 
 Agents should inspect the artifact bundle before rerunning a failing suite.
 
