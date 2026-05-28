@@ -62,6 +62,25 @@ command = "bun --cwd=apps/web test surfaces desktop"
 timeout_seconds = 60
 artifacts = ["artifact.bun.surfaces.web.test"]
 
+[suite.policy.no_telemetry.main]
+level = "policy"
+targets = ["release"]
+runners = ["runner.shell.test"]
+tags = ["policy", "release", "fast", "lab-smoke"]
+paths = [
+  "Cargo.toml",
+  "package.json",
+  "bun.lock",
+  "justfile",
+  ".github/workflows/",
+  "apps/",
+  "crates/",
+  "tools/lab/no-telemetry-main.sh",
+]
+command = "bash tools/lab/no-telemetry-main.sh"
+timeout_seconds = 30
+artifacts = ["artifact.policy.no-telemetry.main"]
+
 [suite.dev.smoke.local]
 level = "smoke"
 targets = ["dev"]
