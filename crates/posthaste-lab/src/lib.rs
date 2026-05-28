@@ -1509,6 +1509,7 @@ artifacts = ["artifact.summary.dev.local"]
             smoke_suite_ids,
             vec![
                 "suite.api.health.dev",
+                "suite.policy.no_telemetry.main",
                 "suite.ui.readiness.web.test",
                 "suite.ui.surfaces.web.test",
             ]

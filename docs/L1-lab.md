@@ -63,7 +63,7 @@ tags = ["ui", "settings", "tauri", "linux"]
 command = "posthaste-lab run suite.desktop.settings.linux.test"
 ```
 
-The registry supports selection by explicit suite ID, tag, target, platform, risk profile, and changed files. Changed-file selection must escalate across behavioral boundaries when public API schemas, event payloads, config schema, shared cache keys, or suite fixtures change.
+The registry supports selection by explicit suite ID, tag, target, platform, and risk profile. Changed-file selection is a planned interface; until it is implemented, `--changed` is parsed as an unsupported request. When added, changed-file selection must escalate across behavioral boundaries when public API schemas, event payloads, config schema, shared cache keys, or suite fixtures change.
 
 ## Command surface
 
@@ -105,6 +105,8 @@ posthastectl fixture load fixture.mail.basic.test
 ```
 
 The future headless daemon and terminal TUI may promote a stable subset of `posthastectl`, but lab-only fixture mutation and rich diagnostics remain separate.
+
+`lab-smoke` is the cheap non-graphical gate for dogfood/main. It includes the Lab registry self-check, API health, web readiness/surface route tests, and a policy suite that rejects active telemetry ingest/runtime artifacts on the main dogfood line. Graphical Tauri smoke remains an explicit Linux suite outside `lab-smoke`.
 
 ## Profiles and fixtures
 
@@ -154,6 +156,8 @@ state.settings.ready.test
 state.settings.error.test
 state.message-detail.ready.test
 state.compose.ready.test
+state.surface.<kind>.ready.test
+state.surface.invalid.ready.test
 ```
 
 The DOM representation may use `data-testid` or `data-posthaste-state`, but the suite registry and lab reports refer to canonical state IDs. Loading states that can block a user must have a reachable error state with diagnostic context. Infinite spinners are test failures.
