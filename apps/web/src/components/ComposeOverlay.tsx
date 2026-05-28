@@ -39,6 +39,7 @@ import {
   insertAddressSuggestion,
   type AddressSuggestionOption,
 } from '@/composeAddressSuggestions'
+import type { ComposeIntent } from '@/composeIntent'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
@@ -53,13 +54,9 @@ const MarkdownComposerEditor = lazy(() =>
   })),
 )
 
-export type ComposeIntent =
-  | { kind: 'new'; sourceId: string }
-  | { kind: 'reply'; sourceId: string; messageId: string }
-  | { kind: 'forward'; sourceId: string; messageId: string }
-
 interface ComposeOverlayProps {
   intent: ComposeIntent
+  shell?: 'floating' | 'document'
   onClose: () => void
 }
 
@@ -209,7 +206,11 @@ function accountFromOptions(
   })
 }
 
-export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
+export function ComposeOverlay({
+  intent,
+  shell = 'floating',
+  onClose,
+}: ComposeOverlayProps) {
   const bodyRef = useRef<MarkdownComposerEditorHandle>(null)
   const queryClient = useQueryClient()
   const identityQuery = useQuery({
@@ -547,46 +548,39 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSubmit])
 
-  return (
-    <FloatingPanel
-      panelLabel={
-        intent.kind === 'reply'
-          ? 'reply composer'
-          : intent.kind === 'forward'
-            ? 'forward composer'
-            : 'message composer'
-      }
-      storageKey="posthaste.compose.panelOffset"
-      zIndexClassName="z-[80]"
-      sizePreset="compose"
-      className="flex flex-col"
-      header={
-        <div className="flex h-11 min-w-0 items-center gap-2 px-3">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--brand-coral)_12%,transparent)] text-muted-foreground">
-            {intent.kind === 'reply' ? (
-              <Reply size={15} />
-            ) : intent.kind === 'forward' ? (
-              <Forward size={15} />
-            ) : (
-              <Mail size={15} />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">
-              {intent.kind === 'reply'
-                ? 'Reply'
-                : intent.kind === 'forward'
-                  ? 'Forward'
-                  : 'New Message'}
-            </div>
-            <div className="truncate text-[11px] text-muted-foreground">
-              {fromLabel}
-            </div>
-          </div>
+  const panelLabel =
+    intent.kind === 'reply'
+      ? 'reply composer'
+      : intent.kind === 'forward'
+        ? 'forward composer'
+        : 'message composer'
+  const header = (
+    <div className="flex h-11 min-w-0 items-center gap-2 px-3">
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--brand-coral)_12%,transparent)] text-muted-foreground">
+        {intent.kind === 'reply' ? (
+          <Reply size={15} />
+        ) : intent.kind === 'forward' ? (
+          <Forward size={15} />
+        ) : (
+          <Mail size={15} />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold">
+          {intent.kind === 'reply'
+            ? 'Reply'
+            : intent.kind === 'forward'
+              ? 'Forward'
+              : 'New Message'}
         </div>
-      }
-      onClose={onClose}
-    >
+        <div className="truncate text-[11px] text-muted-foreground">
+          {fromLabel}
+        </div>
+      </div>
+    </div>
+  )
+  const content = (
+    <>
       <div className="grid shrink-0 gap-2 border-b border-border/70 px-4 py-3">
         <ComposeLine label="From">
           <div className="relative flex min-w-0 items-center gap-1">
@@ -754,6 +748,31 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
           Send
         </Button>
       </div>
+    </>
+  )
+
+  if (shell === 'document') {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+        <div className="shrink-0 border-b border-border/70 bg-chrome text-chrome-foreground">
+          {header}
+        </div>
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <FloatingPanel
+      panelLabel={panelLabel}
+      storageKey="posthaste.compose.panelOffset"
+      zIndexClassName="z-[80]"
+      sizePreset="compose"
+      className="flex flex-col"
+      header={header}
+      onClose={onClose}
+    >
+      {content}
     </FloatingPanel>
   )
 }

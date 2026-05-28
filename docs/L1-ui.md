@@ -1,7 +1,7 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-05-26
+modified: 2026-05-28
 reviewed: 2026-05-26
 depends:
   - path: docs/L0-ui
@@ -58,7 +58,8 @@ App
     │   └── FocusedSurface
     │       ├── MessageDetail
     │       ├── AttachmentSurface
-    │       └── SettingsPanel
+    │       ├── SettingsPanel
+    │       └── Compose
 ```
 
 The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L2-ui-visual-reference.md). L1 owns interaction and data rules; L2 owns dimensions, colors, typography, and visual states.
@@ -205,9 +206,9 @@ at the cursor for the next typed text. Sending still submits the Markdown source
 to the Rust API, which emits `text/plain` Markdown plus the rendered `text/html`
 alternative.
 
-Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }`, `{ kind: "attachment", params, disposition: "focused" }`, or `{ kind: "settings", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Browser overlays form a history-backed surface stack: opening an attachment from a focused message pushes a child surface, and Esc or the close button pops only the top surface before returning to the parent message. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, `o` opens or focuses one stable `message-*` window per exact source/message ID, and attachment previews open or focus one stable `attachment-*` window per exact source/message/attachment ID. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
+Focused surfaces are opened from serializable descriptors such as `{ kind: "message", params, disposition: "focused" }`, `{ kind: "attachment", params, disposition: "focused" }`, `{ kind: "settings", params, disposition: "focused" }`, or `{ kind: "compose", params, disposition: "focused" }`. Browser surfaces are represented in the URL hash and rendered as full-window overlays using shared surface content. Browser overlays form a history-backed surface stack: opening an attachment from a focused message pushes a child surface, and Esc or the close button pops only the top surface before returning to the parent message. Desktop surfaces are represented by the same hash routes but opened as native Tauri windows: settings reuses one `settings` window, `o` opens or focuses one stable `message-*` window per exact source/message ID, attachment previews open or focus one stable `attachment-*` window per exact source/message/attachment ID, and compose windows open or focus one stable `compose-*` window per initial compose intent. Surface content fetches by IDs through React Query and must not depend on parent-only React props.
 
-Surface route parameters own visible navigation state inside focused surfaces. Settings category and drill-in state, including account editors, smart-mailbox editors, source-mailbox editors, and create flows, are encoded in the settings surface descriptor. Component state may hold ephemeral form or pending-operation state, but server/cache refreshes must not replay initial route parameters or otherwise change visible navigation unless they are explicitly correcting an invalid route.
+Surface route parameters own visible navigation state inside focused surfaces. Settings category and drill-in state, including account editors, smart-mailbox editors, source-mailbox editors, and create flows, are encoded in the settings surface descriptor. Compose routes encode only the initial compose intent (`new`, `reply`, or `forward`); live draft contents remain component/session state and are not teleported between popup and desktop-window shells. Component state may hold ephemeral form or pending-operation state, but server/cache refreshes must not replay initial route parameters or otherwise change visible navigation unless they are explicitly correcting an invalid route.
 
 ## Keyboard shortcuts
 

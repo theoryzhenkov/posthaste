@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { ComposeIntent } from '@/components/ComposeOverlay'
+import type { ComposeIntent } from '@/composeIntent'
 import type { SidebarSelection } from '@/components/Sidebar'
 import type { MailSelection } from '@/mailState'
 

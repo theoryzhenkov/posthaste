@@ -5,6 +5,7 @@ import { surfaceWindowUrl } from '../src/surfaceWindow'
 import { surfaceWindowPolicy } from '../src/surfaceWindowPolicy'
 import {
   attachmentSurface,
+  composeSurface,
   messageSurfaceFromSelection,
   settingsSurface,
 } from '../src/surfaces'
@@ -51,5 +52,16 @@ describe('surface window URLs', () => {
         }),
       ),
     ).toBe('popup,width=1100,height=820,resizable=yes,scrollbars=yes')
+    expect(
+      surfaceWindowPolicy(composeSurface({ kind: 'new', sourceId: 'primary' })),
+    ).toEqual({
+      title: 'Compose',
+      popupSize: { width: 780, height: 640 },
+    })
+    expect(
+      surfacePopupFeatures(
+        composeSurface({ kind: 'new', sourceId: 'primary' }),
+      ),
+    ).toBe('popup,width=780,height=640,resizable=yes,scrollbars=yes')
   })
 })
