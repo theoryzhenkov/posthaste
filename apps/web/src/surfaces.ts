@@ -74,14 +74,11 @@ export type SurfaceDescriptor =
   | SettingsSurfaceDescriptor
   | ComposeSurfaceDescriptor
 
-const SETTINGS_TARGET_PARAM_KEYS = [
-  'accountId',
-  'smartMailboxId',
-  'sourceAccountId',
-  'sourceMailboxId',
-] as const
-
-type SettingsTargetParamKey = (typeof SETTINGS_TARGET_PARAM_KEYS)[number]
+type SettingsTargetParamKey =
+  | 'accountId'
+  | 'smartMailboxId'
+  | 'sourceAccountId'
+  | 'sourceMailboxId'
 
 export function messageSurfaceFromSelection(
   selection: MailSelection,
@@ -207,6 +204,15 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
 
   switch (parts[1]) {
     case 'message': {
+      if (
+        !hasOnlySurfaceParams(url.searchParams, [
+          'conversationId',
+          'sourceId',
+          'messageId',
+        ])
+      ) {
+        return null
+      }
       const conversationId = url.searchParams.get('conversationId')
       const sourceId = url.searchParams.get('sourceId')
       const messageId = url.searchParams.get('messageId')
@@ -220,6 +226,15 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
       }
     }
     case 'attachment': {
+      if (
+        !hasOnlySurfaceParams(url.searchParams, [
+          'sourceId',
+          'messageId',
+          'attachmentId',
+        ])
+      ) {
+        return null
+      }
       const sourceId = url.searchParams.get('sourceId')
       const messageId = url.searchParams.get('messageId')
       const attachmentId = url.searchParams.get('attachmentId')
@@ -235,6 +250,12 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
     case 'settings': {
       const category = url.searchParams.get('category')
       if (category !== null && !isSettingsSurfaceCategory(category)) {
+        return null
+      }
+      if (
+        !url.searchParams.has('targetKind') &&
+        !hasOnlySurfaceParams(url.searchParams, ['category'])
+      ) {
         return null
       }
       const target = parseSettingsTarget(url.searchParams)
@@ -361,10 +382,11 @@ function hasOnlyComposeParams(
   params: URLSearchParams,
   expectedKeys: readonly string[],
 ): boolean {
-  return [...params.keys()].every(
-    (key) =>
-      key === 'composeKind' || key === 'sourceId' || expectedKeys.includes(key),
-  )
+  return hasOnlySurfaceParams(params, [
+    'composeKind',
+    'sourceId',
+    ...expectedKeys,
+  ])
 }
 
 function parseSettingsTarget(
@@ -432,8 +454,17 @@ function hasOnlySettingsTargetParams(
   params: URLSearchParams,
   allowed: readonly SettingsTargetParamKey[],
 ): boolean {
-  return SETTINGS_TARGET_PARAM_KEYS.every(
-    (key) => allowed.includes(key) || !params.has(key),
+  return hasOnlySurfaceParams(params, ['category', 'targetKind', ...allowed])
+}
+
+function hasOnlySurfaceParams(
+  params: URLSearchParams,
+  allowed: readonly string[],
+): boolean {
+  const keys = [...params.keys()]
+  return (
+    keys.every((key) => allowed.includes(key)) &&
+    new Set(keys).size === keys.length
   )
 }
 
