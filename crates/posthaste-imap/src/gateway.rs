@@ -1148,6 +1148,15 @@ impl MailGateway for LiveImapSmtpGateway {
     }
 }
 
+/// Project a local message location to its (mailbox, uid-validity, uid) identity tuple.
+fn location_identity(location: &ImapMessageLocation) -> (MailboxId, ImapUidValidity, ImapUid) {
+    (
+        location.mailbox_id.clone(),
+        location.uid_validity,
+        location.uid,
+    )
+}
+
 fn missing_location_identities(
     local_locations: &[ImapMessageLocation],
     remote_headers: &[ImapMappedHeader],
@@ -1172,13 +1181,7 @@ fn missing_location_identities(
                 location.uid,
             ))
         })
-        .map(|location| {
-            (
-                location.mailbox_id.clone(),
-                location.uid_validity,
-                location.uid,
-            )
-        })
+        .map(location_identity)
         .collect()
 }
 
@@ -1194,13 +1197,7 @@ fn missing_location_identities_from_uids(
     local_locations
         .iter()
         .filter(|location| !remote_uids.contains(&location.uid))
-        .map(|location| {
-            (
-                location.mailbox_id.clone(),
-                location.uid_validity,
-                location.uid,
-            )
-        })
+        .map(location_identity)
         .collect()
 }
 
