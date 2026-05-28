@@ -209,8 +209,8 @@ fi
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "Lab Tauri Playwright smoke is Linux-only for now." >&2
   echo "Run dir: $run_dir" >&2
-  write_lab_artifacts "skipped" "unsupported platform" 78
-  exit 78
+  write_lab_artifacts "skipped" "unsupported platform" 77
+  exit 77
 fi
 
 runner=()

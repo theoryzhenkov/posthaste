@@ -226,6 +226,8 @@ Every lab run writes `manifest.json` and `summary.json`.
 
 Runners may add nested artifacts to the parent report by printing lines with the exact prefix `POSTHASTE_LAB_ARTIFACT_PATH=` followed by an existing file or directory path. The path must remain under the active `POSTHASTE_LAB_RUN_DIR`; paths with secret-like segments are ignored.
 
+Suite runner exit code `77` means `skipped`; exit code `78` means `blocked`. Other nonzero exits mean `failed`.
+
 Agents should inspect the artifact bundle before rerunning a failing suite.
 
 ## Release relationship
