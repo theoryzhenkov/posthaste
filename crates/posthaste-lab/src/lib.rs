@@ -65,7 +65,7 @@ pub enum LabError {
     SuiteNotFound(String),
     #[error("no suites matched the requested selection")]
     NoSuitesSelected,
-    #[error("changed-file suite selection is not implemented in the registry skeleton")]
+    #[error("changed-file suite selection is not implemented")]
     ChangedSelectionUnsupported,
     #[error("usage error: {0}")]
     Usage(String),
@@ -1449,7 +1449,7 @@ fn print_suite_usage(program: &str) {
 
 fn print_verify_usage(program: &str) {
     println!("Usage: {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
-    println!("Note: --changed is parsed but currently unsupported in the registry skeleton.");
+    println!("Note: --changed is parsed but currently unsupported.");
 }
 
 #[cfg(test)]
