@@ -1,3 +1,4 @@
+import type { ComposeIntent } from './composeIntent'
 import type { MailSelection } from './mailState'
 
 export type SurfaceDisposition = 'focused'
@@ -61,10 +62,17 @@ export interface SettingsSurfaceDescriptor {
   }
 }
 
+export interface ComposeSurfaceDescriptor {
+  kind: 'compose'
+  disposition: SurfaceDisposition
+  params: ComposeIntent
+}
+
 export type SurfaceDescriptor =
   | MessageSurfaceDescriptor
   | AttachmentSurfaceDescriptor
   | SettingsSurfaceDescriptor
+  | ComposeSurfaceDescriptor
 
 const SETTINGS_TARGET_PARAM_KEYS = [
   'accountId',
@@ -156,6 +164,16 @@ export function sourceMailboxSettingsSurface(
   })
 }
 
+export function composeSurface(
+  intent: ComposeIntent,
+): ComposeSurfaceDescriptor {
+  return {
+    kind: 'compose',
+    disposition: 'focused',
+    params: intent,
+  }
+}
+
 export function attachmentSurface(input: {
   sourceId: string
   messageId: string
@@ -172,6 +190,8 @@ export function surfaceRoute(surface: SurfaceDescriptor): string {
   switch (surface.kind) {
     case 'settings':
       return settingsSurfaceRoute(surface)
+    case 'compose':
+      return composeSurfaceRoute(surface)
     case 'message':
     case 'attachment':
       return genericSurfaceRoute(surface)
@@ -207,6 +227,10 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
         return null
       }
       return attachmentSurface({ sourceId, messageId, attachmentId })
+    }
+    case 'compose': {
+      const intent = parseComposeIntent(url.searchParams)
+      return intent ? composeSurface(intent) : null
     }
     case 'settings': {
       const category = url.searchParams.get('category')
@@ -249,6 +273,16 @@ function genericSurfaceRoute(
   }
   const query = params.toString()
   return `/surface/${surface.kind}${query ? `?${query}` : ''}`
+}
+
+function composeSurfaceRoute(surface: ComposeSurfaceDescriptor): string {
+  const params = new URLSearchParams()
+  params.set('composeKind', surface.params.kind)
+  params.set('sourceId', surface.params.sourceId)
+  if (surface.params.kind !== 'new') {
+    params.set('messageId', surface.params.messageId)
+  }
+  return `/surface/compose?${params.toString()}`
 }
 
 function settingsSurfaceRoute(surface: SettingsSurfaceDescriptor): string {
@@ -294,6 +328,43 @@ function categoryForSettingsTarget(
     case SettingsSurfaceTargetKind.SourceMailbox:
       return 'mailboxes'
   }
+}
+
+function parseComposeIntent(params: URLSearchParams): ComposeIntent | null {
+  const composeKind = params.get('composeKind')
+  const sourceId = params.get('sourceId')
+  if (!composeKind || !sourceId) {
+    return null
+  }
+
+  switch (composeKind) {
+    case 'new':
+      return hasOnlyComposeParams(params, []) ? { kind: 'new', sourceId } : null
+    case 'reply': {
+      const messageId = params.get('messageId')
+      return messageId && hasOnlyComposeParams(params, ['messageId'])
+        ? { kind: 'reply', sourceId, messageId }
+        : null
+    }
+    case 'forward': {
+      const messageId = params.get('messageId')
+      return messageId && hasOnlyComposeParams(params, ['messageId'])
+        ? { kind: 'forward', sourceId, messageId }
+        : null
+    }
+    default:
+      return null
+  }
+}
+
+function hasOnlyComposeParams(
+  params: URLSearchParams,
+  expectedKeys: readonly string[],
+): boolean {
+  return [...params.keys()].every(
+    (key) =>
+      key === 'composeKind' || key === 'sourceId' || expectedKeys.includes(key),
+  )
 }
 
 function parseSettingsTarget(
