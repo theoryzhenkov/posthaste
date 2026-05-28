@@ -43,6 +43,22 @@ command = "bun --cwd=apps/web test labReadiness"
 timeout_seconds = 60
 artifacts = ["artifact.bun.lab-readiness.web.test"]
 
+[suite.ui.surfaces.web.test]
+level = "unit"
+targets = ["web"]
+profile = "profile.lab.empty.test"
+runners = ["runner.bun.test"]
+tags = ["ui", "surfaces", "web", "fast", "lab-smoke"]
+paths = [
+  "apps/web/src/surfaces.ts",
+  "apps/web/src/surfaceWindowPolicy.ts",
+  "apps/web/test/surfaces.test.ts",
+  "apps/web/test/desktop.test.ts",
+]
+command = "bun --cwd=apps/web test surfaces desktop"
+timeout_seconds = 60
+artifacts = ["artifact.bun.surfaces.web.test"]
+
 [suite.dev.smoke.local]
 level = "smoke"
 targets = ["dev"]
