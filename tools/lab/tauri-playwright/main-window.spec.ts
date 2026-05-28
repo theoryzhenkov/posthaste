@@ -49,15 +49,14 @@ test.describe("Linux Tauri main-window smoke", () => {
   }) => {
     await waitForMainWindowReadiness(tauriPage);
 
-    await tauriPage.evaluate(`(() => {
+    await tauriPage.evaluate(`
       window.history.pushState(
         null,
         "",
         "#/surface/compose?composeKind=new&sourceId=lab-smoke"
       );
       window.dispatchEvent(new HashChangeEvent("hashchange"));
-      return true;
-    })()`);
+    `);
 
     await expect(
       tauriPage.locator(
@@ -65,11 +64,10 @@ test.describe("Linux Tauri main-window smoke", () => {
       ),
     ).toBeVisible({ timeout: 10_000 });
 
-    await tauriPage.evaluate(`(() => {
+    await tauriPage.evaluate(`
       window.history.pushState(null, "", "#/surface/compose?composeKind=new");
       window.dispatchEvent(new HashChangeEvent("hashchange"));
-      return true;
-    })()`);
+    `);
 
     await expect(
       tauriPage.locator(
