@@ -305,4 +305,49 @@ mod tests {
         let result = sanitize_email_html(input);
         assert!(result.contains("noopener noreferrer"));
     }
+
+    #[test]
+    fn strips_event_handler_attributes() {
+        let result = sanitize_email_html(r#"<p onclick="alert(1)">hi</p>"#);
+        assert!(!result.contains("onclick"));
+        assert!(!result.contains("alert"));
+        assert!(result.contains("<p>hi</p>"));
+    }
+
+    #[test]
+    fn drops_javascript_and_data_uri_hrefs() {
+        let js = sanitize_email_html(r#"<a href="javascript:alert(1)">x</a>"#);
+        assert!(!js.contains("javascript:"));
+        let data =
+            sanitize_email_html(r#"<a href="data:text/html,<script>alert(1)</script>">x</a>"#);
+        assert!(!data.contains("data:"));
+        assert!(!data.contains("<script"));
+    }
+
+    #[test]
+    fn strips_dangerous_elements() {
+        // Active-content and navigation-hijacking elements have no place in rendered email
+        // bodies; ammonia's allowlist must drop them entirely (no src/action leakage).
+        let vectors = [
+            r#"<iframe src="https://evil.example"></iframe>"#,
+            r#"<object data="https://evil.example"></object>"#,
+            r#"<embed src="https://evil.example">"#,
+            r#"<form action="https://evil.example"><input></form>"#,
+            r#"<svg onload="alert(1)"></svg>"#,
+            r#"<meta http-equiv="refresh" content="0;url=https://evil.example">"#,
+            r#"<base href="https://evil.example/">"#,
+            r#"<style>@import url(https://evil.example/x.css);</style>"#,
+        ];
+        for input in vectors {
+            let result = sanitize_email_html(input).to_ascii_lowercase();
+            assert!(
+                !result.contains("evil.example"),
+                "dangerous element leaked content: input={input:?} result={result:?}"
+            );
+            assert!(
+                !result.contains("onload"),
+                "event handler survived: {input:?}"
+            );
+        }
+    }
 }
