@@ -221,13 +221,16 @@ fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(), String> {
     let label = surface_window_label(&surface);
+    let route = surface_route(&surface);
     if let Some(window) = app.get_webview_window(&label) {
+        window
+            .eval(surface_window_navigation_script(&route))
+            .map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
 
     let port = app.state::<EmbeddedBackend>().port;
-    let route = surface_route(&surface);
     let title = surface_title(&surface);
     let (width, height) = surface_window_size(&surface);
     build_window(
@@ -585,6 +588,13 @@ fn surface_route(surface: &SurfaceDescriptor) -> String {
     }
 }
 
+fn surface_window_navigation_script(route: &str) -> String {
+    let route_json = serde_json::to_string(route).expect("surface route should serialize to JSON");
+    format!(
+        "(() => {{ const route = {route_json}; window.history.replaceState(window.history.state, '', '#' + route); window.dispatchEvent(new HashChangeEvent('hashchange')); }})();"
+    )
+}
+
 fn surface_window_label(surface: &SurfaceDescriptor) -> String {
     match surface {
         SurfaceDescriptor::Attachment { params, .. } => {
@@ -748,6 +758,15 @@ mod tests {
             surface_window_label(&surface),
             surface_window_label(&surface)
         );
+    }
+
+    #[test]
+    fn settings_window_navigation_script_replaces_hash_route() {
+        let script = surface_window_navigation_script("/surface/settings?category=accounts");
+
+        assert!(script.contains("window.history.replaceState"));
+        assert!(script.contains("window.dispatchEvent(new HashChangeEvent('hashchange'))"));
+        assert!(script.contains("\"/surface/settings?category=accounts\""));
     }
 
     #[test]
