@@ -40,6 +40,14 @@ import {
   type AddressSuggestionOption,
 } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
+import {
+  EMPTY_COMPOSE_FORM,
+  buildSendInput,
+  formatRecipient,
+  formatRecipients,
+  parseRecipients,
+  type ComposeForm,
+} from '@/composeMessage'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 
@@ -60,75 +68,12 @@ interface ComposeOverlayProps {
   onClose: () => void
 }
 
-interface ComposeForm {
-  from: string
-  to: string
-  cc: string
-  bcc: string
-  subject: string
-  body: string
-}
-
-const EMPTY_FORM: ComposeForm = {
-  from: '',
-  to: '',
-  cc: '',
-  bcc: '',
-  subject: '',
-  body: '',
-}
-
 interface FromAddressOption {
   sourceId: string
   sourceName: string
   name: string | null
   email: string
   origin: 'configured' | 'identity' | 'cached'
-}
-
-function formatRecipient(recipient: Recipient): string {
-  return recipient.name
-    ? `${recipient.name} <${recipient.email}>`
-    : recipient.email
-}
-
-function formatRecipients(recipients: Recipient[]): string {
-  return recipients.map(formatRecipient).join(', ')
-}
-
-function parseRecipients(value: string): Recipient[] {
-  return value
-    .split(/[;,]/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const match = part.match(/^(.*)<([^>]+)>$/)
-      if (!match) {
-        return { name: null, email: part }
-      }
-      const name = match[1].trim().replace(/^"|"$/g, '')
-      return {
-        name: name || null,
-        email: match[2].trim(),
-      }
-    })
-}
-
-function parseSender(value: string): Recipient | null {
-  return parseRecipients(value)[0] ?? null
-}
-
-function buildSendInput(form: ComposeForm): SendMessageInput {
-  return {
-    from: parseSender(form.from),
-    to: parseRecipients(form.to),
-    cc: parseRecipients(form.cc),
-    bcc: parseRecipients(form.bcc),
-    subject: form.subject.trim(),
-    body: form.body,
-    inReplyTo: null,
-    references: null,
-  }
 }
 
 function isConcreteEmailPattern(pattern: string): boolean {
@@ -250,7 +195,7 @@ export function ComposeOverlay({
 
   const initialForm = useMemo<ComposeForm>(() => {
     if (intent.kind === 'new' || !replyContextQuery.data) {
-      return EMPTY_FORM
+      return EMPTY_COMPOSE_FORM
     }
     const quoted = replyContextQuery.data.quotedBody
       ? `\n\n${replyContextQuery.data.quotedBody}`
