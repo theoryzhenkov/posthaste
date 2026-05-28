@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { openSurfaceInSeparateWindow } from '@/desktop'
 import type { SurfaceDescriptor } from '@/surfaces'
+import { surfaceWindowPolicy } from '@/surfaceWindowPolicy'
 import { Button } from './ui/button'
 import { FocusedSurface } from './FocusedSurface'
 
@@ -12,17 +13,6 @@ interface SurfaceHostProps {
   canClose?: boolean
   onClose: () => void
   onSearch: (query: string, append?: boolean) => void
-}
-
-function surfaceTitle(surface: SurfaceDescriptor): string {
-  switch (surface.kind) {
-    case 'attachment':
-      return 'Attachment'
-    case 'message':
-      return 'Message'
-    case 'settings':
-      return 'Settings'
-  }
 }
 
 export function SurfaceHost({
@@ -97,7 +87,7 @@ export function SurfaceHost({
       <header className="flex h-[42px] shrink-0 items-center gap-3 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold">
-            {surfaceTitle(surface)}
+            {surfaceWindowPolicy(surface).title}
           </p>
         </div>
         <Button
