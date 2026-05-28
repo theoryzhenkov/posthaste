@@ -319,8 +319,23 @@ pub fn bridge_initialization_script() -> &'static str {
     throw new Error(`timeout (${timeoutMs}ms) waiting for ${selector}`);
   }
 
+  function canParseAsExpression(script) {
+    try {
+      new Function(`return (async () => (${script}))();`);
+      return true;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async function evaluateExpression(script) {
-    return await (0, eval)(`(async () => (${script}))()`);
+    if (canParseAsExpression(script)) {
+      return await (0, eval)(`(async () => (${script}))()`);
+    }
+    return await (0, eval)(`(async () => { ${script} })()`);
   }
 
   async function waitForFunction(expression, timeoutMs) {
