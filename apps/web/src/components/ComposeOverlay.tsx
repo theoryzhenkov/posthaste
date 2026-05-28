@@ -558,7 +558,8 @@ export function ComposeOverlay({ intent, onClose }: ComposeOverlayProps) {
       }
       storageKey="posthaste.compose.panelOffset"
       zIndexClassName="z-[80]"
-      className="flex h-[min(760px,calc(100vh-40px))] w-[min(860px,calc(100vw-2rem))] flex-col"
+      sizePreset="compose"
+      className="flex flex-col"
       header={
         <div className="flex h-11 min-w-0 items-center gap-2 px-3">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--brand-coral)_12%,transparent)] text-muted-foreground">

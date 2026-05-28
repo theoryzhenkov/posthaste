@@ -63,10 +63,35 @@ export async function openSurfaceInSeparateWindow(
   const openedWindow = window.open(
     surfaceWindowUrl(window.location, surface),
     '_blank',
-    'popup,width=1100,height=820,resizable=yes,scrollbars=yes',
+    surfacePopupFeatures(surface),
   )
   if (!openedWindow) {
     throw new Error('Popup blocked. Allow popups for Posthaste and try again.')
+  }
+}
+
+export function surfacePopupFeatures(surface: SurfaceDescriptor): string {
+  const { width, height } = surfacePopupSize(surface)
+  return [
+    'popup',
+    `width=${width}`,
+    `height=${height}`,
+    'resizable=yes',
+    'scrollbars=yes',
+  ].join(',')
+}
+
+function surfacePopupSize(surface: SurfaceDescriptor): {
+  width: number
+  height: number
+} {
+  switch (surface.kind) {
+    case 'attachment':
+      return { width: 1100, height: 820 }
+    case 'settings':
+      return { width: 980, height: 720 }
+    case 'message':
+      return { width: 900, height: 760 }
   }
 }
 
