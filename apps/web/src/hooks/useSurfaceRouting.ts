@@ -9,20 +9,26 @@ import {
 } from '@/desktop'
 import {
   settingsCategorySurface,
-  surfaceFromLocation,
+  surfaceRouteStateFromLocation,
   type SurfaceDescriptor,
+  type SurfaceRouteState,
 } from '@/surfaces'
 
 export { closeWebSurface } from '@/desktop'
 
 export function useRouteSurface(): SurfaceDescriptor | null {
-  const [surface, setSurface] = useState<SurfaceDescriptor | null>(() =>
-    surfaceFromLocation(window.location),
+  const state = useSurfaceRouteState()
+  return state.kind === 'valid' ? state.surface : null
+}
+
+export function useSurfaceRouteState(): SurfaceRouteState {
+  const [state, setState] = useState<SurfaceRouteState>(() =>
+    surfaceRouteStateFromLocation(window.location),
   )
 
   useEffect(() => {
     function syncSurface() {
-      setSurface(surfaceFromLocation(window.location))
+      setState(surfaceRouteStateFromLocation(window.location))
     }
 
     window.addEventListener('hashchange', syncSurface)
@@ -33,7 +39,7 @@ export function useRouteSurface(): SurfaceDescriptor | null {
     }
   }, [])
 
-  return surface
+  return state
 }
 
 export function openFocusedSurface(surface: SurfaceDescriptor): void {

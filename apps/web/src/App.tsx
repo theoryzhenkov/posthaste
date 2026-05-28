@@ -33,6 +33,10 @@ import { ActionBar } from './components/ActionBar'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
 import { FocusedSurfaceDocument } from './components/FocusedSurface'
+import {
+  InvalidSurface,
+  InvalidSurfaceDocument,
+} from './components/InvalidSurface'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
@@ -60,7 +64,7 @@ import {
   closeWebSurface,
   openFocusedSurface,
   useEffectiveSurface,
-  useRouteSurface,
+  useSurfaceRouteState,
 } from './hooks/useSurfaceRouting'
 import {
   appReadinessStateFromAccountsQuery,
@@ -118,8 +122,10 @@ const DEFAULT_VIEW: SidebarSelection = {
  * @spec docs/L0-ui#navigation-model
  */
 function MailClient({
+  invalidSurfaceRoute,
   routeSurface,
 }: {
+  invalidSurfaceRoute: string | null
   routeSurface: SurfaceDescriptor | null
 }) {
   const [selectedView, setSelectedView] = useState<SidebarSelection | null>(
@@ -623,14 +629,23 @@ function MailClient({
           <ComposeOverlay intent={composeIntent} onClose={closeCompose} />
         </Suspense>
       )}
-      {effectiveSurface && (
-        <SurfaceHost
-          surface={effectiveSurface}
-          canClose={!shouldRenderForcedSettings}
-          onClose={closeWebSurface}
-          onSearch={handleSearch}
-        />
+      {invalidSurfaceRoute && !shouldRenderForcedSettings && (
+        <div className="fixed inset-0 z-[2300] bg-background text-foreground">
+          <InvalidSurface
+            route={invalidSurfaceRoute}
+            onClose={closeWebSurface}
+          />
+        </div>
       )}
+      {effectiveSurface &&
+        (!invalidSurfaceRoute || shouldRenderForcedSettings) && (
+          <SurfaceHost
+            surface={effectiveSurface}
+            canClose={!shouldRenderForcedSettings}
+            onClose={closeWebSurface}
+            onSearch={handleSearch}
+          />
+        )}
     </div>
   )
 }
@@ -645,18 +660,26 @@ function DaemonEventBridge() {
  * @spec docs/L1-ui#component-hierarchy
  */
 export default function App() {
-  const routeSurface = useRouteSurface()
+  const routeState = useSurfaceRouteState()
+  const routeSurface = routeState.kind === 'valid' ? routeState.surface : null
+  const invalidSurfaceRoute =
+    routeState.kind === 'invalid' ? routeState.route : null
   const isStandaloneSurface =
-    isTauriRuntime() && routeSurface !== null && !isMainDesktopWindow()
+    isTauriRuntime() && routeState.kind !== 'none' && !isMainDesktopWindow()
 
   return (
     <QueryClientProvider client={queryClient}>
       <DesignThemeProvider>
         <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
-        {isStandaloneSurface ? (
+        {isStandaloneSurface && routeSurface ? (
           <FocusedSurfaceDocument surface={routeSurface} />
+        ) : isStandaloneSurface && invalidSurfaceRoute ? (
+          <InvalidSurfaceDocument route={invalidSurfaceRoute} />
         ) : (
-          <MailClient routeSurface={routeSurface} />
+          <MailClient
+            invalidSurfaceRoute={invalidSurfaceRoute}
+            routeSurface={routeSurface}
+          />
         )}
         <Toaster
           position="bottom-center"
