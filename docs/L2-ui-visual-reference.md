@@ -1,7 +1,7 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-05-24
+modified: 2026-05-28
 reviewed: 2026-05-24
 depends:
   - path: docs/L0-branding
@@ -611,13 +611,13 @@ Overlay:
 - No background scrim or backdrop blur; the app remains visible and interactive.
 - Outside pointer interaction closes the panel unless it is pinned.
 - Dragged panel offset is persisted locally and restored on the next open.
-- Floating panels are user-resizable within the viewport.
+- Floating panels are user-resizable within the viewport. Their initial sizes come from a shared 12-column by 8-row floating size grid; user resizing remains arbitrary rather than hard-snapped.
 - During drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
 
 Panel sheet:
 
-- Default width: caller-specific, max width constrained by viewport.
-- Max width: `92vw`.
+- Default size: caller-specific grid preset, max width constrained to the viewport minus the shared `16px` side margins.
+- Max width: `calc(100vw - 32px)`.
 - Background: soft diagonal gradient mixing `brand-coral`, `ring`, and `panel`; the mix must derive from root theme variables so light, dark, and glass presets keep contrast.
 - Border: `1px solid color-mix(in oklab, brand-coral 22%, border)`.
 - Radius: `14px`.
@@ -634,7 +634,7 @@ The command palette opens from `Cmd/Ctrl+K` and the command-search control.
 
 Palette sheet:
 
-- Width: `640px`.
+- Width: shared command preset: `6 / 12` viewport-grid columns, minimum `360px`, maximum `640px`.
 - Uses the shared floating panel shell.
 
 Input row:
@@ -855,9 +855,9 @@ Compose uses the shared floating panel shell with a mail-window header.
 
 Sheet:
 
-- Width: `860px`.
-- Max width: `92vw`.
-- Height: `min(760px, calc(100vh - 40px))`.
+- Width: shared compose preset: `8 / 12` viewport-grid columns, minimum `560px`, maximum `780px`.
+- Max width: `calc(100vw - 32px)`.
+- Height: shared compose preset: `6 / 8` viewport-grid rows, minimum `460px`, maximum `640px`, capped to the viewport below the `54px` top offset and `16px` bottom margin.
 - Background, radius, border, shadow, move/pin/close controls, outside-close behavior, and persisted placement come from the shared floating panel.
 - Flex column.
 

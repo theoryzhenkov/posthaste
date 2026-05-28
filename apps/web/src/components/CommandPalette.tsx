@@ -279,7 +279,7 @@ export function CommandPalette({
         panelLabel="command palette"
         storageKey={COMMAND_PANEL_STORAGE_KEY}
         closeIgnoreSelector="[data-command-search-trigger='true']"
-        className="max-w-[40rem]"
+        sizePreset="command"
         header={
           <CommandInput
             autoFocus
