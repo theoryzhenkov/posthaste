@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 
 import { surfacePopupFeatures } from '../src/desktop'
 import { surfaceWindowUrl } from '../src/surfaceWindow'
+import { surfaceWindowPolicy } from '../src/surfaceWindowPolicy'
 import {
   attachmentSurface,
   messageSurfaceFromSelection,
@@ -24,7 +25,11 @@ describe('surface window URLs', () => {
     )
   })
 
-  it('uses kind-specific popup features for browser fallback windows', () => {
+  it('uses shared kind-specific policy for surface windows', () => {
+    expect(surfaceWindowPolicy(settingsSurface())).toEqual({
+      title: 'Settings',
+      popupSize: { width: 980, height: 720 },
+    })
     expect(surfacePopupFeatures(settingsSurface())).toBe(
       'popup,width=980,height=720,resizable=yes,scrollbars=yes',
     )
