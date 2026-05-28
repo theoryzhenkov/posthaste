@@ -42,6 +42,11 @@ enum SurfaceDescriptor {
         disposition: SurfaceDisposition,
         params: SettingsSurfaceParams,
     },
+    #[serde(rename = "compose")]
+    Compose {
+        disposition: SurfaceDisposition,
+        params: ComposeSurfaceParams,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +77,30 @@ struct MessageSurfaceParams {
 struct SettingsSurfaceParams {
     category: Option<String>,
     target: Option<SettingsSurfaceTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ComposeSurfaceParams {
+    #[serde(rename = "new")]
+    New {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+    },
+    #[serde(rename = "reply")]
+    Reply {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+    },
+    #[serde(rename = "forward")]
+    Forward {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -410,7 +439,10 @@ fn is_main_window_label(label: &str) -> bool {
 }
 
 fn is_closeable_surface_window_label(label: &str) -> bool {
-    label == "settings" || label.starts_with("message-") || label.starts_with("attachment-")
+    label == "settings"
+        || label.starts_with("message-")
+        || label.starts_with("attachment-")
+        || label.starts_with("compose-")
 }
 
 fn remember_focused_window<R: Runtime>(window: &WebviewWindow<R>) {
@@ -585,6 +617,15 @@ fn surface_route(surface: &SurfaceDescriptor) -> String {
                 format!("/surface/settings?{}", pairs.join("&"))
             }
         }
+        SurfaceDescriptor::Compose {
+            disposition,
+            params,
+        } => {
+            let _ = disposition;
+            let mut pairs = Vec::new();
+            push_compose_query_pairs(&mut pairs, params);
+            format!("/surface/compose?{}", pairs.join("&"))
+        }
     }
 }
 
@@ -605,6 +646,12 @@ fn surface_window_label(surface: &SurfaceDescriptor) -> String {
             format!("attachment-{:016x}", stable_hash(key.as_bytes()))
         }
         SurfaceDescriptor::Settings { .. } => "settings".to_string(),
+        SurfaceDescriptor::Compose { .. } => {
+            format!(
+                "compose-{:016x}",
+                stable_hash(surface_route(surface).as_bytes())
+            )
+        }
         SurfaceDescriptor::Message { params, .. } => {
             let key = format!("{}:{}", params.source_id, params.message_id);
             format!("message-{:016x}", stable_hash(key.as_bytes()))
@@ -617,6 +664,7 @@ fn surface_title(surface: &SurfaceDescriptor) -> &'static str {
         SurfaceDescriptor::Attachment { .. } => "Posthaste Attachment",
         SurfaceDescriptor::Settings { .. } => "Posthaste Settings",
         SurfaceDescriptor::Message { .. } => "Posthaste Message",
+        SurfaceDescriptor::Compose { .. } => "Posthaste Compose",
     }
 }
 
@@ -625,12 +673,38 @@ fn surface_window_size(surface: &SurfaceDescriptor) -> (f64, f64) {
         SurfaceDescriptor::Attachment { .. } => (1100.0, 820.0),
         SurfaceDescriptor::Settings { .. } => (980.0, 720.0),
         SurfaceDescriptor::Message { .. } => (900.0, 760.0),
+        SurfaceDescriptor::Compose { .. } => (780.0, 640.0),
     }
 }
 
 fn push_query_pair(pairs: &mut Vec<String>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
         pairs.push(format!("{key}={}", encode_component(value)));
+    }
+}
+
+fn push_compose_query_pairs(pairs: &mut Vec<String>, params: &ComposeSurfaceParams) {
+    match params {
+        ComposeSurfaceParams::New { source_id } => {
+            push_query_pair(pairs, "composeKind", Some("new"));
+            push_query_pair(pairs, "sourceId", Some(source_id));
+        }
+        ComposeSurfaceParams::Reply {
+            source_id,
+            message_id,
+        } => {
+            push_query_pair(pairs, "composeKind", Some("reply"));
+            push_query_pair(pairs, "sourceId", Some(source_id));
+            push_query_pair(pairs, "messageId", Some(message_id));
+        }
+        ComposeSurfaceParams::Forward {
+            source_id,
+            message_id,
+        } => {
+            push_query_pair(pairs, "composeKind", Some("forward"));
+            push_query_pair(pairs, "sourceId", Some(source_id));
+            push_query_pair(pairs, "messageId", Some(message_id));
+        }
     }
 }
 
@@ -740,6 +814,47 @@ mod tests {
         assert!(is_closeable_surface_window_label(
             "attachment-0123456789abcdef"
         ));
+        assert!(is_closeable_surface_window_label(
+            "compose-0123456789abcdef"
+        ));
+    }
+
+    #[test]
+    fn compose_surface_descriptor_deserializes_frontend_camel_case_params() {
+        let surface: SurfaceDescriptor = serde_json::from_value(serde_json::json!({
+            "kind": "compose",
+            "disposition": "focused",
+            "params": {
+                "kind": "reply",
+                "sourceId": "source:primary",
+                "messageId": "message 1"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            surface_route(&surface),
+            "/surface/compose?composeKind=reply&sourceId=source%3Aprimary&messageId=message%201"
+        );
+    }
+
+    #[test]
+    fn compose_surface_route_uses_hash_route_and_encoded_params() {
+        let surface = SurfaceDescriptor::Compose {
+            disposition: SurfaceDisposition::Focused,
+            params: ComposeSurfaceParams::Reply {
+                source_id: "source:primary".to_string(),
+                message_id: "message 1".to_string(),
+            },
+        };
+
+        assert_eq!(
+            surface_route(&surface),
+            "/surface/compose?composeKind=reply&sourceId=source%3Aprimary&messageId=message%201"
+        );
+        assert!(surface_window_label(&surface).starts_with("compose-"));
+        assert_eq!(surface_title(&surface), "Posthaste Compose");
+        assert_eq!(surface_window_size(&surface), (780.0, 640.0));
     }
 
     #[test]

@@ -29,5 +29,10 @@ export function surfaceWindowPolicy(
         title: 'Message',
         popupSize: { width: 900, height: 760 },
       }
+    case 'compose':
+      return {
+        title: 'Compose',
+        popupSize: { width: 780, height: 640 },
+      }
   }
 }

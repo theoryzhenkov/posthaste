@@ -97,6 +97,16 @@ export function FocusedSurface({
     return <AttachmentSurface surface={surface} />
   }
 
+  if (surface.kind === 'compose') {
+    return (
+      <ComposeOverlay
+        intent={surface.params}
+        shell="document"
+        onClose={onClose ?? (() => void closeCurrentSurfaceWindow())}
+      />
+    )
+  }
+
   return (
     <>
       <MessageDetail

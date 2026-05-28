@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   accountSettingsSurface,
   attachmentSurface,
+  composeSurface,
   messageSurfaceFromSelection,
   newAccountSettingsSurface,
   newSmartMailboxSettingsSurface,
@@ -38,6 +39,31 @@ describe('surface routes', () => {
     expect(parseSurfaceRoute(surfaceRoute(surface))).toEqual(surface)
   })
 
+  it('round trips compose surfaces', () => {
+    expect(
+      parseSurfaceRoute(
+        surfaceRoute(composeSurface({ kind: 'new', sourceId: 'primary' })),
+      ),
+    ).toEqual(composeSurface({ kind: 'new', sourceId: 'primary' }))
+    expect(
+      parseSurfaceRoute(
+        surfaceRoute(
+          composeSurface({
+            kind: 'reply',
+            sourceId: 'source:primary',
+            messageId: 'message 1',
+          }),
+        ),
+      ),
+    ).toEqual(
+      composeSurface({
+        kind: 'reply',
+        sourceId: 'source:primary',
+        messageId: 'message 1',
+      }),
+    )
+  })
+
   it('round trips settings create and source mailbox drill-ins', () => {
     expect(
       parseSurfaceRoute(surfaceRoute(newAccountSettingsSurface())),
@@ -58,6 +84,18 @@ describe('surface routes', () => {
   it('rejects incomplete attachment routes', () => {
     expect(
       parseSurfaceRoute('/surface/attachment?sourceId=primary&messageId=one'),
+    ).toBeNull()
+  })
+
+  it('rejects incomplete compose routes', () => {
+    expect(parseSurfaceRoute('/surface/compose?composeKind=new')).toBeNull()
+    expect(
+      parseSurfaceRoute('/surface/compose?composeKind=reply&sourceId=primary'),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/compose?composeKind=new&sourceId=primary&messageId=one',
+      ),
     ).toBeNull()
   })
 

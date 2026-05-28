@@ -57,21 +57,23 @@ export function SurfaceHost({
       })
   }
 
-  if (surface.kind === 'settings') {
+  if (surface.kind === 'settings' || surface.kind === 'compose') {
     return (
       <div className="fixed inset-0 z-[2100] bg-background text-foreground">
-        <div className="absolute right-3 top-3 z-10 flex gap-1">
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Open settings in separate window"
-            title="Open in window"
-            onClick={handleOpenInWindow}
-          >
-            <ExternalLink size={15} strokeWidth={1.7} />
-          </Button>
-        </div>
+        {surface.kind === 'settings' && (
+          <div className="absolute right-3 top-3 z-10 flex gap-1">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Open ${surfaceWindowPolicy(surface).title.toLowerCase()} in separate window`}
+              title="Open in window"
+              onClick={handleOpenInWindow}
+            >
+              <ExternalLink size={15} strokeWidth={1.7} />
+            </Button>
+          </div>
+        )}
         <FocusedSurface
           surface={surface}
           canClose={canClose}
