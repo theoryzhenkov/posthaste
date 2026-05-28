@@ -1,6 +1,11 @@
 import { GripHorizontal, Maximize2, Minimize2, Pin, X } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
+import {
+  type FloatingPanelSizePreset,
+  floatingPanelSizeStyle,
+} from '@/floatingPanelLayout'
 import { cn } from '@/lib/utils'
 
 const PANEL_TOP_OFFSET = 54
@@ -46,6 +51,7 @@ interface FloatingPanelProps {
   header: React.ReactNode
   headerClassName?: string
   panelLabel: string
+  sizePreset?: FloatingPanelSizePreset
   storageKey: string
   zIndexClassName?: string
   onClose: () => void
@@ -234,6 +240,7 @@ export function FloatingPanel({
   header,
   headerClassName,
   panelLabel,
+  sizePreset,
   storageKey,
   zIndexClassName = 'z-[70]',
   onClose,
@@ -386,6 +393,9 @@ export function FloatingPanel({
     }
   }
 
+  const floatingSizeStyle: CSSProperties =
+    !isExpanded && sizePreset ? floatingPanelSizeStyle(sizePreset) : {}
+
   return (
     <div
       className={cn(
@@ -449,6 +459,7 @@ export function FloatingPanel({
             : 'max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] min-h-48 min-w-72 resize',
         )}
         style={{
+          ...floatingSizeStyle,
           transform: isExpanded
             ? undefined
             : `translate(${panelOffset.x}px, ${panelOffset.y}px)`,
