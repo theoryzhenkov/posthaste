@@ -3,46 +3,22 @@ import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
 import {
+  type ActiveRails,
+  type GuideLayout,
+  type PanelGeometry,
+  type PanelOffset,
+  clampPanelOffset,
+  guideColumns,
+  guideRows,
+  isFiniteOffset,
+  resistPanelOffset,
+} from '@/floatingPanelGeometry'
+import {
   type FloatingPanelSizePreset,
   floatingPanelSizeStyle,
+  type ViewportSize,
 } from '@/floatingPanelLayout'
 import { cn } from '@/lib/utils'
-
-const PANEL_TOP_OFFSET = 54
-const PANEL_SCREEN_MARGIN = 16
-const RAIL_RESISTANCE_DISTANCE = 12
-
-interface PanelOffset {
-  x: number
-  y: number
-}
-
-interface ActiveRails {
-  x: number | null
-  y: number | null
-}
-
-interface PanelRails {
-  x: number[]
-  y: number[]
-}
-
-interface GuideColumn {
-  left: number
-  rail: number
-  width: number
-}
-
-interface GuideRow {
-  height: number
-  rail: number
-  top: number
-}
-
-interface GuideLayout {
-  columns: GuideColumn[]
-  rows: GuideRow[]
-}
 
 interface FloatingPanelProps {
   children: React.ReactNode
@@ -55,19 +31,6 @@ interface FloatingPanelProps {
   storageKey: string
   zIndexClassName?: string
   onClose: () => void
-}
-
-function isFiniteOffset(value: unknown): value is PanelOffset {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'x' in value &&
-    'y' in value &&
-    typeof value.x === 'number' &&
-    typeof value.y === 'number' &&
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y)
-  )
 }
 
 function readStoredPanelOffset(storageKey: string): PanelOffset {
@@ -93,144 +56,12 @@ function persistPanelOffset(storageKey: string, offset: PanelOffset) {
   }
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
+function viewportSize(): ViewportSize {
+  return { width: window.innerWidth, height: window.innerHeight }
 }
 
-function clampPanelOffset(offset: PanelOffset, panel: DOMRect): PanelOffset {
-  const viewportWidth = window.innerWidth
-  const viewportHeight = window.innerHeight
-  const baseLeft = (viewportWidth - panel.width) / 2
-  const minX = PANEL_SCREEN_MARGIN - baseLeft
-  const maxX = viewportWidth - PANEL_SCREEN_MARGIN - panel.width - baseLeft
-  const minY = PANEL_SCREEN_MARGIN - PANEL_TOP_OFFSET
-  const maxY =
-    viewportHeight - PANEL_SCREEN_MARGIN - panel.height - PANEL_TOP_OFFSET
-
-  return {
-    x: clamp(offset.x, Math.min(minX, maxX), Math.max(minX, maxX)),
-    y: clamp(offset.y, Math.min(minY, maxY), Math.max(minY, maxY)),
-  }
-}
-
-function uniqueRails(values: number[]): number[] {
-  const rails: number[] = []
-  for (const value of values) {
-    if (!rails.some((rail) => Math.abs(rail - value) < 1)) {
-      rails.push(value)
-    }
-  }
-  return rails
-}
-
-function panelRailOffsets(panel: DOMRect): PanelRails {
-  const viewportWidth = window.innerWidth
-  const viewportHeight = window.innerHeight
-  const baseCenterX = viewportWidth / 2
-  const baseCenterY = PANEL_TOP_OFFSET + panel.height / 2
-  const horizontalCenters = [
-    viewportWidth / 6,
-    viewportWidth / 2,
-    (viewportWidth * 5) / 6,
-  ].map((center) =>
-    clamp(
-      center,
-      PANEL_SCREEN_MARGIN + panel.width / 2,
-      viewportWidth - PANEL_SCREEN_MARGIN - panel.width / 2,
-    ),
-  )
-  const verticalCenters = [viewportHeight / 4, (viewportHeight * 3) / 4].map(
-    (center) =>
-      clamp(
-        center,
-        PANEL_SCREEN_MARGIN + panel.height / 2,
-        viewportHeight - PANEL_SCREEN_MARGIN - panel.height / 2,
-      ),
-  )
-
-  return {
-    x: uniqueRails(horizontalCenters.map((centerX) => centerX - baseCenterX)),
-    y: uniqueRails(verticalCenters.map((centerY) => centerY - baseCenterY)),
-  }
-}
-
-function nearestRail(value: number, rails: number[]): number | null {
-  let nearest: number | null = null
-  let nearestDistance = Number.POSITIVE_INFINITY
-
-  for (const rail of rails) {
-    const distance = Math.abs(value - rail)
-    if (distance < nearestDistance) {
-      nearest = rail
-      nearestDistance = distance
-    }
-  }
-
-  return nearestDistance <= RAIL_RESISTANCE_DISTANCE ? nearest : null
-}
-
-function resistRail(
-  value: number,
-  locked: number | null | undefined,
-  rails: number[],
-): { active: number | null; locked: number | null; value: number } {
-  if (locked !== null && locked !== undefined) {
-    if (Math.abs(value - locked) <= RAIL_RESISTANCE_DISTANCE) {
-      return { active: locked, locked, value: locked }
-    }
-  }
-
-  const nearest = nearestRail(value, rails)
-  if (nearest !== null) {
-    return { active: nearest, locked: nearest, value: nearest }
-  }
-
-  return { active: null, locked: null, value }
-}
-
-function resistPanelOffset(
-  offset: PanelOffset,
-  panel: DOMRect,
-  drag: { lockedX?: number | null; lockedY?: number | null },
-): { activeRails: ActiveRails; offset: PanelOffset } {
-  const clamped = clampPanelOffset(offset, panel)
-  const rails = panelRailOffsets(panel)
-  const x = resistRail(clamped.x, drag.lockedX, rails.x)
-  const y = resistRail(clamped.y, drag.lockedY, rails.y)
-  drag.lockedX = x.locked
-  drag.lockedY = y.locked
-
-  return {
-    activeRails: { x: x.active, y: y.active },
-    offset: { x: x.value, y: y.value },
-  }
-}
-
-function guideColumns(panel: DOMRect): GuideColumn[] {
-  const viewportWidth = window.innerWidth
-  const baseCenterX = viewportWidth / 2
-
-  return panelRailOffsets(panel).x.map((rail) => {
-    const centerX = baseCenterX + rail
-    return {
-      left: centerX - panel.width / 2,
-      rail,
-      width: panel.width,
-    }
-  })
-}
-
-function guideRows(panel: DOMRect): GuideRow[] {
-  const baseCenterY = PANEL_TOP_OFFSET + panel.height / 2
-
-  return panelRailOffsets(panel).y.map((rail) => {
-    const centerY = baseCenterY + rail
-    return {
-      height: panel.height,
-      rail,
-      top: centerY - panel.height / 2,
-    }
-  })
+function panelGeometry(panel: DOMRect): PanelGeometry {
+  return { width: panel.width, height: panel.height }
 }
 
 export function FloatingPanel({
@@ -274,7 +105,11 @@ export function FloatingPanel({
         return
       }
       setPanelOffset((current) => {
-        const clamped = clampPanelOffset(current, panel)
+        const clamped = clampPanelOffset(
+          current,
+          panelGeometry(panel),
+          viewportSize(),
+        )
         if (clamped.x === current.x && clamped.y === current.y) {
           return current
         }
@@ -339,7 +174,12 @@ export function FloatingPanel({
     const panel = panelRef.current?.getBoundingClientRect()
     setIsDragging(true)
     setGuideLayout(
-      panel ? { columns: guideColumns(panel), rows: guideRows(panel) } : null,
+      panel
+        ? {
+            columns: guideColumns(panelGeometry(panel), viewportSize()),
+            rows: guideRows(panelGeometry(panel), viewportSize()),
+          }
+        : null,
     )
     dragRef.current = {
       lockedX: null,
@@ -367,7 +207,12 @@ export function FloatingPanel({
       setActiveRails({ x: null, y: null })
       return
     }
-    const resisted = resistPanelOffset(nextOffset, panel, drag)
+    const resisted = resistPanelOffset(
+      nextOffset,
+      panelGeometry(panel),
+      viewportSize(),
+      drag,
+    )
     setPanelOffset(resisted.offset)
     setActiveRails(resisted.activeRails)
   }
@@ -381,7 +226,12 @@ export function FloatingPanel({
         y: drag.originY + event.clientY - drag.startY,
       }
       const resisted = panel
-        ? resistPanelOffset(rawOffset, panel, drag)
+        ? resistPanelOffset(
+            rawOffset,
+            panelGeometry(panel),
+            viewportSize(),
+            drag,
+          )
         : { activeRails: { x: null, y: null }, offset: rawOffset }
       const nextOffset = resisted.offset
       dragRef.current = null
