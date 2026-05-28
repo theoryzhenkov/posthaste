@@ -74,6 +74,17 @@ export type SurfaceDescriptor =
   | SettingsSurfaceDescriptor
   | ComposeSurfaceDescriptor
 
+export type SurfaceRouteState =
+  | { kind: 'none' }
+  | { kind: 'valid'; route: string; surface: SurfaceDescriptor }
+  | { kind: 'invalid'; route: string }
+
+interface SurfaceLocation {
+  hash: string
+  pathname: string
+  search: string
+}
+
 type SettingsTargetParamKey =
   | 'accountId'
   | 'smartMailboxId'
@@ -196,7 +207,12 @@ export function surfaceRoute(surface: SurfaceDescriptor): string {
 }
 
 export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
-  const url = new URL(route, 'http://posthaste.local')
+  let url: URL
+  try {
+    url = new URL(route, 'http://posthaste.local')
+  } catch {
+    return null
+  }
   const parts = url.pathname.split('/').filter(Boolean)
   if (parts.length !== 2 || parts[0] !== 'surface') {
     return null
@@ -277,12 +293,36 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
 }
 
 export function surfaceFromLocation(
-  location: Location,
+  location: SurfaceLocation,
 ): SurfaceDescriptor | null {
+  const state = surfaceRouteStateFromLocation(location)
+  return state.kind === 'valid' ? state.surface : null
+}
+
+export function surfaceRouteStateFromLocation(
+  location: SurfaceLocation,
+): SurfaceRouteState {
   const hashRoute = location.hash.startsWith('#') ? location.hash.slice(1) : ''
   const route =
     hashRoute.length > 0 ? hashRoute : `${location.pathname}${location.search}`
-  return parseSurfaceRoute(route)
+  if (!isSurfaceRoutePath(route)) {
+    return { kind: 'none' }
+  }
+
+  const surface = parseSurfaceRoute(route)
+  return surface
+    ? { kind: 'valid', route, surface }
+    : { kind: 'invalid', route }
+}
+
+function isSurfaceRoutePath(route: string): boolean {
+  try {
+    const url = new URL(route, 'http://posthaste.local')
+    const parts = url.pathname.split('/').filter(Boolean)
+    return parts[0] === 'surface'
+  } catch {
+    return false
+  }
 }
 
 function genericSurfaceRoute(

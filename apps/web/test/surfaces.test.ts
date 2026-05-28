@@ -10,6 +10,7 @@ import {
   parseSurfaceRoute,
   sourceMailboxSettingsSurface,
   surfaceRoute,
+  surfaceRouteStateFromLocation,
 } from '../src/surfaces'
 
 describe('surface routes', () => {
@@ -75,6 +76,37 @@ describe('surface routes', () => {
     const surface = sourceMailboxSettingsSurface('primary', 'inbox')
 
     expect(parseSurfaceRoute(surfaceRoute(surface))).toEqual(surface)
+  })
+
+  it('classifies valid invalid and non-surface locations', () => {
+    expect(
+      surfaceRouteStateFromLocation({
+        hash: '#/surface/compose?composeKind=new&sourceId=primary',
+        pathname: '/',
+        search: '',
+      }),
+    ).toEqual({
+      kind: 'valid',
+      route: '/surface/compose?composeKind=new&sourceId=primary',
+      surface: composeSurface({ kind: 'new', sourceId: 'primary' }),
+    })
+    expect(
+      surfaceRouteStateFromLocation({
+        hash: '#/surface/compose?composeKind=new',
+        pathname: '/',
+        search: '',
+      }),
+    ).toEqual({
+      kind: 'invalid',
+      route: '/surface/compose?composeKind=new',
+    })
+    expect(
+      surfaceRouteStateFromLocation({
+        hash: '',
+        pathname: '/',
+        search: '?view=inbox',
+      }),
+    ).toEqual({ kind: 'none' })
   })
 
   it('rejects incomplete message routes', () => {

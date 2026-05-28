@@ -50,6 +50,9 @@ profile = "profile.lab.empty.test"
 runners = ["runner.bun.test"]
 tags = ["ui", "surfaces", "web", "fast", "lab-smoke"]
 paths = [
+  "apps/web/src/App.tsx",
+  "apps/web/src/components/InvalidSurface.tsx",
+  "apps/web/src/hooks/useSurfaceRouting.ts",
   "apps/web/src/surfaces.ts",
   "apps/web/src/surfaceWindowPolicy.ts",
   "apps/web/test/surfaces.test.ts",
