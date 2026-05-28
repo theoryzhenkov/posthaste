@@ -75,8 +75,28 @@ struct MessageSurfaceParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsSurfaceParams {
-    category: Option<String>,
+    category: Option<SettingsSurfaceCategory>,
     target: Option<SettingsSurfaceTarget>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum SettingsSurfaceCategory {
+    General,
+    Appearance,
+    Accounts,
+    Mailboxes,
+}
+
+impl SettingsSurfaceCategory {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Appearance => "appearance",
+            Self::Accounts => "accounts",
+            Self::Mailboxes => "mailboxes",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -609,7 +629,14 @@ fn surface_route(surface: &SurfaceDescriptor) -> String {
         } => {
             let _ = disposition;
             let mut pairs = Vec::new();
-            push_query_pair(&mut pairs, "category", params.category.as_deref());
+            push_query_pair(
+                &mut pairs,
+                "category",
+                params
+                    .category
+                    .as_ref()
+                    .map(SettingsSurfaceCategory::as_str),
+            );
             push_settings_target_query_pairs(&mut pairs, params.target.as_ref());
             if pairs.is_empty() {
                 "/surface/settings".to_string()
@@ -885,11 +912,24 @@ mod tests {
     }
 
     #[test]
+    fn settings_surface_rejects_unknown_frontend_category() {
+        let result = serde_json::from_value::<SurfaceDescriptor>(serde_json::json!({
+            "kind": "settings",
+            "disposition": "focused",
+            "params": {
+                "category": "advanced"
+            }
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn settings_window_reuses_stable_label() {
         let surface = SurfaceDescriptor::Settings {
             disposition: SurfaceDisposition::Focused,
             params: SettingsSurfaceParams {
-                category: Some("accounts".to_string()),
+                category: Some(SettingsSurfaceCategory::Accounts),
                 target: Some(SettingsSurfaceTarget::Account {
                     account_id: "primary".to_string(),
                 }),
