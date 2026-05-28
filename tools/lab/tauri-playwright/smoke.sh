@@ -29,9 +29,22 @@ reproduction_command() {
   done
 }
 
-run_root="${POSTHASTE_LAB_TAURI_RUN_ROOT:-$root/target/lab/tpw}"
+parent_lab_run_dir="${POSTHASTE_LAB_RUN_DIR:-}"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(random_suffix)"
-run_dir="$run_root/$run_id"
+if [[ -n "${POSTHASTE_LAB_TAURI_RUN_ROOT:-}" ]]; then
+  case "$POSTHASTE_LAB_TAURI_RUN_ROOT" in
+    /*) run_root="$POSTHASTE_LAB_TAURI_RUN_ROOT" ;;
+    *) run_root="$root/$POSTHASTE_LAB_TAURI_RUN_ROOT" ;;
+  esac
+  run_dir="$run_root/$run_id"
+elif [[ -n "$parent_lab_run_dir" ]]; then
+  case "$parent_lab_run_dir" in
+    /*) run_dir="$parent_lab_run_dir/tpw" ;;
+    *) run_dir="$root/$parent_lab_run_dir/tpw" ;;
+  esac
+else
+  run_dir="$root/target/lab/tpw/$run_id"
+fi
 artifact_dir="$run_dir/artifacts"
 config_root="$run_dir/config"
 state_root="$run_dir/state"
@@ -178,6 +191,11 @@ summary = {
 (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 PY
+  printf 'POSTHASTE_LAB_ARTIFACT_PATH=%s\n' "$run_dir/manifest.json"
+  printf 'POSTHASTE_LAB_ARTIFACT_PATH=%s\n' "$run_dir/summary.json"
+  printf 'POSTHASTE_LAB_ARTIFACT_PATH=%s\n' "$playwright_log"
+  printf 'POSTHASTE_LAB_ARTIFACT_PATH=%s\n' "$playwright_results"
+  printf 'POSTHASTE_LAB_ARTIFACT_PATH=%s\n' "$playwright_output_dir"
 }
 
 if ((${#socket_path} > 100)); then

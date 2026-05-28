@@ -70,7 +70,20 @@ jobs:
             ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: just lab tauri-check
-      - run: just lab smoke
+      - name: Lab smoke
+        id: lab_smoke
+        run: just lab smoke
+      - name: Upload lab smoke artifacts
+        if: ${{ failure() && steps.lab_smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/lab/smoke/*/manifest.json
+            target/lab/smoke/*/summary.json
+            target/lab/smoke/*/artifacts/**
+          if-no-files-found: warn
+          retention-days: 14
 
   docs:
     runs-on: ubuntu-latest

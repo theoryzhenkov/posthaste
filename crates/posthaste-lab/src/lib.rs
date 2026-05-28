@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 const DEFAULT_SUITE_TIMEOUT_SECONDS: u64 = 300;
+const ARTIFACT_PATH_MARKER: &str = "POSTHASTE_LAB_ARTIFACT_PATH=";
 const REDACTED: &str = "<redacted>";
 const KNOWN_ID_TYPES: &[&str] = &[
     "suite", "runner", "profile", "fixture", "artifact", "log", "state", "cmd",
@@ -447,11 +448,11 @@ where
         .find(|result| result.status != LabStatus::Passed)
         .map(|result| result.suite_id.clone());
     let mut artifacts = declared_artifacts.clone();
-    artifacts.extend(
-        suite_results
-            .iter()
-            .flat_map(|result| [result.stdout_path.clone(), result.stderr_path.clone()]),
-    );
+    for result in &suite_results {
+        artifacts.push(result.stdout_path.clone());
+        artifacts.push(result.stderr_path.clone());
+        artifacts.extend(result.artifact_paths.clone());
+    }
     artifacts.sort();
     artifacts.dedup();
 
@@ -588,6 +589,7 @@ fn execute_suite(
     })?;
     write_bytes(&stdout_path, &stdout)?;
     write_bytes(&stderr_path, &stderr)?;
+    let artifact_paths = discover_suite_artifact_paths(&stdout, &stderr, run_dir);
 
     let (exit_code, signal) = exit_status
         .as_ref()
@@ -607,6 +609,7 @@ fn execute_suite(
         timeout_seconds,
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
+        artifact_paths,
     })
 }
 
@@ -711,6 +714,55 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> LabResult<()> {
     })
 }
 
+fn discover_suite_artifact_paths(stdout: &[u8], stderr: &[u8], run_dir: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    for output in [stdout, stderr] {
+        let text = String::from_utf8_lossy(output);
+        for line in text.lines() {
+            if let Some(raw_path) = line.strip_prefix(ARTIFACT_PATH_MARKER) {
+                if let Some(path) = existing_report_artifact_path(raw_path, run_dir) {
+                    if !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn existing_report_artifact_path(raw_path: &str, run_dir: &Path) -> Option<String> {
+    if raw_path.is_empty() || raw_path.contains('\0') {
+        return None;
+    }
+    let path = Path::new(raw_path);
+    if !path.exists() {
+        return None;
+    }
+    let canonical_path = path.canonicalize().ok()?;
+    if !is_allowed_report_artifact_path(&canonical_path, run_dir) {
+        return None;
+    }
+    Some(path.display().to_string())
+}
+
+fn is_allowed_report_artifact_path(canonical_path: &Path, run_dir: &Path) -> bool {
+    run_dir
+        .canonicalize()
+        .ok()
+        .is_some_and(|canonical_run_dir| canonical_path.starts_with(canonical_run_dir))
+        && !has_secret_like_path_segment(canonical_path)
+}
+
+fn has_secret_like_path_segment(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|segment| is_secret_env_name(segment))
+    })
+}
+
 fn path_safe_suite_id(id: &str) -> String {
     id.chars()
         .map(|ch| {
@@ -804,20 +856,74 @@ fn summary_reason(status: LabStatus, results: &[SuiteExecutionRecord]) -> String
 }
 
 fn important_log_excerpts(results: &[SuiteExecutionRecord]) -> Vec<String> {
-    results
+    let mut excerpts = Vec::new();
+    for result in results
         .iter()
         .filter(|result| result.status != LabStatus::Passed)
-        .flat_map(|result| {
-            let stderr_excerpt = tail_text_file(Path::new(&result.stderr_path), 20)
-                .map(|excerpt| format!("{} stderr:\n{}", result.suite_id, excerpt));
-            let stdout_excerpt = tail_text_file(Path::new(&result.stdout_path), 20)
-                .map(|excerpt| format!("{} stdout:\n{}", result.suite_id, excerpt));
-            [stderr_excerpt, stdout_excerpt]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    {
+        if let Some(excerpt) = tail_text_file(Path::new(&result.stderr_path), 20) {
+            excerpts.push(format!("{} stderr:\n{}", result.suite_id, excerpt));
+        }
+        if let Some(excerpt) = tail_text_file(Path::new(&result.stdout_path), 20) {
+            excerpts.push(format!("{} stdout:\n{}", result.suite_id, excerpt));
+        }
+        for artifact_path in &result.artifact_paths {
+            let path = Path::new(artifact_path);
+            if is_summary_artifact_path(path) {
+                if let Some(excerpt) = summary_artifact_excerpt(path) {
+                    excerpts.push(format!(
+                        "{} nested summary {}:\n{}",
+                        result.suite_id, artifact_path, excerpt
+                    ));
+                }
+            }
+            if is_log_excerpt_path(path) {
+                if let Some(excerpt) = tail_text_file(path, 30) {
+                    excerpts.push(format!(
+                        "{} artifact log {}:\n{}",
+                        result.suite_id, artifact_path, excerpt
+                    ));
+                }
+            }
+        }
+    }
+    excerpts
+}
+
+fn is_summary_artifact_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "summary.json")
+}
+
+fn is_log_excerpt_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "log" | "txt"))
+}
+
+fn summary_artifact_excerpt(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let mut lines = Vec::new();
+    for key in ["status", "reason", "exitCode", "runDir"] {
+        if let Some(value) = value.get(key) {
+            lines.push(format!("{}: {}", key, summary_value(value)));
+        }
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn summary_value(value: &serde_json::Value) -> String {
+    let text = value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string());
+    redact_excerpt_text(&text)
 }
 
 fn tail_text_file(path: &Path, max_lines: usize) -> Option<String> {
@@ -826,7 +932,29 @@ fn tail_text_file(path: &Path, max_lines: usize) -> Option<String> {
     if lines.is_empty() {
         return None;
     }
-    Some(lines.into_iter().rev().collect::<Vec<_>>().join("\n"))
+    Some(redact_excerpt_text(
+        &lines.into_iter().rev().collect::<Vec<_>>().join("\n"),
+    ))
+}
+
+fn redact_excerpt_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if contains_secret_marker(line) {
+                REDACTED
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn contains_secret_marker(text: &str) -> bool {
+    let uppercase = text.to_ascii_uppercase();
+    SECRET_MARKERS
+        .iter()
+        .any(|marker| uppercase.contains(marker))
 }
 
 fn create_dir(path: &Path) -> LabResult<()> {
@@ -917,6 +1045,7 @@ struct SuiteExecutionRecord {
     timeout_seconds: u64,
     stdout_path: String,
     stderr_path: String,
+    artifact_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1522,6 +1651,130 @@ artifacts = ["artifact.summary.dev.local"]
             fs::read_to_string(stderr_path).unwrap(),
             "settings stderr\n"
         );
+
+        fs::remove_dir_all(temp_root).ok();
+    }
+
+    #[test]
+    fn propagates_marked_nested_artifacts_and_excerpts() {
+        let registry = SuiteRegistry::from_toml_str(
+            r#"
+[suite.nested.artifacts.demo]
+level = "smoke"
+targets = ["desktop"]
+runners = ["runner.shell.test"]
+tags = ["nested"]
+paths = []
+command = '''
+mkdir -p "$POSTHASTE_LAB_RUN_DIR/nested/artifacts"
+printf '{"status":"failed","reason":"nested smoke failed","exitCode":1,"runDir":"%s"}\n' "$POSTHASTE_LAB_RUN_DIR/nested" > "$POSTHASTE_LAB_RUN_DIR/nested/summary.json"
+printf 'nested playwright failure detail\n' > "$POSTHASTE_LAB_RUN_DIR/nested/artifacts/playwright.log"
+printf 'TOKEN=should-not-be-in-summary\n' > "$POSTHASTE_SECRETS_ROOT/leak.log"
+printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/summary.json"
+printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/artifacts/playwright.log"
+printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_LAB_RUN_DIR/nested/missing.json"
+printf '%s%s\n' 'POSTHASTE_LAB_ARTIFACT_PATH=' "$POSTHASTE_SECRETS_ROOT/leak.log"
+exit 1
+'''
+timeout_seconds = 5
+"#,
+        )
+        .unwrap();
+        let temp_root =
+            std::env::temp_dir().join(format!("posthaste-lab-test-{}", Uuid::new_v4().simple()));
+
+        let output = write_verify_run_with_env(
+            &registry,
+            VerifyOptions {
+                run_root: temp_root.clone(),
+                registry_path: PathBuf::from("tools/lab/suites.toml"),
+                argv: vec!["posthaste-lab".to_string(), "verify".to_string()],
+                criteria: SelectionCriteria::default(),
+            },
+            std::iter::empty::<(String, String)>(),
+        )
+        .unwrap();
+
+        let summary: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&output.summary_path).expect("summary should be readable"),
+        )
+        .unwrap();
+        let summary_path = output
+            .run_dir
+            .join("nested")
+            .join("summary.json")
+            .display()
+            .to_string();
+        let log_path = output
+            .run_dir
+            .join("nested")
+            .join("artifacts")
+            .join("playwright.log")
+            .display()
+            .to_string();
+        let missing_path = output
+            .run_dir
+            .join("nested")
+            .join("missing.json")
+            .display()
+            .to_string();
+        let secret_path = output
+            .run_dir
+            .join("state.secrets")
+            .join("leak.log")
+            .display()
+            .to_string();
+
+        assert_eq!(summary["status"], "failed");
+        let artifact_paths = summary["suiteResults"][0]["artifactPaths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(artifact_paths.contains(&summary_path.as_str()));
+        assert!(artifact_paths.contains(&log_path.as_str()));
+        assert!(!artifact_paths.contains(&missing_path.as_str()));
+        assert!(!artifact_paths.contains(&secret_path.as_str()));
+        let artifacts = summary["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(artifacts.contains(&summary_path.as_str()));
+        assert!(artifacts.contains(&log_path.as_str()));
+        assert!(summary["importantLogExcerpts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str().unwrap().contains("nested smoke failed")));
+        assert!(summary["importantLogExcerpts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value
+                .as_str()
+                .unwrap()
+                .contains("nested playwright failure detail")));
+        assert!(!summary["importantLogExcerpts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str().unwrap().contains("should-not-be-in-summary")));
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&output.manifest_path).expect("manifest should be readable"),
+        )
+        .unwrap();
+        let manifest_artifacts = manifest["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(manifest_artifacts.contains(&summary_path.as_str()));
+        assert!(manifest_artifacts.contains(&log_path.as_str()));
 
         fs::remove_dir_all(temp_root).ok();
     }
