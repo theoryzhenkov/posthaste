@@ -26,12 +26,7 @@ import {
   fetchSenderAddresses,
   sendMessage,
 } from '@/api/client'
-import type {
-  AccountOverview,
-  CachedSenderAddress,
-  Recipient,
-  SendMessageInput,
-} from '@/api/types'
+import type { Recipient, SendMessageInput } from '@/api/types'
 import {
   buildRecipientSuggestionOptions,
   filterAddressSuggestions,
@@ -58,6 +53,18 @@ import { FloatingPanel } from './FloatingPanel'
 import type { MarkdownComposerEditorHandle } from './MarkdownComposerEditor'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import {
+  EMPTY_FORM,
+  accountFromOptions,
+  buildSendInput,
+  formatRecipient,
+  formatRecipients,
+  isConcreteEmailPattern,
+  optionLabel,
+  parseRecipients,
+  wildcardMatchesEmail,
+  type ComposeForm,
+} from './composeFormHelpers'
 
 const MarkdownComposerEditor = lazy(() =>
   import('./MarkdownComposerEditor').then((module) => ({
