@@ -44,7 +44,7 @@ async function waitForMainWindowReadiness(
 }
 
 test.describe("Linux Tauri main-window smoke", () => {
-  test("waits for readiness and renders a route-backed compose surface", async ({
+  test("waits for readiness and renders route-backed surface states", async ({
     tauriPage,
   }) => {
     await waitForMainWindowReadiness(tauriPage);
@@ -62,6 +62,18 @@ test.describe("Linux Tauri main-window smoke", () => {
     await expect(
       tauriPage.locator(
         '[data-posthaste-state="state.surface.compose.ready.test"]',
+      ),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await tauriPage.evaluate(`(() => {
+      window.history.pushState(null, "", "#/surface/compose?composeKind=new");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      return true;
+    })()`);
+
+    await expect(
+      tauriPage.locator(
+        '[data-posthaste-state="state.surface.invalid.ready.test"]',
       ),
     ).toBeVisible({ timeout: 10_000 });
   });
