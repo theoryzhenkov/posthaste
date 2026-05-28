@@ -59,7 +59,11 @@ export function SurfaceHost({
 
   if (surface.kind === 'settings' || surface.kind === 'compose') {
     return (
-      <div className="fixed inset-0 z-[2100] bg-background text-foreground">
+      <div
+        className="fixed inset-0 z-[2100] bg-background text-foreground"
+        data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
+        data-posthaste-surface-kind={surface.kind}
+      >
         {surface.kind === 'settings' && (
           <div className="absolute right-3 top-3 z-10 flex gap-1">
             <Button
@@ -85,7 +89,11 @@ export function SurfaceHost({
   }
 
   return (
-    <div className="fixed inset-0 z-[2200] flex min-h-0 flex-col bg-background text-foreground">
+    <div
+      className="fixed inset-0 z-[2200] flex min-h-0 flex-col bg-background text-foreground"
+      data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
+      data-posthaste-surface-kind={surface.kind}
+    >
       <header className="flex h-[42px] shrink-0 items-center gap-3 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold">
