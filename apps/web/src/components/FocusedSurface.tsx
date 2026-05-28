@@ -169,7 +169,11 @@ export function FocusedSurfaceDocument({
   }, [])
 
   return (
-    <main className="h-full min-h-0 bg-background text-foreground">
+    <main
+      className="h-full min-h-0 bg-background text-foreground"
+      data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
+      data-posthaste-surface-kind={surface.kind}
+    >
       <FocusedSurface surface={surface} />
     </main>
   )

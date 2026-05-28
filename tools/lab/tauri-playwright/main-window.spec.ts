@@ -5,33 +5,64 @@ const READY_MARKERS = [
   "state.settings.ready.test",
 ] as const;
 
-test.describe("Linux Tauri main-window smoke", () => {
-  test("waits for a Lab readiness marker", async ({ tauriPage }) => {
-    const deadline = Date.now() + 60_000;
-    let sawReadyMarker = false;
+interface LabTauriPage {
+  evaluate: (script: string) => Promise<unknown>;
+  locator: (selector: string) => {
+    isVisible: () => Promise<boolean>;
+  };
+}
 
-    while (Date.now() < deadline && !sawReadyMarker) {
-      for (const marker of READY_MARKERS) {
-        try {
-          if (
-            await tauriPage
-              .locator(`[data-posthaste-state="${marker}"]`)
-              .isVisible()
-          ) {
-            sawReadyMarker = true;
-            break;
-          }
-        } catch {
-          // The app-side bridge can start accepting socket traffic before the
-          // first webview listener is registered. Retry until the readiness
-          // deadline instead of failing on the first dropped command.
+async function waitForMainWindowReadiness(
+  tauriPage: LabTauriPage,
+): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let sawReadyMarker = false;
+
+  while (Date.now() < deadline && !sawReadyMarker) {
+    for (const marker of READY_MARKERS) {
+      try {
+        if (
+          await tauriPage
+            .locator(`[data-posthaste-state="${marker}"]`)
+            .isVisible()
+        ) {
+          sawReadyMarker = true;
+          break;
         }
-      }
-      if (!sawReadyMarker) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+      } catch {
+        // The app-side bridge can start accepting socket traffic before the
+        // first webview listener is registered. Retry until the readiness
+        // deadline instead of failing on the first dropped command.
       }
     }
+    if (!sawReadyMarker) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
 
-    expect(sawReadyMarker).toBe(true);
+  expect(sawReadyMarker).toBe(true);
+}
+
+test.describe("Linux Tauri main-window smoke", () => {
+  test("waits for readiness and renders a route-backed compose surface", async ({
+    tauriPage,
+  }) => {
+    await waitForMainWindowReadiness(tauriPage);
+
+    await tauriPage.evaluate(`(() => {
+      window.history.pushState(
+        null,
+        "",
+        "#/surface/compose?composeKind=new&sourceId=lab-smoke"
+      );
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      return true;
+    })()`);
+
+    await expect(
+      tauriPage.locator(
+        '[data-posthaste-state="state.surface.compose.ready.test"]',
+      ),
+    ).toBeVisible({ timeout: 10_000 });
   });
 });

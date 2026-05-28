@@ -86,6 +86,8 @@ paths = [
   "apps/desktop/Cargo.toml",
   "apps/desktop/src/lib.rs",
   "apps/desktop/tauri.e2e.conf.json",
+  "apps/web/src/components/FocusedSurface.tsx",
+  "apps/web/src/components/SurfaceHost.tsx",
   "apps/web/src/labReadiness.ts",
   "tools/lab/tauri-playwright/",
 ]
