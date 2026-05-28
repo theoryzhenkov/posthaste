@@ -25,7 +25,7 @@ const MAIN_WINDOW_LABEL: &str = "main";
 compile_error!("PostHaste e2e-testing is Linux-only; macOS release smoke remains manual");
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum SurfaceDescriptor {
     #[serde(rename = "attachment")]
     Attachment {
@@ -57,7 +57,7 @@ enum SurfaceDisposition {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentSurfaceParams {
     source_id: String,
     message_id: String,
@@ -65,7 +65,7 @@ struct AttachmentSurfaceParams {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MessageSurfaceParams {
     conversation_id: String,
     source_id: String,
@@ -73,13 +73,13 @@ struct MessageSurfaceParams {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SettingsSurfaceParams {
     category: Option<SettingsSurfaceCategory>,
     target: Option<SettingsSurfaceTarget>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum SettingsSurfaceCategory {
     General,
@@ -100,7 +100,7 @@ impl SettingsSurfaceCategory {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum ComposeSurfaceParams {
     #[serde(rename = "new")]
     New {
@@ -124,19 +124,27 @@ enum ComposeSurfaceParams {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum SettingsSurfaceTarget {
     #[serde(rename = "account")]
-    Account { account_id: String },
+    Account {
+        #[serde(rename = "accountId")]
+        account_id: String,
+    },
     #[serde(rename = "newAccount")]
     NewAccount,
     #[serde(rename = "smartMailbox")]
-    SmartMailbox { smart_mailbox_id: String },
+    SmartMailbox {
+        #[serde(rename = "smartMailboxId")]
+        smart_mailbox_id: String,
+    },
     #[serde(rename = "newSmartMailbox")]
     NewSmartMailbox,
     #[serde(rename = "sourceMailbox")]
     SourceMailbox {
+        #[serde(rename = "sourceAccountId")]
         source_account_id: String,
+        #[serde(rename = "sourceMailboxId")]
         source_mailbox_id: String,
     },
 }
@@ -269,6 +277,7 @@ fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(), String> {
+    validate_surface_descriptor(&surface)?;
     let label = surface_window_label(&surface);
     let route = surface_route(&surface);
     if let Some(window) = app.get_webview_window(&label) {
@@ -663,6 +672,29 @@ fn surface_window_navigation_script(route: &str) -> String {
     )
 }
 
+fn validate_surface_descriptor(surface: &SurfaceDescriptor) -> Result<(), String> {
+    if let SurfaceDescriptor::Settings { params, .. } = surface {
+        if let (Some(category), Some(target)) = (&params.category, &params.target) {
+            let target_category = settings_target_category(target);
+            if *category != target_category {
+                return Err("settings surface category does not match target kind".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn settings_target_category(target: &SettingsSurfaceTarget) -> SettingsSurfaceCategory {
+    match target {
+        SettingsSurfaceTarget::Account { .. } | SettingsSurfaceTarget::NewAccount => {
+            SettingsSurfaceCategory::Accounts
+        }
+        SettingsSurfaceTarget::SmartMailbox { .. }
+        | SettingsSurfaceTarget::NewSmartMailbox
+        | SettingsSurfaceTarget::SourceMailbox { .. } => SettingsSurfaceCategory::Mailboxes,
+    }
+}
+
 fn surface_window_label(surface: &SurfaceDescriptor) -> String {
     match surface {
         SurfaceDescriptor::Attachment { params, .. } => {
@@ -912,6 +944,29 @@ mod tests {
     }
 
     #[test]
+    fn settings_surface_descriptor_deserializes_frontend_camel_case_target() {
+        let surface = serde_json::from_value::<SurfaceDescriptor>(serde_json::json!({
+            "kind": "settings",
+            "disposition": "focused",
+            "params": {
+                "category": "mailboxes",
+                "target": {
+                    "kind": "sourceMailbox",
+                    "sourceAccountId": "primary",
+                    "sourceMailboxId": "inbox"
+                }
+            }
+        }))
+        .expect("frontend settings surface descriptors should deserialize");
+
+        assert_eq!(
+            surface_route(&surface),
+            "/surface/settings?category=mailboxes&targetKind=sourceMailbox&sourceAccountId=primary&sourceMailboxId=inbox"
+        );
+        assert!(validate_surface_descriptor(&surface).is_ok());
+    }
+
+    #[test]
     fn settings_surface_rejects_unknown_frontend_category() {
         let result = serde_json::from_value::<SurfaceDescriptor>(serde_json::json!({
             "kind": "settings",
@@ -922,6 +977,39 @@ mod tests {
         }));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn surface_descriptors_reject_unknown_frontend_fields() {
+        let result = serde_json::from_value::<SurfaceDescriptor>(serde_json::json!({
+            "kind": "compose",
+            "disposition": "focused",
+            "params": {
+                "kind": "new",
+                "sourceId": "primary",
+                "draftId": "unexpected"
+            }
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn settings_surface_category_must_match_target_kind() {
+        let surface = SurfaceDescriptor::Settings {
+            disposition: SurfaceDisposition::Focused,
+            params: SettingsSurfaceParams {
+                category: Some(SettingsSurfaceCategory::Mailboxes),
+                target: Some(SettingsSurfaceTarget::Account {
+                    account_id: "primary".to_string(),
+                }),
+            },
+        };
+
+        assert_eq!(
+            validate_surface_descriptor(&surface).unwrap_err(),
+            "settings surface category does not match target kind"
+        );
     }
 
     #[test]
