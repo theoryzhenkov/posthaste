@@ -87,6 +87,27 @@ describe('surface routes', () => {
     ).toBeNull()
   })
 
+  it('rejects unknown or duplicated route params', () => {
+    expect(
+      parseSurfaceRoute(
+        '/surface/message?conversationId=c1&sourceId=primary&messageId=m1&draftId=d1',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/attachment?sourceId=primary&messageId=m1&attachmentId=a1&attachmentId=a2',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute(
+        '/surface/compose?composeKind=new&sourceId=primary&draftId=d1',
+      ),
+    ).toBeNull()
+    expect(
+      parseSurfaceRoute('/surface/settings?category=accounts&draftId=d1'),
+    ).toBeNull()
+  })
+
   it('rejects incomplete compose routes', () => {
     expect(parseSurfaceRoute('/surface/compose?composeKind=new')).toBeNull()
     expect(
