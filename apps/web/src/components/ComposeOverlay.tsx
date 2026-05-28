@@ -49,6 +49,7 @@ import {
   parseRecipients,
   type ComposeForm,
 } from '@/composeMessage'
+import { shouldCloseOriginalComposeAfterWindowOpen } from '@/composeWindowElevation'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
 import { composeSurface } from '@/surfaces'
@@ -494,7 +495,12 @@ export function ComposeOverlay({
     setIsOpeningWindow(true)
     void openSurfaceInSeparateWindow(composeSurface(intent))
       .then(() => {
-        if (editedResetKeyRef.current !== openingResetKey) {
+        if (
+          shouldCloseOriginalComposeAfterWindowOpen({
+            openingResetKey,
+            lastEditedResetKey: editedResetKeyRef.current,
+          })
+        ) {
           onClose()
         }
       })
