@@ -1496,6 +1496,51 @@ artifacts = ["artifact.summary.dev.local"]
     }
 
     #[test]
+    fn real_suite_registry_paths_exist_and_smoke_stays_non_graphical() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let registry = SuiteRegistry::load(repo_root.join("tools/lab/suites.toml")).unwrap();
+        let smoke_suite_ids = registry
+            .suites()
+            .iter()
+            .filter_map(|(id, entry)| entry.tags.iter().any(|tag| tag == "lab-smoke").then_some(id))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            smoke_suite_ids,
+            vec![
+                "suite.api.health.dev",
+                "suite.ui.readiness.web.test",
+                "suite.ui.surfaces.web.test",
+            ]
+        );
+
+        for (id, entry) in registry.suites() {
+            assert!(!entry.command.trim().is_empty(), "{id} command is empty");
+            assert!(
+                entry.timeout_seconds.unwrap_or(DEFAULT_SUITE_TIMEOUT_SECONDS) > 0,
+                "{id} timeout must be positive"
+            );
+            for path in &entry.paths {
+                assert!(
+                    Path::new(path).is_relative() && !path.contains(".."),
+                    "{id} path {path:?} must stay relative to the repository root"
+                );
+                assert!(
+                    repo_root.join(path).exists(),
+                    "{id} path {path:?} does not exist"
+                );
+            }
+            if entry.tags.iter().any(|tag| tag == "lab-smoke") {
+                assert!(
+                    !entry.targets.iter().any(|target| target == "desktop")
+                        && !entry.tags.iter().any(|tag| tag == "tauri"),
+                    "{id} lab-smoke suite must remain non-graphical"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn selects_suites_by_explicit_id_tag_and_target() {
         let registry = SuiteRegistry::from_toml_str(sample_registry_toml()).unwrap();
 
