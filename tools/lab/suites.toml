@@ -106,6 +106,7 @@ runners = ["runner.tauri-playwright.linux.test"]
 tags = ["desktop", "tauri", "linux", "smoke"]
 paths = [
   "apps/desktop/Cargo.toml",
+  "apps/desktop/src/e2e.rs",
   "apps/desktop/src/lib.rs",
   "apps/desktop/tauri.e2e.conf.json",
   "apps/web/src/components/FocusedSurface.tsx",
