@@ -291,7 +291,7 @@ export function CommandPalette({
         }
         onClose={onClose}
       >
-        <CommandList className="ph-scroll px-0 py-1.5">
+        <CommandList className="ph-scroll max-h-[min(440px,calc(100vh-170px))] px-0 py-1.5">
           <CommandEmpty>No results. Try a different query.</CommandEmpty>
           {flatEntries.length > 0 && (
             <CommandItem
