@@ -124,15 +124,16 @@ type LeafCompatible<A, B> = [Defined<A>] extends [Defined<B>]
  * `Record<string, unknown>`) are NOT structural: they are compared as leaves via
  * `LeafCompatible`, so the free-form payload conforms without spurious recursion.
  */
-type IsObject<T> = Defined<T> extends object
-  ? Defined<T> extends readonly unknown[]
-    ? false
-    : string extends keyof Defined<T>
+type IsObject<T> =
+  Defined<T> extends object
+    ? Defined<T> extends readonly unknown[]
       ? false
-      : number extends keyof Defined<T>
+      : string extends keyof Defined<T>
         ? false
-        : true
-  : false
+        : number extends keyof Defined<T>
+          ? false
+          : true
+    : false
 
 /**
  * Recursion fuel. Each nesting level pops one element; when empty, deeply
@@ -187,7 +188,9 @@ type StructConforms<V, W, D extends unknown[]> = [Defined<V>] extends [never]
               : LeafCompatible<V, W>
 
 type AllKeysConform<V, W, D extends unknown[]> = {
-  [K in keyof V & keyof W]: Conforms<V[K], W[K], Pop<D>> extends true ? true : false
+  [K in keyof V & keyof W]: Conforms<V[K], W[K], Pop<D>> extends true
+    ? true
+    : false
 }[keyof V & keyof W] extends true
   ? true
   : false
@@ -200,17 +203,33 @@ type Covered<A, B, D extends unknown[]> = [false] extends [
   : true
 
 type MatchesAny<A, B, D extends unknown[]> = [true] extends [
-  B extends unknown ? (StructConforms<A, B, D> extends true ? true : false) : never,
+  B extends unknown
+    ? StructConforms<A, B, D> extends true
+      ? true
+      : false
+    : never,
 ]
   ? true
   : false
 
 /** `true` when no member of union `T` is a structural object or an array. */
 type IsLeafUnion<T> = [true] extends [
-  T extends unknown ? (IsObject<T> extends true ? false : ArrayOf<T> extends true ? false : true) : never,
+  T extends unknown
+    ? IsObject<T> extends true
+      ? false
+      : ArrayOf<T> extends true
+        ? false
+        : true
+    : never,
 ]
   ? [false] extends [
-      T extends unknown ? (IsObject<T> extends true ? false : ArrayOf<T> extends true ? false : true) : never,
+      T extends unknown
+        ? IsObject<T> extends true
+          ? false
+          : ArrayOf<T> extends true
+            ? false
+            : true
+        : never,
     ]
     ? false
     : true
@@ -233,109 +252,201 @@ type ArrayOf<T> = Defined<T> extends readonly unknown[] ? true : false
  * Each top-level assertion below wraps this in `AssertTrue<...>`, so a `false`
  * result becomes a `tsc` error at that line.
  */
-type Conforms<View, W, D extends unknown[] = Depth> = IsLeafUnion<View> extends true
-  ? LeafCompatible<View, W>
-  : IsLeafUnion<W> extends true
+type Conforms<View, W, D extends unknown[] = Depth> =
+  IsLeafUnion<View> extends true
     ? LeafCompatible<View, W>
-    : Covered<View, W, D> extends true
-      ? Covered<W, View, D> extends true
-        ? true
+    : IsLeafUnion<W> extends true
+      ? LeafCompatible<View, W>
+      : Covered<View, W, D> extends true
+        ? Covered<W, View, D> extends true
+          ? true
+          : false
         : false
-      : false
 
 /* --- Scalar / string-enum view-models --------------------------------- */
-export type _AccountDriver = AssertTrue<Conforms<AccountDriver, Wire['AccountDriver']>>
-export type _ProviderKind = AssertTrue<Conforms<ProviderKind, Wire['ProviderKind']>>
-export type _ProviderHint = AssertTrue<Conforms<ProviderHint, Wire['ProviderHint']>>
-export type _ProviderAuthKind = AssertTrue<Conforms<ProviderAuthKind, Wire['ProviderAuthKind']>>
-export type _TransportSecurity = AssertTrue<Conforms<TransportSecurity, Wire['TransportSecurity']>>
+export type _AccountDriver = AssertTrue<
+  Conforms<AccountDriver, Wire['AccountDriver']>
+>
+export type _ProviderKind = AssertTrue<
+  Conforms<ProviderKind, Wire['ProviderKind']>
+>
+export type _ProviderHint = AssertTrue<
+  Conforms<ProviderHint, Wire['ProviderHint']>
+>
+export type _ProviderAuthKind = AssertTrue<
+  Conforms<ProviderAuthKind, Wire['ProviderAuthKind']>
+>
+export type _TransportSecurity = AssertTrue<
+  Conforms<TransportSecurity, Wire['TransportSecurity']>
+>
 export type _ThemeMode = AssertTrue<Conforms<ThemeMode, Wire['AppThemeMode']>>
-export type _PalettePresetId = AssertTrue<Conforms<PalettePresetId, Wire['AppPalettePreset']>>
+export type _PalettePresetId = AssertTrue<
+  Conforms<PalettePresetId, Wire['AppPalettePreset']>
+>
 export type _UiDensity = AssertTrue<Conforms<UiDensity, Wire['AppUiDensity']>>
-export type _AutomationTrigger = AssertTrue<Conforms<AutomationTrigger, Wire['AutomationTrigger']>>
-export type _MessageSortField = AssertTrue<Conforms<MessageSortField, Wire['MessageSortField']>>
+export type _AutomationTrigger = AssertTrue<
+  Conforms<AutomationTrigger, Wire['AutomationTrigger']>
+>
+export type _MessageSortField = AssertTrue<
+  Conforms<MessageSortField, Wire['MessageSortField']>
+>
 export type _SyncMode = AssertTrue<Conforms<SyncMode, Wire['SyncMode']>>
-export type _SmartMailboxKind = AssertTrue<Conforms<SmartMailboxKind, Wire['SmartMailboxKind']>>
-export type _SmartMailboxGroupOperator = AssertTrue<Conforms<
-  SmartMailboxGroupOperator,
-  Wire['SmartMailboxGroupOperator']
->>
-export type _SmartMailboxField = AssertTrue<Conforms<SmartMailboxField, Wire['SmartMailboxField']>>
-export type _SmartMailboxOperator = AssertTrue<Conforms<SmartMailboxOperator, Wire['SmartMailboxOperator']>>
-export type _SmartMailboxValue = AssertTrue<Conforms<SmartMailboxValue, Wire['SmartMailboxValue']>>
+export type _SmartMailboxKind = AssertTrue<
+  Conforms<SmartMailboxKind, Wire['SmartMailboxKind']>
+>
+export type _SmartMailboxGroupOperator = AssertTrue<
+  Conforms<SmartMailboxGroupOperator, Wire['SmartMailboxGroupOperator']>
+>
+export type _SmartMailboxField = AssertTrue<
+  Conforms<SmartMailboxField, Wire['SmartMailboxField']>
+>
+export type _SmartMailboxOperator = AssertTrue<
+  Conforms<SmartMailboxOperator, Wire['SmartMailboxOperator']>
+>
+export type _SmartMailboxValue = AssertTrue<
+  Conforms<SmartMailboxValue, Wire['SmartMailboxValue']>
+>
 
 /* --- Appearance / settings -------------------------------------------- */
-export type _MailEndpointSettings = AssertTrue<Conforms<MailEndpointSettings, Wire['ImapTransportSettings']>>
-export type _AppGlassBloomSettings = AssertTrue<Conforms<AppGlassBloomSettings, Wire['AppGlassBloomSettings']>>
-export type _AppGlassThemeSettings = AssertTrue<Conforms<AppGlassThemeSettings, Wire['AppGlassThemeSettings']>>
-export type _AppAppearanceSettings = AssertTrue<Conforms<AppAppearanceSettings, Wire['AppAppearanceSettings']>>
-export type _AppSettings = AssertTrue<Conforms<AppSettings, Wire['AppSettings']>>
-export type _CachePolicy = AssertTrue<Conforms<CachePolicy, Wire['CachePolicy']>>
-export type _SecretStatus = AssertTrue<Conforms<SecretStatus, Wire['SecretStatus']>>
-export type _AccountAppearance = AssertTrue<Conforms<AccountAppearance, Wire['AccountAppearance']>>
+export type _MailEndpointSettings = AssertTrue<
+  Conforms<MailEndpointSettings, Wire['ImapTransportSettings']>
+>
+export type _AppGlassBloomSettings = AssertTrue<
+  Conforms<AppGlassBloomSettings, Wire['AppGlassBloomSettings']>
+>
+export type _AppGlassThemeSettings = AssertTrue<
+  Conforms<AppGlassThemeSettings, Wire['AppGlassThemeSettings']>
+>
+export type _AppAppearanceSettings = AssertTrue<
+  Conforms<AppAppearanceSettings, Wire['AppAppearanceSettings']>
+>
+export type _AppSettings = AssertTrue<
+  Conforms<AppSettings, Wire['AppSettings']>
+>
+export type _CachePolicy = AssertTrue<
+  Conforms<CachePolicy, Wire['CachePolicy']>
+>
+export type _SecretStatus = AssertTrue<
+  Conforms<SecretStatus, Wire['SecretStatus']>
+>
+export type _AccountAppearance = AssertTrue<
+  Conforms<AccountAppearance, Wire['AccountAppearance']>
+>
 
 /* --- Automation -------------------------------------------------------- */
-export type _AutomationAction = AssertTrue<Conforms<AutomationAction, Wire['AutomationAction']>>
-export type _AutomationRule = AssertTrue<Conforms<AutomationRule, Wire['AutomationRule']>>
-export type _AutomationRulePreviewInput = AssertTrue<Conforms<
-  AutomationRulePreviewInput,
-  Wire['PreviewAutomationRuleRequest']
->>
-export type _AutomationRulePreviewResponse = AssertTrue<Conforms<
-  AutomationRulePreviewResponse,
-  Wire['AutomationRulePreviewResponse']
->>
+export type _AutomationAction = AssertTrue<
+  Conforms<AutomationAction, Wire['AutomationAction']>
+>
+export type _AutomationRule = AssertTrue<
+  Conforms<AutomationRule, Wire['AutomationRule']>
+>
+export type _AutomationRulePreviewInput = AssertTrue<
+  Conforms<AutomationRulePreviewInput, Wire['PreviewAutomationRuleRequest']>
+>
+export type _AutomationRulePreviewResponse = AssertTrue<
+  Conforms<AutomationRulePreviewResponse, Wire['AutomationRulePreviewResponse']>
+>
 
 /* --- Accounts ---------------------------------------------------------- */
-export type _AccountConnectionOverview = AssertTrue<Conforms<
-  AccountConnectionOverview,
-  Wire['AccountConnectionOverview']
->>
-export type _AccountOverview = AssertTrue<Conforms<AccountOverview, Wire['AccountOverview']>>
-export type _AccountTransportInput = AssertTrue<Conforms<AccountTransportInput, Wire['AccountTransportRequest']>>
-export type _SecretInstructionInput = AssertTrue<Conforms<SecretInstructionInput, Wire['SecretWriteRequest']>>
-export type _CreateAccountInput = AssertTrue<Conforms<CreateAccountInput, Wire['CreateAccountRequest']>>
-export type _UpdateAccountInput = AssertTrue<Conforms<UpdateAccountInput, Wire['PatchAccountRequest']>>
-export type _VerificationResponse = AssertTrue<Conforms<VerificationResponse, Wire['VerificationResponse']>>
-export type _StartProviderOAuthInput = AssertTrue<Conforms<
-  StartProviderOAuthInput,
-  Wire['StartProviderOAuthRequest']
->>
-export type _StartOAuthResponse = AssertTrue<Conforms<StartOAuthResponse, Wire['StartOAuthResponse']>>
-export type _CachedSenderAddress = AssertTrue<Conforms<CachedSenderAddress, Wire['CachedSenderAddress']>>
-export type _SyncProgress = AssertTrue<Conforms<SyncProgress, Wire['SyncProgress']>>
+export type _AccountConnectionOverview = AssertTrue<
+  Conforms<AccountConnectionOverview, Wire['AccountConnectionOverview']>
+>
+export type _AccountOverview = AssertTrue<
+  Conforms<AccountOverview, Wire['AccountOverview']>
+>
+export type _AccountTransportInput = AssertTrue<
+  Conforms<AccountTransportInput, Wire['AccountTransportRequest']>
+>
+export type _SecretInstructionInput = AssertTrue<
+  Conforms<SecretInstructionInput, Wire['SecretWriteRequest']>
+>
+export type _CreateAccountInput = AssertTrue<
+  Conforms<CreateAccountInput, Wire['CreateAccountRequest']>
+>
+export type _UpdateAccountInput = AssertTrue<
+  Conforms<UpdateAccountInput, Wire['PatchAccountRequest']>
+>
+export type _VerificationResponse = AssertTrue<
+  Conforms<VerificationResponse, Wire['VerificationResponse']>
+>
+export type _StartProviderOAuthInput = AssertTrue<
+  Conforms<StartProviderOAuthInput, Wire['StartProviderOAuthRequest']>
+>
+export type _StartOAuthResponse = AssertTrue<
+  Conforms<StartOAuthResponse, Wire['StartOAuthResponse']>
+>
+export type _CachedSenderAddress = AssertTrue<
+  Conforms<CachedSenderAddress, Wire['CachedSenderAddress']>
+>
+export type _SyncProgress = AssertTrue<
+  Conforms<SyncProgress, Wire['SyncProgress']>
+>
 
 /* --- Compose ----------------------------------------------------------- */
 export type _Identity = AssertTrue<Conforms<Identity, Wire['Identity']>>
 export type _Recipient = AssertTrue<Conforms<Recipient, Wire['Recipient']>>
-export type _ReplyContext = AssertTrue<Conforms<ReplyContext, Wire['ReplyContext']>>
-export type _SendMessageInput = AssertTrue<Conforms<SendMessageInput, Wire['SendMessageRequest']>>
+export type _ReplyContext = AssertTrue<
+  Conforms<ReplyContext, Wire['ReplyContext']>
+>
+export type _SendMessageInput = AssertTrue<
+  Conforms<SendMessageInput, Wire['SendMessageRequest']>
+>
 export type _OkResponse = AssertTrue<Conforms<OkResponse, Wire['OkResponse']>>
 
 /* --- Mailboxes / messages --------------------------------------------- */
 export type _Mailbox = AssertTrue<Conforms<Mailbox, Wire['MailboxSummary']>>
-export type _PatchMailboxInput = AssertTrue<Conforms<PatchMailboxInput, Wire['PatchMailboxRequest']>>
-export type _MessageSummary = AssertTrue<Conforms<MessageSummary, Wire['MessageSummary']>>
-export type _MessagePage = AssertTrue<Conforms<MessagePage, Wire['MessagePageResponse']>>
-export type _RawMessageRef = AssertTrue<Conforms<RawMessageRef, Wire['RawMessageRef']>>
-export type _MessageAttachment = AssertTrue<Conforms<MessageAttachment, Wire['MessageAttachment']>>
-export type _MessageDetail = AssertTrue<Conforms<MessageDetail, Wire['MessageDetail']>>
-export type _SourceMessageRef = AssertTrue<Conforms<SourceMessageRef, Wire['SourceMessageRef']>>
-export type _MessageCommandResult = AssertTrue<Conforms<MessageCommandResult, Wire['CommandResult']>>
+export type _PatchMailboxInput = AssertTrue<
+  Conforms<PatchMailboxInput, Wire['PatchMailboxRequest']>
+>
+export type _MessageSummary = AssertTrue<
+  Conforms<MessageSummary, Wire['MessageSummary']>
+>
+export type _MessagePage = AssertTrue<
+  Conforms<MessagePage, Wire['MessagePageResponse']>
+>
+export type _RawMessageRef = AssertTrue<
+  Conforms<RawMessageRef, Wire['RawMessageRef']>
+>
+export type _MessageAttachment = AssertTrue<
+  Conforms<MessageAttachment, Wire['MessageAttachment']>
+>
+export type _MessageDetail = AssertTrue<
+  Conforms<MessageDetail, Wire['MessageDetail']>
+>
+export type _SourceMessageRef = AssertTrue<
+  Conforms<SourceMessageRef, Wire['SourceMessageRef']>
+>
+export type _MessageCommandResult = AssertTrue<
+  Conforms<MessageCommandResult, Wire['CommandResult']>
+>
 
 /* --- Conversations ----------------------------------------------------- */
-export type _ConversationSummary = AssertTrue<Conforms<ConversationSummary, Wire['ConversationSummary']>>
-export type _ConversationPage = AssertTrue<Conforms<ConversationPage, Wire['ConversationPageResponse']>>
-export type _ConversationView = AssertTrue<Conforms<ConversationView, Wire['ConversationView']>>
+export type _ConversationSummary = AssertTrue<
+  Conforms<ConversationSummary, Wire['ConversationSummary']>
+>
+export type _ConversationPage = AssertTrue<
+  Conforms<ConversationPage, Wire['ConversationPageResponse']>
+>
+export type _ConversationView = AssertTrue<
+  Conforms<ConversationView, Wire['ConversationView']>
+>
 
 /* --- Sidebar / tags ---------------------------------------------------- */
-export type _SidebarSmartMailbox = AssertTrue<Conforms<SidebarSmartMailbox, Wire['SidebarSmartMailbox']>>
+export type _SidebarSmartMailbox = AssertTrue<
+  Conforms<SidebarSmartMailbox, Wire['SidebarSmartMailbox']>
+>
 export type _TagSummary = AssertTrue<Conforms<TagSummary, Wire['TagSummary']>>
-export type _SidebarSource = AssertTrue<Conforms<SidebarSource, Wire['SidebarSource']>>
-export type _SidebarResponse = AssertTrue<Conforms<SidebarResponse, Wire['SidebarResponse']>>
+export type _SidebarSource = AssertTrue<
+  Conforms<SidebarSource, Wire['SidebarSource']>
+>
+export type _SidebarResponse = AssertTrue<
+  Conforms<SidebarResponse, Wire['SidebarResponse']>
+>
 
 /* --- Events ------------------------------------------------------------ */
-export type _DomainEvent = AssertTrue<Conforms<DomainEvent, Wire['DomainEvent']>>
+export type _DomainEvent = AssertTrue<
+  Conforms<DomainEvent, Wire['DomainEvent']>
+>
 
 /* --- Smart mailboxes --------------------------------------------------- */
 // The wire emits the rule-tree discriminant (`type`) only on the union
@@ -344,25 +455,39 @@ export type _DomainEvent = AssertTrue<Conforms<DomainEvent, Wire['DomainEvent']>
 // `SmartMailboxRuleGroup`/`SmartMailboxCondition` map to the corresponding
 // MEMBER of the wire node union, while the bare (discriminant-less) curated
 // `SmartMailboxGroup` maps to the bare wire `SmartMailboxGroup`.
-export type _SmartMailboxGroup = AssertTrue<Conforms<SmartMailboxGroup, Wire['SmartMailboxGroup']>>
+export type _SmartMailboxGroup = AssertTrue<
+  Conforms<SmartMailboxGroup, Wire['SmartMailboxGroup']>
+>
 export type _SmartMailboxCondition = AssertTrue<
-  Conforms<SmartMailboxCondition, Extract<Wire['SmartMailboxRuleNode'], { type: 'condition' }>>
+  Conforms<
+    SmartMailboxCondition,
+    Extract<Wire['SmartMailboxRuleNode'], { type: 'condition' }>
+  >
 >
 export type _SmartMailboxRuleGroup = AssertTrue<
-  Conforms<SmartMailboxRuleGroup, Extract<Wire['SmartMailboxRuleNode'], { type: 'group' }>>
+  Conforms<
+    SmartMailboxRuleGroup,
+    Extract<Wire['SmartMailboxRuleNode'], { type: 'group' }>
+  >
 >
-export type _SmartMailboxRuleNode = AssertTrue<Conforms<SmartMailboxRuleNode, Wire['SmartMailboxRuleNode']>>
-export type _SmartMailboxRule = AssertTrue<Conforms<SmartMailboxRule, Wire['SmartMailboxRule']>>
-export type _SmartMailbox = AssertTrue<Conforms<SmartMailbox, Wire['SmartMailbox']>>
-export type _SmartMailboxSummary = AssertTrue<Conforms<SmartMailboxSummary, Wire['SmartMailboxSummary']>>
-export type _CreateSmartMailboxInput = AssertTrue<Conforms<
-  CreateSmartMailboxInput,
-  Wire['CreateSmartMailboxRequest']
->>
-export type _UpdateSmartMailboxInput = AssertTrue<Conforms<
-  UpdateSmartMailboxInput,
-  Wire['PatchSmartMailboxRequest']
->>
+export type _SmartMailboxRuleNode = AssertTrue<
+  Conforms<SmartMailboxRuleNode, Wire['SmartMailboxRuleNode']>
+>
+export type _SmartMailboxRule = AssertTrue<
+  Conforms<SmartMailboxRule, Wire['SmartMailboxRule']>
+>
+export type _SmartMailbox = AssertTrue<
+  Conforms<SmartMailbox, Wire['SmartMailbox']>
+>
+export type _SmartMailboxSummary = AssertTrue<
+  Conforms<SmartMailboxSummary, Wire['SmartMailboxSummary']>
+>
+export type _CreateSmartMailboxInput = AssertTrue<
+  Conforms<CreateSmartMailboxInput, Wire['CreateSmartMailboxRequest']>
+>
+export type _UpdateSmartMailboxInput = AssertTrue<
+  Conforms<UpdateSmartMailboxInput, Wire['PatchSmartMailboxRequest']>
+>
 
 /* --- Types intentionally without their own assertion ------------------- */
 // frontend-only: no wire schema -- MessageCommand (union dispatched to 4 endpoints;

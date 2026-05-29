@@ -1,3 +1,6 @@
 dist/
 node_modules/
 bun.lock
+# Generated from openapi.json by `bun run api:generate`; drift-checked verbatim,
+# so it must stay byte-identical to the generator output (do not reformat).
+src/api/schema.gen.ts

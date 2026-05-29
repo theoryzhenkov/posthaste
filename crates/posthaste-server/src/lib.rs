@@ -2,8 +2,8 @@ pub mod api;
 pub mod config;
 pub mod logging;
 pub mod oauth;
-pub mod openapi;
 pub mod observability;
+pub mod openapi;
 pub mod push;
 pub mod sanitize;
 pub mod secret;
@@ -332,6 +332,11 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .layer(cors)
         .with_state(state);
 
+    // Browsable API docs at /v1/docs, backed by the spec served at
+    // /v1/openapi.json. Swagger UI bundles its own assets (works offline).
+    let api_docs = utoipa_swagger_ui::SwaggerUi::new("/v1/docs")
+        .config(utoipa_swagger_ui::Config::new(["/v1/openapi.json"]));
+
     let app = if let Some(frontend_dist) = server_config.frontend_dist.clone() {
         Router::new().nest("/v1", api).fallback_service(
             ServeDir::new(&frontend_dist)
@@ -339,7 +344,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         )
     } else {
         Router::new().nest("/v1", api)
-    };
+    }
+    .merge(api_docs);
 
     let bind_address = server_config
         .bind_address_override

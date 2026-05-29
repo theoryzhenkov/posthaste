@@ -19,7 +19,9 @@ const dir = mkdtempSync(join(tmpdir(), 'ph-openapi-'))
 const fresh = join(dir, 'schema.gen.ts')
 
 try {
-  execFileSync('bunx', ['openapi-typescript', spec, '-o', fresh], { stdio: 'pipe' })
+  execFileSync('bunx', ['openapi-typescript', spec, '-o', fresh], {
+    stdio: 'pipe',
+  })
   if (readFileSync(committed, 'utf8') !== readFileSync(fresh, 'utf8')) {
     console.error(
       'src/api/schema.gen.ts is out of date with openapi.json.\n' +

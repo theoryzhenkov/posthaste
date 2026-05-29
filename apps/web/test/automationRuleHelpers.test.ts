@@ -12,7 +12,7 @@ import {
 } from '../src/components/settings-panel/automationRuleHelpers'
 
 describe('automation rule helpers', () => {
-  // spec: docs/L1-api#account-crud-lifecycle
+  // spec: docs/L1-api#application-settings
   it('builds the canonical empty action for each kind', () => {
     expect(actionForKind('applyTag')).toEqual({ kind: 'applyTag', tag: '' })
     expect(actionForKind('moveToMailbox')).toEqual({
