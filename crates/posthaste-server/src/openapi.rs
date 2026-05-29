@@ -76,6 +76,7 @@ use utoipa::OpenApi;
         // Server-local wire types.
         crate::api::HealthResponse,
         crate::api::ApiErrorBody,
+        crate::api::ApiErrorCode,
         crate::api::OkResponse,
         crate::api::VerificationResponse,
         crate::api::TriggerSyncRequest,

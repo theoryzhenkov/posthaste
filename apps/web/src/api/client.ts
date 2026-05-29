@@ -18,6 +18,7 @@ import {
 import { ApiError } from './errors'
 import type {
   AccountOverview,
+  ApiErrorCode,
   AppSettings,
   AutomationRulePreviewInput,
   AutomationRulePreviewResponse,
@@ -105,11 +106,11 @@ export function buildOAuthRedirectUri(): string {
 /** Parse a non-OK response into a structured {@link ApiError}. */
 async function parseError(response: Response): Promise<never> {
   let message = response.statusText
-  let code: string | undefined
+  let code: ApiErrorCode | undefined
 
   try {
     const payload = (await response.json()) as {
-      code?: string
+      code?: ApiErrorCode
       message?: string
     }
     message = payload.message ?? message

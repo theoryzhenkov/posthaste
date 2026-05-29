@@ -1,3 +1,15 @@
+import type { components } from './schema.gen'
+
+/**
+ * Stable machine-readable API error code.
+ *
+ * Pure alias of the generated wire enum: there is no curation here, so it needs
+ * no conformance assertion — it IS the wire type.
+ *
+ * @spec docs/L1-api#error-format
+ */
+export type ApiErrorCode = components['schemas']['ApiErrorCode']
+
 /** @spec docs/L1-api#endpoint-table */
 export type AccountDriver = 'jmap' | 'imapSmtp' | 'mock'
 
