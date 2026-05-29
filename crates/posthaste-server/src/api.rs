@@ -15,12 +15,12 @@ use posthaste_domain::{
     AppAppearanceSettings, AppSettings, AutomationAction, AutomationRule, CachePolicy,
     CachedSenderAddress, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
-    GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageAttachment,
-    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SharedGateway, SidebarResponse,
-    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary,
+    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SharedGateway,
+    SidebarResponse, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue,
     SmtpTransportSettings, SortDirection, SyncMode, SyncTrigger, EVENT_TOPIC_ACCOUNT_CREATED,
@@ -60,11 +60,11 @@ pub use smart_mailboxes::{
 use account_support::{
     account_overview, account_secret_ref, append_and_publish_account_event,
     append_and_publish_config_event, apply_account_patch, apply_secret_instruction,
-    default_account_appearance, delete_managed_secret, generate_account_id_seed,
-    generate_smart_mailbox_id, internal_error, normalize_account_appearance,
-    normalize_automation_rules, normalize_email_patterns, normalize_optional, store_error_to_api,
-    validate_account_settings, validate_automation_drafts, validate_automation_rules,
-    validate_logo_image_id, validate_secret_request, ResourceChange, ResourceOperation,
+    decide_secret_instruction, default_account_appearance, delete_managed_secret,
+    generate_account_id_seed, generate_smart_mailbox_id, internal_error,
+    normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
+    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
+    validate_automation_rules, validate_logo_image_id, ResourceChange, ResourceOperation,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -512,6 +512,17 @@ pub struct VerificationResponse {
     pub push_supported: bool,
 }
 
+/// Response from `POST /v1/sources/{id}/commands/sync`.
+///
+/// @spec docs/L1-api#sync-and-events
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerSyncResponse {
+    pub ok: bool,
+    pub event_count: usize,
+    pub mode: String,
+}
+
 /// Paginated conversation list response with an opaque cursor for the next page.
 ///
 /// @spec docs/L1-api#cursor-pagination
@@ -622,22 +633,40 @@ fn command_result_response(
     Ok(Json(result))
 }
 
-fn secret_ref_after_write_request(
-    account_id: &AccountId,
-    previous_secret_ref: Option<&SecretRef>,
-    secret: &SecretWriteRequest,
-) -> Result<Option<SecretRef>, ApiError> {
-    validate_secret_request(secret)?;
-    match secret.mode {
-        SecretWriteMode::Keep => Ok(previous_secret_ref.cloned()),
-        SecretWriteMode::Replace => Ok(Some(
-            previous_secret_ref
-                .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
-                .cloned()
-                .unwrap_or_else(|| account_secret_ref(account_id)),
-        )),
-        SecretWriteMode::Clear => Ok(None),
+/// Find a free account id from `seed`, appending `-2`, `-3`, … on collision.
+fn allocate_unique_account_id(state: &AppState, seed: &str) -> Result<AccountId, ApiError> {
+    let mut candidate = AccountId::from(seed);
+    let mut suffix = 2;
+    while state
+        .service
+        .get_source(&candidate)
+        .map_err(ApiError::from_service_error)?
+        .is_some()
+    {
+        candidate = AccountId::from(format!("{seed}-{suffix}"));
+        suffix += 1;
     }
+    Ok(candidate)
+}
+
+/// Persist a freshly-built account: save → start runtime → publish event.
+///
+/// If `save_source` fails after a secret was written to the keyring, roll the
+/// secret back so a failed create does not orphan it (consistent across the
+/// manual and OAuth creation paths). `delete_managed_secret` no-ops unless the
+/// account carries an OS-managed secret.
+async fn persist_new_account(
+    state: &Arc<AppState>,
+    account: &AccountSettings,
+    topic: &str,
+) -> Result<(), ApiError> {
+    if let Err(error) = state.service.save_source(account) {
+        delete_managed_secret(state, account.transport.secret_ref.as_ref())?;
+        return Err(ApiError::from_service_error(error));
+    }
+    state.supervisor.start_account(account).await;
+    append_and_publish_account_event(state, &account.id, topic).map_err(store_error_to_api)?;
+    Ok(())
 }
 
 /// GET /v1/health
@@ -710,18 +739,7 @@ pub async fn create_account(
         Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
         _ => {
             let seed = generate_account_id_seed(&name, &email_patterns);
-            let mut candidate = AccountId::from(seed.as_str());
-            let mut suffix = 2;
-            while state
-                .service
-                .get_source(&candidate)
-                .map_err(ApiError::from_service_error)?
-                .is_some()
-            {
-                candidate = AccountId::from(format!("{seed}-{suffix}"));
-                suffix += 1;
-            }
-            candidate
+            allocate_unique_account_id(state.as_ref(), &seed)?
         }
     };
     if state
@@ -750,16 +768,11 @@ pub async fn create_account(
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
-    account.transport.secret_ref = secret_ref_after_write_request(&account.id, None, &secret)?;
+    account.transport.secret_ref =
+        decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
     validate_account_settings(&account)?;
     apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
-    state
-        .service
-        .save_source(&account)
-        .map_err(ApiError::from_service_error)?;
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
-        .map_err(store_error_to_api)?;
+    persist_new_account(&state, &account, EVENT_TOPIC_ACCOUNT_CREATED).await?;
 
     let settings = state
         .service
@@ -787,7 +800,8 @@ pub async fn patch_account(
     let existing_secret_ref = account.transport.secret_ref.clone();
     let secret_request = request.secret.unwrap_or_default();
     account.transport.secret_ref =
-        secret_ref_after_write_request(&account.id, existing_secret_ref.as_ref(), &secret_request)?;
+        decide_secret_instruction(&account.id, existing_secret_ref.as_ref(), &secret_request)?
+            .resolved_secret_ref(existing_secret_ref.as_ref());
     validate_account_settings(&account)?;
     let defer_secret_clear = secret_request.mode == SecretWriteMode::Clear;
     if !defer_secret_clear {
@@ -1073,17 +1087,7 @@ async fn create_oauth_account_from_exchange(
     let email_patterns = vec![identity_email.clone()];
     let name = identity_email.clone();
     let seed = generate_account_id_seed(&name, &email_patterns);
-    let mut account_id = AccountId::from(seed.as_str());
-    let mut suffix = 2;
-    while state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .is_some()
-    {
-        account_id = AccountId::from(format!("{seed}-{suffix}"));
-        suffix += 1;
-    }
+    let account_id = allocate_unique_account_id(state.as_ref(), &seed)?;
 
     let secret_ref = account_secret_ref(&account_id);
     let timestamp = domain_now_iso8601().map_err(internal_error)?;
@@ -1107,14 +1111,7 @@ async fn create_oauth_account_from_exchange(
         delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
         return Err(error);
     }
-    if let Err(error) = state.service.save_source(&account) {
-        delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
-        return Err(ApiError::from_service_error(error));
-    }
-
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
-        .map_err(store_error_to_api)?;
+    persist_new_account(state, &account, EVENT_TOPIC_ACCOUNT_CREATED).await?;
     Ok(account_id)
 }
 
@@ -1881,8 +1878,8 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
         ));
     };
     match role.as_deref() {
-        None | Some("archive") | Some("drafts") | Some("inbox") | Some("junk") | Some("sent")
-        | Some("trash") => Ok(role),
+        None => Ok(role),
+        Some(value) if MailboxRole::parse(value).is_some() => Ok(role),
         Some(_) => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_mailbox",
@@ -1971,7 +1968,7 @@ pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
     request: Option<Json<TriggerSyncRequest>>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<TriggerSyncResponse>, ApiError> {
     let account_id = AccountId(source_id);
     let mode = request
         .map(|Json(request)| request.mode)
@@ -1981,11 +1978,11 @@ pub async fn trigger_sync(
         .sync_account_with_mode(&account_id, mode)
         .await
         .map_err(ApiError::from_service_error)?;
-    Ok(Json(json!({
-        "ok": true,
-        "eventCount": event_count,
-        "mode": mode.as_str(),
-    })))
+    Ok(Json(TriggerSyncResponse {
+        ok: true,
+        event_count,
+        mode: mode.as_str().to_string(),
+    }))
 }
 
 /// GET /v1/events
@@ -2150,6 +2147,19 @@ mod tests {
 
         assert_eq!(decoded.sort_value, cursor.sort_value);
         assert_eq!(decoded.conversation_id, cursor.conversation_id);
+    }
+
+    #[test]
+    fn trigger_sync_response_serializes_wire_compatible_json() {
+        let body = TriggerSyncResponse {
+            ok: true,
+            event_count: 3,
+            mode: "full".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&body).expect("serialize trigger sync response"),
+            json!({ "ok": true, "eventCount": 3, "mode": "full" }),
+        );
     }
 
     #[test]

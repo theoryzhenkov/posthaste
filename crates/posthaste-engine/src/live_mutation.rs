@@ -1,6 +1,6 @@
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, MessageId, MutationOutcome,
-    SetKeywordsCommand, SyncCursor, SyncObject,
+    now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, MailboxRole, MessageId,
+    MutationOutcome, SetKeywordsCommand, SyncCursor, SyncObject,
 };
 use serde_json::{json, Map, Value};
 
@@ -294,8 +294,8 @@ fn sync_object_mutation_outcome(
 
 fn validate_mailbox_role(role: Option<&str>) -> Result<(), GatewayError> {
     match role {
-        None | Some("archive") | Some("drafts") | Some("inbox") | Some("junk") | Some("sent")
-        | Some("trash") => Ok(()),
+        None => Ok(()),
+        Some(value) if MailboxRole::parse(value).is_some() => Ok(()),
         Some(other) => Err(GatewayError::Rejected(format!(
             "unsupported mailbox role: {other}"
         ))),
