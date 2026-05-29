@@ -10,6 +10,714 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/v1/account-assets/logos/{image_id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get account logo",
+        "description": "Returns the stored account logo image bytes.",
+        "operationId": "get_account_logo",
+        "parameters": [
+          {
+            "name": "image_id",
+            "in": "path",
+            "description": "Logo image identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logo image bytes",
+            "content": {
+              "image/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Logo not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "List accounts",
+        "description": "Returns all configured accounts with their runtime overview.",
+        "operationId": "list_accounts",
+        "responses": {
+          "200": {
+            "description": "All configured accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountOverview"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Create account",
+        "description": "Validates uniqueness, applies the secret instruction, persists config, starts the runtime, and emits an account.created event.",
+        "operationId": "create_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The created account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Account already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get account",
+        "description": "Returns a single account with its runtime overview.",
+        "operationId": "get_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOverview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Delete account",
+        "description": "Removes the managed keyring secret, stops the runtime, deletes config, and emits an account.deleted event.",
+        "operationId": "delete_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Update account",
+        "description": "Sparse-merges provided fields into the existing account and restarts the runtime.",
+        "operationId": "patch_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}/disable": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Disable account",
+        "description": "Clears the account enabled flag and restarts the runtime.",
+        "operationId": "disable_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}/enable": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Enable account",
+        "description": "Sets the account enabled flag and restarts the runtime.",
+        "operationId": "enable_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}/logo": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Upload account logo",
+        "description": "Stores a user-uploaded account logo (PNG, JPEG, WebP, or GIF) and updates the account appearance to reference it. The request body is the raw image bytes.",
+        "operationId": "upload_account_logo",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Raw image bytes",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOverview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or oversized image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}/oauth/start": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Start account OAuth flow",
+        "description": "Creates a backend-held PKCE authorization session for an existing account.",
+        "operationId": "start_account_oauth",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authorization session details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartOAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid account or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{account_id}/verify": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Verify account",
+        "description": "Attempts JMAP session discovery and reports identity and push support.",
+        "operationId": "verify_account",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "description": "Account identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Gateway verification failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/automation-rules:preview": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Preview automation rule",
+        "description": "Returns a small newest-first sample and total count for a draft rule condition.",
+        "operationId": "preview_automation_rule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewAutomationRuleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Preview sample and total count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationRulePreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid limit or condition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config:reload": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Reload configuration",
+        "description": "Re-reads config from disk, diffs against the in-memory snapshot, and starts/stops runtimes for changed accounts.",
+        "operationId": "reload_config",
+        "responses": {
+          "200": {
+            "description": "Configuration reloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Configuration invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Configuration reload failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Stream events",
+        "description": "Opens a Server-Sent Events stream of domain events. When afterSeq is provided, replays matching backlog events before switching to the live stream.",
+        "operationId": "stream_events",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "mailboxId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "afterSeq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent event stream of domain events",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "400": {
+            "description": "Invalid filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/health": {
       "get": {
         "tags": [
@@ -31,10 +739,2414 @@
           }
         }
       }
+    },
+    "/v1/messages/search": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Search messages",
+        "description": "Returns a global, paginated message search page without source fan-out.",
+        "operationId": "search_messages",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/MessageSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortDir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SortDirection"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of matching message summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or empty query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/callback": {
+      "get": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Complete OAuth flow",
+        "description": "Loopback redirect target. Exchanges a provider authorization code for a token set and returns an HTML page for the browser tab.",
+        "operationId": "complete_account_oauth",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "errorDescription",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth completion HTML page",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "400": {
+            "description": "OAuth denied or invalid callback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/start": {
+      "post": {
+        "tags": [
+          "oauth"
+        ],
+        "summary": "Start provider OAuth flow",
+        "description": "Creates a backend-held PKCE authorization session for provider-first setup.",
+        "operationId": "start_provider_oauth",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartProviderOAuthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authorization session details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartOAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sender-addresses": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List sender addresses",
+        "description": "Returns locally cached sender addresses that previously passed submission.",
+        "operationId": "list_sender_addresses",
+        "responses": {
+          "200": {
+            "description": "Cached sender addresses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CachedSenderAddress"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get settings",
+        "description": "Returns global application settings.",
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "description": "The application settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSettings"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update settings",
+        "description": "Sparse-merges provided settings fields. Validates that a referenced default account exists before persisting.",
+        "operationId": "patch_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sidebar": {
+      "get": {
+        "tags": [
+          "mailboxes"
+        ],
+        "summary": "Get sidebar",
+        "description": "Returns the combined sidebar payload: smart mailboxes, tags, and per-source mailboxes.",
+        "operationId": "get_sidebar",
+        "responses": {
+          "200": {
+            "description": "The sidebar payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SidebarResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/smart-mailboxes": {
+      "get": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "List smart mailboxes",
+        "description": "Returns all smart mailboxes with live unread and total counts.",
+        "operationId": "list_smart_mailboxes",
+        "responses": {
+          "200": {
+            "description": "All smart mailboxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SmartMailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "Create smart mailbox",
+        "description": "Generates an ID from the name and persists a new smart mailbox.",
+        "operationId": "create_smart_mailbox",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSmartMailboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The created smart mailbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/smart-mailboxes/{smart_mailbox_id}": {
+      "get": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "Get smart mailbox",
+        "description": "Returns a single smart mailbox with its rule.",
+        "operationId": "get_smart_mailbox",
+        "parameters": [
+          {
+            "name": "smart_mailbox_id",
+            "in": "path",
+            "description": "Smart mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The smart mailbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartMailbox"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Smart mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "Delete smart mailbox",
+        "description": "Deletes a smart mailbox.",
+        "operationId": "delete_smart_mailbox",
+        "parameters": [
+          {
+            "name": "smart_mailbox_id",
+            "in": "path",
+            "description": "Smart mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Smart mailbox deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Smart mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "Update smart mailbox",
+        "description": "Merges name, position, and rule fields. Omitted fields are preserved.",
+        "operationId": "patch_smart_mailbox",
+        "parameters": [
+          {
+            "name": "smart_mailbox_id",
+            "in": "path",
+            "description": "Smart mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSmartMailboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated smart mailbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Smart mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/smart-mailboxes/{smart_mailbox_id}/conversations": {
+      "get": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "List smart mailbox conversations",
+        "description": "Returns a paginated page of conversation summaries matching a smart mailbox rule, optionally narrowed by a search query.",
+        "operationId": "list_smart_mailbox_conversations",
+        "parameters": [
+          {
+            "name": "smart_mailbox_id",
+            "in": "path",
+            "description": "Smart mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "mailboxId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortDir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SortDirection"
+                }
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of conversation summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Smart mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/smart-mailboxes/{smart_mailbox_id}/messages": {
+      "get": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "List smart mailbox messages",
+        "description": "Returns a paginated page of message summaries matching a smart mailbox rule, optionally narrowed by a search query.",
+        "operationId": "list_smart_mailbox_messages",
+        "parameters": [
+          {
+            "name": "smart_mailbox_id",
+            "in": "path",
+            "description": "Smart mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/MessageSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortDir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SortDirection"
+                }
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of message summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Smart mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/smart-mailboxes:reset-defaults": {
+      "post": {
+        "tags": [
+          "smart-mailboxes"
+        ],
+        "summary": "Reset default smart mailboxes",
+        "description": "Restores the built-in default smart mailboxes and returns the full list.",
+        "operationId": "reset_default_smart_mailboxes",
+        "responses": {
+          "200": {
+            "description": "All smart mailboxes after reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SmartMailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Add message to mailbox",
+        "description": "Adds a message to a single additional mailbox.",
+        "operationId": "add_to_mailbox",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddToMailboxCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/destroy": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Destroy message",
+        "description": "Permanently deletes a message.",
+        "operationId": "destroy_message",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Remove message from mailbox",
+        "description": "Removes a message from a single mailbox.",
+        "operationId": "remove_from_mailbox",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveFromMailboxCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Replace message mailboxes",
+        "description": "Atomically replaces all mailbox memberships for a message.",
+        "operationId": "replace_mailboxes",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceMailboxesCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/messages/{message_id}/set-keywords": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Set message keywords",
+        "description": "Adds and/or removes JMAP keywords on a message.",
+        "operationId": "set_keywords",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKeywordsCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/send": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Send message",
+        "description": "Validates and submits a new email via the source gateway, then triggers a sync.",
+        "operationId": "send_message",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Message accepted for delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid compose request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/sync": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Trigger sync",
+        "description": "Runs a manual sync for a source and reports the number of events emitted.",
+        "operationId": "trigger_sync",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional. Defaults to an incremental sync when the body is omitted.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sync result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerSyncResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/identity": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get sender identity",
+        "description": "Returns the JMAP sender identity for a source.",
+        "operationId": "get_identity",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sender identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/mailboxes": {
+      "get": {
+        "tags": [
+          "mailboxes"
+        ],
+        "summary": "List mailboxes",
+        "description": "Returns all mailboxes for a source with unread and total counts.",
+        "operationId": "list_mailboxes",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mailboxes for the source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/mailboxes/{mailbox_id}": {
+      "patch": {
+        "tags": [
+          "mailboxes"
+        ],
+        "summary": "Update mailbox role",
+        "description": "Sets or clears the role assigned to a mailbox and returns the updated list.",
+        "operationId": "patch_mailbox",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "description": "Mailbox identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchMailboxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated mailboxes for the source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mailbox role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source or mailbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/messages": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List source messages",
+        "description": "Returns a paginated page of message summaries for a source, optionally filtered by mailbox or a search query.",
+        "operationId": "list_source_messages",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailboxId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/MessageSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortDir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SortDirection"
+                }
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of message summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/messages/{message_id}": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get message detail",
+        "description": "Returns full message detail with sanitized body HTML and rewritten inline attachment URLs.",
+        "operationId": "get_message",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get message attachment",
+        "description": "Returns the raw bytes of a message attachment, inline or as a download.",
+        "operationId": "get_message_attachment",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "description": "Attachment identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment bytes, served with the attachment's own MIME type (octet-stream fallback)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message or attachment not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream network error fetching the attachment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/messages/{message_id}/reply-context": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get reply context",
+        "description": "Returns pre-computed reply/forward metadata (recipients, subjects, quoted body).",
+        "operationId": "get_reply_context",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The reply context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplyContext"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/views/conversations": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "List conversations",
+        "description": "Returns a paginated page of conversation summaries, optionally filtered by source, mailbox, or a search query.",
+        "operationId": "list_conversations",
+        "parameters": [
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "mailboxId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ConversationSortField"
+                }
+              ]
+            }
+          },
+          {
+            "name": "sortDir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/SortDirection"
+                }
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of conversation summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/views/conversations/{conversation_id}": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Get conversation",
+        "description": "Returns a full conversation with all messages expanded.",
+        "operationId": "get_conversation",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "description": "Conversation identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AccountAppearance": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "initials",
+              "color_hue",
+              "kind"
+            ],
+            "properties": {
+              "color_hue": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "initials": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "initials"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_id",
+              "initials",
+              "color_hue",
+              "kind"
+            ],
+            "properties": {
+              "color_hue": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "image_id": {
+                "type": "string"
+              },
+              "initials": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "User-facing visual identity for an account.\n\n@spec docs/L1-accounts#toml-schema\n@spec docs/L1-api#account-crud-lifecycle"
+      },
+      "AccountConnectionOverview": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "provider",
+              "provider_kind",
+              "auth",
+              "secret",
+              "kind"
+            ],
+            "properties": {
+              "auth": {
+                "$ref": "#/components/schemas/ProviderAuthKind"
+              },
+              "base_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "imap": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImapTransportSettings"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manualCredentials"
+                ]
+              },
+              "provider": {
+                "$ref": "#/components/schemas/ProviderHint"
+              },
+              "provider_kind": {
+                "$ref": "#/components/schemas/ProviderKind"
+              },
+              "secret": {
+                "$ref": "#/components/schemas/SecretStatus"
+              },
+              "smtp": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SmtpTransportSettings"
+                  }
+                ]
+              },
+              "username": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "provider",
+              "provider_kind",
+              "auth",
+              "secret",
+              "kind"
+            ],
+            "properties": {
+              "auth": {
+                "$ref": "#/components/schemas/ProviderAuthKind"
+              },
+              "imap": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImapTransportSettings"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "managedOAuth"
+                ]
+              },
+              "provider": {
+                "$ref": "#/components/schemas/ProviderHint"
+              },
+              "provider_kind": {
+                "$ref": "#/components/schemas/ProviderKind"
+              },
+              "secret": {
+                "$ref": "#/components/schemas/SecretStatus"
+              },
+              "smtp": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SmtpTransportSettings"
+                  }
+                ]
+              },
+              "username": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "API-facing account connection variant used by account settings UIs.\n\n@spec docs/L1-api#account-crud-lifecycle"
+      },
+      "AccountDriver": {
+        "type": "string",
+        "description": "Backend driver type for an account.\n\n@spec docs/L1-accounts#toml-schema",
+        "enum": [
+          "jmap",
+          "imapSmtp",
+          "mock"
+        ]
+      },
+      "AccountId": {
+        "type": "string",
+        "description": "Opaque server-assigned identifier for a mail account.\n\n@spec docs/L0-accounts#the-invariant"
+      },
+      "AccountOverview": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AccountRuntimeOverview"
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "emailPatterns",
+              "driver",
+              "enabled",
+              "appearance",
+              "connection",
+              "createdAt",
+              "updatedAt",
+              "isDefault"
+            ],
+            "properties": {
+              "appearance": {
+                "$ref": "#/components/schemas/AccountAppearance"
+              },
+              "connection": {
+                "$ref": "#/components/schemas/AccountConnectionOverview"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "driver": {
+                "$ref": "#/components/schemas/AccountDriver"
+              },
+              "emailPatterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "fullName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "$ref": "#/components/schemas/AccountId"
+              },
+              "isDefault": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Combined account config and runtime state returned by the API.\n\n@spec docs/L1-api#account-crud-lifecycle"
+      },
+      "AccountRuntimeOverview": {
+        "type": "object",
+        "description": "Volatile runtime state for an account (sync status, push status, last error).\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "status",
+          "push"
+        ],
+        "properties": {
+          "lastSyncAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSyncError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSyncErrorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "push": {
+            "$ref": "#/components/schemas/PushStatus"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountStatus"
+          },
+          "syncProgress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SyncProgress"
+              }
+            ]
+          }
+        }
+      },
+      "AccountStatus": {
+        "type": "string",
+        "description": "Runtime health status of a mail account.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "enum": [
+          "ready",
+          "syncing",
+          "degraded",
+          "authError",
+          "offline",
+          "disabled"
+        ]
+      },
+      "AccountTransportRequest": {
+        "type": "object",
+        "description": "Transport fields for account create/patch requests.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "properties": {
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderAuthKind"
+              }
+            ]
+          },
+          "baseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imap": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImapTransportSettings"
+              }
+            ]
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderHint"
+              }
+            ]
+          },
+          "smtp": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmtpTransportSettings"
+              }
+            ]
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AddToMailboxCommand": {
+        "type": "object",
+        "description": "Command to add a message to a single additional mailbox.\n\n@spec docs/L1-api#message-commands",
+        "required": [
+          "mailboxId"
+        ],
+        "properties": {
+          "mailboxId": {
+            "$ref": "#/components/schemas/MailboxId"
+          }
+        }
+      },
       "ApiErrorBody": {
         "type": "object",
         "description": "JSON error response body returned by all API error paths.\n\n@spec docs/L1-api#error-format",
@@ -58,6 +3170,727 @@
           }
         }
       },
+      "AppAppearanceSettings": {
+        "type": "object",
+        "description": "Global UI appearance preferences shared across app windows.\n\n@spec docs/L1-accounts#toml-schema",
+        "properties": {
+          "accentHue": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "density": {
+            "$ref": "#/components/schemas/AppUiDensity"
+          },
+          "glassTheme": {
+            "$ref": "#/components/schemas/AppGlassThemeSettings"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AppThemeMode"
+          },
+          "palettePreset": {
+            "$ref": "#/components/schemas/AppPalettePreset"
+          }
+        }
+      },
+      "AppGlassBloomSettings": {
+        "type": "object",
+        "required": [
+          "id",
+          "hue",
+          "x",
+          "y",
+          "opacity",
+          "radius"
+        ],
+        "properties": {
+          "hue": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "opacity": {
+            "type": "number",
+            "format": "double"
+          },
+          "radius": {
+            "type": "number",
+            "format": "double"
+          },
+          "x": {
+            "type": "number",
+            "format": "double"
+          },
+          "y": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "AppGlassThemeSettings": {
+        "type": "object",
+        "properties": {
+          "blooms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppGlassBloomSettings"
+            }
+          }
+        }
+      },
+      "AppPalettePreset": {
+        "type": "string",
+        "enum": [
+          "neutral",
+          "paperInk",
+          "brutalist",
+          "glass",
+          "acid",
+          "marzipan",
+          "botanical"
+        ]
+      },
+      "AppSettings": {
+        "type": "object",
+        "description": "Global application settings shared across all accounts.\n\n@spec docs/L1-accounts#toml-schema",
+        "properties": {
+          "appearance": {
+            "$ref": "#/components/schemas/AppAppearanceSettings"
+          },
+          "automationDrafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationRule"
+            }
+          },
+          "automationRules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationRule"
+            }
+          },
+          "cachePolicy": {
+            "$ref": "#/components/schemas/CachePolicy"
+          },
+          "defaultAccountId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountId"
+              }
+            ]
+          }
+        }
+      },
+      "AppThemeMode": {
+        "type": "string",
+        "enum": [
+          "light",
+          "dark",
+          "system"
+        ]
+      },
+      "AppUiDensity": {
+        "type": "string",
+        "enum": [
+          "compact",
+          "cozy",
+          "comfortable"
+        ]
+      },
+      "AutomationAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "tag",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "applyTag"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "tag",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "removeTag"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "markRead"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "markUnread"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unflag"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "mailbox_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "moveToMailbox"
+                ]
+              },
+              "mailbox_id": {
+                "$ref": "#/components/schemas/MailboxId"
+              }
+            }
+          }
+        ],
+        "description": "Supported effects for automation rules.\n\n@spec docs/L1-sync#automation-actions"
+      },
+      "AutomationRule": {
+        "type": "object",
+        "description": "Account-level automation rule evaluated by backend triggers.\n\n@spec docs/L1-accounts#toml-schema\n@spec docs/L1-sync#automation-actions",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "triggers",
+          "condition",
+          "actions",
+          "backfill"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationAction"
+            }
+          },
+          "backfill": {
+            "type": "boolean"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/SmartMailboxRule"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutomationTrigger"
+            }
+          }
+        }
+      },
+      "AutomationRulePreviewResponse": {
+        "type": "object",
+        "description": "Matching message preview for a draft automation rule condition.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "total",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "AutomationTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "messageArrived"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "messageChanged"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Event types that can cause an automation rule to run.\n\n@spec docs/L1-sync#automation-actions"
+      },
+      "BlobId": {
+        "type": "string",
+        "description": "Opaque server-assigned identifier for a binary blob (attachment or body content).\n\n@spec docs/L1-jmap#methods-used"
+      },
+      "CachePolicy": {
+        "type": "object",
+        "description": "Global cache budget and layer eligibility.\n\n@spec docs/L1-sync#local-cache-planning",
+        "required": [
+          "softCapBytes",
+          "hardCapBytes",
+          "cacheBodies",
+          "cacheRawMessages",
+          "cacheAttachments"
+        ],
+        "properties": {
+          "cacheAttachments": {
+            "type": "boolean"
+          },
+          "cacheBodies": {
+            "type": "boolean"
+          },
+          "cacheRawMessages": {
+            "type": "boolean"
+          },
+          "hardCapBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "softCapBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "CachedSenderAddress": {
+        "type": "object",
+        "description": "Locally cached sender address that previously passed provider submission.\n\n@spec docs/L1-compose#sender-selection",
+        "required": [
+          "sourceId",
+          "email",
+          "lastUsedAt"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceId": {
+            "$ref": "#/components/schemas/AccountId"
+          }
+        }
+      },
+      "CommandResult": {
+        "type": "object",
+        "description": "Result of a message mutation: updated detail (if applicable) and emitted events.\n\n@spec docs/L1-api#message-commands",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "detail": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageDetail"
+              }
+            ]
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainEvent"
+            }
+          }
+        }
+      },
+      "ConversationId": {
+        "type": "string",
+        "description": "Locally-derived identifier for a conversation (cross-source thread grouping).\n\n@spec docs/L1-sync#conversation-pagination"
+      },
+      "ConversationPageResponse": {
+        "type": "object",
+        "description": "Paginated conversation list response with an opaque cursor for the next page.\n\n@spec docs/L1-api#cursor-pagination",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ConversationSortField": {
+        "type": "string",
+        "description": "Column by which conversation lists can be sorted.\n\n@spec docs/L1-api#cursor-pagination",
+        "enum": [
+          "date",
+          "from",
+          "subject",
+          "source",
+          "threadSize",
+          "flagged",
+          "attachment"
+        ]
+      },
+      "ConversationSummary": {
+        "type": "object",
+        "description": "Conversation row for the paginated middle pane.\n\n@spec docs/L1-sync#conversation-pagination",
+        "required": [
+          "id",
+          "latestReceivedAt",
+          "unreadCount",
+          "messageCount",
+          "sourceIds",
+          "sourceNames",
+          "latestMessage",
+          "latestSourceName",
+          "hasAttachment",
+          "isFlagged"
+        ],
+        "properties": {
+          "fromEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasAttachment": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ConversationId"
+          },
+          "isFlagged": {
+            "type": "boolean"
+          },
+          "latestMessage": {
+            "$ref": "#/components/schemas/SourceMessageRef"
+          },
+          "latestReceivedAt": {
+            "type": "string"
+          },
+          "latestSourceName": {
+            "type": "string"
+          },
+          "messageCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "preview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountId"
+            }
+          },
+          "sourceNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unreadCount": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ConversationView": {
+        "type": "object",
+        "description": "Full conversation detail with all messages expanded.\n\n@spec docs/L1-api#conversations-and-messages",
+        "required": [
+          "id",
+          "messages"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ConversationId"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateAccountRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/accounts`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountAppearance"
+              }
+            ]
+          },
+          "driver": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountDriver"
+              }
+            ]
+          },
+          "emailPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretWriteRequest"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/AccountTransportRequest"
+          }
+        }
+      },
+      "CreateSmartMailboxRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/smart-mailboxes`.\n\n@spec docs/L1-api#smart-mailbox-crud",
+        "required": [
+          "name",
+          "rule"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/SmartMailboxRule"
+          }
+        }
+      },
+      "DomainEvent": {
+        "type": "object",
+        "description": "An ordered domain event stored in `event_log` and published via SSE.\n\n@spec docs/L1-sync#event-propagation\n@spec docs/L1-api#sse-event-stream",
+        "required": [
+          "seq",
+          "accountId",
+          "topic",
+          "occurredAt",
+          "payload"
+        ],
+        "properties": {
+          "accountId": {
+            "$ref": "#/components/schemas/AccountId"
+          },
+          "mailboxId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailboxId"
+              }
+            ]
+          },
+          "messageId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageId"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "topic": {
+            "type": "string"
+          }
+        }
+      },
       "HealthResponse": {
         "type": "object",
         "description": "Product API readiness response.\n\n@spec docs/L1-api#health",
@@ -69,6 +3902,1460 @@
             "type": "string"
           }
         }
+      },
+      "Identity": {
+        "type": "object",
+        "description": "JMAP sender identity for an account.\n\n@spec docs/L1-jmap#core-types",
+        "required": [
+          "id",
+          "name",
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ImapTransportSettings": {
+        "type": "object",
+        "description": "IMAP endpoint settings for traditional provider sync.\n\n@spec docs/L0-providers#imap-smtp-sync-strategy",
+        "required": [
+          "host",
+          "port",
+          "security"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "security": {
+            "$ref": "#/components/schemas/TransportSecurity"
+          }
+        }
+      },
+      "MailboxId": {
+        "type": "string",
+        "description": "Opaque server-assigned identifier for a mailbox (folder or label).\n\n@spec docs/L1-jmap#core-types"
+      },
+      "MailboxSummary": {
+        "type": "object",
+        "description": "Lightweight mailbox view for sidebar and list endpoints.\n\n@spec docs/L1-api#navigation",
+        "required": [
+          "id",
+          "name",
+          "unreadEmails",
+          "totalEmails"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/MailboxId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalEmails": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreadEmails": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MessageAttachment": {
+        "type": "object",
+        "description": "Full message including sanitized body content, returned by message detail endpoint.\n\n@spec docs/L1-api#message-body-sanitization",
+        "required": [
+          "id",
+          "blobId",
+          "mimeType",
+          "size",
+          "isInline"
+        ],
+        "properties": {
+          "blobId": {
+            "$ref": "#/components/schemas/BlobId"
+          },
+          "cid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disposition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "isInline": {
+            "type": "boolean"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "partId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MessageDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MessageSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "attachments"
+            ],
+            "properties": {
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MessageAttachment"
+                }
+              },
+              "bodyHtml": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bodyText": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rawMessage": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RawMessageRef"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Full message including sanitized body content, returned by message detail endpoint.\n\n@spec docs/L1-api#message-body-sanitization"
+      },
+      "MessageId": {
+        "type": "string",
+        "description": "Opaque server-assigned identifier for a single email message.\n\n@spec docs/L1-jmap#core-types"
+      },
+      "MessagePageResponse": {
+        "type": "object",
+        "description": "Paginated message list response with an opaque cursor for the next page.\n\n@spec docs/L1-api#cursor-pagination",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MessageSortField": {
+        "type": "string",
+        "description": "Column by which message lists can be sorted.\n\n@spec docs/L1-api#cursor-pagination",
+        "enum": [
+          "date",
+          "from",
+          "subject",
+          "source",
+          "flagged",
+          "attachment"
+        ]
+      },
+      "MessageSummary": {
+        "type": "object",
+        "description": "Message metadata for list views (no body content).\n\n@spec docs/L1-api#conversations-and-messages",
+        "required": [
+          "id",
+          "sourceId",
+          "sourceName",
+          "sourceThreadId",
+          "conversationId",
+          "to",
+          "receivedAt",
+          "hasAttachment",
+          "isRead",
+          "isFlagged",
+          "mailboxIds",
+          "keywords"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/ConversationId"
+          },
+          "fromEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasAttachment": {
+            "type": "boolean"
+          },
+          "id": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "isFlagged": {
+            "type": "boolean"
+          },
+          "isRead": {
+            "type": "boolean"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mailboxIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxId"
+            }
+          },
+          "preview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "sourceId": {
+            "$ref": "#/components/schemas/AccountId"
+          },
+          "sourceName": {
+            "type": "string"
+          },
+          "sourceThreadId": {
+            "$ref": "#/components/schemas/ThreadId"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          }
+        }
+      },
+      "OkResponse": {
+        "type": "object",
+        "description": "Generic success response for mutating endpoints that return no domain data.\n\n@spec docs/L1-api#endpoint-table",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatchAccountRequest": {
+        "type": "object",
+        "description": "Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountAppearance"
+              }
+            ]
+          },
+          "driver": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountDriver"
+              }
+            ]
+          },
+          "emailPatterns": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SecretWriteRequest"
+              }
+            ]
+          },
+          "transport": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountTransportRequest"
+              }
+            ]
+          }
+        }
+      },
+      "PatchMailboxRequest": {
+        "type": "object",
+        "description": "Request body for `PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}`.\n\nOuter `Option` distinguishes omitted `role` from an explicit JSON `null`.\n\n@spec docs/L1-api#conversations-and-messages",
+        "properties": {
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatchSettingsRequest": {
+        "type": "object",
+        "description": "Request body for `PATCH /v1/settings`.\n\n@spec docs/L1-api#settings",
+        "properties": {
+          "appearance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AppAppearanceSettings"
+              }
+            ]
+          },
+          "automationDrafts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AutomationRule"
+            }
+          },
+          "automationRules": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AutomationRule"
+            }
+          },
+          "cachePolicy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CachePolicy"
+              }
+            ]
+          },
+          "defaultAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PatchSmartMailboxRequest": {
+        "type": "object",
+        "description": "Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.\n\n@spec docs/L1-api#smart-mailbox-crud",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "rule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartMailboxRule"
+              }
+            ]
+          }
+        }
+      },
+      "PreviewAutomationRuleRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/automation-rules:preview`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "condition"
+        ],
+        "properties": {
+          "condition": {
+            "$ref": "#/components/schemas/SmartMailboxRule"
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
+      "ProviderAuthKind": {
+        "type": "string",
+        "description": "Authentication mode used by the selected provider transport.\n\n@spec docs/L0-providers#authentication",
+        "enum": [
+          "password",
+          "appPassword",
+          "oauth2"
+        ]
+      },
+      "ProviderHint": {
+        "type": "string",
+        "description": "User-selected provider hint for traditional mail account setup.\n\n@spec docs/L0-providers#driver-model",
+        "enum": [
+          "generic",
+          "gmail",
+          "outlook",
+          "icloud"
+        ]
+      },
+      "ProviderKind": {
+        "type": "string",
+        "description": "Provider family independent of the account driver/protocol.\n\n`AccountDriver` selects the runtime protocol. `ProviderKind` selects the\nvendor/family policy applied within that protocol.\n\n@spec docs/L0-providers#driver-model",
+        "enum": [
+          "generic",
+          "gmail",
+          "outlook",
+          "icloud"
+        ]
+      },
+      "PushStatus": {
+        "type": "string",
+        "description": "Current state of the push notification transport for an account.\n\n@spec docs/L2-transport#push-transport",
+        "enum": [
+          "connected",
+          "reconnecting",
+          "unsupported",
+          "disabled"
+        ]
+      },
+      "RawMessageRef": {
+        "type": "object",
+        "description": "Metadata for a locally-cached raw MIME message file.\n\n@spec docs/L1-sync#sync-loop",
+        "required": [
+          "path",
+          "sha256",
+          "size",
+          "mimeType",
+          "fetchedAt"
+        ],
+        "properties": {
+          "fetchedAt": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Recipient": {
+        "type": "object",
+        "description": "Email address with optional display name.\n\n@spec docs/L1-jmap#methods-used",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RemoveFromMailboxCommand": {
+        "type": "object",
+        "description": "Command to remove a message from a single mailbox.\n\n@spec docs/L1-api#message-commands",
+        "required": [
+          "mailboxId"
+        ],
+        "properties": {
+          "mailboxId": {
+            "$ref": "#/components/schemas/MailboxId"
+          }
+        }
+      },
+      "ReplaceMailboxesCommand": {
+        "type": "object",
+        "description": "Command to atomically replace all mailbox memberships for a message.\n\n@spec docs/L1-api#message-commands",
+        "required": [
+          "mailboxIds"
+        ],
+        "properties": {
+          "mailboxIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxId"
+            }
+          }
+        }
+      },
+      "ReplyContext": {
+        "type": "object",
+        "description": "Pre-computed reply/forward metadata fetched from the gateway.\n\n@spec docs/L1-jmap#methods-used",
+        "required": [
+          "to",
+          "cc",
+          "replySubject",
+          "forwardSubject"
+        ],
+        "properties": {
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "forwardSubject": {
+            "type": "string"
+          },
+          "inReplyTo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quotedBody": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "references": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "replySubject": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          }
+        }
+      },
+      "SecretKind": {
+        "type": "string",
+        "description": "Storage backend for account credentials.\n\n@spec docs/L1-api#secret-management",
+        "enum": [
+          "env",
+          "os"
+        ]
+      },
+      "SecretStatus": {
+        "type": "object",
+        "description": "Redacted secret status returned in API responses. Never contains the secret value.\n\n@spec docs/L1-api#secret-management",
+        "required": [
+          "storage",
+          "configured"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "storage": {
+            "$ref": "#/components/schemas/SecretKind"
+          }
+        }
+      },
+      "SecretWriteMode": {
+        "type": "string",
+        "description": "Tri-state write mode controlling how a secret is mutated on account save.\n\n@spec docs/L1-api#secret-management",
+        "enum": [
+          "keep",
+          "replace",
+          "clear"
+        ]
+      },
+      "SecretWriteRequest": {
+        "type": "object",
+        "description": "Secret instruction embedded in account create/patch requests.\n\n@spec docs/L1-api#secret-management",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SecretWriteMode"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "description": "Request payload for sending a new email via `EmailSubmission/set`.\n\n@spec docs/L1-jmap#methods-used",
+        "required": [
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "bcc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Recipient"
+              }
+            ]
+          },
+          "inReplyTo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "references": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          }
+        }
+      },
+      "SetKeywordsCommand": {
+        "type": "object",
+        "description": "Command to add and/or remove JMAP keywords on a message.\n\n@spec docs/L1-api#message-commands",
+        "required": [
+          "add",
+          "remove"
+        ],
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SidebarResponse": {
+        "type": "object",
+        "description": "Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.\n\n@spec docs/L1-api#navigation",
+        "required": [
+          "smartMailboxes",
+          "tags",
+          "sources"
+        ],
+        "properties": {
+          "smartMailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SidebarSmartMailbox"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SidebarSource"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagSummary"
+            }
+          }
+        }
+      },
+      "SidebarSmartMailbox": {
+        "type": "object",
+        "description": "Smart mailbox entry with live counts for the sidebar.\n\n@spec docs/L1-api#navigation",
+        "required": [
+          "id",
+          "name",
+          "unreadMessages",
+          "totalMessages"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SmartMailboxId"
+          },
+          "name": {
+            "type": "string"
+          },
+          "totalMessages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreadMessages": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SidebarSource": {
+        "type": "object",
+        "description": "An account with its mailboxes, as rendered in the sidebar.\n\n@spec docs/L1-api#navigation",
+        "required": [
+          "id",
+          "name",
+          "mailboxes"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/AccountId"
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxSummary"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SmartMailbox": {
+        "type": "object",
+        "description": "A saved query with display metadata that behaves like a virtual mailbox.\n\n@spec docs/L0-search#smart-mailboxes\n@spec docs/L1-accounts#smart-mailbox-defaults",
+        "required": [
+          "id",
+          "name",
+          "position",
+          "kind",
+          "rule",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "defaultKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifies built-in smart mailboxes (e.g. \"inbox\", \"trash\")."
+          },
+          "id": {
+            "$ref": "#/components/schemas/SmartMailboxId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SmartMailboxKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartMailboxId"
+              }
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/SmartMailboxRule"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "SmartMailboxCondition": {
+        "type": "object",
+        "description": "Leaf condition matching a single field with an operator and value.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "required": [
+          "field",
+          "operator",
+          "negated",
+          "value"
+        ],
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/SmartMailboxField"
+          },
+          "negated": {
+            "type": "boolean"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/SmartMailboxOperator"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SmartMailboxValue"
+          }
+        }
+      },
+      "SmartMailboxField": {
+        "type": "string",
+        "description": "Message field that a smart mailbox condition can filter on.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "enum": [
+          "sourceId",
+          "sourceName",
+          "messageId",
+          "threadId",
+          "mailboxId",
+          "mailboxName",
+          "mailboxRole",
+          "isRead",
+          "isFlagged",
+          "hasAttachment",
+          "keyword",
+          "fromName",
+          "fromEmail",
+          "subject",
+          "preview",
+          "receivedAt"
+        ]
+      },
+      "SmartMailboxGroup": {
+        "type": "object",
+        "description": "Boolean group node containing child conditions or nested groups.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "required": [
+          "operator",
+          "negated",
+          "nodes"
+        ],
+        "properties": {
+          "negated": {
+            "type": "boolean"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SmartMailboxRuleNode"
+            }
+          },
+          "operator": {
+            "$ref": "#/components/schemas/SmartMailboxGroupOperator"
+          }
+        }
+      },
+      "SmartMailboxGroupOperator": {
+        "type": "string",
+        "description": "Boolean combinator for smart mailbox rule groups: `All` (AND) or `Any` (OR).\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "enum": [
+          "all",
+          "any"
+        ]
+      },
+      "SmartMailboxId": {
+        "type": "string",
+        "description": "Identifier for a smart mailbox (saved query with display metadata).\n\n@spec docs/L1-search#smart-mailbox-data-model"
+      },
+      "SmartMailboxKind": {
+        "type": "string",
+        "description": "Distinguishes built-in smart mailboxes from user-created ones.\n\n@spec docs/L1-accounts#smart-mailbox-defaults",
+        "enum": [
+          "default",
+          "user"
+        ]
+      },
+      "SmartMailboxOperator": {
+        "type": "string",
+        "description": "Comparison operator for a smart mailbox condition.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "enum": [
+          "equals",
+          "in",
+          "contains",
+          "before",
+          "after",
+          "onOrBefore",
+          "onOrAfter"
+        ]
+      },
+      "SmartMailboxRule": {
+        "type": "object",
+        "description": "Top-level rule for a smart mailbox, wrapping a root group.\n\n@spec docs/L1-accounts#condition-fields-and-operators",
+        "required": [
+          "root"
+        ],
+        "properties": {
+          "root": {
+            "$ref": "#/components/schemas/SmartMailboxGroup"
+          }
+        }
+      },
+      "SmartMailboxRuleNode": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SmartMailboxGroup"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "group"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SmartMailboxCondition"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "condition"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "description": "Recursive rule tree node: either a [`SmartMailboxGroup`] or a [`SmartMailboxCondition`].\n\n@spec docs/L1-accounts#condition-fields-and-operators"
+      },
+      "SmartMailboxSummary": {
+        "type": "object",
+        "description": "Smart mailbox config with live unread/total counts from the store.\n\n@spec docs/L1-api#smart-mailboxes",
+        "required": [
+          "id",
+          "name",
+          "position",
+          "kind",
+          "unreadMessages",
+          "totalMessages",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "defaultKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/SmartMailboxId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SmartMailboxKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SmartMailboxId"
+              }
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "totalMessages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreadMessages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "SmartMailboxValue": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "boolean"
+          }
+        ],
+        "description": "Condition value: scalar string, string list (for `In`), or boolean.\n\n@spec docs/L1-accounts#condition-fields-and-operators"
+      },
+      "SmtpTransportSettings": {
+        "type": "object",
+        "description": "SMTP endpoint settings for traditional provider submission.\n\n@spec docs/L0-providers#imap-smtp-sync-strategy",
+        "required": [
+          "host",
+          "port",
+          "security"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "security": {
+            "$ref": "#/components/schemas/TransportSecurity"
+          }
+        }
+      },
+      "SortDirection": {
+        "type": "string",
+        "description": "Sort direction for conversation lists.\n\n@spec docs/L1-api#cursor-pagination",
+        "enum": [
+          "asc",
+          "desc"
+        ]
+      },
+      "SourceMessageRef": {
+        "type": "object",
+        "description": "Account-qualified reference to a specific message.\n\n@spec docs/L0-accounts#the-invariant",
+        "required": [
+          "sourceId",
+          "messageId"
+        ],
+        "properties": {
+          "messageId": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "sourceId": {
+            "$ref": "#/components/schemas/AccountId"
+          }
+        }
+      },
+      "StartOAuthRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/accounts/{account_id}/oauth/start`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "clientId",
+          "redirectUri"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redirectUri": {
+            "type": "string"
+          }
+        }
+      },
+      "StartOAuthResponse": {
+        "type": "object",
+        "description": "Response body for `POST /v1/accounts/{account_id}/oauth/start`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "authorizationUrl",
+          "state",
+          "redirectUri"
+        ],
+        "properties": {
+          "authorizationUrl": {
+            "type": "string"
+          },
+          "redirectUri": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "StartProviderOAuthRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/oauth/start`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "provider",
+          "clientId",
+          "redirectUri"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderHint"
+          },
+          "redirectUri": {
+            "type": "string"
+          }
+        }
+      },
+      "SyncMode": {
+        "type": "string",
+        "description": "User-requested sync mode.\n\n@spec docs/L1-sync#sync-loop",
+        "enum": [
+          "incremental",
+          "fullMetadata"
+        ]
+      },
+      "SyncProgress": {
+        "type": "object",
+        "description": "Current user-facing progress for an account sync.\n\nThis is intentionally compact and coarse. Provider adapters may report more\nfrequent internal logs, but the runtime overview only exposes stable status\nuseful to users.\n\n@spec docs/L1-sync#sync-loop",
+        "required": [
+          "syncId",
+          "trigger",
+          "startedAt",
+          "stage",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "mailboxCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "mailboxIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "mailboxName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "messageCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "stage": {
+            "$ref": "#/components/schemas/SyncProgressStage"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "syncId": {
+            "type": "string"
+          },
+          "totalCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/SyncTrigger"
+          }
+        }
+      },
+      "SyncProgressStage": {
+        "type": "string",
+        "description": "Coarse user-facing phase for a running sync cycle.\n\n@spec docs/L1-sync#sync-loop",
+        "enum": [
+          "connecting",
+          "discovering",
+          "planning",
+          "fetching",
+          "storing",
+          "waiting"
+        ]
+      },
+      "SyncTrigger": {
+        "type": "string",
+        "description": "What caused a sync cycle to run.\n\n@spec docs/L1-sync#sync-loop",
+        "enum": [
+          "startup",
+          "poll",
+          "push",
+          "manual"
+        ]
+      },
+      "TagSummary": {
+        "type": "object",
+        "description": "User-facing tag derived from non-system JMAP keywords.\n\n@spec docs/L1-api#navigation",
+        "required": [
+          "name",
+          "unreadMessages",
+          "totalMessages"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "totalMessages": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreadMessages": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ThreadId": {
+        "type": "string",
+        "description": "Opaque server-assigned identifier for a JMAP thread.\n\n@spec docs/L1-jmap#core-types"
+      },
+      "TransportSecurity": {
+        "type": "string",
+        "description": "TLS behavior for IMAP and SMTP endpoints.\n\n@spec docs/L0-providers#imap-smtp-sync-strategy",
+        "enum": [
+          "tls",
+          "startTls",
+          "plain"
+        ]
+      },
+      "TriggerSyncRequest": {
+        "type": "object",
+        "description": "Request body for a manual source sync command.\n\n@spec docs/L1-api#sync-and-events",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SyncMode"
+          }
+        }
+      },
+      "TriggerSyncResponse": {
+        "type": "object",
+        "description": "Response from `POST /v1/sources/{id}/commands/sync`.\n\n@spec docs/L1-api#sync-and-events",
+        "required": [
+          "ok",
+          "eventCount",
+          "mode"
+        ],
+        "properties": {
+          "eventCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mode": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "VerificationResponse": {
+        "type": "object",
+        "description": "Response from `POST /v1/accounts/{id}/verify`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "ok",
+          "pushSupported"
+        ],
+        "properties": {
+          "identityEmail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "pushSupported": {
+            "type": "boolean"
+          }
+        }
       }
     }
   },
@@ -76,6 +5363,42 @@
     {
       "name": "system",
       "description": "Health and service status"
+    },
+    {
+      "name": "accounts",
+      "description": "Account configuration and lifecycle"
+    },
+    {
+      "name": "oauth",
+      "description": "Provider OAuth authorization flows"
+    },
+    {
+      "name": "mailboxes",
+      "description": "Mailboxes and navigation sidebar"
+    },
+    {
+      "name": "messages",
+      "description": "Messages, attachments, compose, and commands"
+    },
+    {
+      "name": "conversations",
+      "description": "Conversation list and detail views"
+    },
+    {
+      "name": "smart-mailboxes",
+      "description": "Saved-query smart mailboxes"
+    },
+    {
+      "name": "settings",
+      "description": "Application settings and automation rules"
+    },
+    {
+      "name": "sync",
+      "description": "Sync triggers and configuration reload"
+    },
+    {
+      "name": "events",
+      "description": "Server-sent domain event stream"
     }
   ]
 }
