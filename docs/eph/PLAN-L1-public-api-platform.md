@@ -89,17 +89,17 @@ Opening the API to arbitrary clients/agents is a security shift, not just docs:
 ## Phases
 
 - **P0 — Design & decisions** (this doc + open questions below resolved).
-- **P1 — OpenAPI emission**: `utoipa` annotations across the routes; commit
-  `openapi.json` as a contract artifact + drift test. DONE (46 operations,
-  feature-gated domain `ToSchema`, `GET /v1/openapi.json`). Remaining: serve a
-  browsable Swagger UI / Redoc / Scalar (currently only the raw spec is served).
-- **P2 — Generated TS client**: generate `api/types.ts` + client from the spec;
-  retire the hand-mirror; ship the typed `ApiErrorCode` union (with backend code
-  consolidation). Also fold in: repoint the frontend `@spec` refs that still
-  point at `#account-crud-lifecycle` for automation/appearance/cache topics →
-  `#application-settings` (deferred from the spec reorg; the generated
-  `types.ts`/`client.ts` get this for free on regen, but the hand-written
-  `apps/web/src/components/settings-panel/*` refs must be updated by hand).
+- **P1 — OpenAPI emission**: DONE. `utoipa` annotations across 46 operations;
+  feature-gated domain `ToSchema`; committed `openapi.json` + drift test;
+  `GET /v1/openapi.json` plus browsable Swagger UI at `/v1/docs` (offline assets).
+- **P2 — Generated TS client**: DONE. `openapi-typescript` generates
+  `schema.gen.ts` (drift-checked); the curated view-model in `api/types.ts` is
+  kept and anchored to the wire schema by `api/conformance.ts` (the model/
+  view-model layer was intentionally NOT rewritten). Typed `ApiErrorCode` union
+  shipped end-to-end (dedicated boundary enum, `From<ServiceErrorKind>`). Anchoring
+  also caught + fixed real contract bugs (utoipa `rename_all_fields` snake_case
+  leak; `AutomationTrigger` shape). Frontend automation `@spec` refs repointed to
+  `#application-settings`.
 - **P3 — AsyncAPI for `/events`**: document the SSE event contract.
 - **P4 — Trust model**: authn + capability-scoped authz + boundary validation +
   rate limiting.

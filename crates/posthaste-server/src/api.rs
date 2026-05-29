@@ -689,7 +689,11 @@ impl IntoResponse for ApiError {
 }
 
 fn account_not_found() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, ApiErrorCode::NotFound, "account not found")
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        ApiErrorCode::NotFound,
+        "account not found",
+    )
 }
 
 fn load_account(state: &AppState, account_id: &AccountId) -> Result<AccountSettings, ApiError> {
@@ -2108,7 +2112,13 @@ pub async fn get_message_attachment(
         .attachments
         .into_iter()
         .find(|attachment| attachment.id == attachment_id)
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, ApiErrorCode::NotFound, "attachment not found"))?;
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                ApiErrorCode::NotFound,
+                "attachment not found",
+            )
+        })?;
     let gateway = require_live_gateway(gateway, &account_id)?;
     let bytes = state
         .service

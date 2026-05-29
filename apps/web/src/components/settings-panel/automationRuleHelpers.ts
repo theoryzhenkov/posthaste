@@ -5,7 +5,7 @@
  * Extracted from AutomationActionsEditor so the component file holds UI and
  * these (testable, React-free) helpers stand on their own.
  *
- * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#application-settings
  */
 import type {
   AccountOverview,
