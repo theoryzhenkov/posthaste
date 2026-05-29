@@ -959,7 +959,7 @@ export interface components {
          *     @spec docs/L1-api#error-code-mapping
          * @enum {string}
          */
-        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse";
+        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse";
         /**
          * @description Global UI appearance preferences shared across app windows.
          *

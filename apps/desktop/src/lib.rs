@@ -288,7 +288,9 @@ fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(),
         return Ok(());
     }
 
-    let port = app.state::<EmbeddedBackend>().port;
+    let backend = app.state::<EmbeddedBackend>();
+    let port = backend.port;
+    let auth_token = backend.auth_token.clone();
     let title = surface_title(&surface);
     let (width, height) = surface_window_size(&surface);
     build_window(
@@ -299,6 +301,7 @@ fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(),
         width,
         height,
         port,
+        &auth_token,
     )
     .map_err(|error| error.to_string())?;
     Ok(())
@@ -306,6 +309,7 @@ fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(),
 
 struct EmbeddedBackend {
     port: u16,
+    auth_token: String,
 }
 
 struct FocusedWindowLabel {
@@ -376,13 +380,17 @@ pub fn run() {
         };
         let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
         let port = handle.addr.port();
+        let auth_token = handle.auth_token.clone();
         ph_info!(
             events::DESKTOP_BACKEND_STARTED,
             addr = %handle.addr,
             "embedded backend started"
         );
         app.manage(handle);
-        app.manage(EmbeddedBackend { port });
+        app.manage(EmbeddedBackend {
+            port,
+            auth_token: auth_token.clone(),
+        });
         app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
         #[cfg(feature = "e2e-testing")]
         app.manage(e2e::E2eBridgeState::default());
@@ -397,6 +405,7 @@ pub fn run() {
             1200.0,
             800.0,
             port,
+            &auth_token,
         )?;
 
         #[cfg(feature = "e2e-testing")]
@@ -550,6 +559,10 @@ fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -
     true
 }
 
+// The window factory threads through the discrete webview parameters
+// (geometry, backend port, injected token); grouping them into a struct would
+// add indirection without clarity for a single internal helper.
+#[allow(clippy::too_many_arguments)]
 fn build_window<M: Manager<R>, R: Runtime>(
     manager: &M,
     label: &str,
@@ -558,9 +571,10 @@ fn build_window<M: Manager<R>, R: Runtime>(
     width: f64,
     height: f64,
     port: u16,
+    auth_token: &str,
 ) -> tauri::Result<WebviewWindow<R>> {
     let builder = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
-        .initialization_script(backend_init_script(port, label))
+        .initialization_script(backend_init_script(port, auth_token, label))
         .title(title)
         .inner_size(width, height)
         .resizable(true);
@@ -587,11 +601,15 @@ fn validate_external_url(url: &str) -> Result<(), String> {
     }
 }
 
-fn backend_init_script(port: u16, window_label: &str) -> String {
+fn backend_init_script(port: u16, auth_token: &str, window_label: &str) -> String {
     let window_label_json =
         serde_json::to_string(window_label).expect("window label should serialize to JSON");
+    // JSON-encode the token so it is safely quoted/escaped in the JS string.
+    let auth_token_json =
+        serde_json::to_string(auth_token).expect("auth token should serialize to JSON");
     let script = format!(
         "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
+         Object.defineProperty(window, '__POSTHASTE_TOKEN__', {{ value: {auth_token_json}, writable: false }});\
          Object.defineProperty(window, '__POSTHASTE_WINDOW_LABEL__', {{ value: {window_label_json}, writable: false }});"
     );
     #[cfg(feature = "e2e-testing")]

@@ -86,6 +86,7 @@ pub struct DaemonToml {
     pub bind: Option<String>,
     pub cors_origin: Option<String>,
     pub poll_interval_seconds: Option<u64>,
+    pub require_auth: Option<bool>,
     #[serde(default, skip_serializing_if = "DaemonRuntimeTuning::is_default")]
     pub runtime: DaemonRuntimeTuning,
 }

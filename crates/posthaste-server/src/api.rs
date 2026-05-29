@@ -508,6 +508,9 @@ pub enum ApiErrorCode {
     NotFound,
     Conflict,
     InternalError,
+    // Authentication / authorization (loopback trust model, default-off).
+    Unauthorized,
+    Forbidden,
     // Domain (mapped from `ServiceErrorKind`).
     GatewayUnavailable,
     AuthError,

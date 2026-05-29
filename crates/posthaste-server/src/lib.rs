@@ -1,4 +1,5 @@
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod logging;
 pub mod oauth;
@@ -16,7 +17,7 @@ use std::time::Duration;
 
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
-use axum::Router;
+use axum::{middleware, Router};
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_config::TomlConfigRepository;
@@ -47,6 +48,26 @@ pub struct AppState {
     pub event_sender: broadcast::Sender<DomainEvent>,
     pub account_logo_root: PathBuf,
     pub oauth_flows: Arc<OAuthFlowStore>,
+    /// Per-process bearer token enforced by the auth middleware when
+    /// `require_auth` is on. Always generated; inert while the flag is off.
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub auth_token: String,
+    /// Whether the `/v1` auth middleware enforces the trust model. Default
+    /// `false`, so existing behavior is byte-identical until enabled.
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub require_auth: bool,
+    /// Allowlisted browser origins (configured CORS origin + Tauri webview).
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub origin_allowlist: Vec<String>,
+    /// Allowlisted `Host` header values (loopback names + configured bind host).
+    /// The mandatory DNS-rebinding defense; checked on every request when
+    /// `require_auth` is on.
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub host_allowlist: Vec<String>,
 }
 
 impl AppState {
@@ -67,6 +88,17 @@ pub struct ServerHandle {
     pub addr: SocketAddr,
     pub join_handle: tokio::task::JoinHandle<()>,
     pub log_guard: WorkerGuard,
+    /// Per-process bearer token, exposed so the embedded host can inject it
+    /// into the webview as `window.__POSTHASTE_TOKEN__`.
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub auth_token: String,
+    /// Whether the trust model is enforced. The daemon entrypoint uses this to
+    /// decide whether to persist the token to `daemon.json` (an unused
+    /// credential is never written to disk).
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub require_auth: bool,
 }
 
 /// Additional origins to allow in CORS beyond the configured default.
@@ -82,6 +114,37 @@ pub struct ServerConfig {
 
 async fn api_not_found() -> StatusCode {
     StatusCode::NOT_FOUND
+}
+
+/// Write `contents` to `path`, creating/truncating it with owner-only (`0600`)
+/// permissions on unix. Used for the `daemon.json` port-file, which carries a
+/// live bearer token. `fs::write` would NOT tighten an already world-readable
+/// file, so this opens with restrictive mode and re-asserts `0600` to cover the
+/// overwrite case. On non-unix platforms it falls back to a plain write
+/// (filesystem ACLs are the protection there).
+///
+/// @spec docs/eph/DESIGN-L1-trust-model
+pub fn write_secure_file(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // `mode` applies only when the file is newly created.
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // Re-assert 0600 because `mode` above is ignored when the file already
+    // existed (e.g. a prior, looser-permissioned daemon.json).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)?;
+    file.flush()
 }
 
 /// Initialize the entire backend (config, store, supervisor, logging)
@@ -153,6 +216,21 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor.start_account(&source).await;
     }
 
+    // Per-process bearer token for the loopback trust model. Always generated
+    // (cheap, exposed via the handle + daemon.json) but only enforced when
+    // `require_auth` is on. uuid v4 is 122 bits of randomness — adequate for a
+    // loopback secret.
+    let auth_token = uuid::Uuid::new_v4().to_string();
+    let origin_allowlist = auth::origin_allowlist(&runtime.cors_origin);
+
+    // Resolve the bind address up front so the Host allowlist can include the
+    // configured bind host. (The same value is used to bind the listener below.)
+    let bind_address = server_config
+        .bind_address_override
+        .clone()
+        .unwrap_or_else(|| runtime.bind_address.clone());
+    let host_allowlist = auth::host_allowlist(&bind_address);
+
     let state = Arc::new(AppState {
         service,
         store,
@@ -161,6 +239,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         event_sender,
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
         oauth_flows: Arc::new(OAuthFlowStore::default()),
+        auth_token: auth_token.clone(),
+        require_auth: runtime.require_auth,
+        origin_allowlist,
+        host_allowlist,
     });
 
     // Build CORS layer: always include the configured origin, plus any extras.
@@ -177,6 +259,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &axum::http::Request<_>| {
             let context = observability::RequestLogContext::from_headers(request.headers());
+            // SECURITY: log `uri().path()` only — never `uri()` (would include
+            // the query string, leaking the SSE `?access_token=` token) and
+            // never the `Authorization` header. Keep this span free of any
+            // credential-bearing field.
             info_span!(
                 "http.request",
                 method = %request.method(),
@@ -329,6 +415,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .route("/config:reload", post(api::reload_config))
         .route("/events", get(api::stream_events))
         .fallback(api_not_found)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth_layer,
+        ))
         .layer(trace_layer)
         .layer(cors)
         .with_state(state);
@@ -348,11 +438,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     }
     .merge(api_docs);
 
-    let bind_address = server_config
-        .bind_address_override
-        .as_deref()
-        .unwrap_or(&runtime.bind_address);
-    let listener = tokio::net::TcpListener::bind(bind_address)
+    let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
         .expect("failed to bind server listener");
     let addr = listener.local_addr().expect("failed to get local address");
@@ -373,5 +459,41 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         addr,
         join_handle,
         log_guard,
+        auth_token,
+        require_auth: runtime.require_auth,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_secure_file_creates_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "posthaste-secure-file-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir should create");
+        let path = dir.join("daemon.json");
+
+        write_secure_file(&path, b"{\"port\":1}").expect("secure write should succeed");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "daemon.json must be owner-only");
+
+        // Overwriting a pre-existing (here world-readable) file must re-tighten.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_secure_file(&path, b"{\"port\":2}").expect("secure overwrite should succeed");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "overwrite must tighten back to 0600");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -31,6 +31,11 @@ pub struct DaemonSettings {
     pub cors_origin: String,
     pub poll_interval_seconds: u64,
     pub log_level: String,
+    /// When `true`, the `/v1` API enforces bearer-token + Origin/Host auth.
+    /// Defaults to `false` so embedded/dogfood behavior is unchanged.
+    ///
+    /// @spec docs/eph/DESIGN-L1-trust-model
+    pub require_auth: bool,
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
@@ -96,11 +101,18 @@ pub fn read_daemon_settings(
         .or(app_toml.logging.level)
         .unwrap_or_else(|| "info".to_string());
 
+    let require_auth = std::env::var("POSTHASTE_REQUIRE_AUTH")
+        .ok()
+        .and_then(|v| parse_bool_flag(&v))
+        .or(app_toml.daemon.require_auth)
+        .unwrap_or(false);
+
     Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
         poll_interval_seconds,
         log_level,
+        require_auth,
     })
 }
 
@@ -164,6 +176,16 @@ pub fn import_bootstrap(
     }
 
     Ok(())
+}
+
+/// Parse a boolean env-var flag, accepting common truthy/falsy spellings.
+/// Returns `None` for unrecognized values so the config/default fallback wins.
+fn parse_bool_flag(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 // -- Bootstrap TOML types (for import only) --
