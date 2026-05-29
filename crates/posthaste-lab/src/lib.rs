@@ -65,8 +65,8 @@ pub enum LabError {
     SuiteNotFound(String),
     #[error("no suites matched the requested selection")]
     NoSuitesSelected,
-    #[error("changed-file suite selection is not implemented")]
-    ChangedSelectionUnsupported,
+    #[error("changed-file suite selection found no changed paths")]
+    ChangedSelectionNeedsPaths,
     #[error("usage error: {0}")]
     Usage(String),
     #[error("verification failed; summary: {summary_path}")]
@@ -149,8 +149,8 @@ impl SuiteRegistry {
     }
 
     pub fn select(&self, criteria: &SelectionCriteria) -> LabResult<Vec<SelectedSuite>> {
-        if criteria.changed {
-            return Err(LabError::ChangedSelectionUnsupported);
+        if criteria.changed && criteria.changed_paths.is_empty() {
+            return Err(LabError::ChangedSelectionNeedsPaths);
         }
 
         let candidates: Vec<(&String, &SuiteEntry)> = if let Some(id) = &criteria.suite_id {
@@ -173,9 +173,55 @@ impl SuiteRegistry {
                     .iter()
                     .all(|target| entry.targets.contains(target))
             })
+            .filter(|(_, entry)| {
+                !criteria.changed || suite_matches_changed_paths(entry, &criteria.changed_paths)
+            })
             .map(|(id, entry)| SelectedSuite::from_entry(id, entry))
             .collect())
     }
+}
+
+fn suite_matches_changed_paths(entry: &SuiteEntry, changed_paths: &[String]) -> bool {
+    if changed_paths.iter().any(|path| is_registry_wide_path(path)) {
+        return true;
+    }
+
+    entry.paths.iter().any(|suite_path| {
+        changed_paths
+            .iter()
+            .any(|changed_path| lab_paths_overlap(suite_path, changed_path))
+    })
+}
+
+fn is_registry_wide_path(path: &str) -> bool {
+    normalize_lab_path(path) == "tools/lab/suites.toml"
+}
+
+fn lab_paths_overlap(suite_path: &str, changed_path: &str) -> bool {
+    let suite_path = normalize_lab_path(suite_path);
+    let changed_path = normalize_lab_path(changed_path);
+    if suite_path.is_empty() || changed_path.is_empty() {
+        return false;
+    }
+
+    if suite_path.ends_with('/') {
+        return changed_path.starts_with(&suite_path);
+    }
+    if changed_path.ends_with('/') {
+        return suite_path.starts_with(&changed_path);
+    }
+
+    suite_path == changed_path
+        || changed_path
+            .strip_prefix(&suite_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+        || suite_path
+            .strip_prefix(&changed_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn normalize_lab_path(path: &str) -> String {
+    path.trim().trim_start_matches("./").replace('\\', "/")
 }
 
 fn flatten_suite_table(
@@ -294,15 +340,22 @@ pub struct SelectionCriteria {
     pub targets: Vec<String>,
     #[serde(default)]
     pub changed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_paths: Vec<String>,
 }
 
 impl SelectionCriteria {
     pub fn rationale(&self) -> String {
+        let mut parts = Vec::new();
         if self.changed {
-            return "changed-file selection requested".to_string();
+            let path_count = self.changed_paths.len();
+            parts.push(if path_count == 1 {
+                "changed-file selection (1 path)".to_string()
+            } else {
+                format!("changed-file selection ({path_count} paths)")
+            });
         }
 
-        let mut parts = Vec::new();
         if let Some(id) = &self.suite_id {
             parts.push(format!("explicit suite {id}"));
         }
@@ -1062,6 +1115,7 @@ struct SelectionRecord {
     tags: Vec<String>,
     targets: Vec<String>,
     changed: bool,
+    changed_paths: Vec<String>,
     rationale: String,
 }
 
@@ -1072,6 +1126,7 @@ impl SelectionRecord {
             tags: criteria.tags.clone(),
             targets: criteria.targets.clone(),
             changed: criteria.changed,
+            changed_paths: criteria.changed_paths.clone(),
             rationale: criteria.rationale(),
         }
     }
@@ -1390,7 +1445,10 @@ fn parse_verify_options(args: &[String], argv: Vec<String>) -> LabResult<VerifyO
     }
     criteria.suite_id = positional_suite_id;
     if criteria.changed {
-        return Err(LabError::ChangedSelectionUnsupported);
+        criteria.changed_paths = detect_changed_paths();
+        if criteria.changed_paths.is_empty() {
+            return Err(LabError::ChangedSelectionNeedsPaths);
+        }
     }
 
     Ok(VerifyOptions {
@@ -1399,6 +1457,66 @@ fn parse_verify_options(args: &[String], argv: Vec<String>) -> LabResult<VerifyO
         argv,
         criteria,
     })
+}
+
+fn detect_changed_paths() -> Vec<String> {
+    if let Ok(value) = std::env::var("POSTHASTE_LAB_CHANGED_PATHS") {
+        let paths = parse_changed_paths(&value);
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+
+    if let Some(root) = command_output("jj", &["root"]).map(PathBuf::from) {
+        return command_lines_in(&root, "jj", &["diff", "--name-only", "-r", "main..@"])
+            .unwrap_or_default();
+    }
+
+    if let Some(root) = command_output("git", &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
+    {
+        return merge_changed_path_sources([
+            command_lines_in(&root, "git", &["diff", "--name-only", "origin/main...HEAD"]),
+            command_lines_in(&root, "git", &["diff", "--name-only"]),
+            command_lines_in(&root, "git", &["diff", "--cached", "--name-only"]),
+        ]);
+    }
+
+    Vec::new()
+}
+
+fn parse_changed_paths(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .flat_map(|line| line.split(';'))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(normalize_lab_path)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn merge_changed_path_sources<const N: usize>(sources: [Option<Vec<String>>; N]) -> Vec<String> {
+    sources
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn command_lines_in(cwd: &Path, command: &str, args: &[&str]) -> Option<Vec<String>> {
+    let output = ProcessCommand::new(command)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    Some(parse_changed_paths(&text))
 }
 
 fn required_value(args: &[String], index: usize, option: &str) -> LabResult<String> {
@@ -1449,7 +1567,7 @@ fn print_suite_usage(program: &str) {
 
 fn print_verify_usage(program: &str) {
     println!("Usage: {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
-    println!("Note: --changed is parsed but currently unsupported.");
+    println!("Note: --changed reads POSTHASTE_LAB_CHANGED_PATHS when set, otherwise falls back to jj diff main..@ or git diff.");
 }
 
 #[cfg(test)]
@@ -1502,7 +1620,13 @@ artifacts = ["artifact.summary.dev.local"]
         let smoke_suite_ids = registry
             .suites()
             .iter()
-            .filter_map(|(id, entry)| entry.tags.iter().any(|tag| tag == "lab-smoke").then_some(id))
+            .filter_map(|(id, entry)| {
+                entry
+                    .tags
+                    .iter()
+                    .any(|tag| tag == "lab-smoke")
+                    .then_some(id)
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -1518,7 +1642,10 @@ artifacts = ["artifact.summary.dev.local"]
         for (id, entry) in registry.suites() {
             assert!(!entry.command.trim().is_empty(), "{id} command is empty");
             assert!(
-                entry.timeout_seconds.unwrap_or(DEFAULT_SUITE_TIMEOUT_SECONDS) > 0,
+                entry
+                    .timeout_seconds
+                    .unwrap_or(DEFAULT_SUITE_TIMEOUT_SECONDS)
+                    > 0,
                 "{id} timeout must be positive"
             );
             for path in &entry.paths {
@@ -1551,6 +1678,7 @@ artifacts = ["artifact.summary.dev.local"]
                 tags: vec!["settings".to_string()],
                 targets: vec!["daemon".to_string()],
                 changed: false,
+                changed_paths: Vec::new(),
             })
             .unwrap();
         assert_eq!(
@@ -1587,7 +1715,58 @@ artifacts = ["artifact.summary.dev.local"]
     }
 
     #[test]
-    fn changed_selection_is_unsupported() {
+    fn selects_suites_by_changed_paths() {
+        let registry = SuiteRegistry::from_toml_str(sample_registry_toml()).unwrap();
+
+        let selected = registry
+            .select(&SelectionCriteria {
+                changed: true,
+                changed_paths: vec!["crates/posthaste-server/tests/settings_patch.rs".to_string()],
+                ..SelectionCriteria::default()
+            })
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|suite| suite.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["suite.api.settings.dev"]
+        );
+
+        let selected = registry
+            .select(&SelectionCriteria {
+                changed: true,
+                changed_paths: vec!["tools/dev".to_string()],
+                ..SelectionCriteria::default()
+            })
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|suite| suite.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["suite.dev.smoke.local"]
+        );
+
+        let selected = registry
+            .select(&SelectionCriteria {
+                changed: true,
+                tags: vec!["settings".to_string()],
+                changed_paths: vec!["tools/lab/suites.toml".to_string()],
+                ..SelectionCriteria::default()
+            })
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|suite| suite.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["suite.api.settings.dev"]
+        );
+    }
+
+    #[test]
+    fn changed_selection_requires_changed_paths() {
         let registry = SuiteRegistry::from_toml_str(sample_registry_toml()).unwrap();
 
         let err = registry
@@ -1596,7 +1775,7 @@ artifacts = ["artifact.summary.dev.local"]
                 ..SelectionCriteria::default()
             })
             .unwrap_err();
-        assert!(matches!(err, LabError::ChangedSelectionUnsupported));
+        assert!(matches!(err, LabError::ChangedSelectionNeedsPaths));
     }
 
     #[test]
