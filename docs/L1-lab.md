@@ -223,6 +223,7 @@ Every lab run writes `manifest.json` and `summary.json`.
 `summary.json` records:
 
 - status: `passed`, `failed`, `skipped`, or `blocked`
+- suite IDs selected, selection rationale, and changed paths when applicable
 - per-suite status, duration, timeout flag, exit code, stdout/stderr artifact paths, and discovered nested artifact paths
 - first failure suite and step
 - reproduction command
