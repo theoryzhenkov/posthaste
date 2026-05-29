@@ -539,8 +539,12 @@ pub enum AutomationTrigger {
 )]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AutomationAction {
-    ApplyTag { tag: String },
-    RemoveTag { tag: String },
+    ApplyTag {
+        tag: String,
+    },
+    RemoveTag {
+        tag: String,
+    },
     MarkRead,
     MarkUnread,
     Flag,

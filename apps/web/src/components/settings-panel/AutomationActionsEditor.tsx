@@ -4,7 +4,7 @@
  * Automation rules are persisted globally in app settings. Account and smart
  * mailbox editors project their UI context into normal query conditions.
  *
- * @spec docs/L1-api#account-crud-lifecycle
+ * @spec docs/L1-api#application-settings
  * @spec docs/L1-search#smart-mailbox-data-model
  */
 import { useMutation, useQuery } from '@tanstack/react-query'

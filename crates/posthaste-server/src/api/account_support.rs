@@ -952,7 +952,11 @@ pub(super) fn store_error_to_api(error: posthaste_domain::StoreError) -> ApiErro
 
 /// Construct a 500 Internal Server Error from a message string.
 pub(super) fn internal_error(error: String) -> ApiError {
-    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::InternalError, error)
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ApiErrorCode::InternalError,
+        error,
+    )
 }
 
 /// Generate a smart mailbox ID from a human name: `sm-{slug}-{uuid}`.
@@ -1211,7 +1215,10 @@ mod tests {
         context: &str,
     ) -> SecretInstructionDecision<'a> {
         result.unwrap_or_else(|error| {
-            panic!("{context}, got {:?}: {}", error.body.code, error.body.message)
+            panic!(
+                "{context}, got {:?}: {}",
+                error.body.code, error.body.message
+            )
         })
     }
 

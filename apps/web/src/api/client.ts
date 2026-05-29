@@ -234,7 +234,7 @@ export async function patchSettings(
   return jsonRequest<AppSettings>('/settings', 'PATCH', input)
 }
 
-/** @spec docs/L1-api#account-crud-lifecycle */
+/** @spec docs/L1-api#application-settings */
 export async function previewAutomationRule(
   input: AutomationRulePreviewInput,
 ): Promise<AutomationRulePreviewResponse> {
