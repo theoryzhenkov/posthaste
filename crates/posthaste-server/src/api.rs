@@ -503,6 +503,17 @@ pub struct VerificationResponse {
     pub push_supported: bool,
 }
 
+/// Response from `POST /v1/sources/{id}/commands/sync`.
+///
+/// @spec docs/L1-api#sync-and-events
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerSyncResponse {
+    pub ok: bool,
+    pub event_count: usize,
+    pub mode: String,
+}
+
 /// Paginated conversation list response with an opaque cursor for the next page.
 ///
 /// @spec docs/L1-api#cursor-pagination
@@ -1955,7 +1966,7 @@ pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
     request: Option<Json<TriggerSyncRequest>>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<TriggerSyncResponse>, ApiError> {
     let account_id = AccountId(source_id);
     let mode = request
         .map(|Json(request)| request.mode)
@@ -1965,11 +1976,11 @@ pub async fn trigger_sync(
         .sync_account_with_mode(&account_id, mode)
         .await
         .map_err(ApiError::from_service_error)?;
-    Ok(Json(json!({
-        "ok": true,
-        "eventCount": event_count,
-        "mode": mode.as_str(),
-    })))
+    Ok(Json(TriggerSyncResponse {
+        ok: true,
+        event_count,
+        mode: mode.as_str().to_string(),
+    }))
 }
 
 /// GET /v1/events
@@ -2134,6 +2145,19 @@ mod tests {
 
         assert_eq!(decoded.sort_value, cursor.sort_value);
         assert_eq!(decoded.conversation_id, cursor.conversation_id);
+    }
+
+    #[test]
+    fn trigger_sync_response_serializes_wire_compatible_json() {
+        let body = TriggerSyncResponse {
+            ok: true,
+            event_count: 3,
+            mode: "full".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&body).expect("serialize trigger sync response"),
+            json!({ "ok": true, "eventCount": 3, "mode": "full" }),
+        );
     }
 
     #[test]
