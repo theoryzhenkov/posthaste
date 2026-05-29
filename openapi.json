@@ -1,0 +1,81 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Posthaste API",
+    "description": "Local-first JMAP mail client backend. The `/v1` surface is the documented, versioned contract for first-party clients, custom clients, and agents.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Service health check",
+        "description": "Returns readiness status. Used by clients to confirm the backend is reachable.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service is ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiErrorBody": {
+        "type": "object",
+        "description": "JSON error response body returned by all API error paths.\n\n@spec docs/L1-api#error-format",
+        "required": [
+          "code",
+          "message",
+          "details"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code."
+          },
+          "details": {
+            "type": "object",
+            "description": "Optional structured context for the error."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable description of the failure."
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "description": "Product API readiness response.\n\n@spec docs/L1-api#health",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Health and service status"
+    }
+  ]
+}
