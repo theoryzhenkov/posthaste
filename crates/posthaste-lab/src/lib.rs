@@ -512,6 +512,7 @@ where
     artifacts.sort();
     artifacts.dedup();
 
+    let selection = SelectionRecord::from_criteria(&options.criteria);
     let manifest = LabManifest {
         schema_version: 1,
         run_id: run_id.clone(),
@@ -522,7 +523,7 @@ where
         registry_path: options.registry_path.display().to_string(),
         selected_suites: selected_suites.clone(),
         suite_results: suite_results.clone(),
-        selection: SelectionRecord::from_criteria(&options.criteria),
+        selection: selection.clone(),
         commit_id: best_effort_commit_id(),
         platform: PlatformInfo::current(),
         tool_versions: collect_tool_versions(),
@@ -547,6 +548,7 @@ where
             .iter()
             .map(|suite| suite.id.clone())
             .collect(),
+        selection,
         suite_results,
         first_failure,
         reproduction_command,
@@ -1075,6 +1077,7 @@ struct LabSummary {
     reason: String,
     selected_suite_count: usize,
     selected_suites: Vec<String>,
+    selection: SelectionRecord,
     suite_results: Vec<SuiteExecutionRecord>,
     first_failure: Option<String>,
     reproduction_command: String,
@@ -1908,6 +1911,10 @@ artifacts = ["artifact.summary.dev.local"]
         assert_eq!(summary["status"], "passed");
         assert_eq!(summary["reason"], "all selected suites passed");
         assert_eq!(summary["selectedSuiteCount"], 1);
+        assert_eq!(
+            summary["selection"]["rationale"],
+            "explicit suite suite.api.settings.dev"
+        );
         assert_eq!(summary["suiteResults"][0]["exitCode"], 0);
         assert_eq!(summary["suiteResults"][0]["timedOut"], false);
         let stdout_path = summary["suiteResults"][0]["stdoutPath"].as_str().unwrap();
