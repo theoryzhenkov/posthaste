@@ -1,0 +1,144 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Posthaste Events",
+    "version": "0.1.0",
+    "description": "Event contract for the Posthaste Server-Sent Events stream at `GET /v1/events`. This is the event-driven analogue of the committed `openapi.json` REST contract: it documents the channel, its query filters, the SSE framing, and the full set of event topics. The `topic` enum is drift-checked against `posthaste_domain::ALL_EVENT_TOPICS`.",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "defaultContentType": "application/json",
+  "servers": {
+    "local": {
+      "host": "localhost",
+      "protocol": "http",
+      "description": "Posthaste server; SSE endpoints are served under the `/v1` prefix."
+    }
+  },
+  "channels": {
+    "events": {
+      "address": "/v1/events",
+      "description": "Server-Sent Events (SSE) stream opened with `GET /v1/events` (`text/event-stream`). Each SSE message uses the default `message` event type (no custom SSE `event:` field): the message `id` is set to the event's `seq`, and `data` is the JSON-serialized `DomainEvent`. When `afterSeq` is supplied, the backend first replays matching backlog from the `event_log` table, then switches to the live broadcast stream so a reconnecting client misses nothing.",
+      "parameters": {
+        "accountId": {
+          "description": "Optional. Filter the stream to a single account id."
+        },
+        "topic": {
+          "description": "Optional. Filter the stream to a single event topic (one of the `EventTopic` values)."
+        },
+        "mailboxId": {
+          "description": "Optional. Filter the stream to events for a single mailbox id."
+        },
+        "afterSeq": {
+          "description": "Optional. Resume from this sequence number (exclusive): backlog with `seq` greater than this value is replayed before live events begin."
+        }
+      },
+      "messages": {
+        "domainEvent": {
+          "$ref": "#/components/messages/DomainEvent"
+        }
+      }
+    }
+  },
+  "operations": {
+    "receiveEvents": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/events"
+      },
+      "summary": "Receive the live (and optionally backlogged) stream of domain events.",
+      "messages": [
+        {
+          "$ref": "#/channels/events/messages/domainEvent"
+        }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "DomainEvent": {
+        "name": "DomainEvent",
+        "title": "Domain event",
+        "summary": "An ordered domain event delivered as a single SSE message. The SSE `id` field carries `seq`; the SSE `data` field carries the JSON below.",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "openapi.json#/components/schemas/DomainEvent"
+        },
+        "examples": [
+          {
+            "name": "accountCreated",
+            "summary": "A new account was created.",
+            "payload": {
+              "seq": 41,
+              "accountId": "acct_personal",
+              "topic": "account.created",
+              "occurredAt": "2026-05-29T12:00:00Z",
+              "mailboxId": null,
+              "messageId": null,
+              "payload": {
+                "name": "Personal"
+              }
+            }
+          },
+          {
+            "name": "messageArrived",
+            "summary": "A new message arrived in a mailbox.",
+            "payload": {
+              "seq": 102,
+              "accountId": "acct_personal",
+              "topic": "message.arrived",
+              "occurredAt": "2026-05-29T12:05:30Z",
+              "mailboxId": "mbx_inbox",
+              "messageId": "msg_abc123",
+              "payload": {
+                "subject": "Lunch?"
+              }
+            }
+          },
+          {
+            "name": "syncCompleted",
+            "summary": "A sync cycle finished for an account.",
+            "payload": {
+              "seq": 7,
+              "accountId": "acct_personal",
+              "topic": "sync.completed",
+              "occurredAt": "2026-05-29T11:59:00Z",
+              "mailboxId": null,
+              "messageId": null,
+              "payload": {}
+            }
+          }
+        ]
+      }
+    },
+    "schemas": {
+      "EventTopic": {
+        "type": "string",
+        "description": "Every event topic the server can emit on `/v1/events`. The concrete shape of `DomainEvent.payload` is topic-dependent and intentionally documented as a free-form object rather than exhaustively typed per topic. This enum is the single documented source the contract drift test compares against `posthaste_domain::ALL_EVENT_TOPICS`.",
+        "enum": [
+          "sync.completed",
+          "sync.failed",
+          "settings.updated",
+          "config.reloaded",
+          "smart_mailbox.created",
+          "smart_mailbox.updated",
+          "smart_mailbox.deleted",
+          "smart_mailbox.reset",
+          "message.updated",
+          "message.keywords_changed",
+          "message.body_cached",
+          "message.mailboxes_changed",
+          "message.arrived",
+          "mailbox.updated",
+          "account.updated",
+          "account.created",
+          "account.deleted",
+          "account.status_changed",
+          "push.connected",
+          "push.disconnected"
+        ]
+      }
+    }
+  }
+}
