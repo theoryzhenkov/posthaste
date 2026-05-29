@@ -248,7 +248,7 @@ pub(super) fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(),
             if secret.password.is_some() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
-                    "invalid_secret",
+                    ApiErrorCode::InvalidSecret,
                     "secret.password is only allowed when secret.mode is replace",
                 ));
             }
@@ -260,7 +260,7 @@ pub(super) fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(),
             if secret.password.is_some() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
-                    "invalid_secret",
+                    ApiErrorCode::InvalidSecret,
                     "secret.password is not allowed when secret.mode is clear",
                 ));
             }
@@ -279,7 +279,7 @@ fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiErro
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_secret",
+                ApiErrorCode::InvalidSecret,
                 "secret.password is required when secret.mode is replace",
             )
         })
@@ -293,14 +293,14 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
     if account.id.as_str().trim().is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             "account id is required",
         ));
     }
     if account.name.trim().is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             "account name is required",
         ));
     }
@@ -311,7 +311,7 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
     {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             "email patterns must not be blank",
         ));
     }
@@ -326,14 +326,14 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
         {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::AccountBaseUrlRequired,
                 "JMAP base URL is required",
             ));
         }
         if account.transport.secret_ref.is_none() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::AccountSecretRequired,
                 "JMAP secret must be configured before saving the account",
             ));
         }
@@ -349,14 +349,14 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
         {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::AccountUsernameRequired,
                 "IMAP/SMTP username is required",
             ));
         }
         if account.transport.secret_ref.is_none() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::AccountSecretRequired,
                 "IMAP/SMTP secret must be configured before saving the account",
             ));
         }
@@ -365,7 +365,7 @@ pub(super) fn validate_account_settings(account: &AccountSettings) -> Result<(),
         if !has_concrete_sender_email(account) {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::AccountSenderRequired,
                 "IMAP/SMTP accounts require a concrete sender email pattern",
             ));
         }
@@ -383,21 +383,21 @@ where
     let endpoint = endpoint.ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             format!("{label} endpoint is required"),
         )
     })?;
     if endpoint.host().trim().is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             format!("{label} host is required"),
         ));
     }
     if endpoint.port() == 0 {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             format!("{label} port must be greater than zero"),
         ));
     }
@@ -452,35 +452,35 @@ pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), 
         if rule.id.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule id is required",
             ));
         }
         if !ids.insert(rule.id.trim().to_string()) {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule ids must be unique",
             ));
         }
         if rule.name.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule name is required",
             ));
         }
         if rule.triggers.is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule must include at least one trigger",
             ));
         }
         if rule.actions.is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule must include at least one action",
             ));
         }
@@ -491,7 +491,7 @@ pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), 
                 {
                     return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
-                        "invalid_account",
+                        ApiErrorCode::InvalidAccount,
                         "automation tag must be a non-system keyword",
                     ));
                 }
@@ -500,7 +500,7 @@ pub(super) fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), 
                 {
                     return Err(ApiError::new(
                         StatusCode::BAD_REQUEST,
-                        "invalid_account",
+                        ApiErrorCode::InvalidAccount,
                         "automation target mailbox id is required",
                     ));
                 }
@@ -556,14 +556,14 @@ fn validate_account_appearance(appearance: &AccountAppearance) -> Result<(), Api
     if initials.trim().is_empty() || initials.chars().count() > 4 {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             "account appearance initials must be 1-4 characters",
         ));
     }
     if *color_hue > 360 {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account",
+            ApiErrorCode::InvalidAccount,
             "account appearance color hue must be between 0 and 360",
         ));
     }
@@ -581,7 +581,7 @@ pub(super) fn validate_logo_image_id(image_id: &str) -> Result<(), ApiError> {
     if !is_valid {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account_logo",
+            ApiErrorCode::InvalidAccountLogo,
             "account logo image id is invalid",
         ));
     }
@@ -764,14 +764,14 @@ pub(super) fn validate_automation_drafts(
         if rule.id.trim().is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation draft id is required",
             ));
         }
         if !ids.insert(rule.id.trim().to_string()) {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "automation rule and draft ids must be unique",
             ));
         }
@@ -952,7 +952,7 @@ pub(super) fn store_error_to_api(error: posthaste_domain::StoreError) -> ApiErro
 
 /// Construct a 500 Internal Server Error from a message string.
 pub(super) fn internal_error(error: String) -> ApiError {
-    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", error)
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::InternalError, error)
 }
 
 /// Generate a smart mailbox ID from a human name: `sm-{slug}-{uuid}`.
@@ -1167,7 +1167,7 @@ mod tests {
                 .expect_err("replace without a nonblank password should fail");
 
             assert_eq!(error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(error.body.code, "invalid_secret");
+            assert_eq!(error.body.code, ApiErrorCode::InvalidSecret);
             assert_eq!(
                 error.body.message,
                 "secret.password is required when secret.mode is replace"
@@ -1191,7 +1191,7 @@ mod tests {
         )
         .unwrap_or_else(|error| {
             panic!(
-                "replace should save the managed secret, got {}: {}",
+                "replace should save the managed secret, got {:?}: {}",
                 error.body.code, error.body.message
             )
         });
@@ -1211,7 +1211,7 @@ mod tests {
         context: &str,
     ) -> SecretInstructionDecision<'a> {
         result.unwrap_or_else(|error| {
-            panic!("{context}, got {}: {}", error.body.code, error.body.message)
+            panic!("{context}, got {:?}: {}", error.body.code, error.body.message)
         })
     }
 

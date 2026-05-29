@@ -174,7 +174,7 @@ fn parse_optional_search_rule(query: Option<&str>) -> Result<Option<SmartMailbox
     }
     posthaste_domain::search::parse_query(query)
         .map(Some)
-        .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, "invalid_query", msg))
+        .map_err(|msg| ApiError::new(StatusCode::BAD_REQUEST, ApiErrorCode::InvalidQuery, msg))
 }
 
 fn rule_condition(field: SmartMailboxField, value: impl Into<String>) -> SmartMailboxRuleNode {
@@ -473,6 +473,77 @@ pub struct PatchSmartMailboxRequest {
     pub rule: Option<SmartMailboxRule>,
 }
 
+/// Stable machine-readable API error code.
+///
+/// The single typed code space for the `/v1` surface: boundary-validation codes
+/// raised by the API layer, plus the domain [`ServiceErrorKind`] codes mapped via
+/// [`From<ServiceErrorKind>`]. Serializes to snake_case wire strings.
+///
+/// @spec docs/L1-api#error-format
+/// @spec docs/L1-api#error-code-mapping
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiErrorCode {
+    // Boundary validation.
+    InvalidQuery,
+    InvalidCursor,
+    InvalidLimit,
+    InvalidMailbox,
+    InvalidCompose,
+    InvalidSecret,
+    InvalidProvider,
+    InvalidAccount,
+    InvalidAccountLogo,
+    InvalidOauthRequest,
+    InvalidOauthCallback,
+    // OAuth outcomes.
+    OauthDenied,
+    InvalidGrant,
+    // Account-field validation (the split of the old generic `invalid_account`).
+    AccountBaseUrlRequired,
+    AccountSecretRequired,
+    AccountUsernameRequired,
+    AccountSenderRequired,
+    // Generic.
+    NotFound,
+    Conflict,
+    InternalError,
+    // Domain (mapped from `ServiceErrorKind`).
+    GatewayUnavailable,
+    AuthError,
+    NetworkError,
+    StateMismatch,
+    CannotCalculateChanges,
+    GatewayRejected,
+    SecretUnavailable,
+    SecretUnsupported,
+    StorageFailure,
+    ConfigValidation,
+    ConfigIo,
+    ConfigParse,
+}
+
+impl From<ServiceErrorKind> for ApiErrorCode {
+    fn from(kind: ServiceErrorKind) -> Self {
+        match kind {
+            ServiceErrorKind::GatewayUnavailable => Self::GatewayUnavailable,
+            ServiceErrorKind::AuthError => Self::AuthError,
+            ServiceErrorKind::NetworkError => Self::NetworkError,
+            ServiceErrorKind::StateMismatch => Self::StateMismatch,
+            ServiceErrorKind::CannotCalculateChanges => Self::CannotCalculateChanges,
+            ServiceErrorKind::GatewayRejected => Self::GatewayRejected,
+            ServiceErrorKind::SecretUnavailable => Self::SecretUnavailable,
+            ServiceErrorKind::SecretUnsupported => Self::SecretUnsupported,
+            ServiceErrorKind::NotFound => Self::NotFound,
+            ServiceErrorKind::Conflict => Self::Conflict,
+            ServiceErrorKind::StorageFailure => Self::StorageFailure,
+            ServiceErrorKind::ConfigValidation => Self::ConfigValidation,
+            ServiceErrorKind::ConfigIo => Self::ConfigIo,
+            ServiceErrorKind::ConfigParse => Self::ConfigParse,
+        }
+    }
+}
+
 /// JSON error response body returned by all API error paths.
 ///
 /// @spec docs/L1-api#error-format
@@ -480,7 +551,7 @@ pub struct PatchSmartMailboxRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ApiErrorBody {
     /// Stable machine-readable error code.
-    pub code: String,
+    pub code: ApiErrorCode,
     /// Human-readable description of the failure.
     pub message: String,
     /// Optional structured context for the error.
@@ -567,7 +638,7 @@ impl ApiError {
         Self {
             status,
             body: ApiErrorBody {
-                code: error.code().to_string(),
+                code: ApiErrorCode::from(error.kind()),
                 message: error.to_string(),
                 details: json!({}),
             },
@@ -575,11 +646,11 @@ impl ApiError {
     }
 
     /// Construct an `ApiError` with explicit status, code, and message.
-    pub fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
+    pub fn new(status: StatusCode, code: ApiErrorCode, message: impl Into<String>) -> Self {
         Self {
             status,
             body: ApiErrorBody {
-                code: code.to_string(),
+                code,
                 message: message.into(),
                 details: json!({}),
             },
@@ -618,7 +689,7 @@ impl IntoResponse for ApiError {
 }
 
 fn account_not_found() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, "not_found", "account not found")
+    ApiError::new(StatusCode::NOT_FOUND, ApiErrorCode::NotFound, "account not found")
 }
 
 fn load_account(state: &AppState, account_id: &AccountId) -> Result<AccountSettings, ApiError> {
@@ -802,7 +873,7 @@ pub async fn create_account(
     {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
-            "conflict",
+            ApiErrorCode::Conflict,
             "account already exists",
         ));
     }
@@ -968,7 +1039,7 @@ pub async fn start_provider_oauth(
     let profile = OAuthProviderProfile::for_provider(&request.provider).ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_provider",
+            ApiErrorCode::InvalidProvider,
             "provider does not support built-in OAuth",
         )
     })?;
@@ -1035,7 +1106,7 @@ pub async fn start_account_oauth(
         OAuthProviderProfile::for_provider(&account.transport.provider).ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_account",
+                ApiErrorCode::InvalidAccount,
                 "account provider does not support built-in OAuth",
             )
         })?;
@@ -1099,7 +1170,7 @@ pub async fn complete_account_oauth(
     if let Some(error) = query.error {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "oauth_denied",
+            ApiErrorCode::OauthDenied,
             query.error_description.unwrap_or(error),
         ));
     }
@@ -1111,7 +1182,7 @@ pub async fn complete_account_oauth(
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_oauth_callback",
+                ApiErrorCode::InvalidOauthCallback,
                 "OAuth callback is missing code",
             )
         })?;
@@ -1122,7 +1193,7 @@ pub async fn complete_account_oauth(
         OAuthFlowCompletion::Unknown => {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_oauth_callback",
+                ApiErrorCode::InvalidOauthCallback,
                 "OAuth callback state is unknown or already used",
             ));
         }
@@ -1175,7 +1246,7 @@ fn validate_oauth_start_request<'a>(
     if client_id.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_oauth_request",
+            ApiErrorCode::InvalidOauthRequest,
             "clientId is required",
         ));
     }
@@ -1183,7 +1254,7 @@ fn validate_oauth_start_request<'a>(
     if redirect_uri.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_oauth_request",
+            ApiErrorCode::InvalidOauthRequest,
             "redirectUri is required",
         ));
     }
@@ -1273,7 +1344,7 @@ fn oauth_provider_mail_transport(
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_provider",
+                ApiErrorCode::InvalidProvider,
                 "provider does not support built-in OAuth account creation",
             )
         })
@@ -1402,14 +1473,14 @@ pub async fn upload_account_logo(
     if bytes.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account_logo",
+            ApiErrorCode::InvalidAccountLogo,
             "account logo file is empty",
         ));
     }
     if bytes.len() > MAX_ACCOUNT_LOGO_BYTES {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account_logo",
+            ApiErrorCode::InvalidAccountLogo,
             "account logo file is too large",
         ));
     }
@@ -1504,7 +1575,7 @@ pub async fn get_account_logo(
     }
     Err(ApiError::new(
         StatusCode::NOT_FOUND,
-        "not_found",
+        ApiErrorCode::NotFound,
         "account logo not found",
     ))
 }
@@ -1779,7 +1850,7 @@ fn validate_source_message_cursor(
     if cursor.is_some_and(|cursor| &cursor.source_id != account_id) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_cursor",
+            ApiErrorCode::InvalidCursor,
             "cursor does not belong to requested source",
         ));
     }
@@ -1815,7 +1886,7 @@ pub async fn search_messages(
     let rule = parse_optional_search_rule(Some(query.q.as_str()))?.ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_query",
+            ApiErrorCode::InvalidQuery,
             "search query must not be empty",
         )
     })?;
@@ -1978,7 +2049,7 @@ pub async fn get_message(
     let mut detail = result.detail.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
-            "not_found",
+            ApiErrorCode::NotFound,
             "message detail not available",
         )
     })?;
@@ -2029,7 +2100,7 @@ pub async fn get_message_attachment(
     let detail = result.detail.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
-            "not_found",
+            ApiErrorCode::NotFound,
             "message detail not available",
         )
     })?;
@@ -2037,7 +2108,7 @@ pub async fn get_message_attachment(
         .attachments
         .into_iter()
         .find(|attachment| attachment.id == attachment_id)
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "not_found", "attachment not found"))?;
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, ApiErrorCode::NotFound, "attachment not found"))?;
     let gateway = require_live_gateway(gateway, &account_id)?;
     let bytes = state
         .service
@@ -2252,7 +2323,7 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
     let Some(role) = role else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_mailbox",
+            ApiErrorCode::InvalidMailbox,
             "role is required",
         ));
     };
@@ -2261,7 +2332,7 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
         Some(value) if MailboxRole::parse(value).is_some() => Ok(role),
         Some(_) => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_mailbox",
+            ApiErrorCode::InvalidMailbox,
             "unsupported mailbox role",
         )),
     }
@@ -2271,28 +2342,28 @@ fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), Api
     if request.from.as_ref().is_some_and(recipient_email_is_empty) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_compose",
+            ApiErrorCode::InvalidCompose,
             "sender email address cannot be empty",
         ));
     }
     if request.to.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_compose",
+            ApiErrorCode::InvalidCompose,
             "at least one To recipient is required",
         ));
     }
     if request.subject.trim().is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_compose",
+            ApiErrorCode::InvalidCompose,
             "subject is required",
         ));
     }
     if request.body.trim().is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_compose",
+            ApiErrorCode::InvalidCompose,
             "message body is required",
         ));
     }
@@ -2305,7 +2376,7 @@ fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), Api
     {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_compose",
+            ApiErrorCode::InvalidCompose,
             "recipient email addresses cannot be empty",
         ));
     }
@@ -2487,7 +2558,7 @@ fn account_logo_extension(content_type: &str) -> Result<&'static str, ApiError> 
         "image/gif" => Ok("gif"),
         _ => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_account_logo",
+            ApiErrorCode::InvalidAccountLogo,
             "account logo must be a PNG, JPEG, WebP, or GIF image",
         )),
     }
@@ -2577,7 +2648,7 @@ mod tests {
     fn malformed_conversation_cursor_is_rejected() {
         let error = parse_conversation_cursor(Some("broken-cursor")).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_cursor");
+        assert_eq!(error.body.code, ApiErrorCode::InvalidCursor);
     }
 
     #[test]
@@ -2620,14 +2691,14 @@ mod tests {
     fn malformed_message_cursor_is_rejected() {
         let error = parse_message_cursor(Some("broken-cursor")).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_cursor");
+        assert_eq!(error.body.code, ApiErrorCode::InvalidCursor);
     }
 
     #[test]
     fn invalid_search_query_is_rejected() {
         let error = parse_optional_search_rule(Some("wat:nope")).unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_query");
+        assert_eq!(error.body.code, ApiErrorCode::InvalidQuery);
     }
 
     #[test]
@@ -2699,7 +2770,7 @@ mod tests {
         let error = ApiError::from_service_error(ServiceError::from(GatewayError::StateMismatch));
 
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert_eq!(error.body.code, "state_mismatch");
+        assert_eq!(error.body.code, ApiErrorCode::StateMismatch);
     }
 
     #[test]
@@ -2717,7 +2788,7 @@ mod tests {
         .expect_err("empty To should be rejected");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_compose");
+        assert_eq!(error.body.code, ApiErrorCode::InvalidCompose);
     }
 
     #[test]
@@ -2743,7 +2814,7 @@ mod tests {
         let error = validate_account_settings(&account).expect_err("validation should fail");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_account");
+        assert_eq!(error.body.code, ApiErrorCode::AccountSecretRequired);
     }
 
     #[test]
@@ -2779,7 +2850,7 @@ mod tests {
         let error = validate_account_settings(&account).expect_err("validation should fail");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_account");
+        assert_eq!(error.body.code, ApiErrorCode::AccountSenderRequired);
         assert!(error.body.message.contains("sender email"));
     }
 
@@ -2797,7 +2868,7 @@ mod tests {
         let error = validate_account_settings(&account).expect_err("validation should fail");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_account");
+        assert_eq!(error.body.code, ApiErrorCode::AccountSenderRequired);
         assert!(error.body.message.contains("sender email"));
     }
 
@@ -2810,7 +2881,7 @@ mod tests {
         .expect_err("validation should fail");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(error.body.code, "invalid_secret");
+        assert_eq!(error.body.code, ApiErrorCode::InvalidSecret);
     }
 
     #[test]
