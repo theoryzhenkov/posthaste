@@ -30,6 +30,7 @@ import {
 } from './api/client'
 import type { MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { MessageDetail } from './components/MessageDetail'
 import { MessageList } from './components/MessageList'
 import { FocusedSurfaceDocument } from './components/FocusedSurface'
@@ -639,12 +640,14 @@ function MailClient({
       )}
       {effectiveSurface &&
         (!invalidSurfaceRoute || shouldRenderForcedSettings) && (
-          <SurfaceHost
-            surface={effectiveSurface}
-            canClose={!shouldRenderForcedSettings}
-            onClose={closeWebSurface}
-            onSearch={handleSearch}
-          />
+          <ErrorBoundary label="surface" resetKeys={[effectiveSurface]}>
+            <SurfaceHost
+              surface={effectiveSurface}
+              canClose={!shouldRenderForcedSettings}
+              onClose={closeWebSurface}
+              onSearch={handleSearch}
+            />
+          </ErrorBoundary>
         )}
     </div>
   )
@@ -653,6 +656,26 @@ function MailClient({
 function DaemonEventBridge() {
   useDaemonEvents()
   return null
+}
+
+function renderAppRootError(error: Error) {
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
+      <p className="text-sm font-medium text-foreground">
+        The app hit an unexpected error
+      </p>
+      <p className="max-w-md text-xs break-words text-muted-foreground">
+        {error.message}
+      </p>
+      <button
+        type="button"
+        className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
+        onClick={() => window.location.reload()}
+      >
+        Reload
+      </button>
+    </div>
+  )
 }
 
 /**
@@ -671,16 +694,18 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <DesignThemeProvider>
         <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
-        {isStandaloneSurface && routeSurface ? (
-          <FocusedSurfaceDocument surface={routeSurface} />
-        ) : isStandaloneSurface && invalidSurfaceRoute ? (
-          <InvalidSurfaceDocument route={invalidSurfaceRoute} />
-        ) : (
-          <MailClient
-            invalidSurfaceRoute={invalidSurfaceRoute}
-            routeSurface={routeSurface}
-          />
-        )}
+        <ErrorBoundary label="app-root" fallback={renderAppRootError}>
+          {isStandaloneSurface && routeSurface ? (
+            <FocusedSurfaceDocument surface={routeSurface} />
+          ) : isStandaloneSurface && invalidSurfaceRoute ? (
+            <InvalidSurfaceDocument route={invalidSurfaceRoute} />
+          ) : (
+            <MailClient
+              invalidSurfaceRoute={invalidSurfaceRoute}
+              routeSurface={routeSurface}
+            />
+          )}
+        </ErrorBoundary>
         <Toaster
           position="bottom-center"
           toastOptions={{

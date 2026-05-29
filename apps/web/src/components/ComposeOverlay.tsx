@@ -26,12 +26,7 @@ import {
   fetchSenderAddresses,
   sendMessage,
 } from '@/api/client'
-import type {
-  AccountOverview,
-  CachedSenderAddress,
-  Recipient,
-  SendMessageInput,
-} from '@/api/types'
+import type { Recipient, SendMessageInput } from '@/api/types'
 import {
   buildRecipientSuggestionOptions,
   filterAddressSuggestions,
@@ -41,14 +36,6 @@ import {
 } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
 import { openSurfaceInSeparateWindow } from '@/desktop'
-import {
-  EMPTY_COMPOSE_FORM,
-  buildSendInput,
-  formatRecipient,
-  formatRecipients,
-  parseRecipients,
-  type ComposeForm,
-} from '@/composeMessage'
 import { shouldCloseOriginalComposeAfterWindowOpen } from '@/composeWindowElevation'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
@@ -58,6 +45,18 @@ import { FloatingPanel } from './FloatingPanel'
 import type { MarkdownComposerEditorHandle } from './MarkdownComposerEditor'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import {
+  EMPTY_FORM,
+  accountFromOptions,
+  buildSendInput,
+  formatRecipient,
+  formatRecipients,
+  isConcreteEmailPattern,
+  optionLabel,
+  parseRecipients,
+  wildcardMatchesEmail,
+  type ComposeForm,
+} from './composeFormHelpers'
 
 const MarkdownComposerEditor = lazy(() =>
   import('./MarkdownComposerEditor').then((module) => ({
@@ -69,89 +68,6 @@ interface ComposeOverlayProps {
   intent: ComposeIntent
   shell?: 'floating' | 'document'
   onClose: () => void
-}
-
-interface FromAddressOption {
-  sourceId: string
-  sourceName: string
-  name: string | null
-  email: string
-  origin: 'configured' | 'identity' | 'cached'
-}
-
-function isConcreteEmailPattern(pattern: string): boolean {
-  const trimmed = pattern.trim()
-  return (
-    trimmed.length > 0 &&
-    !trimmed.includes('*') &&
-    /^[^@\s]+@[^@\s]+$/.test(trimmed)
-  )
-}
-
-function wildcardMatchesEmail(pattern: string, email: string): boolean {
-  const trimmed = pattern.trim().toLowerCase()
-  const normalizedEmail = email.trim().toLowerCase()
-  return trimmed.startsWith('*@') && normalizedEmail.endsWith(trimmed.slice(1))
-}
-
-function optionLabel(option: FromAddressOption): string {
-  return option.name ? `${option.name} <${option.email}>` : option.email
-}
-
-function accountFromOptions(
-  accounts: AccountOverview[],
-  identity: Recipient | null,
-  identitySourceId: string,
-  cachedSenders: CachedSenderAddress[],
-): FromAddressOption[] {
-  const byAccount = new Map(accounts.map((account) => [account.id, account]))
-  const options: FromAddressOption[] = []
-
-  for (const account of accounts) {
-    for (const email of account.emailPatterns.filter(isConcreteEmailPattern)) {
-      options.push({
-        sourceId: account.id,
-        sourceName: account.name,
-        name: account.fullName,
-        email,
-        origin: 'configured',
-      })
-    }
-  }
-
-  if (identity) {
-    options.unshift({
-      sourceId: identitySourceId,
-      sourceName: byAccount.get(identitySourceId)?.name ?? identitySourceId,
-      name: identity.name,
-      email: identity.email,
-      origin: 'identity',
-    })
-  }
-
-  for (const cached of cachedSenders) {
-    const account = byAccount.get(cached.sourceId)
-    if (!account) {
-      continue
-    }
-    options.push({
-      sourceId: cached.sourceId,
-      sourceName: account.name,
-      name: cached.name,
-      email: cached.email,
-      origin: 'cached',
-    })
-  }
-
-  const seen = new Set<string>()
-  return options.filter((option) => {
-    const key = `${option.sourceId}:${option.email.toLowerCase()}`
-    if (seen.has(key)) {
-      return false
-    }
-    seen.add(key)
-    return true
-  })
 }
 
 export function ComposeOverlay({
@@ -198,7 +114,7 @@ export function ComposeOverlay({
 
   const initialForm = useMemo<ComposeForm>(() => {
     if (intent.kind === 'new' || !replyContextQuery.data) {
-      return EMPTY_COMPOSE_FORM
+      return EMPTY_FORM
     }
     const quoted = replyContextQuery.data.quotedBody
       ? `\n\n${replyContextQuery.data.quotedBody}`
