@@ -85,6 +85,7 @@ Lab orchestration should eventually expose a dedicated CLI:
 
 ```sh
 posthaste-lab suite list
+posthaste-lab suite list --changed --target web
 posthaste-lab verify suite.api.health.dev
 posthaste-lab verify --tag lab-smoke
 posthaste-lab verify --tag settings --target web

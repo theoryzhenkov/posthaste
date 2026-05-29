@@ -1282,11 +1282,14 @@ fn run_suite_command(program: &str, args: &[String]) -> LabResult<()> {
         Some("list") => {
             let options = parse_list_options(&args[1..])?;
             let registry = SuiteRegistry::load(&options.registry_path)?;
-            let selected = registry.select(&SelectionCriteria {
+            let mut criteria = SelectionCriteria {
                 tags: options.tags,
                 targets: options.targets,
+                changed: options.changed,
                 ..SelectionCriteria::default()
-            })?;
+            };
+            populate_changed_paths(&mut criteria)?;
+            let selected = registry.select(&criteria)?;
             for suite in selected {
                 println!("{}", suite.id);
             }
@@ -1333,12 +1336,14 @@ struct ListOptions {
     registry_path: PathBuf,
     tags: Vec<String>,
     targets: Vec<String>,
+    changed: bool,
 }
 
 fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
     let mut registry_path = default_registry_path();
     let mut tags = Vec::new();
     let mut targets = Vec::new();
+    let mut changed = false;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -1350,6 +1355,9 @@ fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
             "--tag" => {
                 index += 1;
                 tags.push(required_value(args, index, "--tag")?);
+            }
+            "--changed" => {
+                changed = true;
             }
             "--target" => {
                 index += 1;
@@ -1380,6 +1388,7 @@ fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
         registry_path,
         tags,
         targets,
+        changed,
     })
 }
 
@@ -1444,12 +1453,7 @@ fn parse_verify_options(args: &[String], argv: Vec<String>) -> LabResult<VerifyO
         index += 1;
     }
     criteria.suite_id = positional_suite_id;
-    if criteria.changed {
-        criteria.changed_paths = detect_changed_paths();
-        if criteria.changed_paths.is_empty() {
-            return Err(LabError::ChangedSelectionNeedsPaths);
-        }
-    }
+    populate_changed_paths(&mut criteria)?;
 
     Ok(VerifyOptions {
         run_root,
@@ -1457,6 +1461,17 @@ fn parse_verify_options(args: &[String], argv: Vec<String>) -> LabResult<VerifyO
         argv,
         criteria,
     })
+}
+
+fn populate_changed_paths(criteria: &mut SelectionCriteria) -> LabResult<()> {
+    if !criteria.changed {
+        return Ok(());
+    }
+    criteria.changed_paths = detect_changed_paths();
+    if criteria.changed_paths.is_empty() {
+        return Err(LabError::ChangedSelectionNeedsPaths);
+    }
+    Ok(())
 }
 
 fn detect_changed_paths() -> Vec<String> {
@@ -1557,12 +1572,15 @@ fn print_usage_kind(program: &str, usage_kind: UsageKind) {
 
 fn print_usage(program: &str) {
     println!("Usage:");
-    println!("  {program} suite list [--tag TAG] [--target TARGET] [--registry PATH]");
+    println!("  {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed]");
     println!("  {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
 }
 
 fn print_suite_usage(program: &str) {
-    println!("Usage: {program} suite list [--tag TAG] [--target TARGET] [--registry PATH]");
+    println!(
+        "Usage: {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed]"
+    );
+    println!("Note: --changed reads POSTHASTE_LAB_CHANGED_PATHS when set, otherwise falls back to jj diff main..@ or git diff.");
 }
 
 fn print_verify_usage(program: &str) {
@@ -1777,6 +1795,21 @@ artifacts = ["artifact.summary.dev.local"]
             })
             .unwrap_err();
         assert!(matches!(err, LabError::ChangedSelectionNeedsPaths));
+    }
+
+    #[test]
+    fn parses_changed_suite_list_options() {
+        let options = parse_list_options(&[
+            "--changed".to_string(),
+            "--target".to_string(),
+            "web".to_string(),
+            "--tag=ui".to_string(),
+        ])
+        .unwrap();
+
+        assert!(options.changed);
+        assert_eq!(options.targets, vec!["web"]);
+        assert_eq!(options.tags, vec!["ui"]);
     }
 
     #[test]
