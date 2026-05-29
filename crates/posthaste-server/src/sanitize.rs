@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -127,8 +128,37 @@ fn build_email_sanitizer() -> Builder<'static> {
         .tag_attributes(tag_attributes)
         .url_schemes(url_schemes)
         .link_rel(Some("noopener noreferrer"))
-        .add_tag_attributes("a", ["target"]);
+        .add_tag_attributes("a", ["target"])
+        .attribute_filter(|_element, attribute, value| {
+            if attribute == "style" {
+                Some(Cow::Owned(sanitize_style_value(value)))
+            } else {
+                Some(Cow::Borrowed(value))
+            }
+        });
     builder
+}
+
+/// Strip CSS declarations that load remote resources (`url(...)`) or use the
+/// legacy `expression(...)` from an inline `style` value.
+///
+/// `ammonia` allows the `style` attribute but does not sanitize CSS, so a
+/// `background-image:url(...)` would re-introduce the remote-content/tracking
+/// vector that the `<img>` handling already blocks. Other declarations (color,
+/// layout, fonts) are preserved to keep legitimate email styling intact.
+///
+/// @spec docs/L1-api#message-body-sanitization
+fn sanitize_style_value(style: &str) -> String {
+    style
+        .split(';')
+        .map(str::trim)
+        .filter(|declaration| !declaration.is_empty())
+        .filter(|declaration| {
+            let lowered = declaration.to_ascii_lowercase();
+            !lowered.contains("url(") && !lowered.contains("expression(")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Remove 1x1 tracking pixel images and images with disallowed src schemes.
@@ -349,5 +379,36 @@ mod tests {
                 "event handler survived: {input:?}"
             );
         }
+    }
+
+    #[test]
+    fn strips_remote_and_expression_css_from_style_attribute() {
+        let url = sanitize_email_html(
+            r#"<div style="background-image:url(https://track.example/p.png)">x</div>"#,
+        );
+        assert!(!url.contains("url("), "css url() survived: {url:?}");
+        assert!(
+            !url.contains("track.example"),
+            "remote css ref leaked: {url:?}"
+        );
+
+        let expr = sanitize_email_html(r#"<div style="width:expression(alert(1))">x</div>"#);
+        assert!(
+            !expr.contains("expression("),
+            "css expression() survived: {expr:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_safe_inline_style_declarations() {
+        let result = sanitize_email_html(r#"<p style="color:red; font-weight:bold">hi</p>"#);
+        assert!(
+            result.contains("color:red"),
+            "safe style dropped: {result:?}"
+        );
+        assert!(
+            result.contains("font-weight:bold"),
+            "safe style dropped: {result:?}"
+        );
     }
 }
