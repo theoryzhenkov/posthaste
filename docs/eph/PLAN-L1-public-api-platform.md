@@ -10,6 +10,8 @@ depends:
   - path: docs/L1-api
   - path: docs/L2-transport
   - path: docs/L1-sync
+dependents:
+  - path: docs/eph/DESIGN-L1-runtime-topology
 ---
 
 # PLAN: Public API platform
@@ -97,15 +99,21 @@ Opening the API to arbitrary clients/agents is a security shift, not just docs:
   rate limiting.
 - **P5 — MCP adapter**: thin MCP server over the documented API.
 
-## Open questions (resolve before P1)
+## Resolved decisions (2026-05-29)
 
-- **Auth scope now or later?** Near-term: documented API for *trusted local*
-  clients + own MCP, with P4 as fast-follow — OR external multi-client auth in scope
-  from the start? (This single answer sizes the whole effort.)
-- **Generated artifacts**: commit `openapi.json` + generated TS, or build them in
-  CI? (Recommend: commit the spec, generate TS in build, contract-test agreement —
-  consistent with the existing `check-logging-contract.ts` taste.)
-- **Generator choice**: `utoipa` vs `aide`; `openapi-typescript` vs alternatives.
+- **Auth scope**: **trusted-local now, P4 fast-follow.** Ship the OpenAPI contract
+  (P1–P3) for localhost/first-party + own MCP first; design the error space and `/v1`
+  versioning auth-aware, but defer authn + capability scoping to P4 before any
+  non-localhost exposure. The cheap loopback-token + `Origin`/`Host` guard ships with
+  daemon mode to close the browser/CSRF/DNS-rebinding vector. See
+  `docs/eph/DESIGN-L1-runtime-topology` for how auth attaches to daemon mode.
+- **Generated artifacts**: **commit `openapi.json`**, generate `api/types.ts` in build,
+  add a CI contract-test that the committed spec matches the live server — consistent
+  with the existing `check-logging-contract.ts` taste.
+- **Generator choice**: **`utoipa`** (axum-native, code-first) + **`openapi-typescript`**
+  for the TS client.
+- **Runtime topology**: one server, two lifecycles (embedded default / daemon opt-in),
+  auto-detected. Recorded in `docs/eph/DESIGN-L1-runtime-topology`.
 
 ## Success criteria
 
