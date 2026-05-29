@@ -146,9 +146,25 @@ pub(super) fn apply_secret_instruction(
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct SecretInstructionDecision<'a> {
+pub(super) struct SecretInstructionDecision<'a> {
     account_secret_ref: AccountSecretRefUpdate,
     store_instruction: SecretStoreInstruction<'a>,
+}
+
+impl SecretInstructionDecision<'_> {
+    /// The `secret_ref` the account should carry after this write — the single
+    /// source of truth for "what ref does this account end up with". Used to set
+    /// the account's ref before validation; `apply_secret_instruction` applies
+    /// the same decision to the keyring.
+    pub(super) fn resolved_secret_ref(
+        &self,
+        previous_secret_ref: Option<&SecretRef>,
+    ) -> Option<SecretRef> {
+        match &self.account_secret_ref {
+            AccountSecretRefUpdate::Preserve => previous_secret_ref.cloned(),
+            AccountSecretRefUpdate::Set(secret_ref) => secret_ref.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -173,7 +189,7 @@ enum SecretStoreInstruction<'a> {
     },
 }
 
-fn decide_secret_instruction<'a>(
+pub(super) fn decide_secret_instruction<'a>(
     account_id: &AccountId,
     previous_secret_ref: Option<&SecretRef>,
     secret: &'a SecretWriteRequest,
