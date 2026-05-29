@@ -3,7 +3,7 @@ scope: L1
 type: PLAN
 lifecycle: ephemeral
 summary: "Adopt a documented API standard (OpenAPI + AsyncAPI) so the backend is a standalone, integrable platform"
-modified: 2026-05-29
+modified: 2026-05-30
 reviewed: 2026-05-29
 depends:
   - path: docs/L0-api
@@ -103,7 +103,23 @@ Opening the API to arbitrary clients/agents is a security shift, not just docs:
 - **P3 — AsyncAPI for `/events`**: document the SSE event contract.
 - **P4 — Trust model**: authn + capability-scoped authz + boundary validation +
   rate limiting.
-- **P5 — MCP adapter**: thin MCP server over the documented API.
+- **P5 — MCP adapter**: thin MCP server over the documented API. DONE (initial
+  slice): `apps/mcp` — a new bun workspace member. Stdio MCP server on
+  `@modelcontextprotocol/sdk` (high-level `McpServer.registerTool`), types
+  generated from `openapi.json` via `openapi-typescript` (`schema.gen.ts`, not
+  hand-mirrored). Connection discovered from `daemon.json`
+  (`<state_root>/daemon.json`, `XDG_DATA_HOME`-based per `config.rs`) with
+  `POSTHASTE_API_URL`/`POSTHASTE_TOKEN` env overrides; sends `Bearer` so it works
+  with or without `require_auth`. The 9 core tools shipped (`list_accounts`,
+  `get_sidebar`, `list_conversations`, `get_conversation`, `search_messages`,
+  `get_message`, `set_keywords`, `move_to_mailbox`, `send_message`), each mapped
+  1:1 to a documented operation, returning JSON text content and surfacing typed
+  `ApiErrorBody` (`code`+`message`) as tool errors. Graceful startup failure when
+  no daemon/token is found. Typechecks; smoke confirms the server builds and
+  registers all 9 tools. Capability scoping still deferred to P4 — adapter
+  carries the full-access daemon token, so **trusted-local only** (caveat in
+  `apps/mcp/README.md`). Full tool coverage + scope declarations are P4
+  fast-follow.
 
 ## Resolved decisions (2026-05-29)
 
