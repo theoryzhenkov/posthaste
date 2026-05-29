@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use posthaste_server::{start_server, ServerConfig};
+use posthaste_server::config::resolve_roots;
+use posthaste_server::{start_server, write_secure_file, ServerConfig};
 
 struct ServeOptions {
     bind: Option<String>,
@@ -40,6 +42,15 @@ async fn main() {
         ..ServerConfig::default()
     })
     .await;
+
+    // Write the daemon discovery port-file `{ port, token }` (0600) so external
+    // clients can find the bound port and bearer token. Only written when auth
+    // is enabled — we never persist an unused credential to disk. Best-effort:
+    // a failure here must not bring the daemon down.
+    if handle.require_auth {
+        write_port_file(handle.addr, &handle.auth_token);
+    }
+
     if options.open {
         open_browser(&format!("http://{}", handle.addr));
     }
@@ -92,6 +103,42 @@ fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {
         api_only,
         open,
     })
+}
+
+/// Write `<state_root>/daemon.json` = `{ port, token }`, the documented
+/// discovery mechanism for external clients. The file carries a live
+/// credential, so it is created with mode `0600` on unix (and the state dir
+/// best-effort `0700`). `fs::write` would NOT tighten an already
+/// world-readable file, so we open with explicit restrictive permissions and
+/// truncate. Overwrites any prior file. Best-effort: logs on failure, never
+/// panics.
+///
+/// @spec docs/eph/DESIGN-L1-trust-model
+fn write_port_file(addr: SocketAddr, token: &str) {
+    let roots = resolve_roots();
+    let path = roots.state_root.join("daemon.json");
+    let body = serde_json::json!({ "port": addr.port(), "token": token });
+    let contents = match serde_json::to_string_pretty(&body) {
+        Ok(contents) => contents,
+        Err(error) => {
+            eprintln!("failed to serialize daemon.json: {error}");
+            return;
+        }
+    };
+    if let Err(error) = std::fs::create_dir_all(&roots.state_root) {
+        eprintln!("failed to create state root for daemon.json: {error}");
+        return;
+    }
+    // Best-effort tighten the state dir to 0700 on unix.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&roots.state_root, std::fs::Permissions::from_mode(0o700));
+    }
+
+    if let Err(error) = write_secure_file(&path, contents.as_bytes()) {
+        eprintln!("failed to write daemon.json at {}: {error}", path.display());
+    }
 }
 
 fn resolve_frontend_dist(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
