@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod logging;
 pub mod oauth;
+pub mod openapi;
 pub mod observability;
 pub mod push;
 pub mod sanitize;
@@ -208,6 +209,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     let api = Router::new()
         .route("/health", get(api::health))
+        .route("/openapi.json", get(openapi::openapi_json))
         .route(
             "/settings",
             get(api::get_settings).patch(api::patch_settings),

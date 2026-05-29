@@ -32,6 +32,7 @@ use posthaste_domain::{
 use posthaste_observability::{events, ph_warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use utoipa::ToSchema;
 use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
@@ -74,7 +75,7 @@ use cursor_support::{
 /// Product API readiness response.
 ///
 /// @spec docs/L1-api#health
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: &'static str,
@@ -475,11 +476,15 @@ pub struct PatchSmartMailboxRequest {
 /// JSON error response body returned by all API error paths.
 ///
 /// @spec docs/L1-api#error-format
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiErrorBody {
+    /// Stable machine-readable error code.
     pub code: String,
+    /// Human-readable description of the failure.
     pub message: String,
+    /// Optional structured context for the error.
+    #[schema(value_type = Object)]
     pub details: serde_json::Value,
 }
 
@@ -672,6 +677,16 @@ async fn persist_new_account(
 /// GET /v1/health
 ///
 /// @spec docs/L1-api#health
+#[utoipa::path(
+    get,
+    path = "/v1/health",
+    tag = "system",
+    summary = "Service health check",
+    description = "Returns readiness status. Used by clients to confirm the backend is reachable.",
+    responses(
+        (status = 200, description = "Service is ready", body = HealthResponse)
+    )
+)]
 pub async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
