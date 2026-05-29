@@ -62,6 +62,23 @@ command = "bun --cwd=apps/web test surfaces desktop"
 timeout_seconds = 60
 artifacts = ["artifact.bun.surfaces.web.test"]
 
+[suite.lab.core.rust.test]
+level = "unit"
+targets = ["lab"]
+runners = ["runner.cargo.test.dev"]
+tags = ["lab", "rust", "fast", "lab-smoke"]
+paths = [
+  "crates/posthaste-lab/Cargo.toml",
+  "crates/posthaste-lab/src/lib.rs",
+  "crates/posthaste-lab/src/main.rs",
+  "docs/L1-lab.md",
+  "tools/lab/justfile",
+  "tools/lab/suites.toml",
+]
+command = "cargo test -p posthaste-lab"
+timeout_seconds = 120
+artifacts = ["artifact.cargo.posthaste-lab.test"]
+
 [suite.policy.no_telemetry.main]
 level = "policy"
 targets = ["release"]

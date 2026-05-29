@@ -10,9 +10,8 @@ suite *args:
 verify *args:
     cargo run -p posthaste-lab -- verify {{ args }}
 
-# Cheap non-graphical lab smoke: unit tests, registry loading, and executable suites.
+# Cheap non-graphical lab smoke: registry loading and executable suites.
 smoke:
-    cargo test -p posthaste-lab
     cargo run -p posthaste-lab -- suite list
     cargo run -p posthaste-lab -- verify --tag lab-smoke --run-root target/lab/smoke
 
