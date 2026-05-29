@@ -2770,11 +2770,11 @@
             "type": "object",
             "required": [
               "initials",
-              "color_hue",
+              "colorHue",
               "kind"
             ],
             "properties": {
-              "color_hue": {
+              "colorHue": {
                 "type": "integer",
                 "format": "int32",
                 "minimum": 0
@@ -2793,18 +2793,18 @@
           {
             "type": "object",
             "required": [
-              "image_id",
+              "imageId",
               "initials",
-              "color_hue",
+              "colorHue",
               "kind"
             ],
             "properties": {
-              "color_hue": {
+              "colorHue": {
                 "type": "integer",
                 "format": "int32",
                 "minimum": 0
               },
-              "image_id": {
+              "imageId": {
                 "type": "string"
               },
               "initials": {
@@ -2827,7 +2827,7 @@
             "type": "object",
             "required": [
               "provider",
-              "provider_kind",
+              "providerKind",
               "auth",
               "secret",
               "kind"
@@ -2836,7 +2836,7 @@
               "auth": {
                 "$ref": "#/components/schemas/ProviderAuthKind"
               },
-              "base_url": {
+              "baseUrl": {
                 "type": [
                   "string",
                   "null"
@@ -2861,7 +2861,7 @@
               "provider": {
                 "$ref": "#/components/schemas/ProviderHint"
               },
-              "provider_kind": {
+              "providerKind": {
                 "$ref": "#/components/schemas/ProviderKind"
               },
               "secret": {
@@ -2889,7 +2889,7 @@
             "type": "object",
             "required": [
               "provider",
-              "provider_kind",
+              "providerKind",
               "auth",
               "secret",
               "kind"
@@ -2917,7 +2917,7 @@
               "provider": {
                 "$ref": "#/components/schemas/ProviderHint"
               },
-              "provider_kind": {
+              "providerKind": {
                 "$ref": "#/components/schemas/ProviderKind"
               },
               "secret": {
@@ -3400,7 +3400,7 @@
           {
             "type": "object",
             "required": [
-              "mailbox_id",
+              "mailboxId",
               "kind"
             ],
             "properties": {
@@ -3410,7 +3410,7 @@
                   "moveToMailbox"
                 ]
               },
-              "mailbox_id": {
+              "mailboxId": {
                 "$ref": "#/components/schemas/MailboxId"
               }
             }
@@ -3481,51 +3481,13 @@
         }
       },
       "AutomationTrigger": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "messageArrived"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "messageChanged"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "manual"
-                ]
-              }
-            }
-          }
-        ],
-        "description": "Event types that can cause an automation rule to run.\n\n@spec docs/L1-sync#automation-actions"
+        "type": "string",
+        "description": "Event types that can cause an automation rule to run.\n\n@spec docs/L1-sync#automation-actions",
+        "enum": [
+          "messageArrived",
+          "messageChanged",
+          "manual"
+        ]
       },
       "BlobId": {
         "type": "string",
