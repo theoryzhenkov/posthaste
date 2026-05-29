@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AppAppearanceSettings {
     #[serde(default)]
     pub mode: AppThemeMode,
@@ -40,6 +41,7 @@ fn default_accent_hue() -> u16 {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AppThemeMode {
     Light,
     #[default]
@@ -49,6 +51,7 @@ pub enum AppThemeMode {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AppPalettePreset {
     #[default]
     Neutral,
@@ -62,6 +65,7 @@ pub enum AppPalettePreset {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AppUiDensity {
     #[default]
     Compact,
@@ -71,6 +75,7 @@ pub enum AppUiDensity {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AppGlassThemeSettings {
     #[serde(default = "default_glass_blooms")]
     pub blooms: Vec<AppGlassBloomSettings>,
@@ -86,6 +91,7 @@ impl Default for AppGlassThemeSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AppGlassBloomSettings {
     pub id: String,
     pub hue: u16,
