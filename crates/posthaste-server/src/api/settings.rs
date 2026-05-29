@@ -25,6 +25,17 @@ fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
 /// GET /v1/settings
 ///
 /// @spec docs/L1-api#settings
+#[utoipa::path(
+    get,
+    path = "/v1/settings",
+    tag = "settings",
+    summary = "Get settings",
+    description = "Returns global application settings.",
+    responses(
+        (status = 200, description = "The application settings", body = AppSettings),
+        (status = 500, description = "Internal error", body = ApiErrorBody)
+    )
+)]
 pub async fn get_settings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AppSettings>, ApiError> {
@@ -40,6 +51,19 @@ pub async fn get_settings(
 /// Validates that the referenced default account exists before persisting.
 ///
 /// @spec docs/L1-api#settings
+#[utoipa::path(
+    patch,
+    path = "/v1/settings",
+    tag = "settings",
+    summary = "Update settings",
+    description = "Sparse-merges provided settings fields. Validates that a referenced default \
+                   account exists before persisting.",
+    request_body = PatchSettingsRequest,
+    responses(
+        (status = 200, description = "The updated settings", body = AppSettings),
+        (status = 400, description = "Validation failed", body = ApiErrorBody)
+    )
+)]
 pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PatchSettingsRequest>,
@@ -125,6 +149,18 @@ pub async fn patch_settings(
 /// condition using the same indexed rule query path as smart mailboxes.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/automation-rules:preview",
+    tag = "settings",
+    summary = "Preview automation rule",
+    description = "Returns a small newest-first sample and total count for a draft rule condition.",
+    request_body = PreviewAutomationRuleRequest,
+    responses(
+        (status = 200, description = "Preview sample and total count", body = AutomationRulePreviewResponse),
+        (status = 400, description = "Invalid limit or condition", body = ApiErrorBody)
+    )
+)]
 pub async fn preview_automation_rule(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PreviewAutomationRuleRequest>,

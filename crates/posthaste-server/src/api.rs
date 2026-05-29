@@ -32,9 +32,9 @@ use posthaste_domain::{
 use posthaste_observability::{events, ph_warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use utoipa::ToSchema;
 use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use utoipa::{IntoParams, ToSchema};
 
 use crate::oauth::{
     OAuthAuthorizationCodeExchange, OAuthExchangeResult, OAuthFlowCompletion, OAuthProviderProfile,
@@ -44,9 +44,9 @@ use crate::{observability, sanitize, AppState};
 
 mod account_support;
 mod cursor_support;
-mod message_commands;
-mod settings;
-mod smart_mailboxes;
+pub mod message_commands;
+pub mod settings;
+pub mod smart_mailboxes;
 
 pub use message_commands::{
     add_to_mailbox, destroy_message, remove_from_mailbox, replace_mailboxes, set_keywords,
@@ -84,7 +84,7 @@ pub struct HealthResponse {
 /// Request body for a manual source sync command.
 ///
 /// @spec docs/L1-api#sync-and-events
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TriggerSyncRequest {
     #[serde(default)]
@@ -94,7 +94,7 @@ pub struct TriggerSyncRequest {
 /// Query parameters for conversation list endpoints.
 ///
 /// @spec docs/L1-api#cursor-pagination
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListConversationsQuery {
     pub source_id: Option<String>,
@@ -109,7 +109,7 @@ pub struct ListConversationsQuery {
 /// Query parameters for source-scoped message listing.
 ///
 /// @spec docs/L1-api#conversations-and-messages
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListSourceMessagesQuery {
     pub mailbox_id: Option<String>,
@@ -123,7 +123,7 @@ pub struct ListSourceMessagesQuery {
 /// Query parameters for global message search.
 ///
 /// @spec docs/L1-api#conversations-and-messages
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMessagesQuery {
     pub q: String,
@@ -136,7 +136,7 @@ pub struct SearchMessagesQuery {
 /// Query parameters for smart-mailbox message listing.
 ///
 /// @spec docs/L1-api#smart-mailboxes
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct ListSmartMailboxMessagesQuery {
     pub limit: Option<usize>,
@@ -149,7 +149,7 @@ pub struct ListSmartMailboxMessagesQuery {
 /// Query parameters for the SSE event stream endpoint.
 ///
 /// @spec docs/L1-api#sse-event-stream
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct EventsQuery {
     pub account_id: Option<String>,
@@ -158,7 +158,7 @@ pub struct EventsQuery {
     pub after_seq: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAttachmentQuery {
     pub download: Option<bool>,
@@ -300,7 +300,7 @@ fn spawn_search_cache_visibility(
 /// Outer `Option` distinguishes omitted `role` from an explicit JSON `null`.
 ///
 /// @spec docs/L1-api#conversations-and-messages
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchMailboxRequest {
     pub role: Option<Option<String>>,
@@ -311,7 +311,7 @@ const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
 /// Request body for `PATCH /v1/settings`.
 ///
 /// @spec docs/L1-api#settings
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSettingsRequest {
     #[serde(default)]
@@ -325,7 +325,7 @@ pub struct PatchSettingsRequest {
 /// Request body for `POST /v1/automation-rules:preview`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewAutomationRuleRequest {
     pub condition: SmartMailboxRule,
@@ -335,7 +335,7 @@ pub struct PreviewAutomationRuleRequest {
 /// Transport fields for account create/patch requests.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountTransportRequest {
     pub provider: Option<ProviderHint>,
@@ -349,7 +349,7 @@ pub struct AccountTransportRequest {
 /// Tri-state write mode controlling how a secret is mutated on account save.
 ///
 /// @spec docs/L1-api#secret-management
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretWriteMode {
     #[default]
@@ -361,7 +361,7 @@ pub enum SecretWriteMode {
 /// Secret instruction embedded in account create/patch requests.
 ///
 /// @spec docs/L1-api#secret-management
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretWriteRequest {
     #[serde(default)]
@@ -372,7 +372,7 @@ pub struct SecretWriteRequest {
 /// Request body for `POST /v1/accounts/{account_id}/oauth/start`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOAuthRequest {
     pub client_id: String,
@@ -383,7 +383,7 @@ pub struct StartOAuthRequest {
 /// Request body for `POST /v1/oauth/start`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StartProviderOAuthRequest {
     pub provider: ProviderHint,
@@ -395,7 +395,7 @@ pub struct StartProviderOAuthRequest {
 /// Response body for `POST /v1/accounts/{account_id}/oauth/start`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StartOAuthResponse {
     pub authorization_url: String,
@@ -406,7 +406,7 @@ pub struct StartOAuthResponse {
 /// Query parameters for the loopback OAuth redirect endpoint.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCallbackQuery {
     pub state: String,
@@ -418,7 +418,7 @@ pub struct OAuthCallbackQuery {
 /// Request body for `POST /v1/accounts`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountRequest {
     pub id: Option<String>,
@@ -438,7 +438,7 @@ pub struct CreateAccountRequest {
 /// Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchAccountRequest {
     pub name: Option<String>,
@@ -454,7 +454,7 @@ pub struct PatchAccountRequest {
 /// Request body for `POST /v1/smart-mailboxes`.
 ///
 /// @spec docs/L1-api#smart-mailbox-crud
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSmartMailboxRequest {
     pub name: String,
@@ -465,7 +465,7 @@ pub struct CreateSmartMailboxRequest {
 /// Request body for `PATCH /v1/smart-mailboxes/{id}`. Omitted fields are preserved.
 ///
 /// @spec docs/L1-api#smart-mailbox-crud
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSmartMailboxRequest {
     pub name: Option<String>,
@@ -500,7 +500,7 @@ pub struct ApiError {
 /// Generic success response for mutating endpoints that return no domain data.
 ///
 /// @spec docs/L1-api#endpoint-table
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OkResponse {
     pub ok: bool,
@@ -509,7 +509,7 @@ pub struct OkResponse {
 /// Response from `POST /v1/accounts/{id}/verify`.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationResponse {
     pub ok: bool,
@@ -520,7 +520,7 @@ pub struct VerificationResponse {
 /// Response from `POST /v1/sources/{id}/commands/sync`.
 ///
 /// @spec docs/L1-api#sync-and-events
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TriggerSyncResponse {
     pub ok: bool,
@@ -531,7 +531,7 @@ pub struct TriggerSyncResponse {
 /// Paginated conversation list response with an opaque cursor for the next page.
 ///
 /// @spec docs/L1-api#cursor-pagination
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationPageResponse {
     pub items: Vec<ConversationSummary>,
@@ -541,7 +541,7 @@ pub struct ConversationPageResponse {
 /// Paginated message list response with an opaque cursor for the next page.
 ///
 /// @spec docs/L1-api#cursor-pagination
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePageResponse {
     pub items: Vec<MessageSummary>,
@@ -551,7 +551,7 @@ pub struct MessagePageResponse {
 /// Matching message preview for a draft automation rule condition.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRulePreviewResponse {
     pub total: i64,
@@ -694,6 +694,17 @@ pub async fn health() -> Json<HealthResponse> {
 /// GET /v1/accounts
 ///
 /// @spec docs/L1-api#accounts
+#[utoipa::path(
+    get,
+    path = "/v1/accounts",
+    tag = "accounts",
+    summary = "List accounts",
+    description = "Returns all configured accounts with their runtime overview.",
+    responses(
+        (status = 200, description = "All configured accounts", body = [AccountOverview]),
+        (status = 500, description = "Internal error", body = ApiErrorBody)
+    )
+)]
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AccountOverview>>, ApiError> {
@@ -715,6 +726,18 @@ pub async fn list_accounts(
 /// GET /v1/accounts/{account_id}
 ///
 /// @spec docs/L1-api#accounts
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{account_id}",
+    tag = "accounts",
+    summary = "Get account",
+    description = "Returns a single account with its runtime overview.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "The requested account", body = AccountOverview),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn get_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -734,6 +757,20 @@ pub async fn get_account(
 /// the supervisor runtime, and emits an `account.created` event.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts",
+    tag = "accounts",
+    summary = "Create account",
+    description = "Validates uniqueness, applies the secret instruction, persists config, \
+                   starts the runtime, and emits an account.created event.",
+    request_body = CreateAccountRequest,
+    responses(
+        (status = 200, description = "The created account", body = AccountOverview),
+        (status = 400, description = "Validation failed", body = ApiErrorBody),
+        (status = 409, description = "Account already exists", body = ApiErrorBody)
+    )
+)]
 pub async fn create_account(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateAccountRequest>,
@@ -802,6 +839,20 @@ pub async fn create_account(
 /// the supervisor runtime.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    patch,
+    path = "/v1/accounts/{account_id}",
+    tag = "accounts",
+    summary = "Update account",
+    description = "Sparse-merges provided fields into the existing account and restarts the runtime.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    request_body = PatchAccountRequest,
+    responses(
+        (status = 200, description = "The updated account", body = AccountOverview),
+        (status = 400, description = "Validation failed", body = ApiErrorBody),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn patch_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -862,6 +913,19 @@ pub async fn patch_account(
 /// Attempts JMAP session discovery and reports identity and push support.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{account_id}/verify",
+    tag = "accounts",
+    summary = "Verify account",
+    description = "Attempts JMAP session discovery and reports identity and push support.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "Verification result", body = VerificationResponse),
+        (status = 404, description = "Account not found", body = ApiErrorBody),
+        (status = 502, description = "Gateway verification failed", body = ApiErrorBody)
+    )
+)]
 pub async fn verify_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -885,6 +949,18 @@ pub async fn verify_account(
 /// Creates a backend-held PKCE authorization session for provider-first setup.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/oauth/start",
+    tag = "oauth",
+    summary = "Start provider OAuth flow",
+    description = "Creates a backend-held PKCE authorization session for provider-first setup.",
+    request_body = StartProviderOAuthRequest,
+    responses(
+        (status = 200, description = "Authorization session details", body = StartOAuthResponse),
+        (status = 400, description = "Invalid provider or request", body = ApiErrorBody)
+    )
+)]
 pub async fn start_provider_oauth(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StartProviderOAuthRequest>,
@@ -934,6 +1010,20 @@ pub async fn start_provider_oauth(
 /// Creates a backend-held PKCE authorization session for an existing account.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{account_id}/oauth/start",
+    tag = "oauth",
+    summary = "Start account OAuth flow",
+    description = "Creates a backend-held PKCE authorization session for an existing account.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    request_body = StartOAuthRequest,
+    responses(
+        (status = 200, description = "Authorization session details", body = StartOAuthResponse),
+        (status = 400, description = "Invalid account or request", body = ApiErrorBody),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn start_account_oauth(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -989,6 +1079,19 @@ pub async fn start_account_oauth(
 /// store the token set as the account's managed OS secret.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    get,
+    path = "/v1/oauth/callback",
+    tag = "oauth",
+    summary = "Complete OAuth flow",
+    description = "Loopback redirect target. Exchanges a provider authorization code for a token \
+                   set and returns an HTML page for the browser tab.",
+    params(OAuthCallbackQuery),
+    responses(
+        (status = 200, description = "OAuth completion HTML page", content_type = "text/html"),
+        (status = 400, description = "OAuth denied or invalid callback", body = ApiErrorBody)
+    )
+)]
 pub async fn complete_account_oauth(
     State(state): State<Arc<AppState>>,
     Query(query): Query<OAuthCallbackQuery>,
@@ -1225,6 +1328,18 @@ async fn persist_oauth_token_set(
 /// POST /v1/accounts/{account_id}/enable
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{account_id}/enable",
+    tag = "accounts",
+    summary = "Enable account",
+    description = "Sets the account enabled flag and restarts the runtime.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "Account enabled", body = OkResponse),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn enable_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -1235,6 +1350,18 @@ pub async fn enable_account(
 /// POST /v1/accounts/{account_id}/disable
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{account_id}/disable",
+    tag = "accounts",
+    summary = "Disable account",
+    description = "Clears the account enabled flag and restarts the runtime.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "Account disabled", body = OkResponse),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn disable_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -1248,6 +1375,21 @@ pub async fn disable_account(
 /// account appearance to reference it.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{account_id}/logo",
+    tag = "accounts",
+    summary = "Upload account logo",
+    description = "Stores a user-uploaded account logo (PNG, JPEG, WebP, or GIF) and updates the \
+                   account appearance to reference it. The request body is the raw image bytes.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    request_body(content = [u8], description = "Raw image bytes", content_type = "application/octet-stream"),
+    responses(
+        (status = 200, description = "The updated account", body = AccountOverview),
+        (status = 400, description = "Invalid or oversized image", body = ApiErrorBody),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn upload_account_logo(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -1324,6 +1466,18 @@ pub async fn upload_account_logo(
 /// GET /v1/account-assets/logos/{image_id}
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    get,
+    path = "/v1/account-assets/logos/{image_id}",
+    tag = "accounts",
+    summary = "Get account logo",
+    description = "Returns the stored account logo image bytes.",
+    params(("image_id" = String, Path, description = "Logo image identifier")),
+    responses(
+        (status = 200, description = "Logo image bytes", content_type = "image/*", body = [u8]),
+        (status = 404, description = "Logo not found", body = ApiErrorBody)
+    )
+)]
 pub async fn get_account_logo(
     State(state): State<Arc<AppState>>,
     Path(image_id): Path<String>,
@@ -1361,6 +1515,19 @@ pub async fn get_account_logo(
 /// deletes the config file, and emits an `account.deleted` event.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    delete,
+    path = "/v1/accounts/{account_id}",
+    tag = "accounts",
+    summary = "Delete account",
+    description = "Removes the managed keyring secret, stops the runtime, deletes config, and \
+                   emits an account.deleted event.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "Account deleted", body = OkResponse),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
 pub async fn delete_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
@@ -1392,6 +1559,19 @@ pub async fn delete_account(
 ///
 /// @spec docs/L1-api#sync-and-events
 /// @spec docs/L1-accounts#configdiff
+#[utoipa::path(
+    post,
+    path = "/v1/config:reload",
+    tag = "sync",
+    summary = "Reload configuration",
+    description = "Re-reads config from disk, diffs against the in-memory snapshot, and \
+                   starts/stops runtimes for changed accounts.",
+    responses(
+        (status = 200, description = "Configuration reloaded", body = OkResponse),
+        (status = 400, description = "Configuration invalid", body = ApiErrorBody),
+        (status = 500, description = "Configuration reload failed", body = ApiErrorBody)
+    )
+)]
 pub async fn reload_config(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<OkResponse>, ApiError> {
@@ -1448,6 +1628,18 @@ pub async fn reload_config(
 /// GET /v1/sources/{source_id}/mailboxes
 ///
 /// @spec docs/L1-api#conversations-and-messages
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/mailboxes",
+    tag = "mailboxes",
+    summary = "List mailboxes",
+    description = "Returns all mailboxes for a source with unread and total counts.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    responses(
+        (status = 200, description = "Mailboxes for the source", body = [MailboxSummary]),
+        (status = 404, description = "Source not found", body = ApiErrorBody)
+    )
+)]
 pub async fn list_mailboxes(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -1465,6 +1657,24 @@ pub async fn list_mailboxes(
 ///
 /// @spec docs/L1-api#conversations-and-messages
 /// @spec docs/L1-jmap#methods-used
+#[utoipa::path(
+    patch,
+    path = "/v1/sources/{source_id}/mailboxes/{mailbox_id}",
+    tag = "mailboxes",
+    summary = "Update mailbox role",
+    description = "Sets or clears the role assigned to a mailbox and returns the updated list.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("mailbox_id" = String, Path, description = "Mailbox identifier")
+    ),
+    request_body = PatchMailboxRequest,
+    responses(
+        (status = 200, description = "Updated mailboxes for the source", body = [MailboxSummary]),
+        (status = 400, description = "Invalid mailbox role", body = ApiErrorBody),
+        (status = 404, description = "Source or mailbox not found", body = ApiErrorBody),
+        (status = 503, description = "Account gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn patch_mailbox(
     State(state): State<Arc<AppState>>,
     Path((source_id, mailbox_id)): Path<(String, String)>,
@@ -1494,6 +1704,23 @@ pub async fn patch_mailbox(
 /// GET /v1/sources/{source_id}/messages
 ///
 /// @spec docs/L1-api#conversations-and-messages
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages",
+    tag = "messages",
+    summary = "List source messages",
+    description = "Returns a paginated page of message summaries for a source, optionally filtered \
+                   by mailbox or a search query.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ListSourceMessagesQuery
+    ),
+    responses(
+        (status = 200, description = "A page of message summaries", body = MessagePageResponse),
+        (status = 400, description = "Invalid cursor or query", body = ApiErrorBody),
+        (status = 404, description = "Source not found", body = ApiErrorBody)
+    )
+)]
 pub async fn list_source_messages(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -1565,6 +1792,18 @@ fn validate_source_message_cursor(
 ///
 /// @spec docs/L1-api#conversations-and-messages
 /// @spec docs/L1-api#cursor-pagination
+#[utoipa::path(
+    get,
+    path = "/v1/messages/search",
+    tag = "messages",
+    summary = "Search messages",
+    description = "Returns a global, paginated message search page without source fan-out.",
+    params(SearchMessagesQuery),
+    responses(
+        (status = 200, description = "A page of matching message summaries", body = MessagePageResponse),
+        (status = 400, description = "Invalid or empty query", body = ApiErrorBody)
+    )
+)]
 pub async fn search_messages(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SearchMessagesQuery>,
@@ -1591,6 +1830,17 @@ pub async fn search_messages(
 /// GET /v1/sidebar
 ///
 /// @spec docs/L1-api#navigation
+#[utoipa::path(
+    get,
+    path = "/v1/sidebar",
+    tag = "mailboxes",
+    summary = "Get sidebar",
+    description = "Returns the combined sidebar payload: smart mailboxes, tags, and per-source mailboxes.",
+    responses(
+        (status = 200, description = "The sidebar payload", body = SidebarResponse),
+        (status = 500, description = "Internal error", body = ApiErrorBody)
+    )
+)]
 pub async fn get_sidebar(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<SidebarResponse>, ApiError> {
@@ -1605,6 +1855,19 @@ pub async fn get_sidebar(
 ///
 /// @spec docs/L1-api#conversations-and-messages
 /// @spec docs/L1-api#cursor-pagination
+#[utoipa::path(
+    get,
+    path = "/v1/views/conversations",
+    tag = "conversations",
+    summary = "List conversations",
+    description = "Returns a paginated page of conversation summaries, optionally filtered by \
+                   source, mailbox, or a search query.",
+    params(ListConversationsQuery),
+    responses(
+        (status = 200, description = "A page of conversation summaries", body = ConversationPageResponse),
+        (status = 400, description = "Invalid cursor or query", body = ApiErrorBody)
+    )
+)]
 pub async fn list_conversations(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ListConversationsQuery>,
@@ -1653,6 +1916,18 @@ pub async fn list_conversations(
 /// GET /v1/views/conversations/{id}
 ///
 /// @spec docs/L1-api#conversations-and-messages
+#[utoipa::path(
+    get,
+    path = "/v1/views/conversations/{conversation_id}",
+    tag = "conversations",
+    summary = "Get conversation",
+    description = "Returns a full conversation with all messages expanded.",
+    params(("conversation_id" = String, Path, description = "Conversation identifier")),
+    responses(
+        (status = 200, description = "The conversation detail", body = ConversationView),
+        (status = 404, description = "Conversation not found", body = ApiErrorBody)
+    )
+)]
 pub async fn get_conversation(
     State(state): State<Arc<AppState>>,
     Path(conversation_id): Path<String>,
@@ -1671,6 +1946,22 @@ pub async fn get_conversation(
 ///
 /// @spec docs/L1-api#conversations-and-messages
 /// @spec docs/L1-api#message-body-sanitization
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages/{message_id}",
+    tag = "messages",
+    summary = "Get message detail",
+    description = "Returns full message detail with sanitized body HTML and rewritten inline \
+                   attachment URLs.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("message_id" = String, Path, description = "Message identifier")
+    ),
+    responses(
+        (status = 200, description = "The message detail", body = MessageDetail),
+        (status = 404, description = "Message not found", body = ApiErrorBody)
+    )
+)]
 pub async fn get_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -1702,6 +1993,25 @@ pub async fn get_message(
 }
 
 /// GET /v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
+    tag = "messages",
+    summary = "Get message attachment",
+    description = "Returns the raw bytes of a message attachment, inline or as a download.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("message_id" = String, Path, description = "Message identifier"),
+        ("attachment_id" = String, Path, description = "Attachment identifier"),
+        GetAttachmentQuery
+    ),
+    responses(
+        (status = 200, description = "Attachment bytes, served with the attachment's own MIME type (octet-stream fallback)", content_type = "*/*", body = [u8]),
+        (status = 404, description = "Message or attachment not found", body = ApiErrorBody),
+        (status = 502, description = "Upstream network error fetching the attachment", body = ApiErrorBody),
+        (status = 503, description = "Account gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn get_message_attachment(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id, attachment_id)): Path<(String, String, String)>,
@@ -1767,6 +2077,19 @@ pub async fn get_message_attachment(
 /// GET /v1/sources/{source_id}/identity
 ///
 /// @spec docs/L1-api#compose
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/identity",
+    tag = "messages",
+    summary = "Get sender identity",
+    description = "Returns the JMAP sender identity for a source.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    responses(
+        (status = 200, description = "The sender identity", body = Identity),
+        (status = 404, description = "Source not found", body = ApiErrorBody),
+        (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn get_identity(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -1784,6 +2107,17 @@ pub async fn get_identity(
 /// GET /v1/sender-addresses
 ///
 /// @spec docs/L1-api#compose
+#[utoipa::path(
+    get,
+    path = "/v1/sender-addresses",
+    tag = "messages",
+    summary = "List sender addresses",
+    description = "Returns locally cached sender addresses that previously passed submission.",
+    responses(
+        (status = 200, description = "Cached sender addresses", body = [CachedSenderAddress]),
+        (status = 500, description = "Internal error", body = ApiErrorBody)
+    )
+)]
 pub async fn list_sender_addresses(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<CachedSenderAddress>>, ApiError> {
@@ -1798,6 +2132,22 @@ pub async fn list_sender_addresses(
 ///
 /// @spec docs/L1-api#compose
 /// @spec docs/L1-compose#reply-quoting
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages/{message_id}/reply-context",
+    tag = "messages",
+    summary = "Get reply context",
+    description = "Returns pre-computed reply/forward metadata (recipients, subjects, quoted body).",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("message_id" = String, Path, description = "Message identifier")
+    ),
+    responses(
+        (status = 200, description = "The reply context", body = ReplyContext),
+        (status = 404, description = "Message not found", body = ApiErrorBody),
+        (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn get_reply_context(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
@@ -1816,6 +2166,20 @@ pub async fn get_reply_context(
 ///
 /// @spec docs/L1-api#compose
 /// @spec docs/L1-compose#no-send-empty-to
+#[utoipa::path(
+    post,
+    path = "/v1/sources/{source_id}/commands/send",
+    tag = "messages",
+    summary = "Send message",
+    description = "Validates and submits a new email via the source gateway, then triggers a sync.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    request_body = SendMessageRequest,
+    responses(
+        (status = 200, description = "Message accepted for delivery", body = OkResponse),
+        (status = 400, description = "Invalid compose request", body = ApiErrorBody),
+        (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn send_message(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -1979,6 +2343,23 @@ fn require_live_gateway(
 ///
 /// @spec docs/L1-api#sync-and-events
 /// @spec docs/L1-sync#sync-loop
+#[utoipa::path(
+    post,
+    path = "/v1/sources/{source_id}/commands/sync",
+    tag = "sync",
+    summary = "Trigger sync",
+    description = "Runs a manual sync for a source and reports the number of events emitted.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    // NOTE: the handler accepts an absent body (defaults to incremental sync). utoipa's
+    // path macro can't emit `requestBody.required: false`, so optionality is documented here.
+    request_body(content = TriggerSyncRequest,
+        description = "Optional. Defaults to an incremental sync when the body is omitted."),
+    responses(
+        (status = 200, description = "Sync result", body = TriggerSyncResponse),
+        (status = 404, description = "Source not found", body = ApiErrorBody),
+        (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
+    )
+)]
 pub async fn trigger_sync(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
@@ -2007,6 +2388,21 @@ pub async fn trigger_sync(
 ///
 /// @spec docs/L1-api#sse-event-stream
 /// @spec docs/L0-api#server-sent-events-for-push
+// NOTE: utoipa cannot infer the SSE payload type. The full event payload contract
+// (DomainEvent over text/event-stream) is documented in P3 via AsyncAPI.
+#[utoipa::path(
+    get,
+    path = "/v1/events",
+    tag = "events",
+    summary = "Stream events",
+    description = "Opens a Server-Sent Events stream of domain events. When afterSeq is provided, \
+                   replays matching backlog events before switching to the live stream.",
+    params(EventsQuery),
+    responses(
+        (status = 200, description = "Server-sent event stream of domain events", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid filter", body = ApiErrorBody)
+    )
+)]
 pub async fn stream_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EventsQuery>,

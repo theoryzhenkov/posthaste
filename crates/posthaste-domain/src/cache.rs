@@ -139,6 +139,7 @@ impl CacheObjectState {
 /// @spec docs/L1-sync#local-cache-planning
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CachePolicy {
     pub soft_cap_bytes: u64,
     pub hard_cap_bytes: u64,

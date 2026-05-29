@@ -22,6 +22,7 @@ macro_rules! string_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+        #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -210,6 +211,7 @@ pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 /// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
     #[serde(default)]
@@ -227,6 +229,7 @@ pub struct AppSettings {
 /// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AccountDriver {
     Jmap,
     ImapSmtp,
@@ -275,6 +278,7 @@ impl AccountDriver {
 /// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SecretKind {
     /// Credential read from an environment variable.
     Env,
@@ -287,6 +291,7 @@ pub enum SecretKind {
 /// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SecretRef {
     pub kind: SecretKind,
     pub key: String,
@@ -302,6 +307,7 @@ pub type SecretStorage = SecretKind;
 /// @spec docs/L1-api#secret-management
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SecretStatus {
     pub storage: SecretStorage,
     pub configured: bool,
@@ -313,6 +319,7 @@ pub struct SecretStatus {
 /// @spec docs/L0-providers#driver-model
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ProviderHint {
     #[default]
     Generic,
@@ -337,6 +344,7 @@ impl From<ProviderKind> for ProviderHint {
 /// @spec docs/L0-providers#authentication
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ProviderAuthKind {
     #[default]
     Password,
@@ -350,6 +358,7 @@ pub enum ProviderAuthKind {
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum TransportSecurity {
     #[default]
     Tls,
@@ -362,6 +371,7 @@ pub enum TransportSecurity {
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ImapTransportSettings {
     pub host: String,
     pub port: u16,
@@ -373,6 +383,7 @@ pub struct ImapTransportSettings {
 /// @spec docs/L0-providers#imap-smtp-sync-strategy
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmtpTransportSettings {
     pub host: String,
     pub port: u16,
@@ -384,6 +395,7 @@ pub struct SmtpTransportSettings {
 /// @spec docs/L1-accounts#toml-schema
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountTransportSettings {
     #[serde(default)]
     pub provider: ProviderHint,
@@ -412,6 +424,7 @@ impl AccountTransportSettings {
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AccountAppearance {
     Initials {
         initials: String,
@@ -430,6 +443,7 @@ pub enum AccountAppearance {
 /// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AutomationRule {
     pub id: String,
     pub name: String,
@@ -508,6 +522,7 @@ pub struct CacheRescoreBatchOutcome {
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AutomationTrigger {
     MessageArrived,
     MessageChanged,
@@ -523,6 +538,7 @@ pub enum AutomationTrigger {
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AutomationAction {
     ApplyTag { tag: String },
     RemoveTag { tag: String },
@@ -560,6 +576,7 @@ pub struct AccountSettings {
     rename_all_fields = "camelCase",
     tag = "kind"
 )]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AccountConnectionOverview {
     ManualCredentials {
         provider: ProviderHint,
@@ -663,6 +680,7 @@ impl<'de> Deserialize<'de> for AccountConnectionOverview {
 /// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AccountStatus {
     Ready,
     Syncing,
@@ -677,6 +695,7 @@ pub enum AccountStatus {
 /// @spec docs/L2-transport#push-transport
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum PushStatus {
     Connected,
     Reconnecting,
@@ -689,6 +708,7 @@ pub enum PushStatus {
 /// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SyncProgressStage {
     Connecting,
     Discovering,
@@ -707,6 +727,7 @@ pub enum SyncProgressStage {
 /// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SyncProgress {
     pub sync_id: String,
     pub trigger: SyncTrigger,
@@ -725,6 +746,7 @@ pub struct SyncProgress {
 /// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountRuntimeOverview {
     pub status: AccountStatus,
     pub push: PushStatus,
@@ -752,6 +774,7 @@ impl Default for AccountRuntimeOverview {
 /// @spec docs/L1-api#account-crud-lifecycle
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountOverview {
     pub id: AccountId,
     pub name: String,
@@ -824,6 +847,7 @@ impl SyncObject {
 /// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SyncMode {
     #[default]
     Incremental,
@@ -848,6 +872,7 @@ impl SyncMode {
 /// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RawMessageRef {
     pub path: String,
     pub sha256: String,
@@ -861,6 +886,7 @@ pub struct RawMessageRef {
 /// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MailboxSummary {
     pub id: MailboxId,
     pub name: String,
@@ -874,6 +900,7 @@ pub struct MailboxSummary {
 /// @spec docs/L1-api#conversations-and-messages
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MessageSummary {
     pub id: MessageId,
     pub source_id: AccountId,
@@ -898,6 +925,7 @@ pub struct MessageSummary {
 /// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum MessageSortField {
     #[default]
     Date,
@@ -934,6 +962,7 @@ pub struct MessagePage {
 /// @spec docs/L1-api#message-body-sanitization
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MessageAttachment {
     pub id: String,
     pub blob_id: BlobId,
@@ -951,6 +980,7 @@ pub struct MessageAttachment {
 /// @spec docs/L1-api#message-body-sanitization
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MessageDetail {
     #[serde(flatten)]
     pub summary: MessageSummary,
@@ -975,6 +1005,7 @@ pub struct ThreadView {
 /// @spec docs/L0-accounts#the-invariant
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceMessageRef {
     pub source_id: AccountId,
     pub message_id: MessageId,
@@ -985,6 +1016,7 @@ pub struct SourceMessageRef {
 /// @spec docs/L1-sync#conversation-pagination
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ConversationSummary {
     pub id: ConversationId,
     pub subject: Option<String>,
@@ -1007,6 +1039,7 @@ pub struct ConversationSummary {
 /// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ConversationSortField {
     #[default]
     Date,
@@ -1023,6 +1056,7 @@ pub enum ConversationSortField {
 /// @spec docs/L1-api#cursor-pagination
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SortDirection {
     Asc,
     #[default]
@@ -1054,6 +1088,7 @@ pub struct ConversationPage {
 /// @spec docs/L1-api#conversations-and-messages
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ConversationView {
     pub id: ConversationId,
     pub subject: Option<String>,
@@ -1065,6 +1100,7 @@ pub struct ConversationView {
 /// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SidebarSource {
     pub id: AccountId,
     pub name: String,
@@ -1076,6 +1112,7 @@ pub struct SidebarSource {
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxKind {
     Default,
     User,
@@ -1086,6 +1123,7 @@ pub enum SmartMailboxKind {
 /// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SidebarSmartMailbox {
     pub id: SmartMailboxId,
     pub name: String,
@@ -1098,6 +1136,7 @@ pub struct SidebarSmartMailbox {
 /// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TagSummary {
     pub name: String,
     pub unread_messages: i64,
@@ -1109,6 +1148,7 @@ pub struct TagSummary {
 /// @spec docs/L1-api#navigation
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SidebarResponse {
     pub smart_mailboxes: Vec<SidebarSmartMailbox>,
     pub tags: Vec<TagSummary>,
@@ -1120,6 +1160,7 @@ pub struct SidebarResponse {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxGroupOperator {
     All,
     Any,
@@ -1130,6 +1171,7 @@ pub enum SmartMailboxGroupOperator {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxField {
     SourceId,
     SourceName,
@@ -1154,6 +1196,7 @@ pub enum SmartMailboxField {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxOperator {
     Equals,
     In,
@@ -1169,6 +1212,7 @@ pub enum SmartMailboxOperator {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxValue {
     String(String),
     Strings(Vec<String>),
@@ -1180,9 +1224,14 @@ pub enum SmartMailboxValue {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmartMailboxGroup {
     pub operator: SmartMailboxGroupOperator,
     pub negated: bool,
+    // Break the SmartMailboxGroup -> SmartMailboxRuleNode -> SmartMailboxGroup
+    // schema cycle so utoipa's component collector does not recurse infinitely.
+    // The emitted schema still references SmartMailboxRuleNode by `$ref`.
+    #[cfg_attr(feature = "openapi", schema(no_recursion))]
     pub nodes: Vec<SmartMailboxRuleNode>,
 }
 
@@ -1191,6 +1240,7 @@ pub struct SmartMailboxGroup {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmartMailboxCondition {
     pub field: SmartMailboxField,
     pub operator: SmartMailboxOperator,
@@ -1203,6 +1253,7 @@ pub struct SmartMailboxCondition {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SmartMailboxRuleNode {
     Group(SmartMailboxGroup),
     Condition(SmartMailboxCondition),
@@ -1213,6 +1264,7 @@ pub enum SmartMailboxRuleNode {
 /// @spec docs/L1-accounts#condition-fields-and-operators
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmartMailboxRule {
     pub root: SmartMailboxGroup,
 }
@@ -1223,6 +1275,7 @@ pub struct SmartMailboxRule {
 /// @spec docs/L1-accounts#smart-mailbox-defaults
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmartMailbox {
     pub id: SmartMailboxId,
     pub name: String,
@@ -1241,6 +1294,7 @@ pub struct SmartMailbox {
 /// @spec docs/L1-api#smart-mailboxes
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SmartMailboxSummary {
     pub id: SmartMailboxId,
     pub name: String,
@@ -1365,6 +1419,7 @@ pub struct FetchedBody {
 /// @spec docs/L1-api#sse-event-stream
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DomainEvent {
     pub seq: i64,
     pub account_id: AccountId,
@@ -1372,6 +1427,7 @@ pub struct DomainEvent {
     pub occurred_at: String,
     pub mailbox_id: Option<MailboxId>,
     pub message_id: Option<MessageId>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub payload: Value,
 }
 
@@ -1391,6 +1447,7 @@ pub struct EventFilter {
 /// @spec docs/L1-sync#sync-loop
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum SyncTrigger {
     Startup,
     Poll,
@@ -1432,6 +1489,7 @@ pub type PushStream = Pin<Box<dyn Stream<Item = Result<PushNotification, Gateway
 /// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetKeywordsCommand {
     pub add: Vec<String>,
     pub remove: Vec<String>,
@@ -1442,6 +1500,7 @@ pub struct SetKeywordsCommand {
 /// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReplaceMailboxesCommand {
     pub mailbox_ids: Vec<MailboxId>,
 }
@@ -1451,6 +1510,7 @@ pub struct ReplaceMailboxesCommand {
 /// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AddToMailboxCommand {
     pub mailbox_id: MailboxId,
 }
@@ -1460,6 +1520,7 @@ pub struct AddToMailboxCommand {
 /// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RemoveFromMailboxCommand {
     pub mailbox_id: MailboxId,
 }
@@ -1469,6 +1530,7 @@ pub struct RemoveFromMailboxCommand {
 /// @spec docs/L1-api#message-commands
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CommandResult {
     pub detail: Option<MessageDetail>,
     pub events: Vec<DomainEvent>,
@@ -1488,6 +1550,7 @@ pub struct MutationOutcome {
 /// @spec docs/L1-jmap#core-types
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Identity {
     pub id: String,
     pub name: String,
@@ -1499,6 +1562,7 @@ pub struct Identity {
 /// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Recipient {
     pub name: Option<String>,
     pub email: String,
@@ -1509,6 +1573,7 @@ pub struct Recipient {
 /// @spec docs/L1-compose#sender-selection
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CachedSenderAddress {
     pub source_id: AccountId,
     pub name: Option<String>,
@@ -1521,6 +1586,7 @@ pub struct CachedSenderAddress {
 /// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReplyContext {
     pub to: Vec<Recipient>,
     pub cc: Vec<Recipient>,
@@ -1536,6 +1602,7 @@ pub struct ReplyContext {
 /// @spec docs/L1-jmap#methods-used
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SendMessageRequest {
     pub from: Option<Recipient>,
     pub to: Vec<Recipient>,

@@ -16,6 +16,7 @@ use crate::{
 /// @spec docs/L0-providers#driver-model
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum ProviderKind {
     #[default]
     Generic,
