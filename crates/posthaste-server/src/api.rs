@@ -324,7 +324,7 @@ pub struct PatchSettingsRequest {
 
 /// Request body for `POST /v1/automation-rules:preview`.
 ///
-/// @spec docs/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#application-settings
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewAutomationRuleRequest {
@@ -550,7 +550,7 @@ pub struct MessagePageResponse {
 
 /// Matching message preview for a draft automation rule condition.
 ///
-/// @spec docs/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#application-settings
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRulePreviewResponse {

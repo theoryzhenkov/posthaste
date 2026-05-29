@@ -89,11 +89,17 @@ Opening the API to arbitrary clients/agents is a security shift, not just docs:
 ## Phases
 
 - **P0 — Design & decisions** (this doc + open questions below resolved).
-- **P1 — OpenAPI emission**: `utoipa` annotations across the 38 routes; serve
-  Swagger UI / Redoc; commit `openapi.json` as a contract artifact.
+- **P1 — OpenAPI emission**: `utoipa` annotations across the routes; commit
+  `openapi.json` as a contract artifact + drift test. DONE (46 operations,
+  feature-gated domain `ToSchema`, `GET /v1/openapi.json`). Remaining: serve a
+  browsable Swagger UI / Redoc / Scalar (currently only the raw spec is served).
 - **P2 — Generated TS client**: generate `api/types.ts` + client from the spec;
   retire the hand-mirror; ship the typed `ApiErrorCode` union (with backend code
-  consolidation).
+  consolidation). Also fold in: repoint the frontend `@spec` refs that still
+  point at `#account-crud-lifecycle` for automation/appearance/cache topics →
+  `#application-settings` (deferred from the spec reorg; the generated
+  `types.ts`/`client.ts` get this for free on regen, but the hand-written
+  `apps/web/src/components/settings-panel/*` refs must be updated by hand).
 - **P3 — AsyncAPI for `/events`**: document the SSE event contract.
 - **P4 — Trust model**: authn + capability-scoped authz + boundary validation +
   rate limiting.

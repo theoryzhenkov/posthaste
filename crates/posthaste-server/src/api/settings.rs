@@ -148,7 +148,7 @@ pub async fn patch_settings(
 /// Returns a small newest-first sample and total count for a draft rule
 /// condition using the same indexed rule query path as smart mailboxes.
 ///
-/// @spec docs/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#application-settings
 #[utoipa::path(
     post,
     path = "/v1/automation-rules:preview",
