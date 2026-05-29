@@ -60,11 +60,11 @@ pub use smart_mailboxes::{
 use account_support::{
     account_overview, account_secret_ref, append_and_publish_account_event,
     append_and_publish_config_event, apply_account_patch, apply_secret_instruction,
-    default_account_appearance, delete_managed_secret, generate_account_id_seed,
-    generate_smart_mailbox_id, internal_error, normalize_account_appearance,
-    normalize_automation_rules, normalize_email_patterns, normalize_optional, store_error_to_api,
-    validate_account_settings, validate_automation_drafts, validate_automation_rules,
-    validate_logo_image_id, validate_secret_request, ResourceChange, ResourceOperation,
+    decide_secret_instruction, default_account_appearance, delete_managed_secret,
+    generate_account_id_seed, generate_smart_mailbox_id, internal_error,
+    normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
+    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
+    validate_automation_rules, validate_logo_image_id, ResourceChange, ResourceOperation,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
@@ -624,24 +624,6 @@ fn command_result_response(
     Ok(Json(result))
 }
 
-fn secret_ref_after_write_request(
-    account_id: &AccountId,
-    previous_secret_ref: Option<&SecretRef>,
-    secret: &SecretWriteRequest,
-) -> Result<Option<SecretRef>, ApiError> {
-    validate_secret_request(secret)?;
-    match secret.mode {
-        SecretWriteMode::Keep => Ok(previous_secret_ref.cloned()),
-        SecretWriteMode::Replace => Ok(Some(
-            previous_secret_ref
-                .filter(|secret_ref| matches!(secret_ref.kind, SecretKind::Os))
-                .cloned()
-                .unwrap_or_else(|| account_secret_ref(account_id)),
-        )),
-        SecretWriteMode::Clear => Ok(None),
-    }
-}
-
 /// GET /v1/accounts
 ///
 /// @spec docs/L1-api#accounts
@@ -745,7 +727,8 @@ pub async fn create_account(
         created_at: timestamp.clone(),
         updated_at: timestamp,
     };
-    account.transport.secret_ref = secret_ref_after_write_request(&account.id, None, &secret)?;
+    account.transport.secret_ref =
+        decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
     validate_account_settings(&account)?;
     apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
     state
@@ -782,7 +765,8 @@ pub async fn patch_account(
     let existing_secret_ref = account.transport.secret_ref.clone();
     let secret_request = request.secret.unwrap_or_default();
     account.transport.secret_ref =
-        secret_ref_after_write_request(&account.id, existing_secret_ref.as_ref(), &secret_request)?;
+        decide_secret_instruction(&account.id, existing_secret_ref.as_ref(), &secret_request)?
+            .resolved_secret_ref(existing_secret_ref.as_ref());
     validate_account_settings(&account)?;
     let defer_secret_clear = secret_request.mode == SecretWriteMode::Clear;
     if !defer_secret_clear {
