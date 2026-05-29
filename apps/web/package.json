@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "bun run typecheck && vite build",
-    "check": "bun run logging:check && eslint . && tsc -b && prettier . --check",
+    "check": "bun run logging:check && bun run api:check && eslint . && tsc -b && prettier . --check",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint .",
     "test": "bun test",
     "logging:check": "bun scripts/check-logging-contract.ts",
-    "typecheck": "bun run logging:check && tsc -b",
+    "api:generate": "openapi-typescript ../../openapi.json -o src/api/schema.gen.ts",
+    "api:check": "bun scripts/check-openapi-types.ts",
+    "typecheck": "bun run logging:check && bun run api:check && tsc -b",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -56,6 +58,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.3",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
