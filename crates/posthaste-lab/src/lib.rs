@@ -817,7 +817,7 @@ fn has_secret_like_path_segment(path: &Path) -> bool {
         component
             .as_os_str()
             .to_str()
-            .is_some_and(|segment| is_secret_env_name(segment))
+            .is_some_and(is_secret_env_name)
     })
 }
 
