@@ -1113,6 +1113,14 @@ struct SuiteExecutionRecord {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SuiteListOutput {
+    schema_version: u32,
+    selection: SelectionRecord,
+    suites: Vec<SelectedSuite>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SelectionRecord {
     requested_suite_id: Option<String>,
     tags: Vec<String>,
@@ -1293,8 +1301,17 @@ fn run_suite_command(program: &str, args: &[String]) -> LabResult<()> {
             };
             populate_changed_paths(&mut criteria)?;
             let selected = registry.select(&criteria)?;
-            for suite in selected {
-                println!("{}", suite.id);
+            if options.json {
+                let output = SuiteListOutput {
+                    schema_version: 1,
+                    selection: SelectionRecord::from_criteria(&criteria),
+                    suites: selected,
+                };
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                for suite in selected {
+                    println!("{}", suite.id);
+                }
             }
             Ok(())
         }
@@ -1340,6 +1357,7 @@ struct ListOptions {
     tags: Vec<String>,
     targets: Vec<String>,
     changed: bool,
+    json: bool,
 }
 
 fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
@@ -1347,6 +1365,7 @@ fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
     let mut tags = Vec::new();
     let mut targets = Vec::new();
     let mut changed = false;
+    let mut json = false;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
@@ -1361,6 +1380,9 @@ fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
             }
             "--changed" => {
                 changed = true;
+            }
+            "--json" => {
+                json = true;
             }
             "--target" => {
                 index += 1;
@@ -1392,6 +1414,7 @@ fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
         tags,
         targets,
         changed,
+        json,
     })
 }
 
@@ -1583,13 +1606,13 @@ fn print_usage_kind(program: &str, usage_kind: UsageKind) {
 
 fn print_usage(program: &str) {
     println!("Usage:");
-    println!("  {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed]");
+    println!("  {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed] [--json]");
     println!("  {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
 }
 
 fn print_suite_usage(program: &str) {
     println!(
-        "Usage: {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed]"
+        "Usage: {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed] [--json]"
     );
     println!("Note: --changed reads POSTHASTE_LAB_CHANGED_PATHS when set, otherwise falls back to jj diff main..@ or git diff.");
 }
@@ -1809,16 +1832,38 @@ artifacts = ["artifact.summary.dev.local"]
     }
 
     #[test]
+    fn suite_list_json_shape_includes_selection_and_suites() {
+        let registry = SuiteRegistry::from_toml_str(sample_registry_toml()).unwrap();
+        let criteria = SelectionCriteria {
+            tags: vec!["settings".to_string()],
+            ..SelectionCriteria::default()
+        };
+        let suites = registry.select(&criteria).unwrap();
+        let value = serde_json::to_value(SuiteListOutput {
+            schema_version: 1,
+            selection: SelectionRecord::from_criteria(&criteria),
+            suites,
+        })
+        .unwrap();
+
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["selection"]["tags"], serde_json::json!(["settings"]));
+        assert_eq!(value["suites"][0]["id"], "suite.api.settings.dev");
+    }
+
+    #[test]
     fn parses_changed_suite_list_options() {
         let options = parse_list_options(&[
             "--changed".to_string(),
             "--target".to_string(),
             "web".to_string(),
             "--tag=ui".to_string(),
+            "--json".to_string(),
         ])
         .unwrap();
 
         assert!(options.changed);
+        assert!(options.json);
         assert_eq!(options.targets, vec!["web"]);
         assert_eq!(options.tags, vec!["ui"]);
     }
