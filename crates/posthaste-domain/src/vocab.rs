@@ -62,7 +62,7 @@ impl MailboxRole {
 /// keywords the domain currently treats as first-class.
 ///
 /// @spec docs/L1-api#navigation
-/// @spec docs/L1-api#account-crud-lifecycle
+/// @spec docs/L1-api#application-settings
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SystemKeyword {
     #[serde(rename = "$seen")]

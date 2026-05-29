@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-05-26
-reviewed: 2026-05-26
+modified: 2026-05-29
+reviewed: 2026-05-29
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -241,6 +241,12 @@ progress hints, not a complete execution trace; backend logs remain the detailed
 diagnostic source.
 
 **Appearance**: `AccountOverview` includes a resolved `appearance` object for the account mark. Account config may persist either `{ kind: "initials", initials, colorHue }` or `{ kind: "image", imageId, initials, colorHue }`. If no appearance is configured, the API derives initials and a stable hue from the account. `PATCH /accounts/{id}` can update letter/color appearance. `POST /accounts/{id}/logo` accepts raw PNG, JPEG, WebP, or GIF bytes up to 2 MiB, stores the image under the config root, updates account appearance to `image`, and returns the updated overview. Logo bytes are served from `GET /account-assets/logos/{image_id}`.
+
+## Application settings
+
+App-wide settings carried by `AppSettings` / `PatchSettingsRequest` — automation
+rules, global appearance, and cache policy — plus the automation-rule preview
+endpoint. These are settings semantics, distinct from the account lifecycle above.
 
 **Automation rules**: `AppSettings` and `PatchSettingsRequest` include `automationRules` for active rules and `automationDrafts` for persisted incomplete editor state. Each rule has `id`, `name`, `enabled`, `triggers`, `condition`, `actions`, and `backfill`. `condition` uses the same smart-mailbox rule tree as saved searches. Account and mailbox restrictions are ordinary query conditions, not a separate rule scope. PATCH replaces the full active rule list when `automationRules` is present and preserves it when omitted; the same replacement rule applies to `automationDrafts`. Active rule IDs must be unique, active rules need at least one trigger and one action, tag actions must target non-system keywords, and move actions must target a non-empty mailbox ID. Draft rule IDs must be present and unique across active and draft rules, but draft names, triggers, and actions may be incomplete. Draft rules are not executed and do not enqueue backfill. When `automationRules` is present, the backend saves the rules and enqueues durable low-priority backfill jobs for enabled accounts if the current enabled backfill-rule fingerprint has not already completed.
 

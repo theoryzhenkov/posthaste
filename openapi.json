@@ -3462,7 +3462,7 @@
       },
       "AutomationRulePreviewResponse": {
         "type": "object",
-        "description": "Matching message preview for a draft automation rule condition.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "description": "Matching message preview for a draft automation rule condition.\n\n@spec docs/L1-api#application-settings",
         "required": [
           "total",
           "items"
@@ -4382,7 +4382,7 @@
       },
       "PreviewAutomationRuleRequest": {
         "type": "object",
-        "description": "Request body for `POST /v1/automation-rules:preview`.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "description": "Request body for `POST /v1/automation-rules:preview`.\n\n@spec docs/L1-api#application-settings",
         "required": [
           "condition"
         ],
