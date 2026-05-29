@@ -209,6 +209,8 @@ When `afterSeq` is provided, the backend replays matching events from the `event
 
 Each SSE event has `id` set to the event's sequence number and `data` set to the JSON-serialized `DomainEvent`.
 
+The machine-readable event contract is the AsyncAPI 3.0 document `asyncapi.json` at the repo root (served at `/v1/asyncapi.json`); its `EventTopic` enum is drift-checked against `posthaste_domain::ALL_EVENT_TOPICS`.
+
 The stream sends keepalive comments at the default Axum interval to prevent connection timeout.
 
 `account.status_changed` events include the account runtime fields `status`,

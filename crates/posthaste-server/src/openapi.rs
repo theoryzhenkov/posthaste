@@ -198,3 +198,18 @@ pub fn document() -> utoipa::openapi::OpenApi {
 pub async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
     Json(document())
 }
+
+/// The committed AsyncAPI event contract, embedded at build time. This is the
+/// event-driven analogue of `openapi.json`, describing the `/v1/events` SSE
+/// stream and the full set of event topics.
+///
+/// @spec docs/L1-api#sse-event-stream
+const ASYNCAPI_JSON: &str = include_str!("../../../asyncapi.json");
+
+/// `GET /v1/asyncapi.json` — serve the committed AsyncAPI event contract.
+pub async fn asyncapi_json() -> impl axum::response::IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        ASYNCAPI_JSON,
+    )
+}

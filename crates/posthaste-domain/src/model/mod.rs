@@ -206,6 +206,35 @@ pub const EVENT_TOPIC_PUSH_CONNECTED: &str = "push.connected";
 /// @spec docs/L2-transport#push-transport
 pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 
+/// Every event topic the server emits, in declaration order.
+///
+/// Single source of truth for the documented topic set: the committed
+/// `asyncapi.json` event contract is drift-checked against this slice.
+///
+/// @spec docs/L1-api#sse-event-stream
+pub const ALL_EVENT_TOPICS: &[&str] = &[
+    EVENT_TOPIC_SYNC_COMPLETED,
+    EVENT_TOPIC_SYNC_FAILED,
+    EVENT_TOPIC_SETTINGS_UPDATED,
+    EVENT_TOPIC_CONFIG_RELOADED,
+    EVENT_TOPIC_SMART_MAILBOX_CREATED,
+    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+    EVENT_TOPIC_SMART_MAILBOX_DELETED,
+    EVENT_TOPIC_SMART_MAILBOX_RESET,
+    EVENT_TOPIC_MESSAGE_UPDATED,
+    EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
+    EVENT_TOPIC_MESSAGE_BODY_CACHED,
+    EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
+    EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_ACCOUNT_UPDATED,
+    EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
+    EVENT_TOPIC_PUSH_CONNECTED,
+    EVENT_TOPIC_PUSH_DISCONNECTED,
+];
+
 /// Global application settings shared across all accounts.
 ///
 /// @spec docs/L1-accounts#toml-schema
