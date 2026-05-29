@@ -15,12 +15,12 @@ use posthaste_domain::{
     AppAppearanceSettings, AppSettings, AutomationAction, AutomationRule, CachePolicy,
     CachedSenderAddress, CommandResult, ConversationCursor, ConversationId, ConversationPage,
     ConversationSortField, ConversationSummary, ConversationView, DomainEvent, EventFilter,
-    GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageAttachment,
-    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SharedGateway, SidebarResponse,
-    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    GatewayError, Identity, ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary,
+    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SharedGateway,
+    SidebarResponse, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue,
     SmtpTransportSettings, SortDirection, SyncMode, SyncTrigger, EVENT_TOPIC_ACCOUNT_CREATED,
@@ -1892,8 +1892,8 @@ fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<St
         ));
     };
     match role.as_deref() {
-        None | Some("archive") | Some("drafts") | Some("inbox") | Some("junk") | Some("sent")
-        | Some("trash") => Ok(role),
+        None => Ok(role),
+        Some(value) if MailboxRole::parse(value).is_some() => Ok(role),
         Some(_) => Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_mailbox",
