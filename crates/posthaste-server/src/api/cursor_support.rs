@@ -65,7 +65,7 @@ fn validated_limit(limit: Option<usize>, unit: &str) -> Result<usize, ApiError> 
     if limit == 0 || limit > MAX_CONVERSATION_LIMIT {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_limit",
+            ApiErrorCode::InvalidLimit,
             format!("limit must be between 1 and {MAX_CONVERSATION_LIMIT} {unit}"),
         ));
     }
@@ -113,7 +113,7 @@ pub(super) fn parse_conversation_cursor(
 pub(super) fn invalid_cursor() -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
-        "invalid_cursor",
+        ApiErrorCode::InvalidCursor,
         "cursor must include a sort value and conversation id",
     )
 }
@@ -179,7 +179,7 @@ fn parse_prefixed_value(value: &str) -> Option<(&str, &str)> {
 fn invalid_message_cursor() -> ApiError {
     ApiError::new(
         StatusCode::BAD_REQUEST,
-        "invalid_cursor",
+        ApiErrorCode::InvalidCursor,
         "cursor must include source id and message id",
     )
 }

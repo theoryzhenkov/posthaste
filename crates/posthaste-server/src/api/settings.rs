@@ -8,7 +8,7 @@ fn automation_rule_preview_limit(limit: Option<usize>) -> Result<usize, ApiError
     if limit == 0 || limit > MAX_AUTOMATION_RULE_PREVIEW_LIMIT {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "invalid_limit",
+            ApiErrorCode::InvalidLimit,
             format!(
                 "limit must be between 1 and {MAX_AUTOMATION_RULE_PREVIEW_LIMIT} preview messages"
             ),
@@ -81,7 +81,7 @@ pub async fn patch_settings(
             if account.is_none() {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
-                    "invalid_account",
+                    ApiErrorCode::InvalidAccount,
                     "default account must reference an existing account",
                 ));
             }

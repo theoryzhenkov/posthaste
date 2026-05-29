@@ -942,12 +942,24 @@ export interface components {
          */
         ApiErrorBody: {
             /** @description Stable machine-readable error code. */
-            code: string;
+            code: components["schemas"]["ApiErrorCode"];
             /** @description Optional structured context for the error. */
             details: Record<string, never>;
             /** @description Human-readable description of the failure. */
             message: string;
         };
+        /**
+         * @description Stable machine-readable API error code.
+         *
+         *     The single typed code space for the `/v1` surface: boundary-validation codes
+         *     raised by the API layer, plus the domain [`ServiceErrorKind`] codes mapped via
+         *     [`From<ServiceErrorKind>`]. Serializes to snake_case wire strings.
+         *
+         *     @spec docs/L1-api#error-format
+         *     @spec docs/L1-api#error-code-mapping
+         * @enum {string}
+         */
+        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse";
         /**
          * @description Global UI appearance preferences shared across app windows.
          *
