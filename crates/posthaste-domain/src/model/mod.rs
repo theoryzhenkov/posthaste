@@ -428,11 +428,14 @@ impl AccountTransportSettings {
 pub enum AccountAppearance {
     Initials {
         initials: String,
+        #[cfg_attr(feature = "openapi", schema(rename = "colorHue"))]
         color_hue: u16,
     },
     Image {
+        #[cfg_attr(feature = "openapi", schema(rename = "imageId"))]
         image_id: String,
         initials: String,
+        #[cfg_attr(feature = "openapi", schema(rename = "colorHue"))]
         color_hue: u16,
     },
 }
@@ -517,11 +520,7 @@ pub struct CacheRescoreBatchOutcome {
 ///
 /// @spec docs/L1-sync#automation-actions
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "kind"
-)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AutomationTrigger {
     MessageArrived,
@@ -546,7 +545,10 @@ pub enum AutomationAction {
     MarkUnread,
     Flag,
     Unflag,
-    MoveToMailbox { mailbox_id: MailboxId },
+    MoveToMailbox {
+        #[cfg_attr(feature = "openapi", schema(rename = "mailboxId"))]
+        mailbox_id: MailboxId,
+    },
 }
 
 /// Full persisted configuration for a mail account.
@@ -580,8 +582,10 @@ pub struct AccountSettings {
 pub enum AccountConnectionOverview {
     ManualCredentials {
         provider: ProviderHint,
+        #[cfg_attr(feature = "openapi", schema(rename = "providerKind"))]
         provider_kind: ProviderKind,
         auth: ProviderAuthKind,
+        #[cfg_attr(feature = "openapi", schema(rename = "baseUrl"))]
         base_url: Option<String>,
         username: Option<String>,
         imap: Option<ImapTransportSettings>,
@@ -590,6 +594,7 @@ pub enum AccountConnectionOverview {
     },
     ManagedOAuth {
         provider: ProviderHint,
+        #[cfg_attr(feature = "openapi", schema(rename = "providerKind"))]
         provider_kind: ProviderKind,
         auth: ProviderAuthKind,
         username: Option<String>,

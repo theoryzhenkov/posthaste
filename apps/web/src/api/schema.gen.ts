@@ -824,14 +824,14 @@ export interface components {
          */
         AccountAppearance: {
             /** Format: int32 */
-            color_hue: number;
+            colorHue: number;
             initials: string;
             /** @enum {string} */
             kind: "initials";
         } | {
             /** Format: int32 */
-            color_hue: number;
-            image_id: string;
+            colorHue: number;
+            imageId: string;
             initials: string;
             /** @enum {string} */
             kind: "image";
@@ -843,12 +843,12 @@ export interface components {
          */
         AccountConnectionOverview: {
             auth: components["schemas"]["ProviderAuthKind"];
-            base_url?: string | null;
+            baseUrl?: string | null;
             imap?: null | components["schemas"]["ImapTransportSettings"];
             /** @enum {string} */
             kind: "manualCredentials";
             provider: components["schemas"]["ProviderHint"];
-            provider_kind: components["schemas"]["ProviderKind"];
+            providerKind: components["schemas"]["ProviderKind"];
             secret: components["schemas"]["SecretStatus"];
             smtp?: null | components["schemas"]["SmtpTransportSettings"];
             username?: string | null;
@@ -858,7 +858,7 @@ export interface components {
             /** @enum {string} */
             kind: "managedOAuth";
             provider: components["schemas"]["ProviderHint"];
-            provider_kind: components["schemas"]["ProviderKind"];
+            providerKind: components["schemas"]["ProviderKind"];
             secret: components["schemas"]["SecretStatus"];
             smtp?: null | components["schemas"]["SmtpTransportSettings"];
             username?: string | null;
@@ -1023,7 +1023,7 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "moveToMailbox";
-            mailbox_id: components["schemas"]["MailboxId"];
+            mailboxId: components["schemas"]["MailboxId"];
         };
         /**
          * @description Account-level automation rule evaluated by backend triggers.
@@ -1054,17 +1054,9 @@ export interface components {
          * @description Event types that can cause an automation rule to run.
          *
          *     @spec docs/L1-sync#automation-actions
+         * @enum {string}
          */
-        AutomationTrigger: {
-            /** @enum {string} */
-            kind: "messageArrived";
-        } | {
-            /** @enum {string} */
-            kind: "messageChanged";
-        } | {
-            /** @enum {string} */
-            kind: "manual";
-        };
+        AutomationTrigger: "messageArrived" | "messageChanged" | "manual";
         /**
          * @description Opaque server-assigned identifier for a binary blob (attachment or body content).
          *
