@@ -624,6 +624,42 @@ fn command_result_response(
     Ok(Json(result))
 }
 
+/// Find a free account id from `seed`, appending `-2`, `-3`, … on collision.
+fn allocate_unique_account_id(state: &AppState, seed: &str) -> Result<AccountId, ApiError> {
+    let mut candidate = AccountId::from(seed);
+    let mut suffix = 2;
+    while state
+        .service
+        .get_source(&candidate)
+        .map_err(ApiError::from_service_error)?
+        .is_some()
+    {
+        candidate = AccountId::from(format!("{seed}-{suffix}"));
+        suffix += 1;
+    }
+    Ok(candidate)
+}
+
+/// Persist a freshly-built account: save → start runtime → publish event.
+///
+/// If `save_source` fails after a secret was written to the keyring, roll the
+/// secret back so a failed create does not orphan it (consistent across the
+/// manual and OAuth creation paths). `delete_managed_secret` no-ops unless the
+/// account carries an OS-managed secret.
+async fn persist_new_account(
+    state: &Arc<AppState>,
+    account: &AccountSettings,
+    topic: &str,
+) -> Result<(), ApiError> {
+    if let Err(error) = state.service.save_source(account) {
+        delete_managed_secret(state, account.transport.secret_ref.as_ref())?;
+        return Err(ApiError::from_service_error(error));
+    }
+    state.supervisor.start_account(account).await;
+    append_and_publish_account_event(state, &account.id, topic).map_err(store_error_to_api)?;
+    Ok(())
+}
+
 /// GET /v1/accounts
 ///
 /// @spec docs/L1-api#accounts
@@ -687,18 +723,7 @@ pub async fn create_account(
         Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
         _ => {
             let seed = generate_account_id_seed(&name, &email_patterns);
-            let mut candidate = AccountId::from(seed.as_str());
-            let mut suffix = 2;
-            while state
-                .service
-                .get_source(&candidate)
-                .map_err(ApiError::from_service_error)?
-                .is_some()
-            {
-                candidate = AccountId::from(format!("{seed}-{suffix}"));
-                suffix += 1;
-            }
-            candidate
+            allocate_unique_account_id(state.as_ref(), &seed)?
         }
     };
     if state
@@ -731,13 +756,7 @@ pub async fn create_account(
         decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
     validate_account_settings(&account)?;
     apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
-    state
-        .service
-        .save_source(&account)
-        .map_err(ApiError::from_service_error)?;
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
-        .map_err(store_error_to_api)?;
+    persist_new_account(&state, &account, EVENT_TOPIC_ACCOUNT_CREATED).await?;
 
     let settings = state
         .service
@@ -1052,17 +1071,7 @@ async fn create_oauth_account_from_exchange(
     let email_patterns = vec![identity_email.clone()];
     let name = identity_email.clone();
     let seed = generate_account_id_seed(&name, &email_patterns);
-    let mut account_id = AccountId::from(seed.as_str());
-    let mut suffix = 2;
-    while state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .is_some()
-    {
-        account_id = AccountId::from(format!("{seed}-{suffix}"));
-        suffix += 1;
-    }
+    let account_id = allocate_unique_account_id(state.as_ref(), &seed)?;
 
     let secret_ref = account_secret_ref(&account_id);
     let timestamp = domain_now_iso8601().map_err(internal_error)?;
@@ -1086,14 +1095,7 @@ async fn create_oauth_account_from_exchange(
         delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
         return Err(error);
     }
-    if let Err(error) = state.service.save_source(&account) {
-        delete_managed_secret(state.as_ref(), Some(&secret_ref))?;
-        return Err(ApiError::from_service_error(error));
-    }
-
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(state, &account_id, EVENT_TOPIC_ACCOUNT_CREATED)
-        .map_err(store_error_to_api)?;
+    persist_new_account(state, &account, EVENT_TOPIC_ACCOUNT_CREATED).await?;
     Ok(account_id)
 }
 
