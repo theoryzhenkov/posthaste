@@ -58,6 +58,7 @@ struct OpenIdTokenClaims {
     email: Option<String>,
     email_verified: Option<bool>,
     exp: Option<i64>,
+    nbf: Option<i64>,
     iss: Option<String>,
     preferred_username: Option<String>,
     upn: Option<String>,
@@ -721,6 +722,9 @@ fn insecure_openid_claims_from_id_token(id_token: &str) -> Result<OpenIdTokenCla
     })
 }
 
+/// Clock-skew leeway for the `nbf` (not-before) claim, in seconds.
+const OPENID_NBF_LEEWAY_SECONDS: i64 = 60;
+
 fn validate_openid_identity_claims(
     profile: &OAuthProviderProfile,
     client_id: &str,
@@ -756,6 +760,17 @@ fn validate_openid_identity_claims(
         return Err(GatewayError::Rejected(
             "OAuth identity token has expired".to_string(),
         ));
+    }
+    if let Some(not_before) = claims.nbf {
+        let not_before = OffsetDateTime::from_unix_timestamp(not_before).map_err(|error| {
+            GatewayError::Rejected(format!("OAuth identity token nbf is invalid: {error}"))
+        })?;
+        // Allow a small clock-skew leeway so a freshly-issued token isn't rejected.
+        if now + Duration::seconds(OPENID_NBF_LEEWAY_SECONDS) < not_before {
+            return Err(GatewayError::Rejected(
+                "OAuth identity token is not yet valid".to_string(),
+            ));
+        }
     }
     if claims.nonce.as_deref() != Some(expected_nonce) {
         return Err(GatewayError::Rejected(
@@ -1065,6 +1080,7 @@ TaMgUWVodLXy+lMRbtUQ97M=
             email: Some("user@example.test".to_string()),
             email_verified: Some(true),
             exp: Some(2_000_000_000),
+            nbf: None,
             iss: Some("https://accounts.google.com".to_string()),
             preferred_username: None,
             upn: None,
@@ -1081,6 +1097,56 @@ TaMgUWVodLXy+lMRbtUQ97M=
         .expect_err("wrong audience should be rejected");
 
         assert!(matches!(error, GatewayError::Rejected(message) if message.contains("audience")));
+    }
+
+    #[test]
+    fn openid_claim_validation_rejects_not_yet_valid_nbf() {
+        let base = OpenIdTokenClaims {
+            aud: Some(OpenIdAudience::One("client-id".to_string())),
+            email: Some("user@example.test".to_string()),
+            email_verified: Some(true),
+            exp: Some(2_000_000_000),
+            nbf: None,
+            iss: Some("https://accounts.google.com".to_string()),
+            preferred_username: None,
+            upn: None,
+            nonce: Some("expected-nonce".to_string()),
+        };
+        let now = OffsetDateTime::parse("2026-04-27T10:00:00Z", &Rfc3339).expect("now");
+        let validate = |claims: &OpenIdTokenClaims| {
+            validate_openid_identity_claims(
+                &OAuthProviderProfile::for_provider(&ProviderHint::Gmail).expect("profile"),
+                "client-id",
+                claims,
+                "expected-nonce",
+                now,
+            )
+        };
+
+        // nbf far in the future -> rejected as not yet valid.
+        let future = OpenIdTokenClaims {
+            nbf: Some(now.unix_timestamp() + 3600),
+            ..base.clone()
+        };
+        let error = validate(&future).expect_err("future nbf should be rejected");
+        assert!(
+            matches!(error, GatewayError::Rejected(message) if message.contains("not yet valid"))
+        );
+
+        // nbf in the past (and absent) -> accepted.
+        let past = OpenIdTokenClaims {
+            nbf: Some(now.unix_timestamp() - 3600),
+            ..base.clone()
+        };
+        assert!(validate(&past).is_ok());
+        assert!(validate(&base).is_ok());
+
+        // within the clock-skew leeway -> accepted.
+        let skewed = OpenIdTokenClaims {
+            nbf: Some(now.unix_timestamp() + OPENID_NBF_LEEWAY_SECONDS - 1),
+            ..base
+        };
+        assert!(validate(&skewed).is_ok());
     }
 
     #[test]
