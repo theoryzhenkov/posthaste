@@ -79,6 +79,26 @@ function resolveBaseUrl(): string {
 
 const BASE_URL = resolveBaseUrl()
 
+/**
+ * Read the per-process bearer token injected by the embedded host as
+ * `window.__POSTHASTE_TOKEN__`. Present only in the Tauri webview; absent in
+ * browser dev mode. Harmless when the server does not require auth.
+ *
+ * @spec docs/eph/DESIGN-L1-trust-model
+ */
+function resolveAuthToken(): string | undefined {
+  const token = (window as unknown as Record<string, unknown>)
+    .__POSTHASTE_TOKEN__
+  return typeof token === 'string' && token.length > 0 ? token : undefined
+}
+
+const AUTH_TOKEN = resolveAuthToken()
+
+/** Authorization header for the bearer token, or `{}` when no token is set. */
+function authHeaders(): Record<string, string> {
+  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}
+}
+
 export function buildMessageAttachmentUrl(
   sourceId: string,
   messageId: string,
@@ -166,7 +186,10 @@ async function request<T>(
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       ...fetchInit,
-      headers: mergeHeaders(headers, observabilityHeaders(context)),
+      headers: mergeHeaders(headers, {
+        ...observabilityHeaders(context),
+        ...authHeaders(),
+      }),
     })
   } catch (error) {
     apiLogger.warn(
@@ -683,6 +706,12 @@ export function buildEventsUrl(input?: {
   }
   if (input?.afterSeq != null) {
     params.set('afterSeq', String(input.afterSeq))
+  }
+  // EventSource cannot set request headers, so the bearer token rides as an
+  // `access_token` query param; the server accepts it for `/events` only.
+  // @spec docs/eph/DESIGN-L1-trust-model
+  if (AUTH_TOKEN) {
+    params.set('access_token', AUTH_TOKEN)
   }
   const search = params.toString()
   return `${BASE_URL}/events${search ? `?${search}` : ''}`

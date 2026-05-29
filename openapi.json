@@ -3194,6 +3194,8 @@
           "not_found",
           "conflict",
           "internal_error",
+          "unauthorized",
+          "forbidden",
           "gateway_unavailable",
           "auth_error",
           "network_error",

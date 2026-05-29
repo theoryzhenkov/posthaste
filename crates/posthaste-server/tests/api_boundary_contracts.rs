@@ -94,6 +94,10 @@ impl ApiHarness {
                 event_sender,
                 account_logo_root: state_root.join("account-assets/logos"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
+                auth_token: "test-token".to_string(),
+                require_auth: false,
+                origin_allowlist: Vec::new(),
+                host_allowlist: Vec::new(),
             }),
             store: database_store,
         }
