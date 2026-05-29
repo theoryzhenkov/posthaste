@@ -5,7 +5,8 @@
   "packageManager": "bun@1.3.11",
   "workspaces": [
     "apps/web",
-    "apps/site"
+    "apps/site",
+    "apps/mcp"
   ],
   "scripts": {
     "web:dev": "bun --cwd=apps/web run dev",
