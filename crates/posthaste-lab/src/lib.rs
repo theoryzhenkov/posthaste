@@ -1486,8 +1486,11 @@ fn detect_changed_paths() -> Vec<String> {
     }
 
     if let Some(root) = command_output("jj", &["root"]).map(PathBuf::from) {
-        return command_lines_in(&root, "jj", &["diff", "--name-only", "-r", "main..@"])
-            .unwrap_or_default();
+        if let Some(paths) =
+            command_lines_in(&root, "jj", &["diff", "--name-only", "-r", "main..@"])
+        {
+            return paths;
+        }
     }
 
     if let Some(root) = command_output("git", &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
@@ -1496,6 +1499,11 @@ fn detect_changed_paths() -> Vec<String> {
             command_lines_in(&root, "git", &["diff", "--name-only", "origin/main...HEAD"]),
             command_lines_in(&root, "git", &["diff", "--name-only"]),
             command_lines_in(&root, "git", &["diff", "--cached", "--name-only"]),
+            command_lines_in(
+                &root,
+                "git",
+                &["ls-files", "--others", "--exclude-standard"],
+            ),
         ]);
     }
 

@@ -63,7 +63,7 @@ tags = ["ui", "settings", "tauri", "linux"]
 command = "posthaste-lab run suite.desktop.settings.linux.test"
 ```
 
-The registry supports selection by explicit suite ID, tag, target, platform, risk profile, and changed files. Changed-file selection matches detected paths against suite `paths`; `tools/lab/suites.toml` is registry-wide and selects all otherwise-filtered suites. The CLI reads `POSTHASTE_LAB_CHANGED_PATHS` when set, otherwise falls back to a best-effort repo-root `jj diff --name-only -r main..@`, then Git diff sources for committed and working-copy changes. Changed-file selection must escalate across behavioral boundaries when public API schemas, event payloads, config schema, shared cache keys, or suite fixtures change.
+The registry supports selection by explicit suite ID, tag, target, platform, risk profile, and changed files. Changed-file selection matches detected paths against suite `paths`; `tools/lab/suites.toml` is registry-wide and selects all otherwise-filtered suites. The CLI reads `POSTHASTE_LAB_CHANGED_PATHS` when set, otherwise falls back to a best-effort repo-root `jj diff --name-only -r main..@`, then Git diff sources for committed, staged, unstaged, and untracked changes. Changed-file selection must escalate across behavioral boundaries when public API schemas, event payloads, config schema, shared cache keys, or suite fixtures change.
 
 ## Command surface
 
