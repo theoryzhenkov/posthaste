@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod authz;
 pub mod config;
 pub mod logging;
 pub mod oauth;
