@@ -23,13 +23,24 @@ use posthaste_domain::{
 };
 use posthaste_server::auth::require_auth_layer;
 use posthaste_server::supervisor::AccountSupervisor;
+use posthaste_server::token::{mint_full_scope_token, RootKey};
 use posthaste_server::AppState;
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
 
-const TOKEN: &str = "the-correct-token";
 const CORS_ORIGIN: &str = "http://localhost:5173";
+
+/// Fixed 32-byte test root key, so the minted macaroon and the verifier in the
+/// auth middleware share a key without touching the env or a keyring.
+fn test_root_key() -> RootKey {
+    RootKey::from_test_bytes([42u8; 32])
+}
+
+/// A valid full-scope macaroon minted under the test root key.
+fn valid_token() -> String {
+    mint_full_scope_token(&test_root_key())
+}
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -103,7 +114,8 @@ fn build_state(require_auth: bool) -> Arc<AppState> {
         event_sender,
         account_logo_root: state_root.join("account-assets/logos"),
         oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
-        auth_token: TOKEN.to_string(),
+        auth_token: valid_token(),
+        macaroon_root_key: test_root_key(),
         require_auth,
         origin_allowlist: posthaste_server::auth::origin_allowlist(
             CORS_ORIGIN,
@@ -193,7 +205,7 @@ async fn flag_on_no_token_is_unauthorized() {
 async fn flag_on_correct_token_succeeds() {
     let app = build_app(build_state(true));
     let request = get_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .body(Body::empty())
         .unwrap();
     assert_eq!(status_of(app, request).await, StatusCode::OK);
@@ -201,6 +213,7 @@ async fn flag_on_correct_token_succeeds() {
 
 #[tokio::test]
 async fn flag_on_wrong_token_is_unauthorized() {
+    // A garbage (non-macaroon) token must not verify.
     let app = build_app(build_state(true));
     let request = get_request("/v1/settings")
         .header(header::AUTHORIZATION, "Bearer not-the-token")
@@ -210,10 +223,23 @@ async fn flag_on_wrong_token_is_unauthorized() {
 }
 
 #[tokio::test]
+async fn flag_on_macaroon_from_other_root_key_is_unauthorized() {
+    // A well-formed macaroon minted under a DIFFERENT root key fails the HMAC
+    // verification, even though it deserializes fine.
+    let app = build_app(build_state(true));
+    let foreign = mint_full_scope_token(&RootKey::from_test_bytes([1u8; 32]));
+    let request = get_request("/v1/settings")
+        .header(header::AUTHORIZATION, format!("Bearer {foreign}"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status_of(app, request).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn flag_on_bad_origin_is_forbidden() {
     let app = build_app(build_state(true));
     let request = get_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .header(header::ORIGIN, "http://evil.example")
         .body(Body::empty())
         .unwrap();
@@ -224,7 +250,7 @@ async fn flag_on_bad_origin_is_forbidden() {
 async fn flag_on_allowed_origin_with_token_succeeds() {
     let app = build_app(build_state(true));
     let request = get_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .header(header::ORIGIN, CORS_ORIGIN)
         .body(Body::empty())
         .unwrap();
@@ -235,7 +261,7 @@ async fn flag_on_allowed_origin_with_token_succeeds() {
 async fn flag_on_tauri_origin_with_token_succeeds() {
     let app = build_app(build_state(true));
     let request = get_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .header(header::ORIGIN, "tauri://localhost")
         .body(Body::empty())
         .unwrap();
@@ -255,7 +281,7 @@ async fn flag_on_rebinding_host_is_forbidden_even_with_valid_token() {
     // The Origin check alone would wave this through; the Host gate rejects it.
     let app = build_app(build_state(true));
     let request = bare_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .header(header::HOST, "attacker.com")
         .body(Body::empty())
         .unwrap();
@@ -266,7 +292,7 @@ async fn flag_on_rebinding_host_is_forbidden_even_with_valid_token() {
 async fn flag_on_loopback_host_with_token_succeeds() {
     let app = build_app(build_state(true));
     let request = bare_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .header(header::HOST, "127.0.0.1")
         .body(Body::empty())
         .unwrap();
@@ -277,7 +303,7 @@ async fn flag_on_loopback_host_with_token_succeeds() {
 async fn flag_on_missing_host_is_forbidden() {
     let app = build_app(build_state(true));
     let request = bare_request("/v1/settings")
-        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
         .body(Body::empty())
         .unwrap();
     assert_eq!(status_of(app, request).await, StatusCode::FORBIDDEN);
@@ -330,7 +356,7 @@ async fn flag_on_openapi_doc_succeeds_without_token() {
 #[tokio::test]
 async fn flag_on_events_accepts_access_token_query_param() {
     let app = build_app(build_state(true));
-    let request = get_request(&format!("/v1/events?access_token={TOKEN}"))
+    let request = get_request(&format!("/v1/events?access_token={}", valid_token()))
         .body(Body::empty())
         .unwrap();
     assert_eq!(status_of(app, request).await, StatusCode::OK);
@@ -347,7 +373,7 @@ async fn flag_on_events_rejects_missing_token() {
 async fn flag_on_query_param_not_accepted_on_non_events_path() {
     // The access_token query param is honored ONLY for /events.
     let app = build_app(build_state(true));
-    let request = get_request(&format!("/v1/settings?access_token={TOKEN}"))
+    let request = get_request(&format!("/v1/settings?access_token={}", valid_token()))
         .body(Body::empty())
         .unwrap();
     assert_eq!(status_of(app, request).await, StatusCode::UNAUTHORIZED);

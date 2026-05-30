@@ -36,6 +36,11 @@ const LOOPBACK_HOSTS: &[&str] = &["localhost", "127.0.0.1", "::1"];
 /// without early-exit on the first mismatch, so timing does not leak how many
 /// leading bytes matched. Differing lengths short-circuit to `false` (length
 /// is not itself secret), but equal-length inputs are compared in full.
+///
+/// No longer the token gate — that is now a macaroon HMAC verification (see
+/// `require_auth_layer`). Retained for Stage B caveat enforcement (e.g.
+/// comparing caveat-extracted identifiers) and covered by a unit test.
+#[allow(dead_code)]
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -259,9 +264,15 @@ pub async fn require_auth_layer(
         .map(str::to_owned)
         .or_else(|| is_events_path(&path).then(|| query_token(&req)).flatten());
 
+    // Token validity is a macaroon verification: deserialize the presented
+    // token and verify its HMAC chain against the root key. Stage A satisfies no
+    // first-party caveats, so the full-scope macaroon (no caveats) passes and a
+    // caveat-bearing macaroon fails — acceptable until Stage B adds the authz
+    // map + caveat enforcement. The perimeter above (Host/Origin/exempt/SSE) is
+    // unchanged; only this validity gate swaps from string-eq to macaroon-verify.
     let authorized = presented
         .as_deref()
-        .is_some_and(|token| constant_time_eq(token.as_bytes(), state.auth_token.as_bytes()));
+        .is_some_and(|token| crate::token::verify_token(token, &state.macaroon_root_key));
 
     if !authorized {
         return unauthorized().into_response();
