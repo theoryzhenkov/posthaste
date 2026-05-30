@@ -3,7 +3,7 @@ scope: L1
 type: DESIGN
 lifecycle: ephemeral
 summary: "Trust model for opening the API: authn, capability-scoped authz, boundary validation, rate limiting"
-modified: 2026-05-29
+modified: 2026-05-30
 reviewed: 2026-05-29
 depends:
   - path: docs/eph/PLAN-L1-public-api-platform
@@ -16,10 +16,15 @@ dependents:
 
 ## Status
 
-**P4 design record + near-term implementation.** This doc specifies the whole
-trust model but only part of it is implemented now (see Phasing). The
-**capability-scoping model (§Authorization) is the load-bearing agent-facing
-decision and is proposed here for sign-off, not yet implemented.**
+**P4 design record + near-term implementation.** The **perimeter is now on by
+default**: `require_auth` defaults to `true`, so a fresh install enforces the
+bearer-token + `Origin`/`Host` guard on every `/v1` request out of the box (an
+explicit `app.toml`/`POSTHASTE_REQUIRE_AUTH=false` still opts out). Browser-serve
+mode (`posthaste serve --frontend-dist`) injects the token server-side into the
+served `index.html`, mirroring the Tauri webview injection, so the first-party
+app keeps working with the perimeter on. The **capability-scoping model
+(§Authorization) is the load-bearing agent-facing decision and is proposed here
+for sign-off — it remains the one unimplemented piece.**
 
 ## Why
 
@@ -55,7 +60,7 @@ real auth) modes.
 
 ## Controls (layered)
 
-### 1. Authentication — loopback token (implemented, default-off)
+### 1. Authentication — loopback token (implemented, default-ON)
 
 - A **random per-process bearer token** is generated at server startup.
 - **Daemon mode**: written to the state-dir port-file (`daemon.json`, see
@@ -65,9 +70,17 @@ real auth) modes.
   unused token is never persisted to disk.
 - **Embedded mode**: injected into the webview alongside `window.__POSTHASTE_PORT__`
   as `window.__POSTHASTE_TOKEN__`; the web client sends it as `Authorization: Bearer`.
-- Enforcement is gated by **`[daemon] require_auth` (default `false`)** so existing
-  embedded/dogfood behavior is unchanged until explicitly enabled. When `true`, every
-  `/v1` request except `GET /v1/health` requires the bearer token.
+- **Browser-serve mode** (`posthaste serve --frontend-dist`): the server's SPA
+  fallback no longer serves a bare `index.html`. It reads the file and splices a
+  `<script>window.__POSTHASTE_TOKEN__=…;window.__POSTHASTE_PORT__=…;</script>`
+  before `</head>` (the same globals the Tauri init script defines), so a browser
+  loading the served app authenticates with no extra setup. Static JS/CSS keep
+  flowing through `ServeDir` untouched.
+- Enforcement is gated by **`[daemon] require_auth` (default `true`)**: a fresh
+  install enforces auth, and an explicit `app.toml` `[daemon] require_auth = false`
+  or `POSTHASTE_REQUIRE_AUTH=false` disables it (explicit config/env wins; absent
+  config resolves to ON). When on, every `/v1` request except `GET /v1/health`
+  (and the doc routes) requires the bearer token.
 - **SSE caveat.** Browsers' `EventSource` cannot set request headers, so the
   `/v1/events` stream additionally accepts the token via an `?access_token=<token>`
   query param. The middleware honors `access_token` **only** for the `/events` path;
@@ -76,7 +89,7 @@ real auth) modes.
   tokens can leak into logs/referrers; acceptable on loopback, revisit before any
   non-loopback bind.)
 
-### 2. Origin / Host validation (implemented, default-off, same gate)
+### 2. Origin / Host validation (implemented, default-ON, same gate)
 
 When `require_auth` is on, two checks run (a token alone can't stop a rebinding
 attack that reads the token from the page context):
@@ -97,8 +110,10 @@ attack that reads the token from the page context):
   origins; a mismatch → **403**. Requests with neither header (non-browser
   clients) pass on token alone.
 
-Both checks are inert when `require_auth` is off, preserving the default-off
-byte-identical invariant.
+Both checks are inert when `require_auth` is off, so the explicit opt-out
+(`POSTHASTE_REQUIRE_AUTH=false`) restores the byte-identical no-auth behavior —
+useful for the split dev server (a separate vite origin without an injected
+token; see Phasing).
 
 ### 3. Boundary input validation (partially addressed; tracked)
 
@@ -138,11 +153,17 @@ revocation UX, and expiry policy.
 
 ## Phasing
 
-- **Now (this doc + impl):** token + `Origin`/`Host` guard + config gate (default off),
-  webview/port-file token plumbing, tests. Capability model = design only.
-- **After sign-off:** implement chosen capability model; enable `require_auth` for
-  daemon mode by default; add rate limiting + remaining boundary validation before any
-  non-loopback bind.
+- **Done:** token + `Origin`/`Host` guard + config gate, now **default ON**;
+  webview/port-file token plumbing; browser-serve server-side token injection;
+  tests. Capability model = design only.
+- **Dev-mode note:** the split dev server (`bun run dev`) serves the frontend from
+  a separate vite origin that has no injected token, so it cannot satisfy the
+  perimeter. Run the backend with `POSTHASTE_REQUIRE_AUTH=false` for split dev.
+  The Tauri shell and `posthaste serve --frontend-dist` both inject the token and
+  need no opt-out. (Intentionally not auto-handled — keeping dev wiring simple.)
+- **Remaining:** implement the chosen capability model (the macaroon/scoping
+  work); add rate limiting + remaining boundary validation before any non-loopback
+  bind.
 
 ## Success criteria
 

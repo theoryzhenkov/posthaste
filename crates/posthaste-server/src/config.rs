@@ -32,7 +32,8 @@ pub struct DaemonSettings {
     pub poll_interval_seconds: u64,
     pub log_level: String,
     /// When `true`, the `/v1` API enforces bearer-token + Origin/Host auth.
-    /// Defaults to `false` so embedded/dogfood behavior is unchanged.
+    /// Defaults to `true` (perimeter on); an explicit `app.toml`/env override
+    /// can disable it.
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub require_auth: bool,
@@ -101,11 +102,16 @@ pub fn read_daemon_settings(
         .or(app_toml.logging.level)
         .unwrap_or_else(|| "info".to_string());
 
+    // Perimeter auth defaults ON. Explicit config/env wins (an app.toml
+    // `[daemon] require_auth` or `POSTHASTE_REQUIRE_AUTH=false` still disables
+    // it); absence resolves to enabled.
+    //
+    // @spec docs/eph/DESIGN-L1-trust-model
     let require_auth = std::env::var("POSTHASTE_REQUIRE_AUTH")
         .ok()
         .and_then(|v| parse_bool_flag(&v))
         .or(app_toml.daemon.require_auth)
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     Ok(DaemonSettings {
         bind_address: bind,

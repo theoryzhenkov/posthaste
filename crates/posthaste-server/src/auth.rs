@@ -1,8 +1,8 @@
 //! Loopback bearer-token + Origin/Host guard for the `/v1` API.
 //!
-//! Gated behind `[daemon] require_auth` (default `false`). When the flag is
-//! off the middleware is a pass-through, so existing embedded/dogfood behavior
-//! is byte-identical. When on:
+//! Gated behind `[daemon] require_auth` (default `true`). When the flag is
+//! off (explicit opt-out) the middleware is a pass-through, so the no-auth
+//! behavior is byte-identical. When on:
 //!
 //! - The `Host` header is validated against an allowlist on **every** request
 //!   (including the otherwise-exempt liveness/doc routes), independent of
@@ -26,10 +26,6 @@ use url::Url;
 
 use crate::api::{ApiError, ApiErrorCode};
 use crate::AppState;
-
-/// Tauri webview origins that the embedded host serves the frontend from.
-/// These are always trusted in addition to the configured CORS origin.
-const TAURI_ORIGINS: &[&str] = &["tauri://localhost", "http://tauri.localhost"];
 
 /// Loopback hosts always allowed in the `Host` header, regardless of the
 /// configured bind address. These are the legitimate names for a daemon bound
@@ -114,13 +110,18 @@ fn canonical_origin(value: &str) -> Option<String> {
     }
 }
 
-/// Build the origin allowlist: configured CORS origin + Tauri webview origins,
-/// each canonicalized so comparisons are exact-string against canonical forms.
-/// Entries that fail to parse are dropped (they could never match anyway).
-pub fn origin_allowlist(cors_origin: &str) -> Vec<String> {
+/// Build the Origin allowlist from the **same source as CORS**: the configured
+/// CORS origin plus the host's extra CORS origins (the desktop declares its real
+/// per-platform Tauri webview origins there — `tauri://localhost`,
+/// `https://tauri.localhost` on Windows, etc.). Deriving both from one source
+/// keeps the auth check and CORS from drifting (a divergence would 403 a
+/// first-party client whose origin CORS allows). Each entry is canonicalized so
+/// comparisons are exact-string against canonical forms; unparseable entries are
+/// dropped (they could never match anyway).
+pub fn origin_allowlist(cors_origin: &str, extra_origins: &[String]) -> Vec<String> {
     let mut allowed: Vec<String> = canonical_origin(cors_origin).into_iter().collect();
-    for tauri in TAURI_ORIGINS {
-        if let Some(origin) = canonical_origin(tauri) {
+    for extra in extra_origins {
+        if let Some(origin) = canonical_origin(extra) {
             allowed.push(origin);
         }
     }
@@ -299,15 +300,29 @@ mod tests {
 
     #[test]
     fn origin_allowed_normalizes_and_matches() {
-        let allowed = origin_allowlist("http://localhost:5173");
+        // The allowlist is built from the CORS origin + the host's extra CORS
+        // origins (what the desktop declares per platform).
+        let allowed = origin_allowlist(
+            "http://localhost:5173",
+            &[
+                "tauri://localhost".to_string(),
+                "https://tauri.localhost".to_string(),
+                "http://127.0.0.1:5173".to_string(),
+            ],
+        );
         assert!(origin_allowed("http://localhost:5173", &allowed));
         assert!(origin_allowed("http://localhost:5173/some/path", &allowed));
         // Casing is normalized by url::Url.
         assert!(origin_allowed("HTTP://LOCALHOST:5173", &allowed));
         assert!(origin_allowed("tauri://localhost", &allowed));
-        assert!(origin_allowed("http://tauri.localhost", &allowed));
+        // The Windows WebView2 origin must be allowed (regression: it was
+        // previously missing from the hardcoded list).
+        assert!(origin_allowed("https://tauri.localhost", &allowed));
         assert!(!origin_allowed("http://evil.example", &allowed));
         assert!(!origin_allowed("http://localhost:9999", &allowed));
+        // An origin CORS does not list (e.g. plain http://tauri.localhost here)
+        // is not allowed — auth tracks CORS exactly.
+        assert!(!origin_allowed("http://tauri.localhost", &allowed));
         // Fail closed on garbage / non-absolute values.
         assert!(!origin_allowed("not a url", &allowed));
         assert!(!origin_allowed("", &allowed));
