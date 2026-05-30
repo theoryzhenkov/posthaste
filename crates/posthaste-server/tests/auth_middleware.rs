@@ -105,7 +105,13 @@ fn build_state(require_auth: bool) -> Arc<AppState> {
         oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
         auth_token: TOKEN.to_string(),
         require_auth,
-        origin_allowlist: posthaste_server::auth::origin_allowlist(CORS_ORIGIN),
+        origin_allowlist: posthaste_server::auth::origin_allowlist(
+            CORS_ORIGIN,
+            &[
+                "tauri://localhost".to_string(),
+                "https://tauri.localhost".to_string(),
+            ],
+        ),
         host_allowlist: posthaste_server::auth::host_allowlist("127.0.0.1:3001"),
     })
 }

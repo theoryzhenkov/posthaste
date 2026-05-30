@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{middleware, Router};
 #[cfg(debug_assertions)]
@@ -26,7 +27,7 @@ use posthaste_observability::{events, ph_info};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -53,8 +54,8 @@ pub struct AppState {
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub auth_token: String,
-    /// Whether the `/v1` auth middleware enforces the trust model. Default
-    /// `false`, so existing behavior is byte-identical until enabled.
+    /// Whether the `/v1` auth middleware enforces the trust model. Resolves
+    /// from config (default `true`); an explicit opt-out disables it.
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub require_auth: bool,
@@ -114,6 +115,84 @@ pub struct ServerConfig {
 
 async fn api_not_found() -> StatusCode {
     StatusCode::NOT_FOUND
+}
+
+/// State for the browser-serve SPA fallback: the `index.html` path plus the
+/// per-process token and bound port to inject into the served document.
+#[derive(Clone)]
+struct SpaIndex {
+    index_path: PathBuf,
+    auth_token: String,
+    port: u16,
+}
+
+/// Serve `index.html` with the auth token + port injected as globals so the
+/// browser app can authenticate under `require_auth`. Mirrors the Tauri
+/// `backend_init_script` injection: a `<script>` setting
+/// `window.__POSTHASTE_TOKEN__` / `window.__POSTHASTE_PORT__` is spliced in
+/// immediately before `</head>`. The web client reads the token and sends it
+/// as `Authorization: Bearer` (and appends `?access_token=` for the SSE
+/// stream). Static assets (JS/CSS) are served by `ServeDir` and are unaffected.
+///
+/// @spec docs/eph/DESIGN-L1-trust-model
+async fn serve_index_with_token(
+    axum::extract::State(spa): axum::extract::State<SpaIndex>,
+) -> Response {
+    use axum::response::Html;
+
+    let html = match tokio::fs::read_to_string(&spa.index_path).await {
+        Ok(html) => html,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    // JSON-encode the token so it is safely quoted/escaped inside the JS string,
+    // matching the Tauri init-script encoding. The port is a plain integer.
+    let token_json =
+        serde_json::to_string(&spa.auth_token).expect("auth token should serialize to JSON");
+    let script = format!(
+        "<script>window.__POSTHASTE_TOKEN__={token_json};window.__POSTHASTE_PORT__={};</script>",
+        spa.port
+    );
+
+    // Splice the script in just before the (first) </head>, matched
+    // case-insensitively so `</HEAD>`/`</Head>` also work; the original closing
+    // tag is preserved verbatim. If no </head> exists (unexpected for a built
+    // index.html) fall back to prepending the script.
+    let injected = match html.to_ascii_lowercase().find("</head>") {
+        Some(idx) => {
+            let (head, rest) = html.split_at(idx);
+            format!("{head}{script}{rest}")
+        }
+        None => format!("{script}{html}"),
+    };
+
+    Html(injected).into_response()
+}
+
+/// Build the browser-serve SPA fallback service: a `ServeDir` over the built
+/// frontend whose own not-found falls through to [`serve_index_with_token`].
+///
+/// `append_index_html_on_directories(false)` is load-bearing: without it,
+/// `ServeDir` auto-serves the raw `index.html` for `GET /` (bypassing token
+/// injection, so the browser app would 401 under `require_auth`). With it off,
+/// `/` and any SPA route miss in `ServeDir` and fall through to the injecting
+/// handler; real asset files (e.g. `/app.js`) are still served verbatim.
+///
+/// @spec docs/eph/DESIGN-L1-trust-model
+fn spa_fallback_service(
+    frontend_dist: &std::path::Path,
+    auth_token: &str,
+    port: u16,
+) -> ServeDir<axum::routing::MethodRouter> {
+    let spa = SpaIndex {
+        index_path: frontend_dist.join("index.html"),
+        auth_token: auth_token.to_string(),
+        port,
+    };
+    let index_service = get(serve_index_with_token).with_state(spa);
+    ServeDir::new(frontend_dist)
+        .append_index_html_on_directories(false)
+        .fallback(index_service)
 }
 
 /// Write `contents` to `path`, creating/truncating it with owner-only (`0600`)
@@ -221,7 +300,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // `require_auth` is on. uuid v4 is 122 bits of randomness — adequate for a
     // loopback secret.
     let auth_token = uuid::Uuid::new_v4().to_string();
-    let origin_allowlist = auth::origin_allowlist(&runtime.cors_origin);
+    let origin_allowlist =
+        auth::origin_allowlist(&runtime.cors_origin, &server_config.extra_cors_origins);
 
     // Resolve the bind address up front so the Host allowlist can include the
     // configured bind host. (The same value is used to bind the listener below.)
@@ -428,20 +508,31 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let api_docs = utoipa_swagger_ui::SwaggerUi::new("/v1/docs")
         .config(utoipa_swagger_ui::Config::new(["/v1/openapi.json"]));
 
+    // Bind before assembling the app so the browser-serve fallback can inject
+    // the actual bound port (the override may request an OS-assigned `:0`).
+    let listener = tokio::net::TcpListener::bind(&bind_address)
+        .await
+        .expect("failed to bind server listener");
+    let addr = listener.local_addr().expect("failed to get local address");
+
     let app = if let Some(frontend_dist) = server_config.frontend_dist.clone() {
-        Router::new().nest("/v1", api).fallback_service(
-            ServeDir::new(&frontend_dist)
-                .fallback(ServeFile::new(frontend_dist.join("index.html"))),
-        )
+        // SPA fallback: static assets via ServeDir; any unmatched path returns
+        // `index.html` with the auth token + port injected so the browser app
+        // can authenticate under `require_auth`. The embedded Tauri app uses
+        // `frontend_dist = None` and never reaches this handler (it injects the
+        // token via the webview init script instead).
+        Router::new()
+            .nest("/v1", api)
+            .fallback_service(spa_fallback_service(
+                &frontend_dist,
+                &auth_token,
+                addr.port(),
+            ))
     } else {
         Router::new().nest("/v1", api)
     }
     .merge(api_docs);
 
-    let listener = tokio::net::TcpListener::bind(&bind_address)
-        .await
-        .expect("failed to bind server listener");
-    let addr = listener.local_addr().expect("failed to get local address");
     ph_info!(
         events::SERVER_LISTENING,
         address = %addr,
@@ -493,6 +584,129 @@ mod tests {
         write_secure_file(&path, b"{\"port\":2}").expect("secure overwrite should succeed");
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "overwrite must tighten back to 0600");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Build a temp frontend dist dir with an `index.html` (carrying a
+    /// `</head>`) and a static `app.js`, returning the dir for cleanup.
+    fn write_frontend_dist() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "posthaste-spa-fallback-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dist dir should create");
+        std::fs::write(
+            dir.join("index.html"),
+            "<!doctype html><html><head><title>Posthaste</title></head><body>app</body></html>",
+        )
+        .expect("index.html should write");
+        std::fs::write(dir.join("app.js"), "console.log('app');\n").expect("app.js should write");
+        dir
+    }
+
+    async fn body_string(response: axum::response::Response) -> String {
+        use http_body_util::BodyExt;
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body should collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("body should be utf-8")
+    }
+
+    /// `GET /` must fall through to the injecting handler (NOT ServeDir's raw
+    /// index auto-serve), returning `text/html` with the token script spliced
+    /// in before `</head>`. This guards the `append_index_html_on_directories(false)`
+    /// wiring: without it, `/` served the raw index with no token.
+    #[tokio::test]
+    async fn root_serves_index_with_injected_token() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let dir = write_frontend_dist();
+        let app =
+            Router::new().fallback_service(spa_fallback_service(&dir, "the-correct-token", 4321));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            content_type.starts_with("text/html"),
+            "index must be served as text/html, got {content_type:?}"
+        );
+
+        let body = body_string(response).await;
+        assert!(
+            body.contains("window.__POSTHASTE_TOKEN__=\"the-correct-token\""),
+            "served index must carry the injected token, got: {body}"
+        );
+        assert!(
+            body.contains("window.__POSTHASTE_PORT__=4321"),
+            "served index must carry the injected port, got: {body}"
+        );
+        // The script is spliced before the original </head>, which is preserved.
+        let script_idx = body
+            .find("__POSTHASTE_TOKEN__")
+            .expect("token script present");
+        let head_idx = body.find("</head>").expect("</head> preserved");
+        assert!(script_idx < head_idx, "token script must precede </head>");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A real static asset is served verbatim by ServeDir, with no token
+    /// injection (only the SPA fallback document gets the script).
+    #[tokio::test]
+    async fn static_asset_served_verbatim() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let dir = write_frontend_dist();
+        let app =
+            Router::new().fallback_service(spa_fallback_service(&dir, "the-correct-token", 4321));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/app.js")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_string(response).await;
+        assert_eq!(
+            body, "console.log('app');\n",
+            "static asset must be served verbatim, with no injection"
+        );
+        assert!(
+            !body.contains("__POSTHASTE_TOKEN__"),
+            "static assets must never carry the injected token"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
