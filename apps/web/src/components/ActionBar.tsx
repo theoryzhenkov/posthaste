@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
 
 interface ActionBarProps {
   isDarkMode: boolean
@@ -152,8 +153,11 @@ export function ActionBar({
   onTrash,
 }: ActionBarProps) {
   return (
-    <header className="flex h-[42px] shrink-0 items-center gap-1 border-b border-border-soft bg-chrome px-3 text-chrome-foreground">
-      <div data-tauri-drag-region className="w-[78px] shrink-0" />
+    <header
+      className="flex shrink-0 items-center gap-1 border-b border-border-soft bg-chrome px-3 text-chrome-foreground"
+      style={{ height: WINDOW_TITLEBAR_HEIGHT }}
+    >
+      <TrafficLightInset />
 
       <ToolbarChip
         icon={<PenSquare size={14} strokeWidth={1.6} />}
