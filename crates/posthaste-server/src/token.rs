@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use base64::Engine;
-use macaroon::{Format, Macaroon, MacaroonKey, Verifier};
+use macaroon::{ByteString, Caveat, Format, Macaroon, MacaroonKey, Verifier};
 use posthaste_domain::{SecretKind, SecretRef, SecretStore};
 
 /// Stable macaroon `location` hint embedded in every minted token. Purely
@@ -184,22 +184,91 @@ pub fn mint_full_scope_token(root: &RootKey) -> String {
         .expect("V2 macaroon serialization should not fail")
 }
 
-/// Verify a presented bearer token as a macaroon signed by `root`. Stage A: the
-/// verifier satisfies NO first-party caveats, so a full-scope macaroon (no
-/// caveats) passes and any caveat-bearing macaroon fails (acceptable — only
-/// full-scope tokens exist until Stage B adds caveat enforcement). Returns
-/// `true` iff the token deserializes and its HMAC chain verifies against the
-/// root key.
+/// Why a presented token failed authenticity verification. Both map to **401**
+/// (the credential is forged/garbled); they are distinguished only for clarity.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TokenError {
+    /// The string did not deserialize as a macaroon.
+    Malformed,
+    /// The macaroon deserialized but its HMAC chain did not verify against the
+    /// root key (forged, or minted under a different key).
+    BadSignature,
+}
+
+/// Verify a presented bearer token's **authenticity** (HMAC chain) against
+/// `root` and, on success, return its first-party caveats for separate
+/// evaluation. This deliberately verifies signature ONLY: the verifier is given
+/// a general predicate that satisfies every first-party caveat, so a
+/// caveat-bearing (attenuated) macaroon still passes the signature check. Caveat
+/// ENFORCEMENT happens afterward in [`crate::authz::evaluate`], which yields a
+/// 403 (authentic but out of scope) — distinct from the 401 this returns for a
+/// forged/garbled token.
+///
+/// A full-scope macaroon (no caveats) returns `Ok(vec![])` and is allowed
+/// everywhere by the (empty) caveat evaluation, exactly as before.
+///
+/// @spec docs/eph/DESIGN-L1-capability-tokens
+pub fn verify_authenticity(presented: &str, root: &RootKey) -> Result<Vec<Caveat>, TokenError> {
+    let macaroon = Macaroon::deserialize(presented).map_err(|_| TokenError::Malformed)?;
+    let mut verifier = Verifier::default();
+    // Satisfy ALL first-party caveats so `verify` checks the signature chain
+    // only; the caveats are returned for independent enforcement.
+    fn satisfy_all(_predicate: &ByteString) -> bool {
+        true
+    }
+    verifier.satisfy_general(satisfy_all);
+    verifier
+        .verify(&macaroon, root.macaroon_key(), Vec::new())
+        .map_err(|_| TokenError::BadSignature)?;
+    Ok(macaroon.first_party_caveats())
+}
+
+/// Stage-A authenticity helper retained for callers that only need a yes/no on
+/// the signature (no caveat enforcement). `true` iff the token is authentic
+/// under `root`. Stage B enforcement uses [`verify_authenticity`] +
+/// [`crate::authz::evaluate`] instead.
 ///
 /// @spec docs/eph/DESIGN-L1-capability-tokens
 pub fn verify_token(presented: &str, root: &RootKey) -> bool {
-    let Ok(macaroon) = Macaroon::deserialize(presented) else {
-        return false;
-    };
-    let verifier = Verifier::default();
-    verifier
-        .verify(&macaroon, root.macaroon_key(), Vec::new())
-        .is_ok()
+    verify_authenticity(presented, root).is_ok()
+}
+
+/// Append a first-party caveat to a serialized macaroon and re-serialize it.
+/// Attenuation is **client-side**: it needs no root key (the caveat is folded
+/// into the HMAC chain using the macaroon's own running signature), and it can
+/// only NARROW authority. Used by the `posthaste token attenuate` CLI to derive
+/// scoped tokens. The predicate must use the documented caveat format (see
+/// [`crate::authz`]). Returns the attenuated V2 macaroon string, or an error if
+/// the input does not deserialize.
+///
+/// @spec docs/eph/DESIGN-L1-capability-tokens
+pub fn attenuate(presented: &str, predicate: &str) -> Result<String, TokenError> {
+    let mut macaroon = Macaroon::deserialize(presented).map_err(|_| TokenError::Malformed)?;
+    macaroon.add_first_party_caveat(predicate.into());
+    macaroon
+        .serialize(Format::V2)
+        .map_err(|_| TokenError::Malformed)
+}
+
+/// Mint a macaroon carrying the given first-party caveats, signed by `root`.
+/// Equivalent to [`mint_full_scope_token`] followed by repeated [`attenuate`],
+/// but in one step against the root key. Used by tests to build scoped tokens.
+///
+/// @spec docs/eph/DESIGN-L1-capability-tokens
+pub fn mint_with_caveats(root: &RootKey, predicates: &[&str]) -> String {
+    let identifier = uuid::Uuid::new_v4().to_string();
+    let mut macaroon = Macaroon::create(
+        Some(MACAROON_LOCATION.to_string()),
+        root.macaroon_key(),
+        identifier.into(),
+    )
+    .expect("macaroon should mint (non-empty identifier)");
+    for predicate in predicates {
+        macaroon.add_first_party_caveat((*predicate).into());
+    }
+    macaroon
+        .serialize(Format::V2)
+        .expect("V2 macaroon serialization should not fail")
 }
 
 #[cfg(test)]
@@ -241,6 +310,51 @@ mod tests {
         assert_eq!(decode_root_key(&std_b64), Some(bytes));
         assert_eq!(decode_root_key(&url_b64), Some(bytes));
         assert_eq!(decode_root_key("too short"), None);
+    }
+
+    #[test]
+    fn verify_authenticity_returns_caveats_for_attenuated_token() {
+        let root = test_root_key();
+        let full = mint_full_scope_token(&root);
+        let scoped = attenuate(&full, "action = read").expect("attenuation should succeed");
+        let scoped =
+            attenuate(&scoped, "account = acct-a").expect("second attenuation should succeed");
+
+        // Authentic under the same root key, returning both caveats.
+        let caveats = verify_authenticity(&scoped, &root).expect("scoped token is authentic");
+        assert_eq!(caveats.len(), 2);
+
+        // A full-scope token yields no caveats.
+        let none = verify_authenticity(&full, &root).expect("full-scope authentic");
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn attenuated_token_still_fails_under_wrong_root_key() {
+        let root_a = test_root_key();
+        let root_b = RootKey::from_bytes([9u8; ROOT_KEY_LEN]);
+        let scoped = attenuate(&mint_full_scope_token(&root_a), "action = read").unwrap();
+        assert_eq!(
+            verify_authenticity(&scoped, &root_b),
+            Err(TokenError::BadSignature)
+        );
+    }
+
+    #[test]
+    fn malformed_token_reports_malformed() {
+        let root = test_root_key();
+        assert_eq!(
+            verify_authenticity("not-a-macaroon", &root),
+            Err(TokenError::Malformed)
+        );
+    }
+
+    #[test]
+    fn mint_with_caveats_matches_attenuation() {
+        let root = test_root_key();
+        let token = mint_with_caveats(&root, &["action = read", "message = m1"]);
+        let caveats = verify_authenticity(&token, &root).expect("authentic");
+        assert_eq!(caveats.len(), 2);
     }
 
     #[test]

@@ -18,13 +18,16 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use time::OffsetDateTime;
 use url::Url;
 
 use crate::api::{ApiError, ApiErrorCode};
+use crate::authz::{self, CaveatContext, Decision, ResourceShape, RouteAuthz, ScopeMode};
+use crate::token::{self, TokenError};
 use crate::AppState;
 
 /// Loopback hosts always allowed in the `Host` header, regardless of the
@@ -217,10 +220,15 @@ fn host_allowed(req: &Request, allowed: &[String]) -> bool {
 ///   before any exemption (the DNS-rebinding defense);
 /// - exempt liveness/doc routes from token auth;
 /// - reject browser requests whose `Origin`/`Referer` is not allowlisted;
-/// - require a matching bearer token (constant-time compare), accepting the
-///   `access_token` query param for `/events` only.
+/// - require an authentic macaroon (HMAC chain verified against the root key),
+///   accepting the `access_token` query param for `/events` only;
+/// - enforce the macaroon's first-party caveats against the matched route's
+///   authz descriptor (Stage B): a forged/garbled token is 401, an authentic
+///   token whose caveats are out of scope is 403, and a scoped token on an
+///   unmapped route fails closed (500).
 ///
 /// @spec docs/eph/DESIGN-L1-trust-model
+/// @spec docs/eph/DESIGN-L1-capability-tokens
 pub async fn require_auth_layer(
     State(state): State<Arc<AppState>>,
     req: Request,
@@ -260,25 +268,194 @@ pub async fn require_auth_layer(
 
     // Bearer token: from the Authorization header, or the access_token query
     // param for the SSE stream only (EventSource cannot set headers).
-    let presented = bearer_token(&req)
+    let Some(presented) = bearer_token(&req)
         .map(str::to_owned)
-        .or_else(|| is_events_path(&path).then(|| query_token(&req)).flatten());
-
-    // Token validity is a macaroon verification: deserialize the presented
-    // token and verify its HMAC chain against the root key. Stage A satisfies no
-    // first-party caveats, so the full-scope macaroon (no caveats) passes and a
-    // caveat-bearing macaroon fails — acceptable until Stage B adds the authz
-    // map + caveat enforcement. The perimeter above (Host/Origin/exempt/SSE) is
-    // unchanged; only this validity gate swaps from string-eq to macaroon-verify.
-    let authorized = presented
-        .as_deref()
-        .is_some_and(|token| crate::token::verify_token(token, &state.macaroon_root_key));
-
-    if !authorized {
+        .or_else(|| is_events_path(&path).then(|| query_token(&req)).flatten())
+    else {
         return unauthorized().into_response();
+    };
+
+    // 1. Authenticity (signature) check. A forged/garbled token is 401; an
+    //    authentic-but-attenuated token returns its caveats for enforcement.
+    let caveats = match token::verify_authenticity(&presented, &state.macaroon_root_key) {
+        Ok(caveats) => caveats,
+        Err(TokenError::Malformed) | Err(TokenError::BadSignature) => {
+            return unauthorized().into_response();
+        }
+    };
+
+    // Fast path: a full-scope macaroon (no caveats) is authorized everywhere,
+    // exactly as before — no authz-map lookup needed.
+    if caveats.is_empty() {
+        return next.run(req).await;
     }
 
-    next.run(req).await
+    // 2. Resolve the matched route's authz descriptor. `MatchedPath` carries the
+    //    FULL template including the `/v1` nest prefix (axum appends the nested
+    //    router's template to the outer mount), so strip it to the nest-stripped
+    //    template the authz map is keyed on (e.g. `/sources/{source_id}/messages`).
+    let Some(matched) = req.extensions().get::<MatchedPath>().map(|m| {
+        m.as_str()
+            .strip_prefix("/v1")
+            .unwrap_or(m.as_str())
+            .to_owned()
+    }) else {
+        // No matched path means no route matched (404 fallback). An attenuated
+        // token on a non-route is denied; let routing return its own status by
+        // failing closed here.
+        return forbidden_scope().into_response();
+    };
+    let method = req.method().as_str().to_owned();
+    let Some(route_authz) = authz::lookup(&method, &matched) else {
+        // Unmapped route + scoped token → fail CLOSED as misconfiguration. A new
+        // route without an authz entry must never ship open. (Full-scope tokens
+        // took the fast path above, so this only blocks attenuated tokens.)
+        return misconfigured().into_response();
+    };
+
+    // 3. Build the caveat context (path params; query filter for Filter routes).
+    let ctx = build_context(&req, &matched, &route_authz);
+
+    // 4. Evaluate every caveat. Any unsatisfied caveat → 403 (authentic but out
+    //    of scope), distinct from the 401 above.
+    match authz::evaluate(&caveats, &ctx) {
+        Decision::Allow => next.run(req).await,
+        Decision::Deny(_) => forbidden_scope().into_response(),
+    }
+}
+
+/// Build the [`CaveatContext`] for a matched, authorized-pending request. For
+/// `Gate` routes the resource axes come from path params (matched against the
+/// route template); for `Filter` routes they come from the query string. An
+/// axis the route does not populate stays `None`, so a caveat restricting it is
+/// unsatisfiable and the request is denied — the fail-closed rule.
+fn build_context(req: &Request, template: &str, authz: &RouteAuthz) -> CaveatContext {
+    // `template` is nest-stripped (no `/v1`); strip the same prefix from the
+    // concrete path so segment matching lines up.
+    let raw_path = req.uri().path();
+    let path = raw_path.strip_prefix("/v1").unwrap_or(raw_path);
+    let (account, mailbox, message) = match authz.mode {
+        ScopeMode::Gate => extract_path_axes(template, path, &authz.resource),
+        ScopeMode::Filter => extract_query_axes(req.uri().query(), &authz.resource),
+    };
+    CaveatContext {
+        action: authz.action,
+        account,
+        mailbox,
+        message,
+        now: OffsetDateTime::now_utc(),
+    }
+}
+
+/// Resolve the `(account, mailbox, message)` axes from path params by matching
+/// the request path against the route template segment-by-segment.
+fn extract_path_axes(
+    template: &str,
+    path: &str,
+    shape: &ResourceShape,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let params = path_params(template, path);
+    let pick = |name: Option<&str>| name.and_then(|n| params.get(n).cloned());
+    (
+        pick(shape.account),
+        pick(shape.mailbox),
+        pick(shape.message),
+    )
+}
+
+/// Match a route template (`/sources/{source_id}/messages/{message_id}`) against
+/// a concrete path, returning the captured `{param}` values. Returns an empty
+/// map on any segment-count mismatch (the templates always match here, since the
+/// router selected this template).
+fn path_params(template: &str, path: &str) -> std::collections::HashMap<String, String> {
+    let mut params = std::collections::HashMap::new();
+    let template_segments: Vec<&str> = template.trim_matches('/').split('/').collect();
+    let path_segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    if template_segments.len() != path_segments.len() {
+        return params;
+    }
+    for (tpl, actual) in template_segments.iter().zip(path_segments.iter()) {
+        if let Some(name) = tpl.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+            // Path segments are percent-encoded on the wire; decode so caveat
+            // comparison is against the logical id.
+            let decoded = percent_decode(actual);
+            params.insert(name.to_string(), decoded);
+        }
+    }
+    params
+}
+
+/// Resolve the `(account, mailbox, message)` axes from query params for a
+/// `Filter` route. A missing filter leaves the axis `None`, so a resource caveat
+/// restricting it is unsatisfiable → the request is denied (the matching-filter
+/// rule). `message` is never a query filter in this API.
+fn extract_query_axes(
+    query: Option<&str>,
+    shape: &ResourceShape,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let pick = |name: Option<&str>| name.and_then(|n| query_param(query, n));
+    (
+        pick(shape.account),
+        pick(shape.mailbox),
+        pick(shape.message),
+    )
+}
+
+/// Read a single query parameter's (percent-decoded) value. Fails CLOSED on a
+/// DUPLICATE key: if the query string carries `name` more than once, returns
+/// `None` (so the resource caveat is unsatisfiable → deny) rather than taking
+/// the first occurrence. This prevents any middleware-vs-handler disagreement on
+/// `?sourceId=a&sourceId=b` (the middleware must never authorize a value the
+/// handler might not use).
+fn query_param(query: Option<&str>, name: &str) -> Option<String> {
+    let query = query?;
+    let mut found: Option<String> = None;
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == name {
+            if found.is_some() {
+                // Duplicate key — ambiguous; fail closed.
+                return None;
+            }
+            found = Some(percent_decode(value));
+        }
+    }
+    found
+}
+
+/// Minimal percent-decoder for path/query segment values. Decodes `%XX` escapes
+/// and `+` (in query position both `+` and `%20` mean space). On any malformed
+/// escape the original byte is preserved.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16);
+                let lo = (bytes[i + 2] as char).to_digit(16);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi * 16 + lo) as u8);
+                    i += 3;
+                } else {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn unauthorized() -> ApiError {
@@ -294,6 +471,26 @@ fn forbidden() -> ApiError {
         StatusCode::FORBIDDEN,
         ApiErrorCode::Forbidden,
         "request origin is not allowed",
+    )
+}
+
+/// 403: the token is authentic but a caveat is not satisfied (out of scope).
+fn forbidden_scope() -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        ApiErrorCode::Forbidden,
+        "token is not authorized for this request",
+    )
+}
+
+/// 500: a scoped token reached a route with no authz-map entry. Failing closed
+/// here means a newly added, unmapped route denies attenuated tokens rather than
+/// silently granting them.
+fn misconfigured() -> ApiError {
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ApiErrorCode::InternalError,
+        "route is not present in the authorization map",
     )
 }
 
