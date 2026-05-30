@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-05-28
-reviewed: 2026-05-26
+modified: 2026-05-30
+reviewed: 2026-05-30
 depends:
   - path: docs/L0-ui
   - path: docs/L0-testing
@@ -187,7 +187,7 @@ Global appearance settings are persisted through the backend `AppSettings.appear
 
 Account editing follows that shared property-page pattern. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
 
-Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved, pinned, resized, or expanded so the user can keep reading and interacting with the underlying mail UI.
+Settings, mailbox editor, shortcuts, onboarding, and compose share the modal principles in L2: centered or top-pinned overlay, restrained glass, fixed dimensions where specified, and no nested card shell unless the card represents a concrete entity. Command search, keyboard shortcuts, and compose use the shared floating panel shell: it sits above the app without a backdrop and can be moved (from the grip or empty header space), resized (from any edge or corner, with snap rails reused from the move grid), pinned, or expanded so the user can keep reading and interacting with the underlying mail UI. Because the resize handles belong to the shell rather than the panel content, they stay reachable even when the content (such as the command list) would otherwise capture the pointer.
 
 Compose exposes `From` as editable text with suggestions instead of a fixed
 select. Suggestions include configured account addresses, the current provider
