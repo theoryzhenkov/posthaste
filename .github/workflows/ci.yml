@@ -50,6 +50,26 @@ jobs:
       - run: bun --cwd=apps/web run test
       - run: bun --cwd=apps/web run build
 
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Check generated API schema is up to date
+        run: |
+          bun --cwd=apps/mcp run api:generate
+          git diff --exit-code apps/mcp/src/schema.gen.ts
+      - run: bun --cwd=apps/mcp run typecheck
+      - run: bun --cwd=apps/mcp run build
+
   lab:
     runs-on: ubuntu-latest
     steps:
