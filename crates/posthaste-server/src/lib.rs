@@ -9,6 +9,7 @@ pub mod push;
 pub mod sanitize;
 pub mod secret;
 pub mod supervisor;
+pub mod token;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -50,10 +51,20 @@ pub struct AppState {
     pub account_logo_root: PathBuf,
     pub oauth_flows: Arc<OAuthFlowStore>,
     /// Per-process bearer token enforced by the auth middleware when
-    /// `require_auth` is on. Always generated; inert while the flag is off.
+    /// `require_auth` is on. The serialized **full-scope macaroon** (V2 base64
+    /// ASCII) — opaque to the desktop shell / web client / MCP adapter, which
+    /// pass it through unchanged. Always generated; inert while the flag is off.
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
+    /// @spec docs/eph/DESIGN-L1-capability-tokens
     pub auth_token: String,
+    /// Macaroon HMAC root key used to verify presented bearer tokens. Stage A:
+    /// a token is valid iff it deserializes as a macaroon and its HMAC chain
+    /// verifies against this key with no caveats to satisfy (so the full-scope
+    /// token passes exactly like the former random token).
+    ///
+    /// @spec docs/eph/DESIGN-L1-capability-tokens
+    pub macaroon_root_key: token::RootKey,
     /// Whether the `/v1` auth middleware enforces the trust model. Resolves
     /// from config (default `true`); an explicit opt-out disables it.
     ///
@@ -295,11 +306,15 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         supervisor.start_account(&source).await;
     }
 
-    // Per-process bearer token for the loopback trust model. Always generated
-    // (cheap, exposed via the handle + daemon.json) but only enforced when
-    // `require_auth` is on. uuid v4 is 122 bits of randomness — adequate for a
-    // loopback secret.
-    let auth_token = uuid::Uuid::new_v4().to_string();
+    // Per-process bearer token for the loopback trust model: a full-scope
+    // macaroon (no caveats) minted from the per-install root key. Replaces the
+    // former random uuid token — opaque to all clients, accepted on every
+    // request exactly as before. Always generated (exposed via the handle +
+    // daemon.json) but only enforced when `require_auth` is on. The root key is
+    // resolved (env → keyring → 0600 state-dir file, generating on first run)
+    // so the server runs headless where no keyring exists.
+    let macaroon_root_key = token::resolve_root_key(secret_store.as_ref(), &roots.state_root);
+    let auth_token = token::mint_full_scope_token(&macaroon_root_key);
     let origin_allowlist =
         auth::origin_allowlist(&runtime.cors_origin, &server_config.extra_cors_origins);
 
@@ -320,6 +335,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
         oauth_flows: Arc::new(OAuthFlowStore::default()),
         auth_token: auth_token.clone(),
+        macaroon_root_key,
         require_auth: runtime.require_auth,
         origin_allowlist,
         host_allowlist,

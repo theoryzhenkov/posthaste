@@ -1304,6 +1304,7 @@ mod tests {
                 account_logo_root: root.0.join("account-assets").join("logos"),
                 oauth_flows: Arc::new(OAuthFlowStore::default()),
                 auth_token: "test-token".to_string(),
+                macaroon_root_key: crate::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),
