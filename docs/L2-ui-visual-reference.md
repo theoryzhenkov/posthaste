@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-05-28
-reviewed: 2026-05-24
+modified: 2026-05-30
+reviewed: 2026-05-30
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -610,9 +610,10 @@ Overlay:
 - Pointer-events none on the overlay root and pointer-events auto on the panel.
 - No background scrim or backdrop blur; the app remains visible and interactive.
 - Outside pointer interaction closes the panel unless it is pinned.
-- Dragged panel offset is persisted locally and restored on the next open.
-- Floating panels are user-resizable within the viewport. Their initial sizes come from a shared 12-column by 8-row floating size grid; user resizing remains arbitrary rather than hard-snapped.
-- During drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
+- Dragged panel offset and user size are persisted locally and restored on the next open.
+- Floating panels are user-resizable within the viewport via edge and corner handles on the panel sheet (all four edges plus all four corners; corners drive both axes). Initial sizes come from a shared 12-column by 8-row floating size grid; a resized panel may shrink to the preset minimum (or the shared `min-w-72`/`min-h-48` floor) and grow up to the usable viewport. The grabbed edge follows the pointer while the opposite edge stays fixed.
+- During a move drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
+- During a resize drag, show the same faint guide rails — the panel-edge lines of those left/center/right and top/bottom slots, captured from the panel size at the start of the gesture. The dragged edge resists each rail for `12px` before breaking out, and the snapped rail highlights. Between gestures the rails are re-derived from the panel's current size, so they keep fitting the panel as it changes.
 
 Panel sheet:
 
@@ -625,7 +626,7 @@ Panel sheet:
 - Overflow: hidden.
 - Text color: theme foreground tokens, not hard-coded white.
 - Font: Geist.
-- Move, pin, and expand/restore icon buttons sit at the left of the input row. Move drags the panel around the screen and persists the final placement; pin keeps it open during outside interaction; expand temporarily fills the viewport and restores back to the floating panel.
+- Move, pin, and expand/restore icon buttons sit at the left of the input row. The grip button and any empty space in the header row both drag the panel (the drag is suppressed when it starts on an interactive control), persisting the final placement; pin keeps it open during outside interaction; expand temporarily fills the viewport, hides the resize handles, and restores back to the floating panel.
 - The close button is icon-only and aligned to the far right independently of header content width.
 
 ## Command Palette

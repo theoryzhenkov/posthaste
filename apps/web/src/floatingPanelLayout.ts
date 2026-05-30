@@ -50,6 +50,50 @@ export function floatingPanelSizePolicy(
   return FLOATING_PANEL_SIZE_POLICIES[preset]
 }
 
+// Floor sizes when a panel has no preset; mirror the `min-w-72`/`min-h-48`
+// safety floor on the panel sheet.
+const FLOATING_PANEL_FALLBACK_MIN_WIDTH = 288
+const FLOATING_PANEL_FALLBACK_MIN_HEIGHT = 192
+
+export interface FloatingPanelResizeConstraints {
+  minWidth: number
+  maxWidth: number
+  minHeight: number
+  maxHeight: number
+}
+
+// Bounds for user-driven edge/corner resizing: the minimum comes from the
+// preset (or the shared floor), while the maximum is the usable viewport so a
+// panel can grow to fill the screen rather than being capped at its preset.
+export function floatingPanelResizeConstraints(
+  preset: FloatingPanelSizePreset | undefined,
+  viewport: ViewportSize,
+): FloatingPanelResizeConstraints {
+  const policy = preset ? floatingPanelSizePolicy(preset) : undefined
+  const usableWidth = Math.max(
+    0,
+    viewport.width - FLOATING_PANEL_GRID.screenMargin * 2,
+  )
+  const usableHeight = Math.max(
+    0,
+    viewport.height -
+      FLOATING_PANEL_GRID.topOffset -
+      FLOATING_PANEL_GRID.screenMargin,
+  )
+  return {
+    minWidth: Math.min(
+      policy?.minWidth ?? FLOATING_PANEL_FALLBACK_MIN_WIDTH,
+      usableWidth,
+    ),
+    maxWidth: usableWidth,
+    minHeight: Math.min(
+      policy?.minHeight ?? FLOATING_PANEL_FALLBACK_MIN_HEIGHT,
+      usableHeight,
+    ),
+    maxHeight: usableHeight,
+  }
+}
+
 export function resolveFloatingPanelSize(
   preset: FloatingPanelSizePreset,
   viewport: ViewportSize,

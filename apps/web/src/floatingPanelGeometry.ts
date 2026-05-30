@@ -198,6 +198,166 @@ function resistRail(
   return { active: null, locked: null, value }
 }
 
+export type ResizeHandle =
+  | 'top'
+  | 'right'
+  | 'bottom'
+  | 'left'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+
+export interface PanelRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export interface ResizeConstraints {
+  minWidth: number
+  maxWidth: number
+  minHeight: number
+  maxHeight: number
+}
+
+export interface ResizeSnapLines {
+  x: number[]
+  y: number[]
+}
+
+export interface ActiveResizeLines {
+  x: number[]
+  y: number[]
+}
+
+export interface ResizeLocks {
+  x: number | null
+  y: number | null
+}
+
+export interface ResizeResult {
+  size: PanelGeometry
+  offset: PanelOffset
+  activeLines: ActiveResizeLines
+  locks: ResizeLocks
+}
+
+function resizeHandleAxes(handle: ResizeHandle): {
+  horizontal: 'left' | 'right' | null
+  vertical: 'top' | 'bottom' | null
+} {
+  return {
+    horizontal: handle.includes('left')
+      ? 'left'
+      : handle.includes('right')
+        ? 'right'
+        : null,
+    vertical: handle.includes('top')
+      ? 'top'
+      : handle.includes('bottom')
+        ? 'bottom'
+        : null,
+  }
+}
+
+// Resize reuses the movement rails: the faint guide lines drawn while moving are
+// the panel edges at each candidate slot, so a resized edge snaps to those same
+// screen positions. Snap targets are frozen from the panel size at the start of
+// the gesture, so the reference grid stays stable while the panel changes size.
+export function resizeSnapLines(
+  panel: PanelGeometry,
+  viewport: ViewportSize,
+): ResizeSnapLines {
+  const columns = guideColumns(panel, viewport)
+  const rows = guideRows(panel, viewport)
+  return {
+    x: uniqueRails(
+      columns.flatMap((column) => [column.left, column.left + column.width]),
+    ),
+    y: uniqueRails(rows.flatMap((row) => [row.top, row.top + row.height])),
+  }
+}
+
+export function resizePanelRect(input: {
+  startRect: PanelRect
+  handle: ResizeHandle
+  dx: number
+  dy: number
+  constraints: ResizeConstraints
+  viewport: ViewportSize
+  snapLines: ResizeSnapLines
+  locks: ResizeLocks
+}): ResizeResult {
+  const { startRect, handle, dx, dy, constraints, viewport, snapLines, locks } =
+    input
+  const { horizontal, vertical } = resizeHandleAxes(handle)
+  const margin = FLOATING_PANEL_GRID.screenMargin
+  const topAnchor = FLOATING_PANEL_GRID.topOffset
+
+  let left = startRect.left
+  let right = startRect.left + startRect.width
+  let top = startRect.top
+  let bottom = startRect.top + startRect.height
+
+  const activeLines: ActiveResizeLines = { x: [], y: [] }
+  const nextLocks: ResizeLocks = { x: null, y: null }
+
+  if (horizontal === 'right') {
+    const min = left + constraints.minWidth
+    const max = Math.min(left + constraints.maxWidth, viewport.width - margin)
+    right = clamp(startRect.left + startRect.width + dx, min, max)
+    const snap = resistRail(right, locks.x, snapLines.x)
+    right = clamp(snap.value, min, max)
+    if (snap.active !== null && right === snap.active) {
+      activeLines.x.push(snap.active)
+      nextLocks.x = snap.locked
+    }
+  } else if (horizontal === 'left') {
+    const min = Math.max(margin, right - constraints.maxWidth)
+    const max = right - constraints.minWidth
+    left = clamp(startRect.left + dx, min, max)
+    const snap = resistRail(left, locks.x, snapLines.x)
+    left = clamp(snap.value, min, max)
+    if (snap.active !== null && left === snap.active) {
+      activeLines.x.push(snap.active)
+      nextLocks.x = snap.locked
+    }
+  }
+
+  if (vertical === 'bottom') {
+    const min = top + constraints.minHeight
+    const max = Math.min(top + constraints.maxHeight, viewport.height - margin)
+    bottom = clamp(startRect.top + startRect.height + dy, min, max)
+    const snap = resistRail(bottom, locks.y, snapLines.y)
+    bottom = clamp(snap.value, min, max)
+    if (snap.active !== null && bottom === snap.active) {
+      activeLines.y.push(snap.active)
+      nextLocks.y = snap.locked
+    }
+  } else if (vertical === 'top') {
+    const min = Math.max(margin, bottom - constraints.maxHeight)
+    const max = bottom - constraints.minHeight
+    top = clamp(startRect.top + dy, min, max)
+    const snap = resistRail(top, locks.y, snapLines.y)
+    top = clamp(snap.value, min, max)
+    if (snap.active !== null && top === snap.active) {
+      activeLines.y.push(snap.active)
+      nextLocks.y = snap.locked
+    }
+  }
+
+  const width = right - left
+  const height = bottom - top
+  return {
+    size: { width, height },
+    offset: { x: left - (viewport.width - width) / 2, y: top - topAnchor },
+    activeLines,
+    locks: nextLocks,
+  }
+}
+
 function uniqueRails(values: number[]): number[] {
   const rails: number[] = []
   for (const value of values) {
@@ -209,5 +369,8 @@ function uniqueRails(values: number[]): number[] {
 }
 
 function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
+  // Guard against inverted bounds: the resize paths can derive a min above the
+  // max at extreme viewport sizes, and silently collapsing to `max` could land
+  // outside the screen margins.
+  return Math.min(Math.max(value, Math.min(min, max)), Math.max(min, max))
 }

@@ -11,21 +11,88 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   type ActiveRails,
+  type ActiveResizeLines,
   type GuideLayout,
   type PanelGeometry,
   type PanelOffset,
+  type ResizeHandle,
+  type ResizeSnapLines,
   clampPanelOffset,
   guideColumns,
   guideRows,
   isFiniteOffset,
   resistPanelOffset,
+  resizePanelRect,
+  resizeSnapLines,
 } from '@/floatingPanelGeometry'
 import {
   type FloatingPanelSizePreset,
+  floatingPanelResizeConstraints,
   floatingPanelSizeStyle,
   type ViewportSize,
 } from '@/floatingPanelLayout'
 import { cn } from '@/lib/utils'
+
+type PanelSize = { width: number; height: number }
+
+// Edge and corner resize handles. Corners drive both axes; corners sit above the
+// edge handles so the overlap at the borders resolves to a 2-D drag.
+const RESIZE_HANDLES: {
+  handle: ResizeHandle
+  className: string
+  corner: boolean
+}[] = [
+  {
+    handle: 'top',
+    className: 'inset-x-0 top-0 h-1.5 cursor-ns-resize',
+    corner: false,
+  },
+  {
+    handle: 'bottom',
+    className: 'inset-x-0 bottom-0 h-1.5 cursor-ns-resize',
+    corner: false,
+  },
+  {
+    handle: 'left',
+    className: 'inset-y-0 left-0 w-1.5 cursor-ew-resize',
+    corner: false,
+  },
+  {
+    handle: 'right',
+    className: 'inset-y-0 right-0 w-1.5 cursor-ew-resize',
+    corner: false,
+  },
+  {
+    handle: 'top-left',
+    className: 'left-0 top-0 size-3 cursor-nwse-resize',
+    corner: true,
+  },
+  {
+    handle: 'top-right',
+    className: 'right-0 top-0 size-3 cursor-nesw-resize',
+    corner: true,
+  },
+  {
+    handle: 'bottom-left',
+    className: 'bottom-0 left-0 size-3 cursor-nesw-resize',
+    corner: true,
+  },
+  {
+    handle: 'bottom-right',
+    className: 'bottom-0 right-0 size-3 cursor-nwse-resize',
+    corner: true,
+  },
+]
+
+const GUIDE_LINE_ACTIVE_CLASS =
+  'bg-[color-mix(in_oklab,var(--brand-coral)_46%,transparent)]'
+const GUIDE_LINE_IDLE_CLASS =
+  'bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]'
+
+// Don't start a header drag from interactive controls or the grip (the grip has
+// its own drag handlers); empty header space drags the panel.
+const HEADER_NO_DRAG_SELECTOR =
+  'button, a, input, textarea, select, label, [contenteditable], [data-no-drag]'
 
 interface FloatingPanelProps {
   children: React.ReactNode
@@ -64,8 +131,45 @@ function persistPanelOffset(storageKey: string, offset: PanelOffset) {
   }
 }
 
+function readStoredPanelSize(storageKey: string): PanelSize | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? 'null')
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.width === 'number' &&
+      typeof parsed.height === 'number' &&
+      Number.isFinite(parsed.width) &&
+      Number.isFinite(parsed.height)
+    ) {
+      return { width: parsed.width, height: parsed.height }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function persistPanelSize(storageKey: string, size: PanelSize) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(size))
+  } catch {
+    // Size is a preference; failing to persist should not break the panel.
+  }
+}
+
 function viewportSize(): ViewportSize {
   return { width: window.innerWidth, height: window.innerHeight }
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, Math.min(min, max)), Math.max(min, max))
 }
 
 function panelGeometry(panel: DOMRect): PanelGeometry {
@@ -85,6 +189,7 @@ export function FloatingPanel({
   onClose,
   onOpenInWindow,
 }: FloatingPanelProps) {
+  const sizeStorageKey = `${storageKey}:size`
   const [isPinned, setIsPinned] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -96,6 +201,14 @@ export function FloatingPanel({
   const [panelOffset, setPanelOffset] = useState(() =>
     readStoredPanelOffset(storageKey),
   )
+  const [panelSize, setPanelSize] = useState<PanelSize | null>(() =>
+    readStoredPanelSize(`${storageKey}:size`),
+  )
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeLines, setResizeLines] = useState<ResizeSnapLines | null>(null)
+  const [activeResizeLines, setActiveResizeLines] = useState<ActiveResizeLines>(
+    { x: [], y: [] },
+  )
   const panelRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
     lockedX?: number | null
@@ -106,19 +219,57 @@ export function FloatingPanel({
     originX: number
     originY: number
   } | null>(null)
+  const resizeRef = useRef<{
+    pointerId: number
+    handle: ResizeHandle
+    startRect: { left: number; top: number; width: number; height: number }
+    startX: number
+    startY: number
+    snapLines: ResizeSnapLines
+    lockX: number | null
+    lockY: number | null
+  } | null>(null)
 
   useEffect(() => {
-    function clampRestoredOffset() {
+    function clampRestoredPlacement() {
       const panel = panelRef.current?.getBoundingClientRect()
       if (!panel) {
         return
       }
+      const viewport = viewportSize()
+      // The size update below runs its updater before the offset updater in the
+      // same render pass; capture the clamped size here so the offset is clamped
+      // against the panel's new footprint rather than the stale measured rect.
+      let effectiveGeometry = panelGeometry(panel)
+      setPanelSize((current) => {
+        if (!current) {
+          return current
+        }
+        const constraints = floatingPanelResizeConstraints(sizePreset, viewport)
+        const clamped = {
+          width: clampNumber(
+            current.width,
+            constraints.minWidth,
+            constraints.maxWidth,
+          ),
+          height: clampNumber(
+            current.height,
+            constraints.minHeight,
+            constraints.maxHeight,
+          ),
+        }
+        effectiveGeometry = clamped
+        if (
+          clamped.width === current.width &&
+          clamped.height === current.height
+        ) {
+          return current
+        }
+        persistPanelSize(sizeStorageKey, clamped)
+        return clamped
+      })
       setPanelOffset((current) => {
-        const clamped = clampPanelOffset(
-          current,
-          panelGeometry(panel),
-          viewportSize(),
-        )
+        const clamped = clampPanelOffset(current, effectiveGeometry, viewport)
         if (clamped.x === current.x && clamped.y === current.y) {
           return current
         }
@@ -127,10 +278,10 @@ export function FloatingPanel({
       })
     }
 
-    clampRestoredOffset()
-    window.addEventListener('resize', clampRestoredOffset)
-    return () => window.removeEventListener('resize', clampRestoredOffset)
-  }, [storageKey])
+    clampRestoredPlacement()
+    window.addEventListener('resize', clampRestoredPlacement)
+    return () => window.removeEventListener('resize', clampRestoredPlacement)
+  }, [storageKey, sizeStorageKey, sizePreset])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -174,7 +325,17 @@ export function FloatingPanel({
       window.removeEventListener('pointerdown', handlePointerDown, true)
   }, [closeIgnoreSelector, isPinned, onClose])
 
-  function handleDragStart(event: React.PointerEvent<HTMLButtonElement>) {
+  function handleHeaderPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest(HEADER_NO_DRAG_SELECTOR)
+    ) {
+      return
+    }
+    handleDragStart(event)
+  }
+
+  function handleDragStart(event: React.PointerEvent<HTMLElement>) {
     if (isExpanded) {
       return
     }
@@ -201,7 +362,7 @@ export function FloatingPanel({
     }
   }
 
-  function handleDragMove(event: React.PointerEvent<HTMLButtonElement>) {
+  function handleDragMove(event: React.PointerEvent<HTMLElement>) {
     const drag = dragRef.current
     if (!drag || drag.pointerId !== event.pointerId) {
       return
@@ -226,7 +387,7 @@ export function FloatingPanel({
     setActiveRails(resisted.activeRails)
   }
 
-  function handleDragEnd(event: React.PointerEvent<HTMLButtonElement>) {
+  function handleDragEnd(event: React.PointerEvent<HTMLElement>) {
     const drag = dragRef.current
     if (drag?.pointerId === event.pointerId) {
       const panel = panelRef.current?.getBoundingClientRect()
@@ -252,8 +413,98 @@ export function FloatingPanel({
     }
   }
 
+  function handleResizeStart(
+    handle: ResizeHandle,
+    event: React.PointerEvent<HTMLDivElement>,
+  ) {
+    if (isExpanded) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (!rect) {
+      return
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const startRect = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    }
+    const snapLines = resizeSnapLines(
+      { width: rect.width, height: rect.height },
+      viewportSize(),
+    )
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      handle,
+      startRect,
+      startX: event.clientX,
+      startY: event.clientY,
+      snapLines,
+      lockX: null,
+      lockY: null,
+    }
+    setIsResizing(true)
+    setResizeLines(snapLines)
+    setActiveResizeLines({ x: [], y: [] })
+    // Pin the rendered size to the measured pixels so resizing continues from
+    // exactly where the preset left off, with no visual jump on the first move.
+    setPanelSize({ width: rect.width, height: rect.height })
+  }
+
+  function handleResizeMove(event: React.PointerEvent<HTMLDivElement>) {
+    const resize = resizeRef.current
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return
+    }
+    const viewport = viewportSize()
+    const result = resizePanelRect({
+      startRect: resize.startRect,
+      handle: resize.handle,
+      dx: event.clientX - resize.startX,
+      dy: event.clientY - resize.startY,
+      constraints: floatingPanelResizeConstraints(sizePreset, viewport),
+      viewport,
+      snapLines: resize.snapLines,
+      locks: { x: resize.lockX, y: resize.lockY },
+    })
+    resize.lockX = result.locks.x
+    resize.lockY = result.locks.y
+    setPanelSize(result.size)
+    setPanelOffset(result.offset)
+    setActiveResizeLines(result.activeLines)
+  }
+
+  function handleResizeEnd(event: React.PointerEvent<HTMLDivElement>) {
+    const resize = resizeRef.current
+    if (!resize || resize.pointerId !== event.pointerId) {
+      return
+    }
+    resizeRef.current = null
+    setIsResizing(false)
+    setResizeLines(null)
+    setActiveResizeLines({ x: [], y: [] })
+    setPanelSize((size) => {
+      if (size) {
+        persistPanelSize(sizeStorageKey, size)
+      }
+      return size
+    })
+    setPanelOffset((offset) => {
+      persistPanelOffset(storageKey, offset)
+      return offset
+    })
+  }
+
   const floatingSizeStyle: CSSProperties =
     !isExpanded && sizePreset ? floatingPanelSizeStyle(sizePreset) : {}
+  const resizeSizeStyle: CSSProperties =
+    !isExpanded && panelSize
+      ? { width: `${panelSize.width}px`, height: `${panelSize.height}px` }
+      : {}
 
   return (
     <div
@@ -267,10 +518,10 @@ export function FloatingPanel({
       {isDragging && guideLayout && (
         <div className="pointer-events-none fixed inset-0">
           {guideLayout.columns.map((column) => {
-            const active = activeRails.x === column.rail
-            const lineClass = active
-              ? 'bg-[color-mix(in_oklab,var(--brand-coral)_46%,transparent)]'
-              : 'bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]'
+            const lineClass =
+              activeRails.x === column.rail
+                ? GUIDE_LINE_ACTIVE_CLASS
+                : GUIDE_LINE_IDLE_CLASS
             return (
               <div
                 key={`column:${column.rail}`}
@@ -287,10 +538,10 @@ export function FloatingPanel({
             )
           })}
           {guideLayout.rows.map((row) => {
-            const active = activeRails.y === row.rail
-            const lineClass = active
-              ? 'bg-[color-mix(in_oklab,var(--brand-coral)_46%,transparent)]'
-              : 'bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]'
+            const lineClass =
+              activeRails.y === row.rail
+                ? GUIDE_LINE_ACTIVE_CLASS
+                : GUIDE_LINE_IDLE_CLASS
             return (
               <div
                 key={`row:${row.rail}`}
@@ -308,17 +559,44 @@ export function FloatingPanel({
           })}
         </div>
       )}
+      {isResizing && resizeLines && (
+        <div className="pointer-events-none fixed inset-0">
+          {resizeLines.x.map((x) => (
+            <div
+              key={`resize-x:${x}`}
+              className={`absolute top-0 h-full w-px ${
+                activeResizeLines.x.includes(x)
+                  ? GUIDE_LINE_ACTIVE_CLASS
+                  : GUIDE_LINE_IDLE_CLASS
+              }`}
+              style={{ left: x }}
+            />
+          ))}
+          {resizeLines.y.map((y) => (
+            <div
+              key={`resize-y:${y}`}
+              className={`absolute left-0 h-px w-full ${
+                activeResizeLines.y.includes(y)
+                  ? GUIDE_LINE_ACTIVE_CLASS
+                  : GUIDE_LINE_IDLE_CLASS
+              }`}
+              style={{ top: y }}
+            />
+          ))}
+        </div>
+      )}
       <div
         ref={panelRef}
         className={cn(
-          'pointer-events-auto w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
+          'pointer-events-auto relative w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
           className,
           isExpanded
             ? 'h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)]'
-            : 'max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] min-h-48 min-w-72 resize',
+            : 'max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] min-h-48 min-w-72',
         )}
         style={{
           ...floatingSizeStyle,
+          ...resizeSizeStyle,
           transform: isExpanded
             ? undefined
             : `translate(${panelOffset.x}px, ${panelOffset.y}px)`,
@@ -330,7 +608,16 @@ export function FloatingPanel({
             headerClassName,
           )}
         >
-          <div className="flex items-center">
+          <div
+            className={cn(
+              'flex items-center',
+              !isExpanded && 'cursor-grab touch-none active:cursor-grabbing',
+            )}
+            onPointerDown={isExpanded ? undefined : handleHeaderPointerDown}
+            onPointerMove={isExpanded ? undefined : handleDragMove}
+            onPointerUp={isExpanded ? undefined : handleDragEnd}
+            onPointerCancel={isExpanded ? undefined : handleDragEnd}
+          >
             <div className="flex shrink-0 items-center gap-0.5">
               <button
                 type="button"
@@ -398,6 +685,36 @@ export function FloatingPanel({
           </div>
         </div>
         {children}
+        {/*
+          Edge/corner resize handles sit above the content (z-20/z-30) so they
+          stay reachable over panels whose body captures the pointer (e.g. the
+          command list). The top edge and top corners deliberately overlay the
+          header's top few pixels, so a drag started in that thin strip resizes
+          rather than moves — the expected window-chrome tradeoff.
+        */}
+        {!isExpanded &&
+          RESIZE_HANDLES.map(({ handle, className, corner }) => (
+            <div
+              key={handle}
+              role="presentation"
+              aria-hidden="true"
+              className={cn(
+                'absolute touch-none transition-colors duration-150',
+                corner ? 'z-30' : 'z-20',
+                // Faint brand-coral hint on hover (and while dragging, since the
+                // pointer stays captured on the handle); corners read a touch
+                // stronger to advertise the 2-D drag.
+                corner
+                  ? 'hover:bg-[color-mix(in_oklab,var(--brand-coral)_38%,transparent)]'
+                  : 'hover:bg-[color-mix(in_oklab,var(--brand-coral)_26%,transparent)]',
+                className,
+              )}
+              onPointerDown={(event) => handleResizeStart(handle, event)}
+              onPointerMove={handleResizeMove}
+              onPointerUp={handleResizeEnd}
+              onPointerCancel={handleResizeEnd}
+            />
+          ))}
       </div>
     </div>
   )
