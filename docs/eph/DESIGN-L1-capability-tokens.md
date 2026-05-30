@@ -5,6 +5,7 @@ lifecycle: ephemeral
 summary: "Macaroon capability tokens: resource+action+expiry caveats, a per-route authz map, capability-URL-ready"
 modified: 2026-05-30
 reviewed: 2026-05-30
+status_note: "Stage B implemented: per-route caveat enforcement + authz map live"
 depends:
   - path: docs/eph/DESIGN-L1-trust-model
   - path: docs/eph/PLAN-L1-public-api-platform
@@ -53,6 +54,17 @@ resource-scoped per the user's direction:
 | `message` | `message = <message_id>` | restrict to one message |
 | `expires` | `expires < <rfc3339>` | hard expiry (always recommended) |
 
+**Implemented wire format (Stage B).** Every caveat is an ASCII `key = value`
+predicate (single spaces around `=`); mint/attenuate and verify agree on this
+exact form (documented in `authz.rs`):
+- `action = <verb>[,<verb>...]` — comma-separated set; satisfied iff the route's
+  required verb is in the set.
+- `account = <source_id>`, `mailbox = <mailbox_id>`, `message = <message_id>` —
+  satisfied iff the request's value on that axis equals the value.
+- `expires = <rfc3339-utc>` — satisfied iff `now` < the timestamp (the design's
+  `expires < <rfc3339>` shorthand; the wire key is `expires =`).
+A malformed or unknown-key caveat fails closed (denied).
+
 Absent caveat = unrestricted on that axis. A token with **no** caveats is
 full-access (what the embedded app/daemon use). Multiple `action`s allowed.
 Verbs map to endpoint groups (below). `once`/nonce (one-time-use) is **deferred**
@@ -100,6 +112,41 @@ keeping it a separate table is cleaner to review as a security artifact.
 
 This is the only place endpoints may need work: ensuring each aggregate endpoint
 *has* the filter a caveat needs (account today; mailbox may need adding).
+
+**Stage-B mapping decisions (judgment calls, confirmed against `openapi.json`):**
+- `GET /sidebar` carries **no** query filter, so it is a **global Gate read**,
+  not a Filter — an account-scoped token is (correctly) rejected on it. (The
+  design listed `/sidebar` as Filter; with no filter param available it can only
+  be a global read in Phase 1.)
+- `GET /messages/search` has no `sourceId` filter param, so it is also a global
+  read: an account-scoped token cannot be satisfied there.
+- `GET /sources/{source_id}/messages` is a **Gate** (account from the path), even
+  though it accepts an optional `mailboxId` query filter — the account axis is
+  exact from the path, not the query.
+- The SSE `GET /events` stream is a **Filter** route keyed on `accountId`
+  (+ `mailboxId`): the handler result-side filters by these, so an `account=X`
+  token is accepted with a matching `?accountId=X` and rejected otherwise.
+- **Conversation lists are GLOBAL reads in Phase 1.** `GET /views/conversations`
+  and `GET /smart-mailboxes/{id}/conversations` were initially mapped as Filter
+  routes keyed on `sourceId`/`mailboxId`, but a security review found their
+  handlers do **not** result-side filter by source/mailbox in every branch
+  (`/views/conversations`' search `q` branch drops the filter;
+  `/smart-mailboxes/{id}/conversations` ignores it entirely), so declaring a
+  query axis as the satisfier would let an `account=X` token read **all**
+  accounts' conversations. The safe, design-aligned fix (result-side scoping is
+  a Phase-2 item with capability URLs) is to map both with **no resource axis**
+  (`ResourceShape::empty()`): an `account`/`mailbox` caveat is unsatisfiable →
+  account-scoped tokens get **403**, while a full-scope token (no caveats, fast
+  path) and an `action=read` token (no resource caveat) still read them. This
+  matches how `GET /messages/search` and `GET /smart-mailboxes/{id}/messages` are
+  already mapped (global reads, no source filter exposed). The handlers' query
+  logic is unchanged; proper per-account conversation scoping is deferred to
+  Phase 2. SECURITY: do not re-add a query axis to these routes until the handler
+  enforces source/mailbox scoping in every branch.
+- Global management/read endpoints with no scopable resource axis
+  (`/accounts` list + create, `PATCH /settings`, `/automation-rules:preview`,
+  `/sender-addresses`, smart-mailbox definitions, `/config:reload`, oauth) take a
+  resource caveat as **unsatisfiable** → such tokens are rejected, as intended.
 
 ## Verification flow
 
