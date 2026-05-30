@@ -5,7 +5,7 @@ use posthaste_observability::{
 use posthaste_server::ServerConfig;
 use serde::Deserialize;
 use std::sync::Mutex;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};
 use tauri::webview::WebviewWindow;
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
@@ -420,20 +420,9 @@ pub fn run() {
 }
 
 fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<R>> {
-    let close_window = MenuItem::with_id(
-        manager,
-        CLOSE_WINDOW_MENU_ID,
-        "Close Window",
-        true,
-        Some("CmdOrCtrl+W"),
-    )?;
-    let file_menu = SubmenuBuilder::new(manager, "File")
-        .item(&close_window)
-        .build()?;
-
     #[cfg(any(debug_assertions, feature = "devtools"))]
     let view_menu = {
-        let toggle_devtools = MenuItem::with_id(
+        let toggle_devtools = tauri::menu::MenuItem::with_id(
             manager,
             TOGGLE_DEVTOOLS_MENU_ID,
             "Toggle Developer Tools",
@@ -445,6 +434,14 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
             .build()?
     };
 
+    // macOS: build the standard App / Edit / Window submenus out of predefined
+    // items. Predefined items map to native AppKit selectors (`performClose:`,
+    // `copy:`, …) dispatched through the responder chain, so their key
+    // equivalents fire even while the WKWebView holds focus. A custom MenuItem
+    // accelerator (the route used on other platforms below) is swallowed by the
+    // focused webview, which is why Cmd+W and the other standard shortcuts were
+    // dead. `close_window` -> `performClose:` closes the focused window for all
+    // windows uniformly, replacing the bespoke close-routing used elsewhere.
     #[cfg(target_os = "macos")]
     {
         let app_menu = SubmenuBuilder::new(manager, manager.package_info().name.clone())
@@ -454,17 +451,48 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
             .separator()
             .hide()
             .hide_others()
+            .show_all()
             .separator()
             .quit()
             .build()?;
-        let builder = MenuBuilder::new(manager).item(&app_menu).item(&file_menu);
+        let edit_menu = SubmenuBuilder::new(manager, "Edit")
+            .undo()
+            .redo()
+            .separator()
+            .cut()
+            .copy()
+            .paste()
+            .select_all()
+            .build()?;
+        let window_menu = SubmenuBuilder::new(manager, "Window")
+            .minimize()
+            .maximize()
+            .separator()
+            .close_window()
+            .build()?;
+
+        let builder = MenuBuilder::new(manager).item(&app_menu).item(&edit_menu);
         #[cfg(any(debug_assertions, feature = "devtools"))]
         let builder = builder.item(&view_menu);
+        let builder = builder.item(&window_menu);
         return builder.build();
     }
 
+    // Other platforms keep the custom Close Window item: their webviews do not
+    // intercept the accelerator the way the macOS WKWebView does, and the
+    // predefined close item is macOS-only.
     #[cfg(not(target_os = "macos"))]
     {
+        let close_window = tauri::menu::MenuItem::with_id(
+            manager,
+            CLOSE_WINDOW_MENU_ID,
+            "Close Window",
+            true,
+            Some("CmdOrCtrl+W"),
+        )?;
+        let file_menu = SubmenuBuilder::new(manager, "File")
+            .item(&close_window)
+            .build()?;
         let builder = MenuBuilder::new(manager).item(&file_menu);
         #[cfg(any(debug_assertions, feature = "devtools"))]
         let builder = builder.item(&view_menu);
@@ -578,15 +606,16 @@ fn build_window<M: Manager<R>, R: Runtime>(
         .title(title)
         .inner_size(width, height)
         .resizable(true);
+    // Every window inherits the inset/overlay macOS title bar so the traffic
+    // lights ("semaphore") sit inside the app UI; the web shell paints the
+    // matching drag region + inset. Keep this position in sync with
+    // WINDOW_TITLEBAR_HEIGHT / WINDOW_TRAFFIC_LIGHT_INSET in
+    // apps/web/src/components/WindowChrome.tsx.
     #[cfg(target_os = "macos")]
-    let builder = if is_main_window_label(label) {
-        builder
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .traffic_light_position(tauri::LogicalPosition::new(14.0, 15.0))
-    } else {
-        builder
-    };
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(14.0, 15.0));
 
     let window = builder.build()?;
     remember_focused_window(&window);

@@ -17,6 +17,7 @@ import { AttachmentSurface } from './AttachmentSurface'
 import { ComposeOverlay } from './ComposeOverlay'
 import { MessageDetail } from './MessageDetail'
 import { SettingsPanel } from './SettingsPanel'
+import { WindowTitlebar } from './WindowChrome'
 
 interface FocusedSurfaceProps {
   surface: SurfaceDescriptor
@@ -170,11 +171,29 @@ export function FocusedSurfaceDocument({
 
   return (
     <main
-      className="h-full min-h-0 bg-background text-foreground"
+      className="flex h-full min-h-0 flex-col bg-background text-foreground"
       data-posthaste-state={`state.surface.${surface.kind}.ready.test`}
       data-posthaste-surface-kind={surface.kind}
     >
-      <FocusedSurface surface={surface} />
+      <WindowTitlebar title={surfaceWindowTitle(surface)} />
+      <div className="min-h-0 flex-1">
+        <FocusedSurface surface={surface} />
+      </div>
     </main>
   )
+}
+
+function surfaceWindowTitle(surface: SurfaceDescriptor): string {
+  switch (surface.kind) {
+    case 'settings':
+      return 'Settings'
+    case 'compose':
+      return 'Compose'
+    case 'attachment':
+      return 'Attachment'
+    case 'message':
+      return 'Message'
+    default:
+      return 'Posthaste'
+  }
 }

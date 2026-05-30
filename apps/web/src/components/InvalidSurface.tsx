@@ -7,6 +7,7 @@ import {
 } from '@/desktop'
 
 import { Button } from './ui/button'
+import { WindowTitlebar } from './WindowChrome'
 
 export function InvalidSurface({
   route,
@@ -79,11 +80,14 @@ export function InvalidSurfaceDocument({ route }: { route: string }) {
   }, [])
 
   return (
-    <main className="h-full min-h-0 bg-background text-foreground">
-      <InvalidSurface
-        route={route}
-        onClose={() => void closeCurrentSurfaceWindow()}
-      />
+    <main className="flex h-full min-h-0 flex-col bg-background text-foreground">
+      <WindowTitlebar title="Posthaste" />
+      <div className="min-h-0 flex-1">
+        <InvalidSurface
+          route={route}
+          onClose={() => void closeCurrentSurfaceWindow()}
+        />
+      </div>
     </main>
   )
 }
