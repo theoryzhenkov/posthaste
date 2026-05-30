@@ -102,6 +102,7 @@ impl SettingsHarness {
                 account_logo_root: state_root.join("account-assets/logos"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
                 auth_token: "test-token".to_string(),
+                macaroon_root_key: posthaste_server::token::RootKey::from_test_bytes([0u8; 32]),
                 require_auth: false,
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),
