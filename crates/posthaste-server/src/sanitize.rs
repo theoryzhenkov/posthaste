@@ -78,7 +78,7 @@ fn build_email_sanitizer() -> Builder<'static> {
 
     // Per-tag attributes (merged with globals)
     let per_tag: &[(&str, &[&str])] = &[
-        ("a", &["href", "title", "target"]),
+        ("a", &["href", "title"]),
         ("img", &["src", "alt", "width", "height"]),
         (
             "td",
@@ -128,7 +128,6 @@ fn build_email_sanitizer() -> Builder<'static> {
         .tag_attributes(tag_attributes)
         .url_schemes(url_schemes)
         .link_rel(Some("noopener noreferrer"))
-        .add_tag_attributes("a", ["target"])
         .attribute_filter(|_element, attribute, value| {
             if attribute == "style" {
                 Some(Cow::Owned(sanitize_style_value(value)))
@@ -334,6 +333,15 @@ mod tests {
         let input = r#"<a href="https://example.com">click</a>"#;
         let result = sanitize_email_html(input);
         assert!(result.contains("noopener noreferrer"));
+    }
+
+    #[test]
+    fn strips_link_target_so_renderer_controls_navigation() {
+        let input = r#"<a href="https://example.com" target="_blank">click</a>"#;
+        let result = sanitize_email_html(input);
+
+        assert!(!result.to_ascii_lowercase().contains("target="));
+        assert!(result.contains("https://example.com"));
     }
 
     #[test]
