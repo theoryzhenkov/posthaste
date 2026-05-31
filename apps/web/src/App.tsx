@@ -29,7 +29,7 @@ import {
   fetchSidebar,
   triggerSync,
 } from './api/client'
-import type { MessageSummary } from './api/types'
+import type { Mailbox, MessageSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { MessageDetail } from './components/MessageDetail'
@@ -429,8 +429,15 @@ function MailClient({
     sourceId: string,
     mailboxId: string,
     name: string,
+    role?: Mailbox['role'],
   ) {
-    setSelectedView({ kind: 'source-mailbox', sourceId, mailboxId, name })
+    setSelectedView({
+      kind: 'source-mailbox',
+      sourceId,
+      mailboxId,
+      name,
+      role: role ?? null,
+    })
     setSelectedMessage(null)
   }
 

@@ -103,7 +103,7 @@ The progress bar supplements skeleton layout placeholders; it does not replace t
 
 Each row represents one message. The standard density row is tabular, not card-like. It displays unread state, flag state, attachment state, subject, sender, date, account, and tags according to the L2 column contract.
 
-Message rows expose the same primary message actions through a right-click context menu: open, mark read/unread, flag/unflag, archive, and move to Trash. Opening the context menu selects the row first so command targets stay explicit.
+Message rows expose primary message actions through a right-click context menu. Opening the context menu selects the row first so command targets stay explicit. The menu is built from a contextual-action layer (`actions/contextualActions.ts`) rather than a fixed list, so availability and labels follow the current view's mailbox role: open, mark read/unread, and flag/unflag are always present; **Archive** appears except in archive/trash; **Move to Inbox** (restore) appears in trash/archive/junk; **Move to Trash** appears except in trash; and **Delete permanently** appears in trash. Smart-mailbox and search views are role-ambiguous and fall back to the inbox-like set (archive + move to Trash). This is the first slice of a broader contextual / user-defined action registry (`docs/eph/PLAN-L1-contextual-actions.md`).
 
 ## Tags
 

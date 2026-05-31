@@ -515,6 +515,21 @@ export function useEmailActions() {
         },
       )
     },
+    moveToInbox: (target: SourceMessageRef) => {
+      mutation.mutate(
+        {
+          conversationId:
+            findConversationIdForMessage(queryClient, target) ?? undefined,
+          mailboxRole: MAILBOX_ROLES.Inbox,
+          target,
+        },
+        {
+          onSuccess: () => {
+            toast('Moved to Inbox', { duration: 5000 })
+          },
+        },
+      )
+    },
     deletePermanently: (target: SourceMessageRef) =>
       mutation.mutate({
         command: { kind: 'destroy' },

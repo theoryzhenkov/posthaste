@@ -56,6 +56,7 @@ export type SidebarSelection =
       sourceId: string
       mailboxId: string
       name: string
+      role: Mailbox['role']
     }
 
 /** @spec docs/L1-ui#component-hierarchy */
@@ -68,6 +69,7 @@ interface SidebarProps {
     sourceId: string,
     mailboxId: string,
     name: string,
+    role: Mailbox['role'],
   ) => void
   onSelectTag: (tag: string) => void
   onSyncSource: (sourceId: string) => void
@@ -333,6 +335,7 @@ function SourceSection({
     sourceId: string,
     mailboxId: string,
     name: string,
+    role: Mailbox['role'],
   ) => void
   onSyncSource: (sourceId: string) => void
 }) {
@@ -417,6 +420,7 @@ function SourceSection({
                   source.id,
                   mailbox.id,
                   `${source.name} / ${mailbox.name}`,
+                  mailbox.role,
                 )
               }
               onSyncSource={onSyncSource}
