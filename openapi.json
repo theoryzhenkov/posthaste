@@ -559,6 +559,58 @@
         }
       }
     },
+    "/v1/auth/tokens": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Mint a capability token",
+        "description": "Derives a narrower capability token from the caller's token by appending the requested caveats (attenuation). The minted token can only narrow the caller's authority, never widen it. Requires a full-scope (or unscoped `manage`) token.",
+        "operationId": "create_auth_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAuthTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The minted capability token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAuthTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid scope request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller token is not authorized to mint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/automation-rules:preview": {
       "post": {
         "tags": [
@@ -3135,6 +3187,18 @@
           }
         }
       },
+      "Action": {
+        "type": "string",
+        "description": "A permitted verb. The action a route represents must be a member of an\n`action = ...` caveat's set for that caveat to be satisfied. Doubles as the\nwire enum for the token-mint request (`action = ...` caveats are built from\nit), so the lowercase serde form matches [`Action::as_str`] exactly — one\nsource of truth for the action vocabulary.",
+        "enum": [
+          "read",
+          "send",
+          "tag",
+          "move",
+          "delete",
+          "manage"
+        ]
+      },
       "AddToMailboxCommand": {
         "type": "object",
         "description": "Command to add a message to a single additional mailbox.\n\n@spec docs/L1-api#message-commands",
@@ -3716,6 +3780,72 @@
           },
           "transport": {
             "$ref": "#/components/schemas/AccountTransportRequest"
+          }
+        }
+      },
+      "CreateAuthTokenRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/auth/tokens`: the scope a derived capability token\nshould carry. Every field NARROWS authority — the minted token is the\ncaller's own token with these caveats appended (attenuation), so it can never\nexceed what the caller already holds. All fields are optional; an empty\nrequest returns a token equivalent in authority to the caller's.",
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrict the token to a single account (`source_id`)."
+          },
+          "actions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Action"
+            },
+            "description": "Restrict the token to these actions (subset of\n`read,send,tag,move,delete,manage`). Omitted = no added action caveat."
+          },
+          "expiresInSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Token lifetime in seconds from now. Omitted = no expiry caveat (lives as\nlong as the root key). Recommended for shared/agent tokens.",
+            "minimum": 0
+          },
+          "mailbox": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrict the token to a single mailbox."
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrict the token to a single message."
+          }
+        }
+      },
+      "CreateAuthTokenResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/auth/tokens`.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "RFC3339 UTC expiry, present iff `expiresInSeconds` was set."
+          },
+          "token": {
+            "type": "string",
+            "description": "The minted capability token (a macaroon), for use as\n`Authorization: Bearer <token>`."
           }
         }
       },
@@ -5289,6 +5419,10 @@
     {
       "name": "events",
       "description": "Server-sent domain event stream"
+    },
+    {
+      "name": "auth",
+      "description": "Capability-token minting"
     }
   ]
 }

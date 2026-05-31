@@ -121,10 +121,33 @@ Four shared surfaces — do them together to avoid double-touching the connectio
   out of `AppSettings` — *non-exposing, no security surface.*
 - **(B)** build the client profile store (keyring tokens; local-daemon + remote modes)
   against the existing full-scope token.
-- **(C)** Phase 2: result-side scoping of aggregate endpoints + the mint endpoint, so
-  profiles can hold narrow tokens.
+- **(C)** Phase 2: the mint endpoint (`POST /v1/auth/tokens`, **DONE** — attenuates the
+  caller's token so it can only narrow) + result-side scoping of the aggregate endpoints
+  (**pending** — see the scoping note below), so profiles can hold narrow tokens.
 - **(D)** Phase 2: revocation/once + exposure hardening (TLS/Tailscale, rate limit,
   Host allowlist) — **last, gated behind security review.**
+
+### Result-side scoping note (pending decision)
+
+Four cross-account aggregate reads are mapped `ResourceShape::empty()` today, so an
+account-scoped token is **denied (403)** on them (full-scope + bare `action=read`
+still work). To make a scoped token *work* on them — restricted to its account —
+each handler must honor the account filter in **every** branch (the audit found the
+search `q` branch drops it). The four split into two tiers:
+
+- **Already carry `sourceId`/`mailboxId`, just drop it in a branch** —
+  `GET /views/conversations` (search branch) and `GET /smart-mailboxes/{id}/conversations`
+  (both branches). Fixable by combining a scope rule (the `combine_rules` pattern the
+  smart-mailbox search already uses), then flipping the authz entry from `empty()` to a
+  Filter on `sourceId`(+`mailboxId`). Self-contained.
+- **Have NO account param at all** — `GET /messages/search` and
+  `GET /smart-mailboxes/{id}/messages`. Scoping these requires **adding a `sourceId`
+  query param** (a contract change) + honoring it. Decision needed: add the param, or
+  leave these as global reads requiring full-scope/`action=read`?
+
+The mint endpoint already makes scoped tokens useful on all **Gate** routes
+(`/sources/{id}/…`, single message, commands) — the bulk of the surface — so this is an
+incremental enhancement, not a blocker.
 
 ## Near-term actions (lock the boundary cheaply now)
 
