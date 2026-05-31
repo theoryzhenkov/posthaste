@@ -356,73 +356,42 @@ async fn flag_on_openapi_doc_succeeds_without_token() {
     assert_eq!(status, StatusCode::OK);
 }
 
-// -- SSE query-param token --
+// -- Browser-loadable reads authenticate via the Authorization header --
+//
+// The SSE stream (fetchEventSource), account logos and message attachments are
+// all loaded with a `fetch()` that sets the `Authorization` header, so they go
+// through the same header gate as every other route. The token is never carried
+// in a URL: the `?access_token=` query param is honored nowhere.
 
 #[tokio::test]
-async fn flag_on_events_accepts_access_token_query_param() {
-    let app = build_app(build_state(true));
-    let request = get_request(&format!("/v1/events?access_token={}", valid_token()))
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(status_of(app, request).await, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn flag_on_events_accepts_percent_encoded_access_token() {
-    // The web client builds the events URL with `URLSearchParams`, which
-    // percent-encodes the macaroon's base64 (`=` -> `%3D`, `+`/`/` too); the
-    // server must decode it. Regression: a verbatim scan rejected the real
-    // (encoded) token, so SSE auth 401'd once the token became a macaroon.
-    let app = build_app(build_state(true));
-    let token = valid_token();
-    let encoded = token
-        .replace('%', "%25")
-        .replace('=', "%3D")
-        .replace('+', "%2B")
-        .replace('/', "%2F");
-    assert_ne!(
-        encoded, token,
-        "the macaroon must contain chars that require encoding for this test to be meaningful"
-    );
-    let request = get_request(&format!("/v1/events?access_token={encoded}"))
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(status_of(app, request).await, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn flag_on_events_rejects_missing_token() {
-    let app = build_app(build_state(true));
-    let status = status_of(app, get_request("/v1/events").body(Body::empty()).unwrap()).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn flag_on_browser_loadable_reads_accept_query_token() {
-    // Account logos + message attachments are loaded via <img>, which can't set
-    // the Authorization header — so they accept the (percent-encoded) token via
-    // the access_token query param, same as /events. Without it they 401.
-    let token = valid_token();
-    let encoded = token
-        .replace('%', "%25")
-        .replace('=', "%3D")
-        .replace('+', "%2B")
-        .replace('/', "%2F");
+async fn flag_on_browser_loadable_reads_succeed_with_header_token() {
     for path in [
+        "/v1/events",
         "/v1/account-assets/logos/img-1",
         "/v1/sources/acct/messages/m1/attachments/a1",
     ] {
-        let with = get_request(&format!("{path}?access_token={encoded}"))
+        let request = get_request(path)
+            .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
             .body(Body::empty())
             .unwrap();
         assert_eq!(
-            status_of(build_app(build_state(true)), with).await,
+            status_of(build_app(build_state(true)), request).await,
             StatusCode::OK,
-            "{path} should accept the query-param token"
+            "{path} should authenticate via the Authorization header"
         );
-        let without = get_request(path).body(Body::empty()).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn flag_on_browser_loadable_reads_reject_missing_token() {
+    for path in [
+        "/v1/events",
+        "/v1/account-assets/logos/img-1",
+        "/v1/sources/acct/messages/m1/attachments/a1",
+    ] {
+        let request = get_request(path).body(Body::empty()).unwrap();
         assert_eq!(
-            status_of(build_app(build_state(true)), without).await,
+            status_of(build_app(build_state(true)), request).await,
             StatusCode::UNAUTHORIZED,
             "{path} without a token must 401"
         );
@@ -430,13 +399,25 @@ async fn flag_on_browser_loadable_reads_accept_query_token() {
 }
 
 #[tokio::test]
-async fn flag_on_query_param_not_accepted_on_non_events_path() {
-    // The access_token query param is honored ONLY for /events.
-    let app = build_app(build_state(true));
-    let request = get_request(&format!("/v1/settings?access_token={}", valid_token()))
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(status_of(app, request).await, StatusCode::UNAUTHORIZED);
+async fn flag_on_access_token_query_param_is_not_honored() {
+    // The query-param token transport was removed entirely: a valid token in
+    // `?access_token=` with no Authorization header must NOT authenticate, on
+    // any route (including the formerly-exempt /events + logo/attachment paths).
+    for path in [
+        "/v1/events",
+        "/v1/account-assets/logos/img-1",
+        "/v1/sources/acct/messages/m1/attachments/a1",
+        "/v1/settings",
+    ] {
+        let request = get_request(&format!("{path}?access_token={}", valid_token()))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            status_of(build_app(build_state(true)), request).await,
+            StatusCode::UNAUTHORIZED,
+            "{path} must ignore the access_token query param"
+        );
+    }
 }
 
 // -- CORS preflight (handled by the outer CORS layer, never reaches auth) --

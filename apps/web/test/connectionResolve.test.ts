@@ -61,32 +61,30 @@ describe('embedded resolution matches the legacy frozen consts', () => {
   })
 })
 
-describe('client builders read the active connection identically to today', () => {
-  it('builds the same SSE events URL with the access_token query param', async () => {
+describe('client builders read the active connection without a URL token', () => {
+  it('builds the SSE events URL with no access_token query param', async () => {
+    // The stream is consumed via fetchEventSource, which authenticates with the
+    // Authorization header; the token never appears in the URL.
     const { buildEventsUrl } = await import('../src/api/client')
-    // Old: `${BASE_URL}/events?...&access_token=${AUTH_TOKEN}`.
-    expect(buildEventsUrl()).toBe(
-      `http://127.0.0.1:${PORT}/v1/events?access_token=${TOKEN}`,
-    )
+    expect(buildEventsUrl()).toBe(`http://127.0.0.1:${PORT}/v1/events`)
     expect(buildEventsUrl({ accountId: 'acct-1', afterSeq: 7 })).toBe(
-      `http://127.0.0.1:${PORT}/v1/events?accountId=acct-1&afterSeq=7&access_token=${TOKEN}`,
+      `http://127.0.0.1:${PORT}/v1/events?accountId=acct-1&afterSeq=7`,
     )
   })
 
-  it('appends the access token to browser-loadable attachment + logo URLs', async () => {
-    // These ride in <img src>/downloads, which cannot set an Authorization
-    // header, so the token must travel as ?access_token= (same transport class
-    // as the SSE stream). The server allow-lists exactly these paths for the
-    // query-param token in accepts_query_token().
+  it('builds attachment + logo URLs with no token (loaded via authed blob fetch)', async () => {
     const { buildMessageAttachmentUrl, buildAccountLogoUrl } =
       await import('../src/api/client')
-    expect(
-      buildMessageAttachmentUrl('src 1', 'msg/2', 'att:3', { download: true }),
-    ).toBe(
-      `http://127.0.0.1:${PORT}/v1/sources/src%201/messages/msg%2F2/attachments/att%3A3?download=1&access_token=${TOKEN}`,
+    expect(buildMessageAttachmentUrl('src 1', 'msg/2', 'att:3')).toBe(
+      `http://127.0.0.1:${PORT}/v1/sources/src%201/messages/msg%2F2/attachments/att%3A3`,
     )
     expect(buildAccountLogoUrl('logo 1')).toBe(
-      `http://127.0.0.1:${PORT}/v1/account-assets/logos/logo%201?access_token=${TOKEN}`,
+      `http://127.0.0.1:${PORT}/v1/account-assets/logos/logo%201`,
     )
+  })
+
+  it('exposes the bearer token via authHeaders for header-authed fetches', async () => {
+    const { authHeaders } = await import('../src/api/client')
+    expect(authHeaders()).toEqual({ Authorization: `Bearer ${TOKEN}` })
   })
 })

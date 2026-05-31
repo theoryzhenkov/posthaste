@@ -37,6 +37,7 @@ import type {
 import { canPreviewAttachment, formatAttachmentSize } from '../attachments'
 import { openFocusedSurface } from '../hooks/useSurfaceRouting'
 import { cn } from '../lib/utils'
+import { downloadAuthedResource } from '../lib/downloadAuthedResource'
 import { mergeConversationView } from '../mailState'
 import { resolveMessageBodyRender } from '../messageBody'
 import { attachmentSurface } from '../surfaces'
@@ -465,12 +466,6 @@ export function MessageDetail({
             <div className="space-y-2">
               {message.attachments.map((attachment) => {
                 const canPreview = canPreviewAttachment(attachment)
-                const downloadUrl = buildMessageAttachmentUrl(
-                  sourceId,
-                  messageId,
-                  attachment.id,
-                  { download: true },
-                )
 
                 return (
                   <div
@@ -536,20 +531,26 @@ export function MessageDetail({
                         </Button>
                       )}
                       <Button
-                        asChild
+                        aria-label={`Download ${attachment.filename ?? 'attachment'}`}
+                        onClick={(event: MouseEvent) => {
+                          event.stopPropagation()
+                          void downloadAuthedResource(
+                            buildMessageAttachmentUrl(
+                              sourceId,
+                              messageId,
+                              attachment.id,
+                            ),
+                            attachment.filename ?? 'attachment',
+                          ).catch(() => {
+                            // already logged in the helper; nothing to surface here
+                          })
+                        }}
                         size="icon-sm"
+                        title="Download"
                         type="button"
                         variant="ghost"
                       >
-                        <a
-                          download
-                          href={downloadUrl}
-                          onClick={(event: MouseEvent) =>
-                            event.stopPropagation()
-                          }
-                        >
-                          <Download size={14} strokeWidth={1.75} />
-                        </a>
+                        <Download size={14} strokeWidth={1.75} />
                       </Button>
                       <Button
                         disabled

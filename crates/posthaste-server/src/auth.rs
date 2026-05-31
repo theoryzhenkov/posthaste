@@ -64,22 +64,6 @@ fn bearer_token(req: &Request) -> Option<&str> {
     Some(rest.trim())
 }
 
-/// Extract and percent-decode the `access_token` query parameter (used by
-/// EventSource, which cannot set request headers — see the SSE caveat in the
-/// design doc).
-///
-/// The token is a macaroon (base64; may contain `=` padding and `+`/`/`), and
-/// the client builds the URL with `URLSearchParams`, so the value arrives
-/// **percent-encoded**. Decode with the matching `application/x-www-form-urlencoded`
-/// semantics before comparing — a verbatim scan would mismatch on `%3D` etc.
-/// (Regression: SSE auth broke once the token stopped being a bare UUID.)
-fn query_token(req: &Request) -> Option<String> {
-    let query = req.uri().query()?;
-    url::form_urlencoded::parse(query.as_bytes())
-        .find(|(key, _)| key == "access_token")
-        .map(|(_, value)| value.into_owned())
-}
-
 /// Routes (relative to the `/v1` nest, i.e. the path the api router sees) that
 /// are exempt from token auth: liveness + browsable docs. Swagger UI is mounted
 /// at the app root under `/v1/docs` and never reaches this middleware.
@@ -88,22 +72,6 @@ fn is_exempt_path(path: &str) -> bool {
         nest_relative(path),
         "/health" | "/openapi.json" | "/asyncapi.json"
     )
-}
-
-/// Whether a route accepts the bearer token via the `access_token` query param.
-///
-/// This is the single allow-list for token-in-URL: only the **browser-loadable
-/// read** routes that cannot set the `Authorization` header — the SSE stream
-/// (`EventSource`), account logos and message attachments (`<img>`/downloads).
-/// All other routes require the header. NOTE: this only governs where the token
-/// may be *presented*; the token still goes through full authenticity +
-/// caveat/authz enforcement, so a false match cannot widen access — it would
-/// just let a (still-verified, still-scoped) token arrive via the query param.
-fn accepts_query_token(path: &str) -> bool {
-    let p = nest_relative(path);
-    p == "/events"
-        || p.starts_with("/account-assets/logos/")
-        || (p.starts_with("/sources/") && p.contains("/attachments/"))
 }
 
 /// Strip the `/v1` API nest prefix. The auth layer runs on the nested router but
@@ -243,8 +211,8 @@ fn host_allowed(req: &Request, allowed: &[String]) -> bool {
 ///   before any exemption (the DNS-rebinding defense);
 /// - exempt liveness/doc routes from token auth;
 /// - reject browser requests whose `Origin`/`Referer` is not allowlisted;
-/// - require an authentic macaroon (HMAC chain verified against the root key),
-///   accepting the `access_token` query param for `/events` only;
+/// - require an authentic macaroon (HMAC chain verified against the root key)
+///   presented in the `Authorization` header — there is no query-param token;
 /// - enforce the macaroon's first-party caveats against the matched route's
 ///   authz descriptor (Stage B): a forged/garbled token is 401, an authentic
 ///   token whose caveats are out of scope is 403, and a scoped token on an
@@ -289,14 +257,11 @@ pub async fn require_auth_layer(
         }
     }
 
-    // Bearer token: from the Authorization header, or the percent-decoded
-    // access_token query param for the browser-loadable read routes that cannot
-    // set headers (EventSource, <img>) — see `accepts_query_token`.
-    let Some(presented) = bearer_token(&req).map(str::to_owned).or_else(|| {
-        accepts_query_token(&path)
-            .then(|| query_token(&req))
-            .flatten()
-    }) else {
+    // Bearer token from the Authorization header. Every client — including the
+    // SSE stream (`fetchEventSource`) and the browser-loadable logo/attachment
+    // fetches (blob fetch) — sends the header; the token never rides in a query
+    // param, so there is no `access_token` fallback to honor.
+    let Some(presented) = bearer_token(&req).map(str::to_owned) else {
         return unauthorized().into_response();
     };
 
@@ -532,27 +497,19 @@ mod tests {
     }
 
     #[test]
-    fn route_checks_handle_the_v1_nest_prefix() {
+    fn exempt_path_check_handles_the_v1_nest_prefix() {
         // The auth layer runs on the nested router but sees the full request
-        // path, so the SSE stream arrives as `/v1/events`. Regression: it was
-        // only matched as `/events`, so EventSource's `access_token` query token
-        // was dropped and `/events` 401'd under require_auth, killing live
-        // updates (archived/deleted rows lingered until a manual refresh).
-        assert!(accepts_query_token("/v1/events"));
-        assert!(accepts_query_token("/events"));
-        // Browser-loadable read routes (<img>) also accept the query-param token.
-        assert!(accepts_query_token("/v1/account-assets/logos/img-1"));
-        assert!(accepts_query_token(
-            "/v1/sources/acct/messages/m1/attachments/a1"
-        ));
-        // Everything else requires the Authorization header.
-        assert!(!accepts_query_token("/v1/messages"));
-        assert!(!accepts_query_token("/v1/settings"));
-        assert!(!accepts_query_token("/v1/accounts"));
-
+        // path, so liveness/doc routes arrive as `/v1/health` etc.; the check
+        // must strip the nest prefix (it also tolerates the bare form).
         assert!(is_exempt_path("/v1/openapi.json"));
+        assert!(is_exempt_path("/v1/asyncapi.json"));
         assert!(is_exempt_path("/v1/health"));
         assert!(is_exempt_path("/health"));
+        // Everything else requires an authentic token in the Authorization
+        // header — including the previously query-token routes (events, logos,
+        // attachments), which now authenticate via header (fetch/blob fetch).
+        assert!(!is_exempt_path("/v1/events"));
+        assert!(!is_exempt_path("/v1/account-assets/logos/img-1"));
         assert!(!is_exempt_path("/v1/sources"));
     }
 
