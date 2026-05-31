@@ -15,6 +15,7 @@ import {
   observabilityHeaders,
   type OperationContext,
 } from '../observability'
+import { getActiveConnection } from '../connection/runtime'
 import { ApiError } from './errors'
 import type {
   AccountOverview,
@@ -63,40 +64,49 @@ type RequestInitWithObservability = RequestInit & {
   operation?: OperationContext
 }
 
-function normalizeApiBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '')
+/**
+ * The `/v1` base URL of the active connection. Dynamic (per active profile),
+ * not a module-load const: reads the runtime holder, which is seeded to the
+ * embedded injection (`__POSTHASTE_PORT__`, or the browser-dev fallback) so the
+ * bundled build is unchanged, and re-pointed on a profile switch.
+ *
+ * @spec docs/eph/DESIGN-L1-deployment-modes#connection-profiles
+ */
+function baseUrl(): string {
+  return getActiveConnection().baseUrl
 }
-
-function resolveBaseUrl(): string {
-  const port = (window as unknown as Record<string, unknown>).__POSTHASTE_PORT__
-  if (typeof port === 'number') {
-    return `http://127.0.0.1:${port}/v1`
-  }
-  return normalizeApiBaseUrl(
-    import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:3001/v1',
-  )
-}
-
-const BASE_URL = resolveBaseUrl()
 
 /**
- * Read the per-process bearer token injected by the embedded host as
- * `window.__POSTHASTE_TOKEN__`. Present only in the Tauri webview; absent in
- * browser dev mode. Harmless when the server does not require auth.
+ * The per-connection bearer token. For the embedded profile this is the
+ * injected `__POSTHASTE_TOKEN__` (today's behavior); for remote profiles it is
+ * the keyring-held token. Absent when the server does not require auth.
  *
  * @spec docs/eph/DESIGN-L1-trust-model
  */
-function resolveAuthToken(): string | undefined {
-  const token = (window as unknown as Record<string, unknown>)
-    .__POSTHASTE_TOKEN__
-  return typeof token === 'string' && token.length > 0 ? token : undefined
+function authToken(): string | undefined {
+  return getActiveConnection().token
 }
 
-const AUTH_TOKEN = resolveAuthToken()
+/** The pinned `Host` header for a remote profile, or `undefined`. */
+function hostHeader(): string | undefined {
+  return getActiveConnection().hostHeader
+}
 
-/** Authorization header for the bearer token, or `{}` when no token is set. */
+/**
+ * Per-request headers carrying the bearer token (and, for remote profiles, the
+ * pinned `Host` header). Empty when no token is set.
+ */
 function authHeaders(): Record<string, string> {
-  return AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}
+  const headers: Record<string, string> = {}
+  const token = authToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const host = hostHeader()
+  if (host) {
+    headers.Host = host
+  }
+  return headers
 }
 
 export function buildMessageAttachmentUrl(
@@ -106,7 +116,7 @@ export function buildMessageAttachmentUrl(
   options?: { download?: boolean },
 ): string {
   const url = new URL(
-    `${BASE_URL}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    `${baseUrl()}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
   )
   if (options?.download) {
     url.searchParams.set('download', '1')
@@ -115,12 +125,12 @@ export function buildMessageAttachmentUrl(
 }
 
 export function buildAccountLogoUrl(imageId: string): string {
-  return `${BASE_URL}/account-assets/logos/${encodeURIComponent(imageId)}`
+  return `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
 export function buildOAuthRedirectUri(): string {
-  return `${BASE_URL}/oauth/callback`
+  return `${baseUrl()}/oauth/callback`
 }
 
 /** Parse a non-OK response into a structured {@link ApiError}. */
@@ -184,7 +194,7 @@ async function request<T>(
   )
   let response: Response
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    response = await fetch(`${baseUrl()}${path}`, {
       ...fetchInit,
       headers: mergeHeaders(headers, {
         ...observabilityHeaders(context),
@@ -710,9 +720,10 @@ export function buildEventsUrl(input?: {
   // EventSource cannot set request headers, so the bearer token rides as an
   // `access_token` query param; the server accepts it for `/events` only.
   // @spec docs/eph/DESIGN-L1-trust-model
-  if (AUTH_TOKEN) {
-    params.set('access_token', AUTH_TOKEN)
+  const token = authToken()
+  if (token) {
+    params.set('access_token', token)
   }
   const search = params.toString()
-  return `${BASE_URL}/events${search ? `?${search}` : ''}`
+  return `${baseUrl()}/events${search ? `?${search}` : ''}`
 }
