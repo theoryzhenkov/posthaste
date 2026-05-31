@@ -90,10 +90,20 @@ fn is_exempt_path(path: &str) -> bool {
     )
 }
 
-/// Whether the request targets the SSE event stream, which accepts a token via
-/// the `access_token` query param because `EventSource` cannot set headers.
-fn is_events_path(path: &str) -> bool {
-    nest_relative(path) == "/events"
+/// Whether a route accepts the bearer token via the `access_token` query param.
+///
+/// This is the single allow-list for token-in-URL: only the **browser-loadable
+/// read** routes that cannot set the `Authorization` header — the SSE stream
+/// (`EventSource`), account logos and message attachments (`<img>`/downloads).
+/// All other routes require the header. NOTE: this only governs where the token
+/// may be *presented*; the token still goes through full authenticity +
+/// caveat/authz enforcement, so a false match cannot widen access — it would
+/// just let a (still-verified, still-scoped) token arrive via the query param.
+fn accepts_query_token(path: &str) -> bool {
+    let p = nest_relative(path);
+    p == "/events"
+        || p.starts_with("/account-assets/logos/")
+        || (p.starts_with("/sources/") && p.contains("/attachments/"))
 }
 
 /// Strip the `/v1` API nest prefix. The auth layer runs on the nested router but
@@ -279,12 +289,14 @@ pub async fn require_auth_layer(
         }
     }
 
-    // Bearer token: from the Authorization header, or the access_token query
-    // param for the SSE stream only (EventSource cannot set headers).
-    let Some(presented) = bearer_token(&req)
-        .map(str::to_owned)
-        .or_else(|| is_events_path(&path).then(|| query_token(&req)).flatten())
-    else {
+    // Bearer token: from the Authorization header, or the percent-decoded
+    // access_token query param for the browser-loadable read routes that cannot
+    // set headers (EventSource, <img>) — see `accepts_query_token`.
+    let Some(presented) = bearer_token(&req).map(str::to_owned).or_else(|| {
+        accepts_query_token(&path)
+            .then(|| query_token(&req))
+            .flatten()
+    }) else {
         return unauthorized().into_response();
     };
 
@@ -526,9 +538,17 @@ mod tests {
         // only matched as `/events`, so EventSource's `access_token` query token
         // was dropped and `/events` 401'd under require_auth, killing live
         // updates (archived/deleted rows lingered until a manual refresh).
-        assert!(is_events_path("/v1/events"));
-        assert!(is_events_path("/events"));
-        assert!(!is_events_path("/v1/messages"));
+        assert!(accepts_query_token("/v1/events"));
+        assert!(accepts_query_token("/events"));
+        // Browser-loadable read routes (<img>) also accept the query-param token.
+        assert!(accepts_query_token("/v1/account-assets/logos/img-1"));
+        assert!(accepts_query_token(
+            "/v1/sources/acct/messages/m1/attachments/a1"
+        ));
+        // Everything else requires the Authorization header.
+        assert!(!accepts_query_token("/v1/messages"));
+        assert!(!accepts_query_token("/v1/settings"));
+        assert!(!accepts_query_token("/v1/accounts"));
 
         assert!(is_exempt_path("/v1/openapi.json"));
         assert!(is_exempt_path("/v1/health"));

@@ -109,6 +109,23 @@ function authHeaders(): Record<string, string> {
   return headers
 }
 
+/**
+ * Append the active connection's bearer token as an `access_token` query param.
+ * The single client-side place that puts a token in a URL — used by every
+ * browser-loadable resource (EventSource, `<img>`) that cannot set the
+ * `Authorization` header. The server honors it only on the matching read routes
+ * (`accepts_query_token` in `auth.rs`). On loopback the query-param token is an
+ * accepted trade-off (it can reach logs/Referer); see the design note.
+ *
+ * @spec docs/eph/DESIGN-L1-trust-model
+ */
+function appendAccessToken(params: URLSearchParams): void {
+  const token = authToken()
+  if (token) {
+    params.set('access_token', token)
+  }
+}
+
 export function buildMessageAttachmentUrl(
   sourceId: string,
   messageId: string,
@@ -121,11 +138,16 @@ export function buildMessageAttachmentUrl(
   if (options?.download) {
     url.searchParams.set('download', '1')
   }
+  appendAccessToken(url.searchParams)
   return url.toString()
 }
 
 export function buildAccountLogoUrl(imageId: string): string {
-  return `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`
+  const url = new URL(
+    `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`,
+  )
+  appendAccessToken(url.searchParams)
+  return url.toString()
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
@@ -717,13 +739,7 @@ export function buildEventsUrl(input?: {
   if (input?.afterSeq != null) {
     params.set('afterSeq', String(input.afterSeq))
   }
-  // EventSource cannot set request headers, so the bearer token rides as an
-  // `access_token` query param; the server accepts it for `/events` only.
-  // @spec docs/eph/DESIGN-L1-trust-model
-  const token = authToken()
-  if (token) {
-    params.set('access_token', token)
-  }
+  appendAccessToken(params)
   const search = params.toString()
   return `${baseUrl()}/events${search ? `?${search}` : ''}`
 }
