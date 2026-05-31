@@ -2,21 +2,24 @@
  * Sandboxed iframe for rendering email HTML.
  *
  * Persisted message HTML is sanitized in Rust via ammonia before reaching the
- * frontend.
- * The iframe uses `sandbox="allow-same-origin"` with no script execution.
+ * frontend, and the iframe runs with no `allow-scripts`, so the email's own
+ * markup can never execute scripts.
+ *
+ * Links always open in the system browser, never inside the app. A parent-added
+ * click handler cannot run in a no-scripts sandboxed frame (WKWebView blocks
+ * it), so instead the link navigates and we intercept the navigation:
+ * - Desktop: `<base target="_top">` navigates the top frame; the Tauri webview's
+ *   navigation handler opens external URLs externally and blocks the in-app nav.
+ * - Browser: `<base target="_blank">` opens a new tab natively.
+ *
  * Long messages scroll inside the iframe rather than expanding the detail pane.
  *
  * @spec docs/L1-ui#messagedetail-and-emailframe
  * @spec docs/L0-ui#html-email-rendering
  */
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 
-import { openExternalUrl } from '../desktop'
-import {
-  EMAIL_LINK_HREF_ATTR,
-  externalEmailLinkUrl,
-  neutralizeEmailLinks,
-} from '../emailLinks'
+import { isTauriRuntime } from '../desktop'
 import { cn } from '../lib/utils'
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
@@ -37,13 +40,16 @@ export function EmailFrame({
   className,
   title = 'Email content',
 }: EmailFrameProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  // Desktop intercepts top-frame navigations (open external + block); the
+  // browser opens links in a new tab. Both keep the no-scripts sandbox.
+  const isDesktop = isTauriRuntime()
   const wrappedHtml = useMemo(
     () => `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base target="${isDesktop ? '_top' : '_blank'}">
     <style>
         :root { color-scheme: light; }
         html {
@@ -66,7 +72,6 @@ export function EmailFrame({
         }
         img { max-width: 100%; height: auto; }
         a { color: #2B7EC2; }
-        a[${EMAIL_LINK_HREF_ATTR}] { cursor: pointer; text-decoration: underline; }
         blockquote {
             border-left: 2px solid #D4DAE0;
             margin: 16px 0;
@@ -84,72 +89,19 @@ export function EmailFrame({
         }
     </style>
 </head>
-<body>${neutralizeEmailLinks(html)}</body>
+<body>${html}</body>
 </html>`,
-    [html],
+    [html, isDesktop],
   )
-
-  useEffect(() => {
-    const frame = iframeRef.current
-    if (!frame) {
-      return
-    }
-
-    let unbindClickHandler: (() => void) | null = null
-    const bindClickHandler = () => {
-      unbindClickHandler?.()
-      const document = frame.contentDocument
-      if (!document) {
-        return
-      }
-
-      const handleClick = (event: MouseEvent) => {
-        const target = event.target as {
-          closest?: (selector: string) => Element | null
-          parentElement?: Element | null
-        } | null
-        const element = target?.closest ? target : target?.parentElement
-        const anchor = element?.closest?.(`a[${EMAIL_LINK_HREF_ATTR}]`)
-        const href = externalEmailLinkUrl(
-          anchor?.getAttribute(EMAIL_LINK_HREF_ATTR) ?? null,
-        )
-        if (!href) {
-          return
-        }
-
-        // The anchor carries no `href` (neutralized above), so there is nothing
-        // to navigate to; preventDefault is belt-and-suspenders.
-        event.preventDefault()
-        event.stopPropagation()
-        void openExternalUrl(href).catch((error: unknown) => {
-          console.error('Failed to open email link externally', error)
-        })
-      }
-
-      // Capture phase so we cancel the iframe's own navigation before it runs,
-      // and auxclick to also catch middle-click "open in new tab".
-      document.addEventListener('click', handleClick, true)
-      document.addEventListener('auxclick', handleClick, true)
-      unbindClickHandler = () => {
-        document.removeEventListener('click', handleClick, true)
-        document.removeEventListener('auxclick', handleClick, true)
-      }
-    }
-
-    frame.addEventListener('load', bindClickHandler)
-    bindClickHandler()
-
-    return () => {
-      frame.removeEventListener('load', bindClickHandler)
-      unbindClickHandler?.()
-    }
-  }, [wrappedHtml])
 
   return (
     <iframe
-      ref={iframeRef}
       className={cn('block h-full w-full border-0 bg-transparent', className)}
-      sandbox="allow-same-origin"
+      sandbox={
+        isDesktop
+          ? 'allow-same-origin allow-top-navigation-by-user-activation'
+          : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox'
+      }
       srcDoc={wrappedHtml}
       title={title}
     />
