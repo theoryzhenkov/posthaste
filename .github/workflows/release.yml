@@ -127,14 +127,14 @@ jobs:
         shell: bash
         run: |
           rm -rf target/release/bundle apps/desktop/target/release/bundle
-          bun run tauri build --ci --no-sign --features devtools --config '{"productName":"Posthaste DevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null}}'
+          bun run tauri build --ci --no-sign --features devtools --config '{"productName":"PosthasteDevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null}}'
 
       - name: Build ad-hoc signed macOS desktop devtools bundles
         if: runner.os == 'macOS'
         shell: bash
         run: |
           rm -rf target/release/bundle apps/desktop/target/release/bundle
-          bun run tauri build --ci --features devtools --config '{"productName":"Posthaste DevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+          bun run tauri build --ci --features devtools --config '{"productName":"PosthasteDevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
 
       - name: Verify macOS desktop devtools app signature
         if: runner.os == 'macOS'
