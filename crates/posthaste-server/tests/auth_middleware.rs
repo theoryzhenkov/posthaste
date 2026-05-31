@@ -363,6 +363,29 @@ async fn flag_on_events_accepts_access_token_query_param() {
 }
 
 #[tokio::test]
+async fn flag_on_events_accepts_percent_encoded_access_token() {
+    // The web client builds the events URL with `URLSearchParams`, which
+    // percent-encodes the macaroon's base64 (`=` -> `%3D`, `+`/`/` too); the
+    // server must decode it. Regression: a verbatim scan rejected the real
+    // (encoded) token, so SSE auth 401'd once the token became a macaroon.
+    let app = build_app(build_state(true));
+    let token = valid_token();
+    let encoded = token
+        .replace('%', "%25")
+        .replace('=', "%3D")
+        .replace('+', "%2B")
+        .replace('/', "%2F");
+    assert_ne!(
+        encoded, token,
+        "the macaroon must contain chars that require encoding for this test to be meaningful"
+    );
+    let request = get_request(&format!("/v1/events?access_token={encoded}"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(status_of(app, request).await, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn flag_on_events_rejects_missing_token() {
     let app = build_app(build_state(true));
     let status = status_of(app, get_request("/v1/events").body(Body::empty()).unwrap()).await;
