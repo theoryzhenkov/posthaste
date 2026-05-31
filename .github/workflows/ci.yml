@@ -50,6 +50,22 @@ jobs:
       - run: bun --cwd=apps/web run test
       - run: bun --cwd=apps/web run build
 
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - run: bun --cwd=apps/site run check
+      - run: bun --cwd=apps/site run build
+
   mcp:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,55 @@
+name: Sync release notes
+
+# When a GitHub release is published (or edited), regenerate its entry in the
+# website's release content collection (apps/site/src/content/releases/<ver>.md)
+# and commit it to main. The frontmatter (version, date, per-platform download
+# assets) is regenerated; any hand-authored Markdown notes body is preserved.
+#
+# The resulting commit touches apps/site/**, which triggers site-publish.yml to
+# rebuild and push the site image, so the new release appears on
+# posthaste.theor.net automatically.
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to sync (e.g. v0.1.0-dogfood.39)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-notes
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Generate release entry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: node apps/site/tools/generate-release-notes.mjs --tag "$TAG"
+      - name: Commit if changed
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain apps/site/src/content/releases)" ]; then
+            git add apps/site/src/content/releases
+            git commit -m "chore(site): sync release notes for ${TAG}"
+            git push origin HEAD:main
+          else
+            echo "No release-content changes for ${TAG}."
+          fi

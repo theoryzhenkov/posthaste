@@ -2,9 +2,11 @@ FROM oven/bun:1.3.11-alpine AS build
 
 WORKDIR /app
 
+# All workspace members' manifests are needed for a frozen-lockfile install.
 COPY package.json bun.lock ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/site/package.json apps/site/package.json
+COPY apps/mcp/package.json apps/mcp/package.json
 RUN bun install --frozen-lockfile
 
 COPY apps/site apps/site
