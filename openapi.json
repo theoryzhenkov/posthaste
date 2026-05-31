@@ -1000,6 +1000,58 @@
         }
       }
     },
+    "/v1/read": {
+      "post": {
+        "tags": [
+          "read"
+        ],
+        "summary": "Execute typed read calls",
+        "description": "Executes a JMAP-style batch of typed, read-only domain operations.",
+        "operationId": "read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Read-call results keyed by call id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid read call or result reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sender-addresses": {
       "get": {
         "tags": [
@@ -1096,38 +1148,6 @@
           },
           "400": {
             "description": "Validation failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/sidebar": {
-      "get": {
-        "tags": [
-          "mailboxes"
-        ],
-        "summary": "Get sidebar",
-        "description": "Returns the combined sidebar payload: smart mailboxes, tags, and per-source mailboxes.",
-        "operationId": "get_sidebar",
-        "responses": {
-          "200": {
-            "description": "The sidebar payload",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SidebarResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -3009,6 +3029,48 @@
         "type": "string",
         "description": "Opaque server-assigned identifier for a mail account.\n\n@spec docs/L0-accounts#the-invariant"
       },
+      "AccountIdSelector": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "description": "Account id selector for read calls. A string beginning with `#` is a result\nreference such as `#accounts.ids`; an array is an explicit account-id list."
+      },
+      "AccountListReadResult": {
+        "type": "object",
+        "required": [
+          "ids",
+          "enabledIds",
+          "items"
+        ],
+        "properties": {
+          "enabledIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountId"
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountId"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountOverview"
+            }
+          }
+        }
+      },
       "AccountOverview": {
         "allOf": [
           {
@@ -3979,6 +4041,27 @@
         "type": "string",
         "description": "Opaque server-assigned identifier for a mailbox (folder or label).\n\n@spec docs/L1-jmap#core-types"
       },
+      "MailboxListReadResult": {
+        "type": "object",
+        "required": [
+          "byAccountId"
+        ],
+        "properties": {
+          "byAccountId": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/MailboxSummary"
+              }
+            },
+            "propertyNames": {
+              "type": "string",
+              "description": "Opaque server-assigned identifier for a mail account.\n\n@spec docs/L0-accounts#the-invariant"
+            }
+          }
+        }
+      },
       "MailboxSummary": {
         "type": "object",
         "description": "Lightweight mailbox view for sidebar and list endpoints.\n\n@spec docs/L1-api#navigation",
@@ -4487,6 +4570,161 @@
           }
         }
       },
+      "ReadCall": {
+        "type": "object",
+        "description": "A single domain read operation requested as part of `POST /v1/read`.",
+        "required": [
+          "id",
+          "op"
+        ],
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/ReadCallArgs"
+          },
+          "id": {
+            "type": "string"
+          },
+          "op": {
+            "$ref": "#/components/schemas/ReadOperation"
+          }
+        }
+      },
+      "ReadCallArgs": {
+        "type": "object",
+        "description": "Optional read-call arguments. Only `Mailbox/list` currently uses `accountIds`.",
+        "properties": {
+          "accountIds": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccountIdSelector"
+              }
+            ]
+          }
+        }
+      },
+      "ReadOperation": {
+        "type": "string",
+        "description": "Supported read operation names.",
+        "enum": [
+          "Account/list",
+          "Mailbox/list",
+          "SmartMailbox/list",
+          "Tag/list"
+        ]
+      },
+      "ReadRequest": {
+        "type": "object",
+        "description": "Request body for the typed read-call endpoint.\n\n@spec docs/L1-api#read-calls",
+        "required": [
+          "calls"
+        ],
+        "properties": {
+          "calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReadCall"
+            }
+          }
+        }
+      },
+      "ReadResponse": {
+        "type": "object",
+        "description": "Response body for the typed read-call endpoint.",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ReadResult"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ReadResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "Account/list"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/AccountListReadResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "Mailbox/list"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/MailboxListReadResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "SmartMailbox/list"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/SmartMailboxListReadResult"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "Tag/list"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TagListReadResult"
+              }
+            }
+          }
+        ],
+        "description": "A successful read-call result, discriminated by operation name."
+      },
       "Recipient": {
         "type": "object",
         "description": "Email address with optional display name.\n\n@spec docs/L1-jmap#methods-used",
@@ -4715,84 +4953,6 @@
           }
         }
       },
-      "SidebarResponse": {
-        "type": "object",
-        "description": "Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.\n\n@spec docs/L1-api#navigation",
-        "required": [
-          "smartMailboxes",
-          "tags",
-          "sources"
-        ],
-        "properties": {
-          "smartMailboxes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SidebarSmartMailbox"
-            }
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SidebarSource"
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TagSummary"
-            }
-          }
-        }
-      },
-      "SidebarSmartMailbox": {
-        "type": "object",
-        "description": "Smart mailbox entry with live counts for the sidebar.\n\n@spec docs/L1-api#navigation",
-        "required": [
-          "id",
-          "name",
-          "unreadMessages",
-          "totalMessages"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/SmartMailboxId"
-          },
-          "name": {
-            "type": "string"
-          },
-          "totalMessages": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "unreadMessages": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
-      "SidebarSource": {
-        "type": "object",
-        "description": "An account with its mailboxes, as rendered in the sidebar.\n\n@spec docs/L1-api#navigation",
-        "required": [
-          "id",
-          "name",
-          "mailboxes"
-        ],
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/AccountId"
-          },
-          "mailboxes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MailboxSummary"
-            }
-          },
-          "name": {
-            "type": "string"
-          }
-        }
-      },
       "SmartMailbox": {
         "type": "object",
         "description": "A saved query with display metadata that behaves like a virtual mailbox.\n\n@spec docs/L0-search#smart-mailboxes\n@spec docs/L1-accounts#smart-mailbox-defaults",
@@ -4935,6 +5095,20 @@
           "default",
           "user"
         ]
+      },
+      "SmartMailboxListReadResult": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SmartMailboxSummary"
+            }
+          }
+        }
       },
       "SmartMailboxOperator": {
         "type": "string",
@@ -5290,6 +5464,20 @@
           "manual"
         ]
       },
+      "TagListReadResult": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagSummary"
+            }
+          }
+        }
+      },
       "TagSummary": {
         "type": "object",
         "description": "User-facing tag derived from non-system JMAP keywords.\n\n@spec docs/L1-api#navigation",
@@ -5383,6 +5571,10 @@
     {
       "name": "system",
       "description": "Health and service status"
+    },
+    {
+      "name": "read",
+      "description": "Typed batch read calls"
     },
     {
       "name": "accounts",

@@ -3,8 +3,8 @@ scope: L1
 type: PLAN
 lifecycle: ephemeral
 summary: "Adopt a documented API standard (OpenAPI + AsyncAPI) so the backend is a standalone, integrable platform"
-modified: 2026-05-30
-reviewed: 2026-05-29
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: docs/L0-api
   - path: docs/L1-api
@@ -111,7 +111,7 @@ Opening the API to arbitrary clients/agents is a security shift, not just docs:
   (`<state_root>/daemon.json`, `XDG_DATA_HOME`-based per `config.rs`) with
   `POSTHASTE_API_URL`/`POSTHASTE_TOKEN` env overrides; sends `Bearer` so it works
   with or without `require_auth`. The 9 core tools shipped (`list_accounts`,
-  `get_sidebar`, `list_conversations`, `get_conversation`, `search_messages`,
+  `read`, `list_conversations`, `get_conversation`, `search_messages`,
   `get_message`, `set_keywords`, `move_to_mailbox`, `send_message`), each mapped
   1:1 to a documented operation, returning JSON text content and surfacing typed
   `ApiErrorBody` (`code`+`message`) as tool errors. Graceful startup failure when

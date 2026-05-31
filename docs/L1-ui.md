@@ -68,17 +68,19 @@ The exact visual contract for these surfaces lives in [L2-ui-visual-reference](L
 
 React Query manages server state, but different surfaces use different strategies:
 
-- `queryKeys.accounts` loads configured account overviews.
-- `queryKeys.mailboxes(accountId)` loads synced mailboxes for account-level settings.
-- `queryKeys.sidebar` loads enabled sources, smart mailbox summaries, and tag summaries.
+- `queryKeys.accounts` loads configured account overviews and is the authority for account display fields.
+- `queryKeys.mailboxes(accountId)` loads synced source mailboxes and is the authority for source mailbox names, roles, and counts.
+- `queryKeys.smartMailboxes` loads smart mailbox summaries and is the authority for smart mailbox navigation metadata.
+- `queryKeys.tags` stores user-facing tag summaries, loaded through the typed read-call bootstrap.
+- `queryKeys.mailNavigationRead` is the client-owned `POST /read` bootstrap operation for mail navigation. It hydrates domain-named caches such as `queryKeys.accounts`, `queryKeys.mailboxes(accountId)`, `queryKeys.smartMailboxes`, and `queryKeys.tags`.
 - `queryKeys.messages(selectedView, query, sort)` loads paginated individual message summaries for the selected mailbox or smart mailbox, with filtering and sorting executed by the backend.
 - `mailKeys.conversation(conversationId)` loads the selected conversation's message summaries.
 - `mailKeys.message(sourceId, messageId)` loads full message detail, including lazily fetched body content when needed.
 - Attachment focused surfaces reuse `mailKeys.message(sourceId, messageId)` and resolve the selected attachment by `attachmentId`; they must not depend on parent-only React props.
 
-Mutable account display fields are canonical in the accounts query. Message and sidebar DTOs may contain `sourceName` snapshots, but the UI resolves visible account names from `sourceId -> account.name` through the account directory selector.
+Mutable account display fields are canonical in the accounts query. Message DTOs may contain `sourceName` snapshots, but the UI resolves visible account names from `sourceId -> account.name` through the account directory selector.
 
-Domain events and mutation results update caches through the centralized domain cache helper. Components should not invent ad hoc cache keys or scatter account/message invalidation rules locally. The message list still listens for live domain events and refreshes the current view when a relevant message or mailbox event arrives.
+Domain events and mutation results update caches through the centralized domain cache helper. Components should not invent ad hoc cache keys or scatter account/message invalidation rules locally. Typed read-call bootstraps hydrate normalized caches; feature code reads the domain keys. The message list still listens for live domain events and refreshes the current view when a relevant message or mailbox event arrives.
 
 ## Loading And Progress
 
@@ -122,7 +124,7 @@ Sidebar objects expose object-scoped right-click menus. Smart mailboxes can be o
 
 Account settings are edited in a sparse, section-first layout for account identity, appearance, server credentials, verification, sync, and deletion. Mailbox metadata and mailbox actions do not live in the account editor.
 
-The Mailboxes & Rules settings category is a mailbox index for both smart mailboxes and synced source mailboxes. Selecting a mailbox opens a focused mailbox editor page. Smart mailbox editors expose the saved-query definition and backend actions. Source mailbox editors expose server metadata, starting with JMAP role assignment, and backend actions. Role edits are applied immediately through the API, then mailbox, sidebar, and message read-model caches are refreshed through the shared domain cache helper.
+The Mailboxes & Rules settings category is a mailbox index for both smart mailboxes and synced source mailboxes. Selecting a mailbox opens a focused mailbox editor page. Smart mailbox editors expose the saved-query definition and backend actions. Source mailbox editors expose server metadata, starting with JMAP role assignment, and backend actions. Role edits are applied immediately through the API, then mailbox, mail-navigation, and message read-model caches are refreshed through the shared domain cache helper.
 
 Mailbox actions use the shared automation action editor. Each action has its own Save action button; valid actions become active backend automations, while incomplete actions are persisted as drafts and never executed. Smart-mailbox actions are saved as global automations: the selected account condition and smart mailbox rule form the fixed base filter, and each action rule adds its own condition before executing its selected actions. Source mailbox actions are saved as global automations whose fixed base filter is the selected account plus the selected mailbox ID, with each action rule adding its own condition.
 

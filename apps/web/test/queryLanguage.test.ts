@@ -1,31 +1,29 @@
 import { describe, expect, it } from 'bun:test'
 
-import type { MessageSummary, SidebarResponse } from '../src/api/types'
+import type { MessageSummary, TagSummary } from '../src/api/types'
 import {
   getQueryCompletions,
   getQueryHelpEntries,
   validateSearchQuery,
 } from '../src/queryLanguage'
 
-const sidebar: SidebarResponse = {
-  smartMailboxes: [],
-  tags: [],
-  sources: [
-    {
-      id: 'primary',
-      name: 'Primary Account',
-      mailboxes: [
-        {
-          id: 'archive',
-          name: 'Archive',
-          role: null,
-          unreadEmails: 0,
-          totalEmails: 0,
-        },
-      ],
-    },
-  ],
-}
+const sources = [
+  {
+    id: 'primary',
+    name: 'Primary Account',
+    mailboxes: [
+      {
+        id: 'archive',
+        name: 'Archive',
+        role: null,
+        unreadEmails: 0,
+        totalEmails: 0,
+      },
+    ],
+  },
+]
+
+const tags: TagSummary[] = []
 
 const message: MessageSummary = {
   id: 'message-1',
@@ -49,8 +47,9 @@ const message: MessageSummary = {
 describe('query language completions', () => {
   it('suggests mailbox names for in: value continuations', () => {
     const [completion] = getQueryCompletions('in: Arc', {
-      sidebar,
       messages: [],
+      sources,
+      tags,
     })
 
     expect(completion?.label).toBe('Archive')
@@ -59,8 +58,9 @@ describe('query language completions', () => {
 
   it('suggests a new prefix after a non-spaced value token', () => {
     const [completion] = getQueryCompletions('is:unread f', {
-      sidebar,
       messages: [],
+      sources,
+      tags,
     })
 
     expect(completion?.label).toBe('from:')
@@ -69,8 +69,9 @@ describe('query language completions', () => {
 
   it('suggests static state values in declaration order', () => {
     const [completion] = getQueryCompletions('is: u', {
-      sidebar,
       messages: [],
+      sources,
+      tags,
     })
 
     expect(completion?.label).toBe('unread')
@@ -79,12 +80,14 @@ describe('query language completions', () => {
 
   it('uses cached message metadata for sender and keyword suggestions', () => {
     const sender = getQueryCompletions('from: Post', {
-      sidebar,
       messages: [message],
+      sources,
+      tags,
     })
     const tag = getQueryCompletions('tag: news', {
-      sidebar,
       messages: [message],
+      sources,
+      tags,
     })
 
     expect(sender[0]?.replacement).toBe('from: Posthaste Author')
@@ -93,15 +96,13 @@ describe('query language completions', () => {
 
   it('does not suggest blank or system tag filters', () => {
     const completions = getQueryCompletions('tag:', {
-      sidebar: {
-        ...sidebar,
-        tags: [
-          { name: '', unreadMessages: 1, totalMessages: 1 },
-          { name: '   ', unreadMessages: 1, totalMessages: 1 },
-          { name: '$seen', unreadMessages: 1, totalMessages: 1 },
-          { name: 'newsletter', unreadMessages: 1, totalMessages: 1 },
-        ],
-      },
+      sources,
+      tags: [
+        { name: '', unreadMessages: 1, totalMessages: 1 },
+        { name: '   ', unreadMessages: 1, totalMessages: 1 },
+        { name: '$seen', unreadMessages: 1, totalMessages: 1 },
+        { name: 'newsletter', unreadMessages: 1, totalMessages: 1 },
+      ],
       messages: [
         {
           ...message,
@@ -136,8 +137,9 @@ describe('query language completions', () => {
 
     for (const input of contexts) {
       const completions = getQueryCompletions(input, {
-        sidebar,
         messages: [message],
+        sources,
+        tags,
         now: new Date('2026-04-24T12:00:00Z'),
       })
       expect(completions.length, input).toBeGreaterThan(0)

@@ -1,13 +1,11 @@
 /**
  * Left-pane sidebar with smart mailbox and source mailbox navigation.
  *
- * Loads data from `GET /v1/sidebar` and renders collapsible sections
- * for smart mailboxes and per-source mailbox trees.
+ * Renders normalized account, mailbox, smart mailbox, and tag read models.
  *
  * @spec docs/L1-ui#component-hierarchy
  * @spec docs/L0-ui#navigation-model
  */
-import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import {
   AlertCircle,
@@ -18,13 +16,10 @@ import {
   RefreshCw,
   Settings,
 } from 'lucide-react'
-import { useAccountDirectory } from '../accountDirectory'
-import { fetchSidebar } from '../api/client'
 import type {
   AccountAppearance,
   Mailbox,
-  SidebarResponse,
-  SidebarSmartMailbox,
+  SmartMailboxSummary,
   TagSummary,
 } from '../api/types'
 import { cn } from '../lib/utils'
@@ -35,7 +30,7 @@ import {
   smartMailboxAccent,
   smartMailboxFallbackIcon,
 } from '../mailboxRoles'
-import { queryKeys } from '../queryKeys'
+import { useMailboxNavigationReadModels } from '../mailboxNavigationReadModels'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -75,11 +70,6 @@ interface SidebarProps {
 
 function roleIcon(role: Mailbox['role'], size = 14): React.ReactNode {
   return renderMailboxRoleIcon(role, size)
-}
-
-function isUserTag(tag: TagSummary): boolean {
-  const name = tag.name.trim()
-  return Boolean(name) && !name.startsWith('$')
 }
 
 function fallbackAccountAppearance(
@@ -124,9 +114,9 @@ function displaySmartMailboxName(name: string): string {
   return name.trim().toLowerCase() === 'inbox' ? 'All Inboxes' : name
 }
 
-function partitionSmartMailboxes(smartMailboxes: SidebarSmartMailbox[]) {
-  const quick: SidebarSmartMailbox[] = []
-  const smart: SidebarSmartMailbox[] = []
+function partitionSmartMailboxes(smartMailboxes: SmartMailboxSummary[]) {
+  const quick: SmartMailboxSummary[] = []
+  const smart: SmartMailboxSummary[] = []
 
   for (const mailbox of smartMailboxes) {
     const priority = smartMailboxPriority(mailbox.name)
@@ -325,7 +315,11 @@ function SourceSection({
   onSelectSourceMailbox,
   onSyncSource,
 }: {
-  source: SidebarResponse['sources'][number]
+  source: {
+    id: string
+    name: string
+    mailboxes: Mailbox[]
+  }
   appearance: AccountAppearance
   selectedView: SidebarSelection | null
   onOpenAccountSettings: (sourceId: string) => void
@@ -465,34 +459,14 @@ export function Sidebar({
   onSelectTag,
   onSyncSource,
 }: SidebarProps) {
-  const {
-    data: sidebar,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
-    queryKey: queryKeys.sidebar,
-    queryFn: fetchSidebar,
-  })
-  const accountDirectory = useAccountDirectory()
+  const { error, isLoading, refetchBootstrap, smartMailboxes, sources, tags } =
+    useMailboxNavigationReadModels()
 
   const [mailboxesCollapsed, setMailboxesCollapsed] = useState(false)
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false)
   const groupedSmartMailboxes = useMemo(
-    () => partitionSmartMailboxes(sidebar?.smartMailboxes ?? []),
-    [sidebar?.smartMailboxes],
-  )
-  const tags = useMemo(
-    () => (sidebar?.tags ?? []).filter(isUserTag),
-    [sidebar?.tags],
-  )
-  const sources = useMemo(
-    () =>
-      (sidebar?.sources ?? []).map((source) => {
-        const name = accountDirectory.resolveAccountName(source.id, source.name)
-        return name === source.name ? source : { ...source, name }
-      }),
-    [accountDirectory, sidebar?.sources],
+    () => partitionSmartMailboxes(smartMailboxes),
+    [smartMailboxes],
   )
 
   return (
@@ -519,14 +493,14 @@ export function Sidebar({
               <button
                 type="button"
                 className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                onClick={() => void refetch()}
+                onClick={() => void refetchBootstrap()}
               >
                 Try again
               </button>
             </div>
           </div>
         )}
-        {sidebar && (
+        {!isLoading && !error && (
           <>
             {groupedSmartMailboxes.quick.length > 0 && (
               <div className="space-y-0.5 pb-3">
@@ -607,7 +581,7 @@ export function Sidebar({
                     key={source.id}
                     source={source}
                     appearance={
-                      accountDirectory.byId.get(source.id)?.appearance ??
+                      source.appearance ??
                       fallbackAccountAppearance(source.id, source.name)
                     }
                     selectedView={selectedView}

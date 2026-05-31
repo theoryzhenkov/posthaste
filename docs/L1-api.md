@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-05-29
-reviewed: 2026-05-29
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -67,16 +67,52 @@ In browser-localhost mode, `posthaste serve` serves the built React frontend on 
 | GET    | `/smart-mailboxes/{id}/messages`      | `list_smart_mailbox_messages`      | `ListSmartMailboxMessagesQuery` | `MessagePageResponse`      |
 | GET    | `/smart-mailboxes/{id}/conversations` | `list_smart_mailbox_conversations` | `ListConversationsQuery`        | `ConversationPageResponse` |
 
-### Navigation
+### Typed read calls
 
-| Method | Path       | Handler       | Request | Response          |
-| ------ | ---------- | ------------- | ------- | ----------------- |
-| GET    | `/sidebar` | `get_sidebar` | --      | `SidebarResponse` |
+| Method | Path    | Handler | Request       | Response       |
+| ------ | ------- | ------- | ------------- | -------------- |
+| POST   | `/read` | `read`  | `ReadRequest` | `ReadResponse` |
 
-`SidebarResponse` includes smart mailbox summaries, real tag summaries derived
-from non-system JMAP keywords, and enabled account mailbox trees. Tag counts are
-merged across enabled accounts and exclude system keywords such as `$seen` and
-`$flagged`.
+`POST /read` executes typed, read-only domain operations in order. It is the
+client-composable replacement for UI-shaped bootstrap endpoints: the backend
+exposes domain read methods, while clients decide which graph to request.
+
+Supported operation names:
+
+| Operation | Args | Result |
+| --- | --- | --- |
+| `Account/list` | -- | `{ ids, enabledIds, items: AccountOverview[] }` |
+| `Mailbox/list` | `accountIds?: string[] | "#<callId>.ids" | "#<callId>.enabledIds"` | `{ byAccountId: Record<accountId, MailboxSummary[]> }` |
+| `SmartMailbox/list` | -- | `{ items: SmartMailboxSummary[] }` |
+| `Tag/list` | `accountIds?: string[] | "#<callId>.ids" | "#<callId>.enabledIds"` | `{ items: TagSummary[] }` |
+
+Later calls may reference earlier `Account/list` results. For example, a client
+can request accounts, then mailboxes and tags for only enabled accounts in the
+same round trip:
+
+```json
+{
+  "calls": [
+    { "id": "accounts", "op": "Account/list" },
+    {
+      "id": "mailboxes",
+      "op": "Mailbox/list",
+      "args": { "accountIds": "#accounts.enabledIds" }
+    },
+    { "id": "smartMailboxes", "op": "SmartMailbox/list" },
+    {
+      "id": "tags",
+      "op": "Tag/list",
+      "args": { "accountIds": "#accounts.enabledIds" }
+    }
+  ]
+}
+```
+
+A read request may contain at most 16 calls. Invalid call IDs or result references
+return `invalid_query` with HTTP 400. The first implementation fails the whole read
+request on an invalid call or backend read error rather than returning partial
+per-call errors.
 
 ### Conversations and messages
 

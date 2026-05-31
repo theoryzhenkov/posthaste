@@ -295,11 +295,11 @@ const AUTHZ_TABLE: &[Entry] = &[
         template: "/account-assets/logos/{image_id}",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
-    // -- Sidebar: cross-account aggregate tree, no per-account filter — global
-    //    read; an account-scoped token cannot be satisfied here. --
+    // -- Typed read calls can be cross-account reads; an account-scoped token
+    //    cannot be satisfied here in the initial global-gate implementation. --
     Entry {
-        method: "GET",
-        template: "/sidebar",
+        method: "POST",
+        template: "/read",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
     // -- Smart mailboxes: definitions are global config (Manage to mutate,

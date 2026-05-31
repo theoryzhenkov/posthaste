@@ -5,7 +5,12 @@
  * @spec docs/L1-api#sse-event-stream
  */
 import type { QueryClient } from '@tanstack/react-query'
-import type { AccountOverview, DomainEvent, SyncProgress } from './api/types'
+import type {
+  AccountOverview,
+  DomainEvent,
+  SourceMessageRef,
+  SyncProgress,
+} from './api/types'
 import {
   applyKeywordEventPatch,
   findConversationIdForMessage,
@@ -197,6 +202,92 @@ function invalidateMessageDetailReadModels(queryClient: QueryClient) {
   })
 }
 
+function invalidateMailNavigationBootstrapReadModels(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.tags })
+}
+
+export async function invalidateSyncStartedReadModels(
+  queryClient: QueryClient,
+  accountId: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes(accountId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+  ])
+}
+
+export async function invalidateComposeSendReadModels(
+  queryClient: QueryClient,
+  accountId: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes(accountId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.senderAddresses }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot }),
+  ])
+}
+
+export async function invalidateMessageMutationReadModels(
+  queryClient: QueryClient,
+  target: SourceMessageRef,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.mailboxes(target.sourceId),
+    }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+  ])
+}
+
+export async function invalidateMessageScopeReadModels(
+  queryClient: QueryClient,
+  target: SourceMessageRef,
+  conversationId: string | null,
+) {
+  const invalidations = [
+    queryClient.invalidateQueries({
+      queryKey: mailKeys.message(target.sourceId, target.messageId),
+    }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot }),
+  ]
+  if (conversationId) {
+    invalidations.push(
+      queryClient.invalidateQueries({
+        queryKey: mailKeys.conversation(conversationId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: mailKeys.conversationSummary(conversationId),
+      }),
+    )
+  }
+  await Promise.all(invalidations)
+}
+
+export async function invalidateSmartMailboxMutationReadModels(
+  queryClient: QueryClient,
+  smartMailboxId?: string,
+) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
+    queryClient.invalidateQueries({
+      queryKey: smartMailboxId
+        ? queryKeys.smartMailbox(smartMailboxId)
+        : queryKeys.smartMailboxRoot,
+    }),
+  ])
+}
+
 function invalidateSmartMailboxReadModels(
   queryClient: QueryClient,
   smartMailboxId?: string | null,
@@ -207,9 +298,8 @@ function invalidateSmartMailboxReadModels(
       queryKey: queryKeys.smartMailbox(smartMailboxId),
     })
   } else {
-    void queryClient.invalidateQueries({ queryKey: ['smart-mailbox'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxRoot })
   }
-  void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
   invalidateMessageListReadModels(queryClient)
 }
 
@@ -217,7 +307,6 @@ function invalidateMailboxReadModels(
   queryClient: QueryClient,
   accountId: string,
 ) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
   void queryClient.invalidateQueries({
     queryKey: queryKeys.mailboxes(accountId),
   })
@@ -239,6 +328,7 @@ export function invalidateAccountReadModels(
 ) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.settings })
   void queryClient.invalidateQueries({ queryKey: queryKeys.accounts })
+  void queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead })
   if (accountId) {
     void queryClient.invalidateQueries({
       queryKey: queryKeys.account(accountId),
@@ -247,7 +337,6 @@ export function invalidateAccountReadModels(
       queryKey: queryKeys.mailboxes(accountId),
     })
   }
-  void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
   invalidateMessageListReadModels(queryClient)
 }
 
@@ -350,6 +439,7 @@ function applyResourceInvalidation(
     case 'config':
       invalidateAccountReadModels(queryClient)
       invalidateSmartMailboxReadModels(queryClient)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
       invalidateMessageDetailReadModels(queryClient)
       return true
     case 'account': {
@@ -379,6 +469,7 @@ function applyResourceInvalidation(
     case 'sync':
       invalidateAccountReadModels(queryClient, accountId)
       invalidateSmartMailboxReadModels(queryClient)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
       invalidateMessageDetailReadModels(queryClient)
       return true
     case 'message':
@@ -421,6 +512,7 @@ const eventHandlers = {
     applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
       invalidateAccountReadModels(client)
       invalidateSmartMailboxReadModels(client)
+      invalidateMailNavigationBootstrapReadModels(client)
       invalidateMessageDetailReadModels(client)
     })
   },
@@ -461,6 +553,7 @@ const eventHandlers = {
     applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
       invalidateAccountReadModels(client, event.accountId)
       invalidateSmartMailboxReadModels(client)
+      invalidateMailNavigationBootstrapReadModels(client)
       invalidateMessageDetailReadModels(client)
     })
   },
@@ -493,15 +586,13 @@ const eventHandlers = {
   [EVENT_TOPICS.MailboxUpdated]: (queryClient, event) => {
     invalidateMailboxReadModels(queryClient, event.accountId)
   },
-  [EVENT_TOPICS.MessageArrived]: (queryClient) => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-    invalidateMessageListReadModels(queryClient)
+  [EVENT_TOPICS.MessageArrived]: (queryClient, event) => {
+    invalidateMailboxReadModels(queryClient, event.accountId)
+    invalidateMailNavigationBootstrapReadModels(queryClient)
   },
   [EVENT_TOPICS.MessageKeywordsChanged]: (queryClient, event) => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-    invalidateMessageListReadModels(queryClient)
+    invalidateMailboxReadModels(queryClient, event.accountId)
+    invalidateMailNavigationBootstrapReadModels(queryClient)
 
     const target = eventTarget(event)
     const keywords = event.payload.keywords
@@ -517,9 +608,8 @@ const eventHandlers = {
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageMailboxesChanged]: (queryClient, event) => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-    invalidateMessageListReadModels(queryClient)
+    invalidateMailboxReadModels(queryClient, event.accountId)
+    invalidateMailNavigationBootstrapReadModels(queryClient)
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {

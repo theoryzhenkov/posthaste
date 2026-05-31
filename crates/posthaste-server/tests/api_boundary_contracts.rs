@@ -15,7 +15,8 @@ use posthaste_domain::{
     SecretStore, SecretStoreError, SyncBatch, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
 use posthaste_server::api::{
-    health, list_mailboxes, list_source_messages, ApiError, ListSourceMessagesQuery,
+    health, list_mailboxes, list_source_messages, read, AccountIdSelector, ApiError,
+    ListSourceMessagesQuery, ReadCall, ReadCallArgs, ReadOperation, ReadRequest,
 };
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::AppState;
@@ -204,6 +205,100 @@ async fn health_returns_only_product_readiness_status() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, serde_json::json!({ "status": "ok" }));
+}
+
+// spec: docs/L1-api#read-calls
+#[tokio::test]
+async fn read_calls_support_account_references_for_navigation_data() {
+    let harness = ApiHarness::new();
+    harness.save_account("primary");
+    harness.seed_messages(
+        "primary",
+        vec![message("message-1", "2026-04-02T10:00:00Z")],
+    );
+
+    let Json(response) = match read(
+        State(harness.state.clone()),
+        Json(ReadRequest {
+            calls: vec![
+                ReadCall {
+                    id: "accounts".to_string(),
+                    op: ReadOperation::AccountList,
+                    args: ReadCallArgs::default(),
+                },
+                ReadCall {
+                    id: "mailboxes".to_string(),
+                    op: ReadOperation::MailboxList,
+                    args: ReadCallArgs {
+                        account_ids: Some(AccountIdSelector::Reference(
+                            "#accounts.enabledIds".to_string(),
+                        )),
+                    },
+                },
+                ReadCall {
+                    id: "smart".to_string(),
+                    op: ReadOperation::SmartMailboxList,
+                    args: ReadCallArgs::default(),
+                },
+                ReadCall {
+                    id: "tags".to_string(),
+                    op: ReadOperation::TagList,
+                    args: ReadCallArgs {
+                        account_ids: Some(AccountIdSelector::Reference(
+                            "#accounts.enabledIds".to_string(),
+                        )),
+                    },
+                },
+            ],
+        }),
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => panic!(
+            "read calls should succeed, got {}",
+            error.into_response().status()
+        ),
+    };
+
+    let json = serde_json::to_value(response).expect("response should serialize");
+    assert_eq!(json["results"]["accounts"]["op"], "Account/list");
+    assert_eq!(
+        json["results"]["accounts"]["value"]["enabledIds"],
+        serde_json::json!(["primary"])
+    );
+    assert_eq!(json["results"]["mailboxes"]["op"], "Mailbox/list");
+    assert_eq!(
+        json["results"]["mailboxes"]["value"]["byAccountId"]["primary"][0]["name"],
+        "Inbox"
+    );
+    assert_eq!(json["results"]["smart"]["op"], "SmartMailbox/list");
+    assert_eq!(json["results"]["tags"]["op"], "Tag/list");
+}
+
+// spec: docs/L1-api#read-calls
+#[tokio::test]
+async fn read_calls_reject_unknown_result_references() {
+    let harness = ApiHarness::new();
+
+    let error = read(
+        State(harness.state.clone()),
+        Json(ReadRequest {
+            calls: vec![ReadCall {
+                id: "mailboxes".to_string(),
+                op: ReadOperation::MailboxList,
+                args: ReadCallArgs {
+                    account_ids: Some(AccountIdSelector::Reference("#missing.ids".to_string())),
+                },
+            }],
+        }),
+    )
+    .await
+    .expect_err("missing reference should fail");
+
+    let (status, body) = api_error_json(error).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_query");
 }
 
 // spec: docs/L0-testing#api-boundary-contracts

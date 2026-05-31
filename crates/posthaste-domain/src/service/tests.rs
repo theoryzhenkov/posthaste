@@ -1136,26 +1136,6 @@ fn list_smart_mailboxes_propagates_store_count_errors() {
     assert_eq!(error.code(), "storage_failure");
 }
 
-#[test]
-fn get_sidebar_propagates_mailbox_listing_errors() {
-    let store = Arc::new(TestStore {
-        list_mailboxes_error: Some("mailboxes failed".to_string()),
-        ..Default::default()
-    });
-    let config = Arc::new(TestConfig {
-        smart_mailboxes: vec![sample_smart_mailbox()],
-        sources: vec![sample_source()],
-        ..Default::default()
-    });
-    let service = MailService::new(store, config);
-
-    let error = service
-        .get_sidebar()
-        .expect_err("mailbox failures should not be swallowed");
-
-    assert_eq!(error.code(), "storage_failure");
-}
-
 #[tokio::test]
 async fn sync_account_records_body_cache_candidate_with_body_only_fetch_cost() {
     let account = sample_source();

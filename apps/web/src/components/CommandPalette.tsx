@@ -8,7 +8,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 
-import { fetchSearchMessages, fetchSidebar } from '@/api/client'
+import { fetchSearchMessages } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
 import {
   commandPaletteEntryValue,
@@ -18,6 +18,7 @@ import {
   useCommandPaletteResults,
 } from '@/hooks/useCommandPaletteResults'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 import { createOperationContext } from '@/observability'
 import { queryKeys } from '@/queryKeys'
 import { validateSearchQuery } from '@/queryLanguage'
@@ -82,6 +83,7 @@ export function CommandPalette({
   const serverQuery =
     queryValidation.state === 'valid' ? normalizeAppliedSearchQuery(query) : ''
   const debouncedServerQuery = useDebouncedValue(serverQuery, 180)
+  const readModels = useMailboxNavigationReadModels()
   const searchPreviewOperation = useMemo(
     () =>
       debouncedServerQuery
@@ -89,10 +91,6 @@ export function CommandPalette({
         : undefined,
     [debouncedServerQuery],
   )
-  const { data: sidebar } = useQuery({
-    queryKey: ['sidebar'],
-    queryFn: fetchSidebar,
-  })
   const searchMessagesQuery = useQuery({
     queryKey: [
       ...queryKeys.messagesRoot,
@@ -158,7 +156,7 @@ export function CommandPalette({
     onSelectSourceMailbox,
     onToggleFlag,
     query,
-    sidebar,
+    readModels,
   })
 
   const flatEntries = useMemo(
