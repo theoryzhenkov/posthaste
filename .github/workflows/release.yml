@@ -81,15 +81,33 @@ jobs:
           cargo build --release --bin posthaste
           POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
 
+      # Reflect the dogfood counter in the installed app version instead of the
+      # frozen 0.1.0. `v0.1.0-dogfood.N` -> bundle version `0.1.N` (a valid
+      # 3-integer macOS CFBundleShortVersionString); a plain `vX.Y.Z` tag is used
+      # as-is. Patches the checked-out config so every build below picks it up.
+      - name: Set desktop bundle version from tag
+        shell: bash
+        run: |
+          tag="${RELEASE_TAG#v}"
+          if [[ "$tag" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+-dogfood\.([0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          else
+            version="$tag"
+          fi
+          echo "Desktop bundle version: $version"
+          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$version"
+
+      # Single build (devtools compiled in, gated at runtime); no separate
+      # "DevTools" bundle.
       - name: Build desktop bundles
         if: runner.os != 'macOS'
         shell: bash
-        run: bun run tauri build --ci --no-sign --config '{"build":{"beforeBuildCommand":null}}'
+        run: bun run tauri build --ci --no-sign --features devtools --config '{"build":{"beforeBuildCommand":null}}'
 
       - name: Build ad-hoc signed macOS desktop bundles
         if: runner.os == 'macOS'
         shell: bash
-        run: bun run tauri build --ci --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+        run: bun run tauri build --ci --features devtools --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
 
       - name: Verify macOS desktop app signature
         if: runner.os == 'macOS'
@@ -122,51 +140,6 @@ jobs:
           )
           test -n "$(find "$out" -type f -print -quit)"
 
-      - name: Build desktop devtools bundles
-        if: runner.os != 'macOS'
-        shell: bash
-        run: |
-          rm -rf target/release/bundle apps/desktop/target/release/bundle
-          bun run tauri build --ci --no-sign --features devtools --config '{"productName":"PosthasteDevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null}}'
-
-      - name: Build ad-hoc signed macOS desktop devtools bundles
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          rm -rf target/release/bundle apps/desktop/target/release/bundle
-          bun run tauri build --ci --features devtools --config '{"productName":"PosthasteDevTools","identifier":"com.posthaste.mail.devtools","build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
-
-      - name: Verify macOS desktop devtools app signature
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          found=0
-          while IFS= read -r app; do
-            found=1
-            codesign --verify --deep --strict --verbose=2 "$app"
-          done < <(find target/release/bundle apps/desktop/target/release/bundle -type d -name '*.app' 2>/dev/null)
-          test "$found" -eq 1
-
-      - name: Collect desktop devtools bundles
-        shell: bash
-        run: |
-          out="target/distribute/desktop-devtools-${{ matrix.platform }}"
-          mkdir -p "$out"
-          while IFS= read -r file; do
-            cp "$file" "$out/"
-          done < <(
-            find target/release/bundle apps/desktop/target/release/bundle \
-              -type f \( \
-                -name '*.AppImage' -o \
-                -name '*.deb' -o \
-                -name '*.dmg' -o \
-                -name '*.exe' -o \
-                -name '*.msi' -o \
-                -name '*.rpm' \
-              \) 2>/dev/null
-          )
-          test -n "$(find "$out" -type f -print -quit)"
-
       - uses: actions/upload-artifact@v4
         with:
           name: posthaste-${{ matrix.platform }}
@@ -174,7 +147,6 @@ jobs:
           path: |
             target/distribute/posthaste-serve-*.tar.gz
             target/distribute/desktop-${{ matrix.platform }}/*
-            target/distribute/desktop-devtools-${{ matrix.platform }}/*
 
   publish:
     name: Publish GitHub Release
