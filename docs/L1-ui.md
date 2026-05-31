@@ -96,6 +96,7 @@ The progress bar supplements skeleton layout placeholders; it does not replace t
 - Scroll offset is preserved per selected mailbox or smart-mailbox key.
 - The active command/search filter, sort field, and sort direction are sent to the message endpoint and executed server-side. The frontend virtualizes loaded pages and fetches the next page near the viewport end.
 - Empty list space or `Escape` clears the selected message. When no message is selected, the detail pane is closed so the message list can use the available width.
+- `j`/`ArrowDown` and `k`/`ArrowUp` move the selection. When the selected message leaves the list (e.g. after `E` archive), navigation resumes relative to its former slot — Down selects the message that shifted up into it, Up the one before — rather than jumping to the top of the list.
 - The sidebar is resized in a separate shell panel group from the message list and detail pane, so selecting or deselecting a message does not change the left pane width.
 - Thread viewing is not the default list mode. When the user wants a thread, a command may apply a thread filter to the message list.
 
