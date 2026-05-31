@@ -99,9 +99,6 @@ pub async fn patch_settings(
     if let Some(cache_policy) = &request.cache_policy {
         settings.cache_policy = normalize_cache_policy(cache_policy.clone());
     }
-    if let Some(appearance) = &request.appearance {
-        settings.appearance = appearance.clone();
-    }
     validate_automation_rules(&settings.automation_rules)?;
     validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
     let mut changed = Vec::new();
@@ -116,9 +113,6 @@ pub async fn patch_settings(
     }
     if request.cache_policy.is_some() {
         changed.push("cachePolicy");
-    }
-    if request.appearance.is_some() {
-        changed.push("appearance");
     }
     state
         .service
