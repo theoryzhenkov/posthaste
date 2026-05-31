@@ -3561,6 +3561,8 @@ dependencies = [
 name = "posthaste-desktop"
 version = "0.1.0"
 dependencies = [
+ "dirs",
+ "keyring",
  "posthaste-observability",
  "posthaste-server",
  "serde",

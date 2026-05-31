@@ -15,6 +15,8 @@ use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tauri_utils::config::WebviewUrl;
 
+mod client_connection;
+
 #[cfg(feature = "e2e-testing")]
 mod e2e;
 
@@ -392,13 +394,25 @@ pub fn run() {
         log_from_frontend,
         open_external_url,
         open_surface_window,
+        client_connection::client_connections_read,
+        client_connection::client_connections_write,
+        client_connection::client_token_get,
+        client_connection::client_token_set,
+        client_connection::client_token_delete,
+        client_connection::client_local_daemon_read,
         e2e::posthaste_e2e_result
     ]);
     #[cfg(not(feature = "e2e-testing"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         log_from_frontend,
         open_external_url,
-        open_surface_window
+        open_surface_window,
+        client_connection::client_connections_read,
+        client_connection::client_connections_write,
+        client_connection::client_token_get,
+        client_connection::client_token_set,
+        client_connection::client_token_delete,
+        client_connection::client_local_daemon_read
     ]);
 
     let builder = builder.setup(|app| {
