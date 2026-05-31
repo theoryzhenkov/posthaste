@@ -1,16 +1,7 @@
-import {
-  Archive,
-  Download,
-  Flag,
-  Grip,
-  Mail,
-  Palette,
-  Pin,
-  Search,
-  Settings,
-} from 'lucide-react'
+import { Archive, Flag, Mail, Palette, Search, Settings } from 'lucide-react'
 import { type CSSProperties, useEffect, useState } from 'react'
 import type { HomeContent, SiteMessage } from './content/types'
+import { FooterSection, InstallHeader } from './SiteChrome'
 
 interface Mailbox {
   label: string
@@ -152,33 +143,6 @@ export function App({ content }: { content: HomeContent }) {
       <ThemeSection content={content.theme} />
       <FooterSection content={content.footer} />
     </main>
-  )
-}
-
-function InstallHeader() {
-  return (
-    <header className="install-header" aria-label="Install and navigation">
-      <div className="install-header-grip" aria-hidden="true">
-        <Grip />
-      </div>
-      <button
-        type="button"
-        className="install-header-pin is-pinned"
-        aria-label="Pinned"
-        aria-pressed="true"
-      >
-        <Pin aria-hidden="true" />
-      </button>
-      <a className="install-header-button" href="#top">
-        <Download aria-hidden="true" />
-        <span>Install on Linux</span>
-      </a>
-      <nav className="install-header-nav" aria-label="Site">
-        <a href="#notes">Documentation</a>
-        <a href="#themes">Themes</a>
-        <a href="#top">Releases</a>
-      </nav>
-    </header>
   )
 }
 
@@ -454,14 +418,5 @@ function ThemeSection({ content }: { content: HomeContent['theme'] }) {
         </div>
       </div>
     </section>
-  )
-}
-
-function FooterSection({ content }: { content: HomeContent['footer'] }) {
-  return (
-    <footer className="footer-section">
-      <span>{content.brand}</span>
-      <div dangerouslySetInnerHTML={{ __html: content.html }} />
-    </footer>
   )
 }
