@@ -64,18 +64,12 @@ export function InvalidSurfaceDocument({ route }: { route: string }) {
       unlisten = nextUnlisten
     })
 
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') {
-        event.preventDefault()
-        void closeCurrentSurfaceWindow()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
+    // Cmd/Ctrl+W is handled by the native window menu (close_window ->
+    // performClose:); intercepting it here with preventDefault() would suppress
+    // the menu item and leave the window unable to close.
     return () => {
       disposed = true
       unlisten?.()
-      window.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
 
