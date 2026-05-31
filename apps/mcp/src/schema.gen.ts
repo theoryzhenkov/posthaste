@@ -176,6 +176,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a capability token
+         * @description Derives a narrower capability token from the caller's token by appending the requested caveats (attenuation). The minted token can only narrow the caller's authority, never widen it. Requires a full-scope (or unscoped `manage`) token.
+         */
+        post: operations["create_auth_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/automation-rules:preview": {
         parameters: {
             query?: never;
@@ -928,6 +948,15 @@ export interface components {
             username?: string | null;
         };
         /**
+         * @description A permitted verb. The action a route represents must be a member of an
+         *     `action = ...` caveat's set for that caveat to be satisfied. Doubles as the
+         *     wire enum for the token-mint request (`action = ...` caveats are built from
+         *     it), so the lowercase serde form matches [`Action::as_str`] exactly — one
+         *     source of truth for the action vocabulary.
+         * @enum {string}
+         */
+        Action: "read" | "send" | "tag" | "move" | "delete" | "manage";
+        /**
          * @description Command to add a message to a single additional mailbox.
          *
          *     @spec docs/L1-api#message-commands
@@ -1143,6 +1172,42 @@ export interface components {
             name: string;
             secret?: components["schemas"]["SecretWriteRequest"];
             transport?: components["schemas"]["AccountTransportRequest"];
+        };
+        /**
+         * @description Request body for `POST /v1/auth/tokens`: the scope a derived capability token
+         *     should carry. Every field NARROWS authority — the minted token is the
+         *     caller's own token with these caveats appended (attenuation), so it can never
+         *     exceed what the caller already holds. All fields are optional; an empty
+         *     request returns a token equivalent in authority to the caller's.
+         */
+        CreateAuthTokenRequest: {
+            /** @description Restrict the token to a single account (`source_id`). */
+            account?: string | null;
+            /**
+             * @description Restrict the token to these actions (subset of
+             *     `read,send,tag,move,delete,manage`). Omitted = no added action caveat.
+             */
+            actions?: components["schemas"]["Action"][] | null;
+            /**
+             * Format: int64
+             * @description Token lifetime in seconds from now. Omitted = no expiry caveat (lives as
+             *     long as the root key). Recommended for shared/agent tokens.
+             */
+            expiresInSeconds?: number | null;
+            /** @description Restrict the token to a single mailbox. */
+            mailbox?: string | null;
+            /** @description Restrict the token to a single message. */
+            message?: string | null;
+        };
+        /** @description Response for `POST /v1/auth/tokens`. */
+        CreateAuthTokenResponse: {
+            /** @description RFC3339 UTC expiry, present iff `expiresInSeconds` was set. */
+            expiresAt?: string | null;
+            /**
+             * @description The minted capability token (a macaroon), for use as
+             *     `Authorization: Bearer <token>`.
+             */
+            token: string;
         };
         /**
          * @description Request body for `POST /v1/smart-mailboxes`.
@@ -2211,6 +2276,48 @@ export interface operations {
             };
             /** @description Gateway verification failed */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    create_auth_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAuthTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The minted capability token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateAuthTokenResponse"];
+                };
+            };
+            /** @description Invalid scope request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Caller token is not authorized to mint */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1845,6 +1845,77 @@ fn list_conversations_preserves_source_names_with_commas() -> Result<(), StoreEr
 }
 
 #[test]
+fn query_conversations_by_rule_excludes_other_accounts() -> Result<(), StoreError> {
+    // The result-side scope rule (`SourceId = primary`) ANDed into a conversation
+    // search MUST exclude another account's messages even when they match the rest
+    // of the rule. This is the SQL-level guard behind the Tier-1 account-scoped
+    // capability tokens on `/views/conversations` + smart-mailbox conversations:
+    // the filter is applied at the message level before conversation grouping, so
+    // a colliding subject in `secondary` must never surface.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let primary = AccountId::from("primary");
+    let secondary = AccountId::from("secondary");
+    setup_source(&store, &primary, "Primary")?;
+    setup_source(&store, &secondary, "Secondary")?;
+    seed_messages(
+        &store,
+        &primary,
+        vec![MessageRecord {
+            id: MessageId::from("primary-match"),
+            subject: Some("Shared subject line".to_string()),
+            mailbox_ids: vec![MailboxId::from("inbox")],
+            ..sample_message("primary-match", "inbox", Some("mime-primary"))
+        }],
+        "primary-state",
+    )?;
+    seed_messages(
+        &store,
+        &secondary,
+        vec![MessageRecord {
+            id: MessageId::from("secondary-match"),
+            subject: Some("Shared subject line".to_string()),
+            mailbox_ids: vec![MailboxId::from("inbox")],
+            ..sample_message("secondary-match", "inbox", Some("mime-secondary"))
+        }],
+        "secondary-state",
+    )?;
+
+    // A rule whose subject condition matches BOTH accounts, scoped to `primary`.
+    let rule = all_rule(vec![
+        rule_condition(
+            SmartMailboxField::SourceId,
+            SmartMailboxOperator::Equals,
+            "primary",
+        ),
+        rule_condition(
+            SmartMailboxField::Subject,
+            SmartMailboxOperator::Contains,
+            "Shared subject",
+        ),
+    ]);
+    let page = store.query_conversations_by_rule(
+        &rule,
+        10,
+        None,
+        ConversationSortField::default(),
+        SortDirection::default(),
+    )?;
+
+    // Only the primary account's conversation is returned, and the cross-account
+    // `source_ids` aggregate never names the secondary account.
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].source_ids, vec![primary.clone()]);
+    assert!(
+        page.items
+            .iter()
+            .all(|conversation| !conversation.source_ids.contains(&secondary)),
+        "secondary account must not leak into a primary-scoped conversation query"
+    );
+    Ok(())
+}
+
+#[test]
 fn conversations_follow_jmap_thread_id_not_headers_or_subject() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;

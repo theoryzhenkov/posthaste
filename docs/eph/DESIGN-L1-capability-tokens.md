@@ -174,9 +174,17 @@ Replaces the `constant_time_eq` token check in `auth.rs`:
   injected into the webview as `__POSTHASTE_TOKEN__`, written to `daemon.json`.
 - **Attenuation**: holders add caveats client-side (no key needed) — the macaroon
   superpower. Minting *new* root macaroons needs the root key (server-side only).
-- **Agent/share issuance**: `POST /v1/auth/tokens` (action=`manage`) → takes
-  requested caveats, returns an attenuated macaroon. (CLI `posthaste token mint …`
-  as a convenience; both share one minting function.)
+- **Agent/share issuance** (IMPLEMENTED): `POST /v1/auth/tokens`, `Manage`-gated
+  with no resource axis (so only a full-scope / unscoped-`manage` caller reaches
+  it). Request body: `actions?`, `account?`, `mailbox?`, `message?`,
+  `expiresInSeconds?` (all narrowing); response `{ token, expiresAt? }`. The
+  handler **attenuates the CALLER's own presented token** (plumbed via the
+  `PresentedToken` request extension set in `auth.rs`) rather than minting fresh
+  from the root key — so a minted token can only narrow, never widen, the
+  caller's authority, regardless of what scope is requested. When `require_auth`
+  is off there is no caller token, so it mints from the root key with the
+  requested caveats. (CLI `posthaste token attenuate` remains the offline
+  convenience; same caveat format.)
 
 ## Migration from the shipped random token
 
