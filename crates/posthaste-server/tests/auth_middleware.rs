@@ -136,6 +136,11 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/openapi.json", get(protected))
         .route("/settings", get(protected))
         .route("/events", get(protected))
+        .route("/account-assets/logos/{image_id}", get(protected))
+        .route(
+            "/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
+            get(protected),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_auth_layer,
@@ -390,6 +395,38 @@ async fn flag_on_events_rejects_missing_token() {
     let app = build_app(build_state(true));
     let status = status_of(app, get_request("/v1/events").body(Body::empty()).unwrap()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn flag_on_browser_loadable_reads_accept_query_token() {
+    // Account logos + message attachments are loaded via <img>, which can't set
+    // the Authorization header — so they accept the (percent-encoded) token via
+    // the access_token query param, same as /events. Without it they 401.
+    let token = valid_token();
+    let encoded = token
+        .replace('%', "%25")
+        .replace('=', "%3D")
+        .replace('+', "%2B")
+        .replace('/', "%2F");
+    for path in [
+        "/v1/account-assets/logos/img-1",
+        "/v1/sources/acct/messages/m1/attachments/a1",
+    ] {
+        let with = get_request(&format!("{path}?access_token={encoded}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            status_of(build_app(build_state(true)), with).await,
+            StatusCode::OK,
+            "{path} should accept the query-param token"
+        );
+        let without = get_request(path).body(Body::empty()).unwrap();
+        assert_eq!(
+            status_of(build_app(build_state(true)), without).await,
+            StatusCode::UNAUTHORIZED,
+            "{path} without a token must 401"
+        );
+    }
 }
 
 #[tokio::test]
