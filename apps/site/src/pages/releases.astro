@@ -1,0 +1,31 @@
+---
+import '@fontsource-variable/geist/index.css'
+import '@fontsource-variable/geist-mono/index.css'
+import { getHomeContent } from '../content/homeContent'
+import { getReleases } from '../content/releasesContent'
+import { Releases } from '../Releases'
+import '../styles.css'
+
+const [content, releases] = await Promise.all([
+  getHomeContent(),
+  getReleases(),
+])
+const latest = releases[0]
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Download Posthaste for macOS, Windows, and Linux, and read the changelog."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Download Posthaste{latest ? ` ${latest.version}` : ''}</title>
+  </head>
+  <body>
+    <Releases releases={releases} footer={content.footer} client:load />
+  </body>
+</html>

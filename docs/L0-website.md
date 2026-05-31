@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Public PostHaste product showcase site, visual direction, and container deployment"
-modified: 2026-04-25
-reviewed: 2026-04-25
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: README
   - path: docs/L0-branding
@@ -51,16 +51,33 @@ The landscape should reflect the viewer's local browser time. Morning, day, even
 
 The site must not call the local PostHaste API or JMAP. It is deployable independently from the desktop/web client stack.
 
+## Releases and Downloads
+
+The site serves a static `/releases` downloads-and-changelog page, rendered at build time (no client-side data fetch).
+
+- Each release is a Markdown file under `apps/site/src/content/releases/<version>.md`. Frontmatter carries the structured data (version, tag, date, prerelease flag, per-platform download assets, checksum/GPG-key URLs); the Markdown body holds optional hand-authored dev notes for that version.
+- These files are the source of truth. The releases page (`src/pages/releases.astro` + the `Releases` React island) reads the whole collection through `releasesContent.ts`, which globs the directory so newly added files need no loader changes.
+- `apps/site/tools/generate-release-notes.mjs` writes a release's frontmatter from its GitHub release (mapping tag `v0.1.0-dogfood.N` to version `0.1.N`, matching the desktop version mapping). It preserves any existing notes body, so regenerating never clobbers hand-written notes. Asset classification keeps the desktop installers (`.dmg`, `.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`) and drops signatures, checksums, the self-host server bundle, and retired build variants.
+- The download grid auto-detects the visitor's OS after hydration to highlight their platform; with JavaScript off, all platforms are shown equally.
+
+A new release flows to the live page automatically: `release-notes.yml` regenerates and commits the content file on `release: published`, which lands on `main` and retriggers the site image build.
+
 ## Deployment
 
-The Docker image is built from `apps/site/Dockerfile`. The build stage runs `bun run build`; the runtime stage serves `dist/` through Nginx on port `80`.
+The Docker image is built from `apps/site/Dockerfile`. The build stage installs the Bun workspace (all member manifests are copied so `--frozen-lockfile` resolves) and runs `bun run build`; the runtime stage serves `dist/` through Nginx on port `80`.
+
+The site is published and deployed continuously:
+
+- `.github/workflows/site-publish.yml` builds and pushes `ghcr.io/theoryzhenkov/posthaste/posthaste-site:latest` on every push to `main` that touches `apps/site/**`.
+- The image is deployed on the `tars` host through the ops_atlas app framework: `hosts/nixos/tars/apps/posthaste-theor-net/app.yaml` declares the container (port `80`, host port `8104`, domain `posthaste.theor.net`), which nginx serves with ACME TLS. The `docker-auto-update` timer pulls `:latest` every ~5 minutes, so merges to `main` roll out without a manual deploy.
+- Public DNS for `posthaste.theor.net` is a Porkbun A-record in the ops_atlas DNS Terraform root, pointing at the tars public IP.
 
 Expected local commands:
 
 ```sh
 just site dev
 just site build
-docker build -t posthaste-site apps/site
+docker build -f apps/site/Dockerfile -t posthaste-site .   # build context is the repo root
 ```
 
 ## Invariants
