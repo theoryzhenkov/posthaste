@@ -1,7 +1,10 @@
+#[cfg(feature = "embedded-server")]
+use posthaste_observability::{events, ph_info};
 use posthaste_observability::{
-    events, ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
-    ph_forwarded_warn, ph_info,
+    ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
+    ph_forwarded_warn,
 };
+#[cfg(feature = "embedded-server")]
 use posthaste_server::ServerConfig;
 use serde::Deserialize;
 use std::sync::Mutex;
@@ -287,9 +290,16 @@ fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(),
         return Ok(());
     }
 
-    let backend = app.state::<EmbeddedBackend>();
-    let port = backend.port;
-    let auth_token = backend.auth_token.clone();
+    #[cfg(feature = "embedded-server")]
+    let backend = {
+        let backend = app.state::<EmbeddedBackend>();
+        BackendInjection {
+            port: backend.port,
+            auth_token: backend.auth_token.clone(),
+        }
+    };
+    #[cfg(not(feature = "embedded-server"))]
+    let backend = BackendInjection::none();
     let title = surface_title(&surface);
     let (width, height) = surface_window_size(&surface);
     build_window(
@@ -299,16 +309,40 @@ fn open_surface_window(app: AppHandle, surface: SurfaceDescriptor) -> Result<(),
         title,
         width,
         height,
-        port,
-        &auth_token,
+        &backend,
     )
     .map_err(|error| error.to_string())?;
     Ok(())
 }
 
+#[cfg(feature = "embedded-server")]
 struct EmbeddedBackend {
     port: u16,
     auth_token: String,
+}
+
+/// Backend connection details injected into a webview at window-build time.
+///
+/// In the embedded build this carries the in-process server's port and token,
+/// which are injected as `window.__POSTHASTE_PORT__`/`__POSTHASTE_TOKEN__`. In
+/// the client-only build (`embedded-server` off) it carries nothing and no
+/// injection occurs; the connection-profile runtime (Phase B) supplies the
+/// backend in that mode.
+struct BackendInjection {
+    #[cfg_attr(not(feature = "embedded-server"), allow(dead_code))]
+    port: u16,
+    #[cfg_attr(not(feature = "embedded-server"), allow(dead_code))]
+    auth_token: String,
+}
+
+impl BackendInjection {
+    #[cfg(not(feature = "embedded-server"))]
+    fn none() -> Self {
+        Self {
+            port: 0,
+            auth_token: String::new(),
+        }
+    }
 }
 
 struct FocusedWindowLabel {
@@ -368,28 +402,39 @@ pub fn run() {
     ]);
 
     let builder = builder.setup(|app| {
-        let config = ServerConfig {
-            extra_cors_origins: vec![
-                "https://tauri.localhost".to_string(),
-                "tauri://localhost".to_string(),
-                "http://127.0.0.1:5173".to_string(),
-            ],
-            bind_address_override: Some("127.0.0.1:0".to_string()),
-            frontend_dist: None,
+        #[cfg(feature = "embedded-server")]
+        let backend = {
+            let config = ServerConfig {
+                extra_cors_origins: vec![
+                    "https://tauri.localhost".to_string(),
+                    "tauri://localhost".to_string(),
+                    "http://127.0.0.1:5173".to_string(),
+                ],
+                bind_address_override: Some("127.0.0.1:0".to_string()),
+                frontend_dist: None,
+            };
+            let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
+            let port = handle.addr.port();
+            let auth_token = handle.auth_token.clone();
+            ph_info!(
+                events::DESKTOP_BACKEND_STARTED,
+                addr = %handle.addr,
+                "embedded backend started"
+            );
+            app.manage(handle);
+            app.manage(EmbeddedBackend {
+                port,
+                auth_token: auth_token.clone(),
+            });
+            BackendInjection { port, auth_token }
         };
-        let handle = tauri::async_runtime::block_on(posthaste_server::start_server(config));
-        let port = handle.addr.port();
-        let auth_token = handle.auth_token.clone();
-        ph_info!(
-            events::DESKTOP_BACKEND_STARTED,
-            addr = %handle.addr,
-            "embedded backend started"
-        );
-        app.manage(handle);
-        app.manage(EmbeddedBackend {
-            port,
-            auth_token: auth_token.clone(),
-        });
+        // Client-only build: no embedded server, so nothing is injected. The
+        // connection-profile runtime that supplies a backend in this mode lands
+        // in Phase B; the frontend's `desktop.ts` guards degrade gracefully when
+        // `__POSTHASTE_PORT__`/`__POSTHASTE_TOKEN__` are absent.
+        #[cfg(not(feature = "embedded-server"))]
+        let backend = BackendInjection::none();
+
         app.manage(FocusedWindowLabel::new(MAIN_WINDOW_LABEL));
         #[cfg(feature = "e2e-testing")]
         app.manage(e2e::E2eBridgeState::default());
@@ -403,8 +448,7 @@ pub fn run() {
             "Posthaste",
             1200.0,
             800.0,
-            port,
-            &auth_token,
+            &backend,
         )?;
 
         #[cfg(feature = "e2e-testing")]
@@ -587,8 +631,8 @@ fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -
 }
 
 // The window factory threads through the discrete webview parameters
-// (geometry, backend port, injected token); grouping them into a struct would
-// add indirection without clarity for a single internal helper.
+// (geometry, backend injection); grouping the geometry into a struct would add
+// indirection without clarity for a single internal helper.
 #[allow(clippy::too_many_arguments)]
 fn build_window<M: Manager<R>, R: Runtime>(
     manager: &M,
@@ -597,11 +641,10 @@ fn build_window<M: Manager<R>, R: Runtime>(
     title: &str,
     width: f64,
     height: f64,
-    port: u16,
-    auth_token: &str,
+    backend: &BackendInjection,
 ) -> tauri::Result<WebviewWindow<R>> {
     let builder = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
-        .initialization_script(backend_init_script(port, auth_token, label))
+        .initialization_script(backend_init_script(backend, label))
         .title(title)
         .inner_size(width, height)
         .resizable(true);
@@ -629,17 +672,33 @@ fn validate_external_url(url: &str) -> Result<(), String> {
     }
 }
 
-fn backend_init_script(port: u16, auth_token: &str, window_label: &str) -> String {
+fn backend_init_script(backend: &BackendInjection, window_label: &str) -> String {
     let window_label_json =
         serde_json::to_string(window_label).expect("window label should serialize to JSON");
-    // JSON-encode the token so it is safely quoted/escaped in the JS string.
-    let auth_token_json =
-        serde_json::to_string(auth_token).expect("auth token should serialize to JSON");
-    let script = format!(
-        "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
-         Object.defineProperty(window, '__POSTHASTE_TOKEN__', {{ value: {auth_token_json}, writable: false }});\
-         Object.defineProperty(window, '__POSTHASTE_WINDOW_LABEL__', {{ value: {window_label_json}, writable: false }});"
+    let window_label_script = format!(
+        "Object.defineProperty(window, '__POSTHASTE_WINDOW_LABEL__', {{ value: {window_label_json}, writable: false }});"
     );
+    // Embedded build: inject the in-process server's port + token so the
+    // frontend client resolves the backend at module load. Client-only build:
+    // skip injection entirely — `desktop.ts` degrades and the connection-profile
+    // runtime (Phase B) supplies the backend.
+    #[cfg(feature = "embedded-server")]
+    let script = {
+        let port = backend.port;
+        // JSON-encode the token so it is safely quoted/escaped in the JS string.
+        let auth_token_json = serde_json::to_string(&backend.auth_token)
+            .expect("auth token should serialize to JSON");
+        format!(
+            "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
+             Object.defineProperty(window, '__POSTHASTE_TOKEN__', {{ value: {auth_token_json}, writable: false }});\
+             {window_label_script}"
+        )
+    };
+    #[cfg(not(feature = "embedded-server"))]
+    let script = {
+        let _ = backend;
+        window_label_script
+    };
     #[cfg(feature = "e2e-testing")]
     {
         let mut script = script;

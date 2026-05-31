@@ -10,9 +10,8 @@ use axum::Json;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppAppearanceSettings, AppPalettePreset, AppSettings, AppThemeMode, AppUiDensity,
-    AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger, CachePolicy,
-    ConfigRepository, DomainEvent, MailService, MailStore, SecretRef, SecretStore,
+    AppSettings, AutomationAction, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
+    CachePolicy, ConfigRepository, DomainEvent, MailService, MailStore, SecretRef, SecretStore,
     SecretStoreError, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
@@ -202,7 +201,6 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
                 automation_rules: None,
                 automation_drafts: None,
                 cache_policy: None,
-                appearance: None,
             }),
         )
         .await,
@@ -378,7 +376,6 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
             Json(PatchSettingsRequest {
                 default_account_id: None,
                 cache_policy: None,
-                appearance: None,
                 automation_rules: Some(vec![source_rule("primary")]),
                 automation_drafts: None,
             }),
@@ -427,7 +424,6 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
             Json(PatchSettingsRequest {
                 default_account_id: Some(None),
                 cache_policy: None,
-                appearance: None,
                 automation_rules: None,
                 automation_drafts: None,
             }),
@@ -442,46 +438,6 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
     assert_eq!(
         app_toml["automations"][0]["id"].as_str(),
         Some("rule-newsletters")
-    );
-}
-
-#[tokio::test]
-async fn patch_settings_can_update_global_appearance() {
-    let harness = SettingsHarness::new();
-    let receiver = harness.state.event_sender.subscribe();
-
-    let Json(settings) = expect_settings_ok(
-        patch_settings(
-            State(harness.state.clone()),
-            Json(PatchSettingsRequest {
-                default_account_id: None,
-                cache_policy: None,
-                appearance: Some(AppAppearanceSettings {
-                    mode: AppThemeMode::Light,
-                    palette_preset: AppPalettePreset::Glass,
-                    density: AppUiDensity::Comfortable,
-                    accent_hue: 210,
-                    glass_theme: Default::default(),
-                }),
-                automation_rules: None,
-                automation_drafts: None,
-            }),
-        )
-        .await,
-    );
-
-    assert_eq!(settings.appearance.mode, AppThemeMode::Light);
-    assert_eq!(settings.appearance.palette_preset, AppPalettePreset::Glass);
-    assert_eq!(settings.appearance.density, AppUiDensity::Comfortable);
-    assert_eq!(settings.appearance.accent_hue, 210);
-    let event = receive_event(receiver).await;
-    assert_eq!(event.topic, EVENT_TOPIC_SETTINGS_UPDATED);
-    assert_eq!(event.payload["changed"], serde_json::json!(["appearance"]));
-    assert_eq!(event.payload["resources"][0]["kind"], "appSettings");
-    let app_toml = harness.app_toml();
-    assert_eq!(
-        app_toml["appearance"]["palettePreset"].as_str(),
-        Some("glass")
     );
 }
 
@@ -501,7 +457,6 @@ async fn patch_settings_can_update_cache_policy() {
                     cache_raw_messages: false,
                     cache_attachments: false,
                 }),
-                appearance: None,
                 automation_rules: None,
                 automation_drafts: None,
             }),
@@ -547,7 +502,6 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
             Json(PatchSettingsRequest {
                 default_account_id: None,
                 cache_policy: None,
-                appearance: None,
                 automation_rules: None,
                 automation_drafts: Some(vec![draft]),
             }),
@@ -579,7 +533,6 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
         Json(PatchSettingsRequest {
             default_account_id: Some(Some("missing".to_string())),
             cache_policy: None,
-            appearance: None,
             automation_rules: None,
             automation_drafts: None,
         }),
@@ -620,7 +573,6 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
         Json(PatchSettingsRequest {
             default_account_id: None,
             cache_policy: None,
-            appearance: None,
             automation_rules: Some(vec![invalid_rule]),
             automation_drafts: None,
         }),

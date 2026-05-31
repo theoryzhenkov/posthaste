@@ -25,9 +25,6 @@ import type {
   AccountDriver,
   AccountOverview,
   AccountTransportInput,
-  AppAppearanceSettings,
-  AppGlassBloomSettings,
-  AppGlassThemeSettings,
   AppSettings,
   AutomationAction,
   AutomationRule,
@@ -52,7 +49,6 @@ import type {
   MessageSortField,
   MessageSummary,
   OkResponse,
-  PalettePresetId,
   PatchMailboxInput,
   ProviderAuthKind,
   ProviderHint,
@@ -84,9 +80,7 @@ import type {
   SyncMode,
   SyncProgress,
   TagSummary,
-  ThemeMode,
   TransportSecurity,
-  UiDensity,
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
@@ -279,11 +273,6 @@ export type _ProviderAuthKind = AssertTrue<
 export type _TransportSecurity = AssertTrue<
   Conforms<TransportSecurity, Wire['TransportSecurity']>
 >
-export type _ThemeMode = AssertTrue<Conforms<ThemeMode, Wire['AppThemeMode']>>
-export type _PalettePresetId = AssertTrue<
-  Conforms<PalettePresetId, Wire['AppPalettePreset']>
->
-export type _UiDensity = AssertTrue<Conforms<UiDensity, Wire['AppUiDensity']>>
 export type _AutomationTrigger = AssertTrue<
   Conforms<AutomationTrigger, Wire['AutomationTrigger']>
 >
@@ -311,15 +300,10 @@ export type _SmartMailboxValue = AssertTrue<
 export type _MailEndpointSettings = AssertTrue<
   Conforms<MailEndpointSettings, Wire['ImapTransportSettings']>
 >
-export type _AppGlassBloomSettings = AssertTrue<
-  Conforms<AppGlassBloomSettings, Wire['AppGlassBloomSettings']>
->
-export type _AppGlassThemeSettings = AssertTrue<
-  Conforms<AppGlassThemeSettings, Wire['AppGlassThemeSettings']>
->
-export type _AppAppearanceSettings = AssertTrue<
-  Conforms<AppAppearanceSettings, Wire['AppAppearanceSettings']>
->
+// NOTE: appearance (ThemeMode / PalettePresetId / UiDensity /
+// AppAppearanceSettings / AppGlassThemeSettings / AppGlassBloomSettings) is
+// client-local presentation state and is intentionally NOT in the wire schema,
+// so it has no conformance assertion here.
 export type _AppSettings = AssertTrue<
   Conforms<AppSettings, Wire['AppSettings']>
 >

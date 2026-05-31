@@ -20,8 +20,16 @@ export interface Connection {
   source: "env" | "daemon.json";
 }
 
-/** Shape of the `daemon.json` port-file written by the daemon. */
+/**
+ * Shape of the `daemon.json` port-file written by the daemon.
+ *
+ * The daemon writes `{ version, port, token }`. Unknown/extra fields (such as
+ * `version`, or future additions like a macaroon id or tailnet hostname) are
+ * tolerated: only `port` and `token` are required and consumed here.
+ */
 interface PortFile {
+  /** Schema version of the port-file (currently `1`); informational only. */
+  version?: number;
   port: number;
   token: string;
 }

@@ -32,6 +32,10 @@ export interface MailEndpointSettings {
   security: TransportSecurity
 }
 
+// Appearance is client-local presentation state, persisted in localStorage (see
+// `ThemeProvider`). It is intentionally NOT part of the daemon wire contract
+// (`AppSettings`), so these types have no conformance assertion against the
+// generated schema. Kept here as the shared client-local appearance model.
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type PalettePresetId =
   | 'neutral'
@@ -67,7 +71,6 @@ export interface AppAppearanceSettings {
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
   defaultAccountId: string | null
-  appearance: AppAppearanceSettings
   cachePolicy: CachePolicy
   automationRules: AutomationRule[]
   automationDrafts: AutomationRule[]

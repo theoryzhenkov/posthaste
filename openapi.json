@@ -3210,96 +3210,10 @@
           "config_parse"
         ]
       },
-      "AppAppearanceSettings": {
-        "type": "object",
-        "description": "Global UI appearance preferences shared across app windows.\n\n@spec docs/L1-accounts#toml-schema",
-        "properties": {
-          "accentHue": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "density": {
-            "$ref": "#/components/schemas/AppUiDensity"
-          },
-          "glassTheme": {
-            "$ref": "#/components/schemas/AppGlassThemeSettings"
-          },
-          "mode": {
-            "$ref": "#/components/schemas/AppThemeMode"
-          },
-          "palettePreset": {
-            "$ref": "#/components/schemas/AppPalettePreset"
-          }
-        }
-      },
-      "AppGlassBloomSettings": {
-        "type": "object",
-        "required": [
-          "id",
-          "hue",
-          "x",
-          "y",
-          "opacity",
-          "radius"
-        ],
-        "properties": {
-          "hue": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "id": {
-            "type": "string"
-          },
-          "opacity": {
-            "type": "number",
-            "format": "double"
-          },
-          "radius": {
-            "type": "number",
-            "format": "double"
-          },
-          "x": {
-            "type": "number",
-            "format": "double"
-          },
-          "y": {
-            "type": "number",
-            "format": "double"
-          }
-        }
-      },
-      "AppGlassThemeSettings": {
-        "type": "object",
-        "properties": {
-          "blooms": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AppGlassBloomSettings"
-            }
-          }
-        }
-      },
-      "AppPalettePreset": {
-        "type": "string",
-        "enum": [
-          "neutral",
-          "paperInk",
-          "brutalist",
-          "glass",
-          "acid",
-          "marzipan",
-          "botanical"
-        ]
-      },
       "AppSettings": {
         "type": "object",
         "description": "Global application settings shared across all accounts.\n\n@spec docs/L1-accounts#toml-schema",
         "properties": {
-          "appearance": {
-            "$ref": "#/components/schemas/AppAppearanceSettings"
-          },
           "automationDrafts": {
             "type": "array",
             "items": {
@@ -3326,22 +3240,6 @@
             ]
           }
         }
-      },
-      "AppThemeMode": {
-        "type": "string",
-        "enum": [
-          "light",
-          "dark",
-          "system"
-        ]
-      },
-      "AppUiDensity": {
-        "type": "string",
-        "enum": [
-          "compact",
-          "cozy",
-          "comfortable"
-        ]
       },
       "AutomationAction": {
         "oneOf": [
@@ -4307,16 +4205,6 @@
         "type": "object",
         "description": "Request body for `PATCH /v1/settings`.\n\n@spec docs/L1-api#settings",
         "properties": {
-          "appearance": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AppAppearanceSettings"
-              }
-            ]
-          },
           "automationDrafts": {
             "type": [
               "array",
