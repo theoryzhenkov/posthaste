@@ -35,21 +35,47 @@ interface EmailFrameProps {
  * @spec docs/L1-ui#messagedetail-and-emailframe
  * @spec docs/L0-branding#color-palette-light-mode-primary
  */
+type EmailLinkTarget = '_blank' | '_top'
+
+function normalizeEmailLinkTargets(
+  html: string,
+  target: EmailLinkTarget,
+): string {
+  if (typeof document === 'undefined') {
+    return html
+  }
+
+  const template = document.createElement('template')
+  template.innerHTML = html
+  for (const anchor of template.content.querySelectorAll('a[href]')) {
+    anchor.setAttribute('target', target)
+    anchor.setAttribute('rel', 'noopener noreferrer')
+  }
+  return template.innerHTML
+}
+
 export function EmailFrame({
   html,
   className,
   title = 'Email content',
 }: EmailFrameProps) {
   // Desktop intercepts top-frame navigations (open external + block); the
-  // browser opens links in a new tab. Both keep the no-scripts sandbox.
+  // browser opens links in a new tab. Both keep the no-scripts sandbox. Force
+  // per-anchor targets too because many emails ship target="_blank", which
+  // overrides <base target="_top"> and is blocked by the desktop sandbox.
   const isDesktop = isTauriRuntime()
+  const linkTarget = isDesktop ? '_top' : '_blank'
+  const bodyHtml = useMemo(
+    () => normalizeEmailLinkTargets(html, linkTarget),
+    [html, linkTarget],
+  )
   const wrappedHtml = useMemo(
     () => `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <base target="${isDesktop ? '_top' : '_blank'}">
+    <base target="${linkTarget}">
     <style>
         :root { color-scheme: light; }
         html {
@@ -89,9 +115,9 @@ export function EmailFrame({
         }
     </style>
 </head>
-<body>${html}</body>
+<body>${bodyHtml}</body>
 </html>`,
-    [html, isDesktop],
+    [bodyHtml, linkTarget],
   )
 
   return (
