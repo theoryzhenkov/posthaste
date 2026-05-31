@@ -9,7 +9,7 @@ use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};
 use tauri::webview::WebviewWindow;
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime, WindowEvent};
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 use tauri_utils::config::WebviewUrl;
 
 #[cfg(feature = "e2e-testing")]
@@ -269,9 +269,8 @@ fn is_safe_log_token(value: char) -> bool {
 #[tauri::command]
 fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     validate_external_url(&url)?;
-    #[allow(deprecated)]
-    app.shell()
-        .open(url, None)
+    app.opener()
+        .open_url(url, None::<&str>)
         .map_err(|error| error.to_string())
 }
 
@@ -342,7 +341,7 @@ impl FocusedWindowLabel {
 /// as `window.__POSTHASTE_PORT__` so the frontend can discover the backend.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_shell::init());
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
 
     let builder = builder.on_menu_event(|app, event| {
         if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {

@@ -4,6 +4,6 @@
   "windows": ["main", "settings", "message-*", "attachment-*"],
   "permissions": [
     "core:default",
-    "shell:allow-open"
+    "opener:allow-open-url"
   ]
 }
