@@ -275,6 +275,33 @@ export function MessageList({
     }
   }, [messages, selectedKey, currentViewKey])
 
+  // Auto-focus the next message when the selected one leaves the current view
+  // (archived, trashed, moved, or removed by any refresh), so the reader
+  // advances without manual navigation. The message that shifted up into the
+  // former slot becomes selected; archiving the last row falls back to the new
+  // last row, and emptying the list clears the selection. Scoped to the view
+  // key so a selection carried in from another mailbox/sort/search never
+  // triggers a jump (those legitimately replace the list).
+  useEffect(() => {
+    if (selectedKey === null) return
+    if (messages.some((message) => messageKey(message) === selectedKey)) return
+
+    const slot = lastSelectedSlotRef.current
+    if (!slot || slot.viewKey !== currentViewKey) return
+
+    if (messages.length === 0) {
+      onClearSelection()
+      return
+    }
+
+    const nextMessage = messages[Math.min(slot.index, messages.length - 1)]
+    onSelectMessage({
+      conversationId: nextMessage.conversationId,
+      sourceId: nextMessage.sourceId,
+      messageId: nextMessage.id,
+    })
+  }, [messages, selectedKey, currentViewKey, onSelectMessage, onClearSelection])
+
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
       if (messages.length === 0) return
