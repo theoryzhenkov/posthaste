@@ -64,18 +64,20 @@ fn bearer_token(req: &Request) -> Option<&str> {
     Some(rest.trim())
 }
 
-/// Extract the `access_token` query parameter (used by EventSource, which
-/// cannot set request headers — see the SSE caveat in the design doc).
+/// Extract and percent-decode the `access_token` query parameter (used by
+/// EventSource, which cannot set request headers — see the SSE caveat in the
+/// design doc).
 ///
-/// The token is a UUID/opaque ASCII string with no reserved characters, so a
-/// simple `key=value` scan over the query string suffices; we only need to
-/// recover the verbatim token to compare it.
+/// The token is a macaroon (base64; may contain `=` padding and `+`/`/`), and
+/// the client builds the URL with `URLSearchParams`, so the value arrives
+/// **percent-encoded**. Decode with the matching `application/x-www-form-urlencoded`
+/// semantics before comparing — a verbatim scan would mismatch on `%3D` etc.
+/// (Regression: SSE auth broke once the token stopped being a bare UUID.)
 fn query_token(req: &Request) -> Option<String> {
     let query = req.uri().query()?;
-    query.split('&').find_map(|pair| {
-        let (key, value) = pair.split_once('=')?;
-        (key == "access_token").then(|| value.to_string())
-    })
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(key, _)| key == "access_token")
+        .map(|(_, value)| value.into_owned())
 }
 
 /// Routes (relative to the `/v1` nest, i.e. the path the api router sees) that
