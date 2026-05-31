@@ -237,14 +237,19 @@ jobs:
             | xargs -0 sha256sum > "$checksums"
           mv "$checksums" SHA256SUMS
 
+      # Supply-chain steps are best-effort: a Sigstore/Rekor outage (e.g. the
+      # "tlog entry 404" failure) must not block publishing dogfood installers.
+      # The GPG detached signatures + SHA256SUMS below still provide integrity.
       - name: Attest release artifacts
         uses: actions/attest@v4
+        continue-on-error: true
         with:
           subject-path: release-assets/*
 
       - uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign release artifacts with cosign
+        continue-on-error: true
         shell: bash
         run: |
           find release-assets -maxdepth 1 -type f \
