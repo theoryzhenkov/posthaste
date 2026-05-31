@@ -154,18 +154,13 @@ export function FocusedSurfaceDocument({
       unlisten = nextUnlisten
     })
 
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'w') {
-        event.preventDefault()
-        void closeCurrentSurfaceWindow()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
+    // Cmd/Ctrl+W is handled by the native window menu (close_window ->
+    // performClose:). A JS keydown handler that preventDefault()s the combo
+    // makes the WKWebView report the key equivalent as handled, suppressing the
+    // menu item, so the window never closes — do not intercept it here.
     return () => {
       disposed = true
       unlisten?.()
-      window.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
 
