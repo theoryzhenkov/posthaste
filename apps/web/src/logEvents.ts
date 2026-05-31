@@ -7,6 +7,7 @@ export const LOG_EVENTS = {
   frontendConsoleOutput: 'frontend.console.output',
   frontendErrorUncaught: 'frontend.error.uncaught',
   frontendErrorUnhandledRejection: 'frontend.error.unhandled_rejection',
+  resourceFetchError: 'resource.fetch.error',
 } as const
 
 export type LogEvent = (typeof LOG_EVENTS)[keyof typeof LOG_EVENTS]

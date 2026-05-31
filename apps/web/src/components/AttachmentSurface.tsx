@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Download, FileText } from 'lucide-react'
 
 import { buildMessageAttachmentUrl, fetchMessage } from '@/api/client'
+import { useAuthedBlobUrl } from '@/hooks/useAuthedBlobUrl'
 import type { MessageAttachment } from '@/api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '@/attachments'
 import { mailKeys } from '@/mailState'
@@ -10,38 +11,12 @@ import type { AttachmentSurfaceDescriptor } from '@/surfaces'
 import { Button } from './ui/button'
 import { ProgressBar } from './ui/progress'
 
-interface AttachmentPreviewProps {
-  attachment: MessageAttachment
-  messageId: string
-  sourceId: string
-}
-
-function AttachmentPreview({
-  attachment,
-  messageId,
-  sourceId,
-}: AttachmentPreviewProps) {
-  const attachmentUrl = buildMessageAttachmentUrl(
-    sourceId,
-    messageId,
-    attachment.id,
-  )
-
-  return (
-    <AttachmentPreviewContent
-      key={attachmentUrl}
-      attachment={attachment}
-      attachmentUrl={attachmentUrl}
-    />
-  )
-}
-
 function AttachmentPreviewContent({
   attachment,
-  attachmentUrl,
+  objectUrl,
 }: {
   attachment: MessageAttachment
-  attachmentUrl: string
+  objectUrl: string
 }) {
   const [isLoadingPreview, setIsLoadingPreview] = useState(true)
 
@@ -62,7 +37,7 @@ function AttachmentPreviewContent({
           className="max-h-full max-w-full object-contain"
           onError={() => setIsLoadingPreview(false)}
           onLoad={() => setIsLoadingPreview(false)}
-          src={attachmentUrl}
+          src={objectUrl}
         />
       </div>
     )
@@ -74,7 +49,7 @@ function AttachmentPreviewContent({
       <iframe
         className="h-full w-full border-0 bg-panel"
         onLoad={() => setIsLoadingPreview(false)}
-        src={attachmentUrl}
+        src={objectUrl}
         title={attachment.filename ?? 'Attachment preview'}
       />
     </div>
@@ -95,12 +70,20 @@ export function AttachmentSurface({
     messageQuery.data?.attachments.find(
       (candidate) => candidate.id === attachmentId,
     ) ?? null
-  const downloadUrl =
-    attachment !== null
-      ? buildMessageAttachmentUrl(sourceId, messageId, attachment.id, {
-          download: true,
-        })
-      : null
+
+  // One authenticated fetch of the attachment bytes serves both the preview
+  // (<img>/<iframe>) and the download link: the browser can't auth-load either
+  // directly, so we hold the blob and point both at its object URL. The
+  // `download` attribute supplies the filename, so we don't need the server's
+  // `?download=1` content-disposition variant.
+  const attachmentUrl = attachment
+    ? buildMessageAttachmentUrl(sourceId, messageId, attachment.id)
+    : null
+  const {
+    objectUrl,
+    isLoading: isBlobLoading,
+    error: blobError,
+  } = useAuthedBlobUrl(attachmentUrl)
 
   if (messageQuery.isLoading) {
     return (
@@ -162,9 +145,9 @@ export function AttachmentSurface({
             {attachment.mimeType}
           </p>
         </div>
-        {downloadUrl && (
+        {objectUrl && (
           <Button asChild size="sm" type="button" variant="outline">
-            <a download href={downloadUrl}>
+            <a download={attachment.filename ?? 'attachment'} href={objectUrl}>
               <Download size={14} strokeWidth={1.75} />
               Download
             </a>
@@ -173,13 +156,7 @@ export function AttachmentSurface({
       </header>
 
       <div className="min-h-0 flex-1 bg-panel">
-        {canPreviewAttachment(attachment) ? (
-          <AttachmentPreview
-            attachment={attachment}
-            messageId={messageId}
-            sourceId={sourceId}
-          />
-        ) : (
+        {!canPreviewAttachment(attachment) ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 bg-panel text-center">
             <FileText
               size={34}
@@ -193,6 +170,31 @@ export function AttachmentSurface({
               This attachment type cannot be previewed in Posthaste yet.
             </p>
           </div>
+        ) : blobError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 bg-panel text-center">
+            <AlertCircle
+              size={32}
+              strokeWidth={1.5}
+              className="text-destructive/50"
+            />
+            <p className="text-sm text-destructive">
+              Failed to load attachment preview
+            </p>
+          </div>
+        ) : isBlobLoading || !objectUrl ? (
+          <div className="relative flex h-full min-h-0 items-center justify-center bg-panel p-5">
+            <ProgressBar
+              ariaLabel="Loading attachment preview"
+              className="absolute inset-x-5 top-5 z-10"
+              compact
+            />
+          </div>
+        ) : (
+          <AttachmentPreviewContent
+            key={objectUrl}
+            attachment={attachment}
+            objectUrl={objectUrl}
+          />
         )}
       </div>
     </div>

@@ -1,11 +1,11 @@
 import { buildAccountLogoUrl } from '../api/client'
+import { useAuthedBlobUrl } from '../hooks/useAuthedBlobUrl'
 import type { AccountAppearance } from '../api/types'
 import { cn } from '../lib/utils'
 
 interface AccountMarkProps {
   appearance: AccountAppearance
   className?: string
-  imageUrl?: string | null
 }
 
 function accountHueColor(colorHue: number): string {
@@ -16,18 +16,15 @@ function accountLetter(appearance: AccountAppearance): string {
   return appearance.initials.trim().charAt(0).toUpperCase() || '?'
 }
 
-export function AccountMark({
-  appearance,
-  className,
-  imageUrl,
-}: AccountMarkProps) {
+export function AccountMark({ appearance, className }: AccountMarkProps) {
   const color = accountHueColor(appearance.colorHue)
-  const resolvedImageUrl =
-    imageUrl !== undefined
-      ? imageUrl
-      : appearance.kind === 'image'
-        ? buildAccountLogoUrl(appearance.imageId)
-        : undefined
+  // Logo images are auth-gated daemon resources; the browser can't set the
+  // Authorization header on an <img src>, so fetch the bytes ourselves and use
+  // the resulting object URL. Until it resolves (or if it fails) we show the
+  // letter avatar, which is also the non-image fallback.
+  const logoUrl =
+    appearance.kind === 'image' ? buildAccountLogoUrl(appearance.imageId) : null
+  const { objectUrl } = useAuthedBlobUrl(logoUrl)
 
   return (
     <span
@@ -40,12 +37,12 @@ export function AccountMark({
         borderColor: `color-mix(in oklab, ${color} 78%, black)`,
       }}
     >
-      {resolvedImageUrl ? (
+      {objectUrl ? (
         <img
           alt=""
           className="h-full w-full object-cover"
           draggable={false}
-          src={resolvedImageUrl}
+          src={objectUrl}
         />
       ) : (
         accountLetter(appearance)

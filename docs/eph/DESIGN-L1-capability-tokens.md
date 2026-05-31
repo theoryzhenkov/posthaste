@@ -3,8 +3,8 @@ scope: L1
 type: DESIGN
 lifecycle: ephemeral
 summary: "Macaroon capability tokens: resource+action+expiry caveats, a per-route authz map, capability-URL-ready"
-modified: 2026-05-30
-reviewed: 2026-05-30
+modified: 2026-05-31
+reviewed: 2026-05-31
 status_note: "Stage B implemented: per-route caveat enforcement + authz map live"
 depends:
   - path: docs/eph/DESIGN-L1-trust-model
@@ -152,8 +152,12 @@ This is the only place endpoints may need work: ensuring each aggregate endpoint
 
 Replaces the `constant_time_eq` token check in `auth.rs`:
 1. Perimeter unchanged: `require_auth`, Host allowlist, Origin allowlist run first.
-2. Extract the macaroon (Authorization: Bearer, or `?access_token=` per existing
-   SSE rule / future capability URLs).
+2. Extract the macaroon from `Authorization: Bearer`. (The `?access_token=`
+   query-param transport was removed — the SSE stream and browser-loadable reads
+   now `fetch()` with the header. **Capability URLs** will deliberately
+   re-introduce a query-param token, but as a distinct, narrowly-scoped,
+   short-lived share grant rather than the full-scope session token; gate it on
+   the same exposure hardening.)
 3. Verify the HMAC chain against the **root key**; reject if invalid.
 4. Resolve the request's `(action, account?, mailbox?, message?)` from the
    `authz_map` entry for the matched route + path params.

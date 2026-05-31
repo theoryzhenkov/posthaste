@@ -143,8 +143,10 @@ struct SpaIndex {
 /// `backend_init_script` injection: a `<script>` setting
 /// `window.__POSTHASTE_TOKEN__` / `window.__POSTHASTE_PORT__` is spliced in
 /// immediately before `</head>`. The web client reads the token and sends it
-/// as `Authorization: Bearer` (and appends `?access_token=` for the SSE
-/// stream). Static assets (JS/CSS) are served by `ServeDir` and are unaffected.
+/// as `Authorization: Bearer` on every request — including the SSE stream and
+/// logo/attachment fetches, which use `fetch()` rather than the native
+/// `EventSource`/`<img>` so they can set the header. Static assets (JS/CSS) are
+/// served by `ServeDir` and are unaffected.
 ///
 /// @spec docs/eph/DESIGN-L1-trust-model
 async fn serve_index_with_token(
@@ -356,9 +358,9 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &axum::http::Request<_>| {
             let context = observability::RequestLogContext::from_headers(request.headers());
-            // SECURITY: log `uri().path()` only — never `uri()` (would include
-            // the query string, leaking the SSE `?access_token=` token) and
-            // never the `Authorization` header. Keep this span free of any
+            // SECURITY: log `uri().path()` only — never `uri()` (the query
+            // string can carry sensitive values) and never the `Authorization`
+            // header (the bearer token). Keep this span free of any
             // credential-bearing field.
             info_span!(
                 "http.request",
