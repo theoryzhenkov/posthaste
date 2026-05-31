@@ -12,7 +12,11 @@
 import { useEffect, useMemo, useRef } from 'react'
 
 import { openExternalUrl } from '../desktop'
-import { externalEmailLinkUrl } from '../emailLinks'
+import {
+  EMAIL_LINK_HREF_ATTR,
+  externalEmailLinkUrl,
+  neutralizeEmailLinks,
+} from '../emailLinks'
 import { cn } from '../lib/utils'
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
@@ -62,6 +66,7 @@ export function EmailFrame({
         }
         img { max-width: 100%; height: auto; }
         a { color: #2B7EC2; }
+        a[${EMAIL_LINK_HREF_ATTR}] { cursor: pointer; text-decoration: underline; }
         blockquote {
             border-left: 2px solid #D4DAE0;
             margin: 16px 0;
@@ -79,7 +84,7 @@ export function EmailFrame({
         }
     </style>
 </head>
-<body>${html}</body>
+<body>${neutralizeEmailLinks(html)}</body>
 </html>`,
     [html],
   )
@@ -104,12 +109,16 @@ export function EmailFrame({
           parentElement?: Element | null
         } | null
         const element = target?.closest ? target : target?.parentElement
-        const anchor = element?.closest?.('a[href]')
-        const href = externalEmailLinkUrl(anchor?.getAttribute('href') ?? null)
+        const anchor = element?.closest?.(`a[${EMAIL_LINK_HREF_ATTR}]`)
+        const href = externalEmailLinkUrl(
+          anchor?.getAttribute(EMAIL_LINK_HREF_ATTR) ?? null,
+        )
         if (!href) {
           return
         }
 
+        // The anchor carries no `href` (neutralized above), so there is nothing
+        // to navigate to; preventDefault is belt-and-suspenders.
         event.preventDefault()
         event.stopPropagation()
         void openExternalUrl(href).catch((error: unknown) => {
