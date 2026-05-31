@@ -18,12 +18,14 @@ import {
   type ResizeHandle,
   type ResizeSnapLines,
   clampPanelOffset,
+  expandPanelToGrid,
   guideColumns,
   guideRows,
   isFiniteOffset,
   resistPanelOffset,
+  resizeGridCell,
+  resizeGridLines,
   resizePanelRect,
-  resizeSnapLines,
 } from '@/floatingPanelGeometry'
 import {
   type FloatingPanelSizePreset,
@@ -88,11 +90,21 @@ const GUIDE_LINE_ACTIVE_CLASS =
   'bg-[color-mix(in_oklab,var(--brand-coral)_46%,transparent)]'
 const GUIDE_LINE_IDLE_CLASS =
   'bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]'
+// The resize grid shows many more lines than the movement rails, so its idle
+// lines are fainter to stay calm.
+const GRID_LINE_IDLE_CLASS =
+  'bg-[color-mix(in_oklab,var(--foreground)_8%,transparent)]'
 
 // Don't start a header drag from interactive controls or the grip (the grip has
 // its own drag handlers); empty header space drags the panel.
 const HEADER_NO_DRAG_SELECTOR =
   'button, a, input, textarea, select, label, [contenteditable], [data-no-drag]'
+
+// Manual double-click detection on a resize handle (preventDefault suppresses
+// the native dblclick): a second press on the same handle within this window
+// and pointer slop grows the panel to the grid instead of dragging.
+const RESIZE_DOUBLE_CLICK_MS = 350
+const RESIZE_DOUBLE_CLICK_SLOP = 6
 
 interface FloatingPanelProps {
   children: React.ReactNode
@@ -205,11 +217,18 @@ export function FloatingPanel({
     readStoredPanelSize(`${storageKey}:size`),
   )
   const [isResizing, setIsResizing] = useState(false)
+  const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null)
   const [resizeLines, setResizeLines] = useState<ResizeSnapLines | null>(null)
   const [activeResizeLines, setActiveResizeLines] = useState<ActiveResizeLines>(
     { x: [], y: [] },
   )
   const panelRef = useRef<HTMLDivElement>(null)
+  const lastResizeClickRef = useRef<{
+    handle: ResizeHandle
+    time: number
+    x: number
+    y: number
+  } | null>(null)
   const dragRef = useRef<{
     lockedX?: number | null
     lockedY?: number | null
@@ -413,6 +432,33 @@ export function FloatingPanel({
     }
   }
 
+  // Grow the panel out to the nearest grid lines for the double-clicked handle.
+  // Holding Option/Alt expands the opposite edge of each affected axis too.
+  function expandResizeToGrid(handle: ResizeHandle, both: boolean) {
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (!rect) {
+      return
+    }
+    const viewport = viewportSize()
+    const { size, offset } = expandPanelToGrid({
+      rect: {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+      handle,
+      both,
+      grid: resizeGridLines(viewport),
+      viewport,
+    })
+    const clampedOffset = clampPanelOffset(offset, size, viewport)
+    setPanelSize(size)
+    setPanelOffset(clampedOffset)
+    persistPanelSize(sizeStorageKey, size)
+    persistPanelOffset(storageKey, clampedOffset)
+  }
+
   function handleResizeStart(
     handle: ResizeHandle,
     event: React.PointerEvent<HTMLDivElement>,
@@ -422,6 +468,42 @@ export function FloatingPanel({
     }
     event.preventDefault()
     event.stopPropagation()
+
+    // Detect a double-click on the same handle manually: preventDefault() above
+    // suppresses the native dblclick event, and we want the gesture scoped to
+    // this handle anyway. A double-click grows to the grid instead of dragging.
+    const last = lastResizeClickRef.current
+    const isDoubleClick =
+      last !== null &&
+      last.handle === handle &&
+      event.timeStamp - last.time < RESIZE_DOUBLE_CLICK_MS &&
+      Math.abs(event.clientX - last.x) < RESIZE_DOUBLE_CLICK_SLOP &&
+      Math.abs(event.clientY - last.y) < RESIZE_DOUBLE_CLICK_SLOP
+    if (isDoubleClick) {
+      lastResizeClickRef.current = null
+      // Defensively end any gesture the first click may have left in flight, so
+      // the expand path is self-contained regardless of pointerup ordering.
+      const inFlight = resizeRef.current
+      if (inFlight) {
+        if (event.currentTarget.hasPointerCapture(inFlight.pointerId)) {
+          event.currentTarget.releasePointerCapture(inFlight.pointerId)
+        }
+        resizeRef.current = null
+        setIsResizing(false)
+        setResizeHandle(null)
+        setResizeLines(null)
+        setActiveResizeLines({ x: [], y: [] })
+      }
+      expandResizeToGrid(handle, event.altKey)
+      return
+    }
+    lastResizeClickRef.current = {
+      handle,
+      time: event.timeStamp,
+      x: event.clientX,
+      y: event.clientY,
+    }
+
     const rect = panelRef.current?.getBoundingClientRect()
     if (!rect) {
       return
@@ -433,10 +515,9 @@ export function FloatingPanel({
       width: rect.width,
       height: rect.height,
     }
-    const snapLines = resizeSnapLines(
-      { width: rect.width, height: rect.height },
-      viewportSize(),
-    )
+    // Snap targets are the static, viewport-anchored grid — the same for every
+    // window, so panels can be standardized to identical dimensions.
+    const snapLines = resizeGridLines(viewportSize())
     resizeRef.current = {
       pointerId: event.pointerId,
       handle,
@@ -448,6 +529,7 @@ export function FloatingPanel({
       lockY: null,
     }
     setIsResizing(true)
+    setResizeHandle(handle)
     setResizeLines(snapLines)
     setActiveResizeLines({ x: [], y: [] })
     // Pin the rendered size to the measured pixels so resizing continues from
@@ -485,6 +567,7 @@ export function FloatingPanel({
     }
     resizeRef.current = null
     setIsResizing(false)
+    setResizeHandle(null)
     setResizeLines(null)
     setActiveResizeLines({ x: [], y: [] })
     setPanelSize((size) => {
@@ -505,6 +588,27 @@ export function FloatingPanel({
     !isExpanded && panelSize
       ? { width: `${panelSize.width}px`, height: `${panelSize.height}px` }
       : {}
+
+  // Only draw the grid axis being resized: vertical lines while changing width,
+  // horizontal while changing height, both at a corner.
+  const resizeShowsX =
+    resizeHandle !== null &&
+    (resizeHandle.includes('left') || resizeHandle.includes('right'))
+  const resizeShowsY =
+    resizeHandle !== null &&
+    (resizeHandle.includes('top') || resizeHandle.includes('bottom'))
+  const resizeCells =
+    isResizing && panelSize
+      ? (() => {
+          const cell = resizeGridCell(viewportSize())
+          return {
+            columns:
+              cell.width > 0 ? Math.round(panelSize.width / cell.width) : 0,
+            rows:
+              cell.height > 0 ? Math.round(panelSize.height / cell.height) : 0,
+          }
+        })()
+      : null
 
   return (
     <div
@@ -561,28 +665,30 @@ export function FloatingPanel({
       )}
       {isResizing && resizeLines && (
         <div className="pointer-events-none fixed inset-0">
-          {resizeLines.x.map((x) => (
-            <div
-              key={`resize-x:${x}`}
-              className={`absolute top-0 h-full w-px ${
-                activeResizeLines.x.includes(x)
-                  ? GUIDE_LINE_ACTIVE_CLASS
-                  : GUIDE_LINE_IDLE_CLASS
-              }`}
-              style={{ left: x }}
-            />
-          ))}
-          {resizeLines.y.map((y) => (
-            <div
-              key={`resize-y:${y}`}
-              className={`absolute left-0 h-px w-full ${
-                activeResizeLines.y.includes(y)
-                  ? GUIDE_LINE_ACTIVE_CLASS
-                  : GUIDE_LINE_IDLE_CLASS
-              }`}
-              style={{ top: y }}
-            />
-          ))}
+          {resizeShowsX &&
+            resizeLines.x.map((x) => (
+              <div
+                key={`resize-x:${x}`}
+                className={`absolute top-0 h-full w-px ${
+                  activeResizeLines.x.includes(x)
+                    ? GUIDE_LINE_ACTIVE_CLASS
+                    : GRID_LINE_IDLE_CLASS
+                }`}
+                style={{ left: x }}
+              />
+            ))}
+          {resizeShowsY &&
+            resizeLines.y.map((y) => (
+              <div
+                key={`resize-y:${y}`}
+                className={`absolute left-0 h-px w-full ${
+                  activeResizeLines.y.includes(y)
+                    ? GUIDE_LINE_ACTIVE_CLASS
+                    : GRID_LINE_IDLE_CLASS
+                }`}
+                style={{ top: y }}
+              />
+            ))}
         </div>
       )}
       <div
@@ -593,6 +699,12 @@ export function FloatingPanel({
           isExpanded
             ? 'h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)]'
             : 'max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] min-h-48 min-w-72',
+          // Animate double-click grow / restore, but never during a live drag or
+          // resize (that must track the pointer instantly).
+          !isExpanded &&
+            !isDragging &&
+            !isResizing &&
+            'transition-[transform,width,height] duration-150 ease-out',
         )}
         style={{
           ...floatingSizeStyle,
@@ -715,6 +827,11 @@ export function FloatingPanel({
               onPointerCancel={handleResizeEnd}
             />
           ))}
+        {isResizing && resizeCells && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border [border-color:color-mix(in_oklab,var(--brand-coral)_30%,var(--border))] bg-[color-mix(in_oklab,var(--panel)_85%,transparent)] px-2 py-1 font-mono text-[11px] font-medium text-foreground/80 shadow-sm backdrop-blur-sm">
+            {resizeCells.columns} × {resizeCells.rows}
+          </div>
+        )}
       </div>
     </div>
   )
