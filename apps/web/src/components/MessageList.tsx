@@ -258,6 +258,19 @@ export function MessageList({
       : error instanceof ApiError && error.code === 'invalid_query'
         ? `Search query is not valid: ${error.message}`
         : 'Failed to load messages'
+  // Remember the selected message's slot so that, once it leaves the list (e.g.
+  // archived with `E`), the next Up/Down moves relative to where it was rather
+  // than jumping to the top of the list.
+  const lastSelectedIndexRef = useRef(-1)
+  useEffect(() => {
+    const index = messages.findIndex(
+      (message) => messageKey(message) === selectedKey,
+    )
+    if (index !== -1) {
+      lastSelectedIndexRef.current = index
+    }
+  }, [messages, selectedKey])
+
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
       if (messages.length === 0) return
@@ -265,15 +278,24 @@ export function MessageList({
       const currentIndex = messages.findIndex(
         (message) => messageKey(message) === selectedKey,
       )
-      const nextIndex =
-        currentIndex === -1
-          ? direction === 1
-            ? 0
-            : messages.length - 1
-          : currentIndex + direction
 
-      if (nextIndex < 0 || nextIndex >= messages.length) {
-        return
+      let nextIndex: number
+      if (currentIndex !== -1) {
+        nextIndex = currentIndex + direction
+        if (nextIndex < 0 || nextIndex >= messages.length) {
+          return
+        }
+      } else if (lastSelectedIndexRef.current !== -1) {
+        // Selection left the list (archived/trashed); continue from its old
+        // slot — Down lands on the message that shifted up into it, Up on the
+        // one before it.
+        const base =
+          direction === 1
+            ? lastSelectedIndexRef.current
+            : lastSelectedIndexRef.current - 1
+        nextIndex = Math.min(Math.max(base, 0), messages.length - 1)
+      } else {
+        nextIndex = direction === 1 ? 0 : messages.length - 1
       }
 
       const nextMessage = messages[nextIndex]

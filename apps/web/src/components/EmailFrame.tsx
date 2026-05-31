@@ -117,9 +117,14 @@ export function EmailFrame({
         })
       }
 
-      document.addEventListener('click', handleClick)
-      unbindClickHandler = () =>
-        document.removeEventListener('click', handleClick)
+      // Capture phase so we cancel the iframe's own navigation before it runs,
+      // and auxclick to also catch middle-click "open in new tab".
+      document.addEventListener('click', handleClick, true)
+      document.addEventListener('auxclick', handleClick, true)
+      unbindClickHandler = () => {
+        document.removeEventListener('click', handleClick, true)
+        document.removeEventListener('auxclick', handleClick, true)
+      }
     }
 
     frame.addEventListener('load', bindClickHandler)
