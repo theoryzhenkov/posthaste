@@ -115,8 +115,11 @@ fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {
     })
 }
 
-/// Write `<state_root>/daemon.json` = `{ port, token }`, the documented
-/// discovery mechanism for external clients. The file carries a live
+/// Write `<state_root>/daemon.json` = `{ version, port, token }`, the documented
+/// discovery mechanism for external clients. `version` is the schema version
+/// (currently `1`); readers tolerate unknown fields so the schema can grow
+/// (e.g. a macaroon id or tailnet hostname) without breaking older clients.
+/// The file carries a live
 /// credential, so it is created with mode `0600` on unix (and the state dir
 /// best-effort `0700`). `fs::write` would NOT tighten an already
 /// world-readable file, so we open with explicit restrictive permissions and
@@ -127,7 +130,7 @@ fn parse_args(args: Vec<String>) -> Result<ServeOptions, String> {
 fn write_port_file(addr: SocketAddr, token: &str) {
     let roots = resolve_roots();
     let path = roots.state_root.join("daemon.json");
-    let body = serde_json::json!({ "port": addr.port(), "token": token });
+    let body = serde_json::json!({ "version": 1, "port": addr.port(), "token": token });
     let contents = match serde_json::to_string_pretty(&body) {
         Ok(contents) => contents,
         Err(error) => {
@@ -339,7 +342,8 @@ fn read_token_from_stdin() -> Option<String> {
     None
 }
 
-/// Read the full-scope macaroon from `<state_root>/daemon.json` (`{port, token}`).
+/// Read the full-scope macaroon from `<state_root>/daemon.json`
+/// (`{version, port, token}`); only `token` is consumed here.
 fn read_token_from_daemon_file() -> Option<String> {
     let path = resolve_roots().state_root.join("daemon.json");
     let contents = std::fs::read_to_string(path).ok()?;

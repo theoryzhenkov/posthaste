@@ -14,9 +14,6 @@ use crate::{
     ConfigError, ProviderKind,
 };
 
-mod appearance;
-pub use appearance::*;
-
 /// Generates a newtype wrapper around `String` for type-safe identifiers.
 macro_rules! string_id {
     ($(#[$meta:meta])* $name:ident) => {
@@ -243,8 +240,6 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AppSettings {
     pub default_account_id: Option<AccountId>,
-    #[serde(default)]
-    pub appearance: AppAppearanceSettings,
     #[serde(default)]
     pub cache_policy: CachePolicy,
     #[serde(default)]

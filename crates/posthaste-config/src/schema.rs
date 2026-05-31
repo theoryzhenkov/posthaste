@@ -1,8 +1,8 @@
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountSettings, AccountTransportSettings,
-    AppAppearanceSettings, AppSettings, AutomationAction, AutomationRule, AutomationTrigger,
-    CachePolicy, ImapTransportSettings, MailboxId, ProviderAuthKind, ProviderHint, SecretKind,
-    SecretRef, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    AppSettings, AutomationAction, AutomationRule, AutomationTrigger, CachePolicy,
+    ImapTransportSettings, MailboxId, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
+    SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
     SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxKind, SmartMailboxOperator,
     SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SmtpTransportSettings,
     TransportSecurity, RFC3339_EPOCH,
@@ -27,8 +27,6 @@ pub struct AppToml {
     pub draft_automations: Vec<AutomationRuleToml>,
     #[serde(default)]
     pub daemon: DaemonToml,
-    #[serde(default)]
-    pub appearance: AppAppearanceSettings,
     #[serde(default)]
     pub logging: LoggingToml,
     #[serde(default)]
@@ -98,7 +96,6 @@ impl AppToml {
     pub fn to_app_settings(&self) -> Result<AppSettings, String> {
         Ok(AppSettings {
             default_account_id: self.default_source_id.as_deref().map(AccountId::from),
-            appearance: self.appearance.clone(),
             cache_policy: self.cache.to_cache_policy(),
             automation_rules: self
                 .automations
@@ -135,7 +132,6 @@ impl AppToml {
                 .map(convert_automation_rule_to_toml)
                 .collect(),
             daemon: existing.daemon.clone(),
-            appearance: settings.appearance.clone(),
             logging: existing.logging.clone(),
             cache: CachePolicyToml::from_cache_policy(&settings.cache_policy),
         }
@@ -1152,7 +1148,6 @@ auth = "app_password"
             automations: Vec::new(),
             draft_automations: Vec::new(),
             daemon: DaemonToml::default(),
-            appearance: AppAppearanceSettings::default(),
             logging: LoggingToml::default(),
             cache: CachePolicyToml::default(),
         };

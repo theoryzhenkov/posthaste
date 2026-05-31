@@ -961,52 +961,16 @@ export interface components {
          */
         ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse";
         /**
-         * @description Global UI appearance preferences shared across app windows.
-         *
-         *     @spec docs/L1-accounts#toml-schema
-         */
-        AppAppearanceSettings: {
-            /** Format: int32 */
-            accentHue?: number;
-            density?: components["schemas"]["AppUiDensity"];
-            glassTheme?: components["schemas"]["AppGlassThemeSettings"];
-            mode?: components["schemas"]["AppThemeMode"];
-            palettePreset?: components["schemas"]["AppPalettePreset"];
-        };
-        AppGlassBloomSettings: {
-            /** Format: int32 */
-            hue: number;
-            id: string;
-            /** Format: double */
-            opacity: number;
-            /** Format: double */
-            radius: number;
-            /** Format: double */
-            x: number;
-            /** Format: double */
-            y: number;
-        };
-        AppGlassThemeSettings: {
-            blooms?: components["schemas"]["AppGlassBloomSettings"][];
-        };
-        /** @enum {string} */
-        AppPalettePreset: "neutral" | "paperInk" | "brutalist" | "glass" | "acid" | "marzipan" | "botanical";
-        /**
          * @description Global application settings shared across all accounts.
          *
          *     @spec docs/L1-accounts#toml-schema
          */
         AppSettings: {
-            appearance?: components["schemas"]["AppAppearanceSettings"];
             automationDrafts?: components["schemas"]["AutomationRule"][];
             automationRules?: components["schemas"]["AutomationRule"][];
             cachePolicy?: components["schemas"]["CachePolicy"];
             defaultAccountId?: null | components["schemas"]["AccountId"];
         };
-        /** @enum {string} */
-        AppThemeMode: "light" | "dark" | "system";
-        /** @enum {string} */
-        AppUiDensity: "compact" | "cozy" | "comfortable";
         /**
          * @description Supported effects for automation rules.
          *
@@ -1368,7 +1332,6 @@ export interface components {
          *     @spec docs/L1-api#settings
          */
         PatchSettingsRequest: {
-            appearance?: null | components["schemas"]["AppAppearanceSettings"];
             automationDrafts?: components["schemas"]["AutomationRule"][] | null;
             automationRules?: components["schemas"]["AutomationRule"][] | null;
             cachePolicy?: null | components["schemas"]["CachePolicy"];

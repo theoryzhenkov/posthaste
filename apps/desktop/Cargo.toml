@@ -8,6 +8,11 @@ name = "posthaste_desktop_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [features]
+default = ["embedded-server"]
+# Embed the Posthaste server in-process (bundled `.dmg`). When OFF, the desktop
+# shell builds without an embedded backend (client-only deployment seam); the
+# connection-profile runtime that replaces it lands in Phase B.
+embedded-server = []
 devtools = ["tauri/devtools"]
 e2e-testing = ["dep:tauri-plugin-playwright"]
 

@@ -1,4 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   applyRootTheme,
   appendGlassBloom,
@@ -20,14 +19,8 @@ import {
   type ThemeMode,
   type UiDensity,
 } from '@/design'
-import { fetchSettings, patchSettings } from '@/api/client'
-import type { AppSettings } from '@/api/types'
-import { queryKeys } from '@/queryKeys'
 import {
-  appAppearanceFromPreferences,
   defaultThemePreferences,
-  preferencesFromAppAppearance,
-  shouldMigrateStoredThemePreferences,
   type DesignThemePreferences,
 } from '@/themeSettings'
 import {
@@ -45,8 +38,6 @@ import {
 interface DesignThemeProviderProps {
   children: ReactNode
 }
-
-const themeMigrationStorageKey = 'posthaste.themeMigratedToAppSettings.v1'
 
 function storedThemeMode(): ThemeMode {
   const value = localStorage.getItem(designStorageKeys.themeMode)
@@ -96,93 +87,41 @@ function readStoredThemePreferences(): DesignThemePreferences {
   }
 }
 
-function hasCompletedThemeMigration() {
-  return localStorage.getItem(themeMigrationStorageKey) === 'complete'
+/**
+ * Persist appearance preferences to localStorage. Appearance is client-local
+ * presentation state (see the ownership boundary in
+ * docs/eph/DESIGN-L1-deployment-modes): it never touches the daemon API.
+ */
+function persistThemePreferences(preferences: DesignThemePreferences) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  const normalizedGlass = normalizeGlassThemeParameters(preferences.glassTheme)
+  localStorage.setItem(designStorageKeys.themeMode, preferences.mode)
+  localStorage.setItem(
+    designStorageKeys.palettePreset,
+    preferences.palettePreset,
+  )
+  localStorage.setItem(designStorageKeys.uiDensity, preferences.density)
+  localStorage.setItem(
+    designStorageKeys.accentHue,
+    String(normalizeAccentHue(preferences.accentHue)),
+  )
+  localStorage.setItem(
+    designStorageKeys.themeParameters,
+    JSON.stringify({ glass: normalizedGlass }),
+  )
 }
 
 export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
-  const queryClient = useQueryClient()
-  const [initialStoredPreferences] = useState(readStoredThemePreferences)
-  const [optimisticPreferences, setOptimisticPreferences] =
-    useState<DesignThemePreferences | null>(null)
-
-  const settingsQuery = useQuery({
-    queryKey: queryKeys.settings,
-    queryFn: fetchSettings,
-  })
-  const { mutate: saveAppearance } = useMutation({
-    mutationFn: (appearance: ReturnType<typeof appAppearanceFromPreferences>) =>
-      patchSettings({ appearance }),
-    onSuccess: (settings) => {
-      queryClient.setQueryData<AppSettings>(queryKeys.settings, settings)
-      setOptimisticPreferences(null)
-    },
-  })
-
-  const serverAppearance = settingsQuery.data?.appearance
-  const shouldMigrate = useMemo(
-    () =>
-      Boolean(
-        serverAppearance &&
-        !hasCompletedThemeMigration() &&
-        shouldMigrateStoredThemePreferences(
-          serverAppearance,
-          initialStoredPreferences,
-        ),
-      ),
-    [initialStoredPreferences, serverAppearance],
-  )
-  const serverPreferences = useMemo(
-    () =>
-      serverAppearance ? preferencesFromAppAppearance(serverAppearance) : null,
-    [serverAppearance],
-  )
-  const preferences = useMemo(
-    () =>
-      optimisticPreferences ??
-      (shouldMigrate
-        ? initialStoredPreferences
-        : (serverPreferences ?? initialStoredPreferences)),
-    [
-      initialStoredPreferences,
-      optimisticPreferences,
-      serverPreferences,
-      shouldMigrate,
-    ],
+  const [preferences, setPreferences] = useState<DesignThemePreferences>(
+    readStoredThemePreferences,
   )
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
 
   useEffect(() => {
-    if (!serverAppearance || hasCompletedThemeMigration()) {
-      return
-    }
-
-    if (shouldMigrate) {
-      saveAppearance(appAppearanceFromPreferences(initialStoredPreferences), {
-        onSuccess: () =>
-          localStorage.setItem(themeMigrationStorageKey, 'complete'),
-      })
-      return
-    }
-
-    localStorage.setItem(themeMigrationStorageKey, 'complete')
-  }, [
-    initialStoredPreferences,
-    saveAppearance,
-    serverAppearance,
-    shouldMigrate,
-  ])
-
-  useEffect(() => {
-    if (!optimisticPreferences) {
-      return
-    }
-
-    const timeout = window.setTimeout(() => {
-      saveAppearance(appAppearanceFromPreferences(optimisticPreferences))
-    }, 300)
-    return () => window.clearTimeout(timeout)
-  }, [optimisticPreferences, saveAppearance])
+    persistThemePreferences(preferences)
+  }, [preferences])
 
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
     accentHue,
@@ -228,9 +167,9 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
 
   const updatePreferences = useCallback(
     (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
-      setOptimisticPreferences((current) => updater(current ?? preferences))
+      setPreferences((current) => updater(current))
     },
-    [preferences],
+    [],
   )
 
   const setAccentHue = useCallback(
