@@ -262,21 +262,117 @@ function resizeHandleAxes(handle: ResizeHandle): {
   }
 }
 
-// Resize reuses the movement rails: the faint guide lines drawn while moving are
-// the panel edges at each candidate slot, so a resized edge snaps to those same
-// screen positions. Snap targets are frozen from the panel size at the start of
-// the gesture, so the reference grid stays stable while the panel changes size.
-export function resizeSnapLines(
-  panel: PanelGeometry,
-  viewport: ViewportSize,
-): ResizeSnapLines {
-  const columns = guideColumns(panel, viewport)
-  const rows = guideRows(panel, viewport)
+// Resize snaps to a STATIC, viewport-anchored grid — the same 12x8 grid the size
+// presets are built from — independent of the panel being dragged. Every
+// floating window therefore snaps to the same standard, symmetric dimensions.
+// (Movement rails, by contrast, stay sized to the current panel; see
+// `panelRailOffsets`.)
+export function resizeGridLines(viewport: ViewportSize): ResizeSnapLines {
+  const usableWidth = Math.max(
+    0,
+    viewport.width - FLOATING_PANEL_GRID.screenMargin * 2,
+  )
+  const usableHeight = Math.max(
+    0,
+    viewport.height -
+      FLOATING_PANEL_GRID.topOffset -
+      FLOATING_PANEL_GRID.screenMargin,
+  )
+  const x: number[] = []
+  for (let column = 0; column <= FLOATING_PANEL_GRID.columns; column += 1) {
+    x.push(
+      FLOATING_PANEL_GRID.screenMargin +
+        (usableWidth * column) / FLOATING_PANEL_GRID.columns,
+    )
+  }
+  const y: number[] = []
+  for (let row = 0; row <= FLOATING_PANEL_GRID.rows; row += 1) {
+    y.push(
+      FLOATING_PANEL_GRID.topOffset +
+        (usableHeight * row) / FLOATING_PANEL_GRID.rows,
+    )
+  }
+  return { x, y }
+}
+
+// One grid cell, used to report the panel size in whole columns/rows.
+export function resizeGridCell(viewport: ViewportSize): PanelGeometry {
   return {
-    x: uniqueRails(
-      columns.flatMap((column) => [column.left, column.left + column.width]),
-    ),
-    y: uniqueRails(rows.flatMap((row) => [row.top, row.top + row.height])),
+    width:
+      Math.max(0, viewport.width - FLOATING_PANEL_GRID.screenMargin * 2) /
+      FLOATING_PANEL_GRID.columns,
+    height:
+      Math.max(
+        0,
+        viewport.height -
+          FLOATING_PANEL_GRID.topOffset -
+          FLOATING_PANEL_GRID.screenMargin,
+      ) / FLOATING_PANEL_GRID.rows,
+  }
+}
+
+function nearestGridLine(
+  lines: number[],
+  value: number,
+  direction: 'down' | 'up',
+): number | null {
+  const epsilon = 0.5
+  let best: number | null = null
+  for (const line of lines) {
+    if (direction === 'down') {
+      if (line < value - epsilon && (best === null || line > best)) {
+        best = line
+      }
+    } else if (line > value + epsilon && (best === null || line < best)) {
+      best = line
+    }
+  }
+  return best
+}
+
+// Double-click a handle to grow the panel out to the nearest grid lines. The
+// grabbed edge(s) expand outward to the nearest line; with `both`, the opposite
+// edge on each affected axis also expands — so an edge grows on both sides of
+// its axis and a corner grows on all four.
+export function expandPanelToGrid(input: {
+  rect: PanelRect
+  handle: ResizeHandle
+  both: boolean
+  grid: ResizeSnapLines
+  viewport: ViewportSize
+}): { size: PanelGeometry; offset: PanelOffset } {
+  const { rect, handle, both, grid, viewport } = input
+  const { horizontal, vertical } = resizeHandleAxes(handle)
+  let left = rect.left
+  let right = rect.left + rect.width
+  let top = rect.top
+  let bottom = rect.top + rect.height
+
+  if (horizontal !== null) {
+    if (horizontal === 'left' || both) {
+      left = nearestGridLine(grid.x, left, 'down') ?? left
+    }
+    if (horizontal === 'right' || both) {
+      right = nearestGridLine(grid.x, right, 'up') ?? right
+    }
+  }
+  if (vertical !== null) {
+    if (vertical === 'top' || both) {
+      top = nearestGridLine(grid.y, top, 'down') ?? top
+    }
+    if (vertical === 'bottom' || both) {
+      bottom = nearestGridLine(grid.y, bottom, 'up') ?? bottom
+    }
+  }
+
+  const width = right - left
+  const height = bottom - top
+  return {
+    size: { width, height },
+    offset: {
+      x: left - (viewport.width - width) / 2,
+      y: top - FLOATING_PANEL_GRID.topOffset,
+    },
   }
 }
 

@@ -5,16 +5,15 @@ import {
   guideColumns,
   guideRows,
   panelRailOffsets,
+  expandPanelToGrid,
   resistPanelOffset,
+  resizeGridLines,
   resizePanelRect,
-  resizeSnapLines,
 } from '../src/floatingPanelGeometry'
 import { floatingPanelResizeConstraints } from '../src/floatingPanelLayout'
 
 const viewport = { width: 1200, height: 800 }
 const panel = { width: 600, height: 400 }
-const constraints = floatingPanelResizeConstraints(undefined, viewport)
-const startRect = { left: 300, top: 16, width: 600, height: 400 }
 
 describe('floating panel geometry', () => {
   it('clamps panel offsets inside the viewport margins', () => {
@@ -80,134 +79,135 @@ describe('floating panel geometry', () => {
   })
 })
 
+// A viewport whose usable area divides evenly into the 12x8 grid, for clean
+// integer grid lines: usable 1200x720 -> 100px columns, 90px rows.
+const gridViewport = { width: 1232, height: 790 }
+const gridConstraints = floatingPanelResizeConstraints(undefined, gridViewport)
+const grid = resizeGridLines(gridViewport)
+const gridStart = { left: 216, top: 144, width: 300, height: 180 }
+
 describe('floating panel resize geometry', () => {
-  it('derives resize snap lines from the movement guide edges', () => {
-    expect(resizeSnapLines(panel, viewport)).toEqual({
-      x: [16, 616, 300, 900, 584, 1184],
-      y: [16, 416, 384, 784],
+  it('exposes a static, viewport-anchored grid independent of any panel', () => {
+    expect(grid).toEqual({
+      x: [16, 116, 216, 316, 416, 516, 616, 716, 816, 916, 1016, 1116, 1216],
+      y: [54, 144, 234, 324, 414, 504, 594, 684, 774],
     })
   })
 
-  it('snaps a dragged edge to the nearest rail and keeps the opposite edge fixed', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
+  it('snaps a dragged edge to the nearest grid line, opposite edge fixed', () => {
     const result = resizePanelRect({
-      startRect,
-      handle: 'left',
-      dx: 4,
+      startRect: gridStart,
+      handle: 'right',
+      dx: 95,
       dy: 0,
-      constraints,
-      viewport,
-      snapLines,
+      constraints: gridConstraints,
+      viewport: gridViewport,
+      snapLines: grid,
       locks: { x: null, y: null },
     })
-    expect(result).toEqual({
-      size: { width: 600, height: 400 },
-      offset: { x: 0, y: -38 },
-      activeLines: { x: [300], y: [] },
-      locks: { x: 300, y: null },
-    })
+    expect(result.size).toEqual({ width: 400, height: 180 })
+    expect(result.offset).toEqual({ x: -200, y: 90 })
+    expect(result.activeLines).toEqual({ x: [616], y: [] })
   })
 
-  it('snaps a dragged bottom edge to a horizontal rail', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
+  it('clamps growth to the usable viewport (last grid line is the margin)', () => {
     const result = resizePanelRect({
-      startRect,
-      handle: 'bottom',
-      dx: 0,
-      dy: 5,
-      constraints,
-      viewport,
-      snapLines,
-      locks: { x: null, y: null },
-    })
-    expect(result.size).toEqual({ width: 600, height: 400 })
-    expect(result.activeLines).toEqual({ x: [], y: [416] })
-  })
-
-  it('clamps growth to the usable viewport', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
-    const result = resizePanelRect({
-      startRect,
+      startRect: gridStart,
       handle: 'right',
       dx: 10000,
       dy: 0,
-      constraints,
-      viewport,
-      snapLines,
+      constraints: gridConstraints,
+      viewport: gridViewport,
+      snapLines: grid,
       locks: { x: null, y: null },
     })
-    expect(result.size).toEqual({ width: 884, height: 400 })
-    expect(result.offset).toEqual({ x: 142, y: -38 })
+    expect(result.size.width).toBe(1000)
+    expect(result.offset.x).toBe(100)
   })
 
-  it('enforces the minimum width even when a rail is within reach', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
+  it('enforces the minimum width when no grid line is within reach', () => {
     const result = resizePanelRect({
-      startRect,
+      startRect: { left: 250, top: 144, width: 300, height: 180 },
       handle: 'right',
       dx: -10000,
       dy: 0,
-      constraints,
-      viewport,
-      snapLines,
+      constraints: gridConstraints,
+      viewport: gridViewport,
+      snapLines: grid,
       locks: { x: null, y: null },
     })
-    expect(result.size.width).toBe(constraints.minWidth)
+    expect(result.size.width).toBe(gridConstraints.minWidth)
     expect(result.activeLines.x).toEqual([])
   })
 
-  it('drives both axes and both offset components from a corner handle', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
-    // top-left grows leftward (offset.x) and shrinks from the top (offset.y),
-    // with deltas chosen to stay clear of every rail.
-    const result = resizePanelRect({
-      startRect,
-      handle: 'top-left',
-      dx: -40,
-      dy: 30,
-      constraints,
-      viewport,
-      snapLines,
-      locks: { x: null, y: null },
+  it('double-click grows a single edge out to the nearest grid line', () => {
+    const result = expandPanelToGrid({
+      rect: { left: 250, top: 144, width: 300, height: 180 },
+      handle: 'left',
+      both: false,
+      grid,
+      viewport: gridViewport,
     })
-    expect(result).toEqual({
-      size: { width: 640, height: 370 },
-      offset: { x: -20, y: -8 },
-      activeLines: { x: [], y: [] },
-      locks: { x: null, y: null },
-    })
+    // left 250 -> 216 (nearest line outward); right (550) unchanged.
+    expect(result.size).toEqual({ width: 334, height: 180 })
+    expect(result.offset).toEqual({ x: -233, y: 90 })
   })
 
-  it('keeps a held rail lock until the pointer breaks out of the resist zone', () => {
-    const snapLines = resizeSnapLines(panel, viewport)
-    // Incoming lock on the right rail (900) holds the edge while inside 12px...
-    const held = resizePanelRect({
-      startRect,
-      handle: 'right',
-      dx: 8,
-      dy: 0,
-      constraints,
-      viewport,
-      snapLines,
-      locks: { x: 900, y: null },
+  it('double-click a corner grows both grabbed edges to the grid', () => {
+    const result = expandPanelToGrid({
+      rect: { left: 250, top: 144, width: 300, height: 180 },
+      handle: 'bottom-left',
+      both: false,
+      grid,
+      viewport: gridViewport,
     })
-    expect(held.size.width).toBe(600)
-    expect(held.activeLines.x).toEqual([900])
-    expect(held.locks.x).toBe(900)
+    // left 250 -> 216, bottom 324 -> 414; top/right unchanged.
+    expect(result.size).toEqual({ width: 334, height: 270 })
+  })
 
-    // ...and releases once the pointer travels past the resist distance.
-    const released = resizePanelRect({
-      startRect,
-      handle: 'right',
-      dx: 40,
-      dy: 0,
-      constraints,
-      viewport,
-      snapLines,
-      locks: { x: 900, y: null },
+  it('double-click on an edge already on a grid line grows one cell out', () => {
+    const result = expandPanelToGrid({
+      rect: { left: 216, top: 144, width: 200, height: 180 },
+      handle: 'left',
+      both: false,
+      grid,
+      viewport: gridViewport,
     })
-    expect(released.size.width).toBe(640)
-    expect(released.activeLines.x).toEqual([])
-    expect(released.locks.x).toBeNull()
+    // left 216 sits on a line, so it grows to the next line out (116).
+    expect(result.size.width).toBe(300)
+  })
+
+  it('double-click on an edge at the outer margin is a no-op for that axis', () => {
+    const result = expandPanelToGrid({
+      rect: { left: 16, top: 144, width: 200, height: 180 },
+      handle: 'left',
+      both: false,
+      grid,
+      viewport: gridViewport,
+    })
+    // left is already at the margin (first grid line); nothing to grow into.
+    expect(result.size.width).toBe(200)
+  })
+
+  it('double-click with the modifier grows the opposite edges too', () => {
+    const edge = expandPanelToGrid({
+      rect: { left: 250, top: 144, width: 300, height: 180 },
+      handle: 'left',
+      both: true,
+      grid,
+      viewport: gridViewport,
+    })
+    // left 250 -> 216 AND right 550 -> 616 (horizontal both ways).
+    expect(edge.size).toEqual({ width: 400, height: 180 })
+
+    const corner = expandPanelToGrid({
+      rect: { left: 250, top: 144, width: 300, height: 180 },
+      handle: 'bottom-left',
+      both: true,
+      grid,
+      viewport: gridViewport,
+    })
+    // all four edges grow: left->216, right->616, top 144->54, bottom 324->414.
+    expect(corner.size).toEqual({ width: 400, height: 360 })
   })
 })

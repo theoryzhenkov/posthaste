@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Precise visual contract for the handoff-matched PostHaste interface"
-modified: 2026-05-30
-reviewed: 2026-05-30
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: docs/L0-branding
   - path: docs/L0-ui
@@ -613,7 +613,8 @@ Overlay:
 - Dragged panel offset and user size are persisted locally and restored on the next open.
 - Floating panels are user-resizable within the viewport via edge and corner handles on the panel sheet (all four edges plus all four corners; corners drive both axes). Initial sizes come from a shared 12-column by 8-row floating size grid; a resized panel may shrink to the preset minimum (or the shared `min-w-72`/`min-h-48` floor) and grow up to the usable viewport. The grabbed edge follows the pointer while the opposite edge stays fixed.
 - During a move drag, show faint guide rails sized to the panel: left/center/right modal-width columns and top/bottom modal-height rows, with no fill. When the panel reaches a rail it resists movement for `12px` before breaking out, and the active rail highlights while resisting.
-- During a resize drag, show the same faint guide rails — the panel-edge lines of those left/center/right and top/bottom slots, captured from the panel size at the start of the gesture. The dragged edge resists each rail for `12px` before breaking out, and the snapped rail highlights. Between gestures the rails are re-derived from the panel's current size, so they keep fitting the panel as it changes.
+- During a resize drag, show a **static** grid — the fixed 12-column by 8-row layout grid anchored to the viewport (column lines across the usable width, row lines down the usable height below the `54px` top offset), independent of the panel being dragged so every window standardizes to the same dimensions. Draw only the axis being resized (vertical lines for width, horizontal for height, both at a corner); idle grid lines are fainter than the movement rails, and the snapped line highlights. The dragged edge resists each grid line for `12px` before breaking out. A small monospace `cols × rows` chip centered on the panel reports its size in whole grid cells. (Movement rails stay dynamic — sized to the current panel — so the two systems read differently: move shows where the window will sit, resize shows standard sizes.)
+- Double-clicking a resize handle grows the panel out to the nearest grid line(s): an edge expands that side, a corner expands both grabbed sides. Holding `Option`/`Alt` also expands the opposite edge of each affected axis — so an edge grows on both sides and a corner grows on all four. The grow animates (≈`150ms`); live drags never animate.
 
 Panel sheet:
 
