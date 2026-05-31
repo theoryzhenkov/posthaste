@@ -66,6 +66,7 @@ import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesignTheme } from './hooks/useDesignTheme'
 import { useEmailActions } from './hooks/useEmailActions'
 import { useGlobalMailShortcuts } from './hooks/useGlobalMailShortcuts'
+import { useMailboxRole } from './hooks/useMailboxRole'
 import { useMailLayoutPersistence } from './hooks/useMailLayoutPersistence'
 import {
   closeWebSurface,
@@ -181,20 +182,13 @@ function MailClient({
   const effectiveView = hasEnabledSources
     ? (selectedView ?? DEFAULT_VIEW)
     : null
-  // Mailbox role of the active view, looked up by id from the already-cached
-  // sidebar mailbox tree (no extra fetch). Drives contextual row actions and is
-  // correct regardless of how the mailbox was reached — sidebar, command
-  // palette, or the default view.
-  const viewRole = useMemo<string | null>(() => {
-    if (effectiveView?.kind !== 'source-mailbox') return null
-    const source = sidebar?.sources.find(
-      (item) => item.id === effectiveView.sourceId,
-    )
-    return (
-      source?.mailboxes.find((item) => item.id === effectiveView.mailboxId)
-        ?.role ?? null
-    )
-  }, [sidebar, effectiveView])
+  // Mailbox role of the active view, resolved from the mailbox domain read
+  // model. Drives contextual row actions and is correct regardless of how the
+  // mailbox was reached — sidebar, command palette, or the default view.
+  const viewRole = useMailboxRole(
+    effectiveView?.kind === 'source-mailbox' ? effectiveView.sourceId : null,
+    effectiveView?.kind === 'source-mailbox' ? effectiveView.mailboxId : null,
+  )
   const shouldForceSettings = shouldForceAccountSettings({
     accounts,
     accountsQuerySucceeded: hasLoadedAccounts,
