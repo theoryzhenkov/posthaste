@@ -3,8 +3,8 @@ scope: L1
 type: DESIGN
 lifecycle: ephemeral
 summary: "Trust model for opening the API: authn, capability-scoped authz, boundary validation, rate limiting"
-modified: 2026-05-30
-reviewed: 2026-05-29
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: docs/eph/PLAN-L1-public-api-platform
   - path: docs/eph/DESIGN-L1-runtime-topology
@@ -81,13 +81,20 @@ real auth) modes.
   or `POSTHASTE_REQUIRE_AUTH=false` disables it (explicit config/env wins; absent
   config resolves to ON). When on, every `/v1` request except `GET /v1/health`
   (and the doc routes) requires the bearer token.
-- **SSE caveat.** Browsers' `EventSource` cannot set request headers, so the
-  `/v1/events` stream additionally accepts the token via an `?access_token=<token>`
-  query param. The middleware honors `access_token` **only** for the `/events` path;
-  all other routes require the `Authorization: Bearer` header. The web client appends
-  the param automatically when `window.__POSTHASTE_TOKEN__` is present. (Query-param
-  tokens can leak into logs/referrers; acceptable on loopback, revisit before any
-  non-loopback bind.)
+- **No token in URLs.** Every client authenticates with the `Authorization: Bearer`
+  header — there is no `?access_token=` query param on any route. The two transports
+  that the native browser primitives can't header-authenticate are handled with
+  `fetch()` instead:
+  - the **SSE stream** is consumed via `fetchEventSource` (a `fetch()`-backed
+    EventSource), which sets the header;
+  - **account logos and message attachments** (loaded by `<img>`/`<iframe>`/download
+    links, which also can't set headers) are `fetch()`ed with the header into a blob
+    and shown via an object URL (see `useAuthedBlobUrl`).
+
+  This keeps the token out of logs/referrers/history and means the middleware has a
+  single token path (the header), which is the prerequisite for a non-loopback bind.
+  (History: the stream and image reads briefly used a query-param token; it was
+  removed in the full-elimination migration once both moved to `fetch()`.)
 
 ### 2. Origin / Host validation (implemented, default-ON, same gate)
 

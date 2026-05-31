@@ -95,8 +95,13 @@ function hostHeader(): string | undefined {
 /**
  * Per-request headers carrying the bearer token (and, for remote profiles, the
  * pinned `Host` header). Empty when no token is set.
+ *
+ * Exported because the SSE stream (via `fetchEventSource`) and the
+ * browser-loadable blob fetches (logos, attachments) authenticate with the
+ * same header set rather than a URL token — there is no `access_token` query
+ * param anywhere anymore.
  */
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = authToken()
   if (token) {
@@ -109,45 +114,20 @@ function authHeaders(): Record<string, string> {
   return headers
 }
 
-/**
- * Append the active connection's bearer token as an `access_token` query param.
- * The single client-side place that puts a token in a URL — used by every
- * browser-loadable resource (EventSource, `<img>`) that cannot set the
- * `Authorization` header. The server honors it only on the matching read routes
- * (`accepts_query_token` in `auth.rs`). On loopback the query-param token is an
- * accepted trade-off (it can reach logs/Referer); see the design note.
- *
- * @spec docs/eph/DESIGN-L1-trust-model
- */
-function appendAccessToken(params: URLSearchParams): void {
-  const token = authToken()
-  if (token) {
-    params.set('access_token', token)
-  }
-}
-
 export function buildMessageAttachmentUrl(
   sourceId: string,
   messageId: string,
   attachmentId: string,
-  options?: { download?: boolean },
 ): string {
-  const url = new URL(
-    `${baseUrl()}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
-  )
-  if (options?.download) {
-    url.searchParams.set('download', '1')
-  }
-  appendAccessToken(url.searchParams)
-  return url.toString()
+  // No `?download=1` content-disposition variant: the bytes are loaded via an
+  // authenticated blob fetch (preview) or saved with the `download` attribute
+  // (downloads), so the client owns the filename and never needs the server to
+  // force attachment disposition.
+  return `${baseUrl()}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
 }
 
 export function buildAccountLogoUrl(imageId: string): string {
-  const url = new URL(
-    `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`,
-  )
-  appendAccessToken(url.searchParams)
-  return url.toString()
+  return `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`
 }
 
 /** @spec docs/L1-api#account-crud-lifecycle */
@@ -726,6 +706,8 @@ export async function triggerSync(
 
 /**
  * Build the SSE event stream URL, optionally resuming from a sequence number.
+ * The stream is consumed via `fetchEventSource`, which authenticates with the
+ * `Authorization` header (see {@link authHeaders}) — no token in the URL.
  * @spec docs/L1-api#sse-event-stream
  */
 export function buildEventsUrl(input?: {
@@ -739,7 +721,6 @@ export function buildEventsUrl(input?: {
   if (input?.afterSeq != null) {
     params.set('afterSeq', String(input.afterSeq))
   }
-  appendAccessToken(params)
   const search = params.toString()
   return `${baseUrl()}/events${search ? `?${search}` : ''}`
 }

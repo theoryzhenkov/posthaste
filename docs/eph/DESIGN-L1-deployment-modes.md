@@ -76,8 +76,9 @@ Promote the pattern the MCP adapter already proves (`apps/mcp/src/client.ts`
   single-writer lock via `daemon.json`) while making **remote** a real third mode.
 - **Critical refactor**: `client.ts` `resolveBaseUrl()`/`resolveAuthToken()` are
   module-load `const`s today; they must become **functions of the active profile**,
-  re-resolvable on switch — including `authHeaders()` and `buildEventsUrl()` (the SSE
-  `?access_token=` path).
+  re-resolvable on switch — including `authHeaders()`, which now carries the token for
+  the SSE stream (`fetchEventSource`) and logo/attachment blob fetches as well (no
+  `?access_token=` URL token).
 
 ## Client state layout
 
