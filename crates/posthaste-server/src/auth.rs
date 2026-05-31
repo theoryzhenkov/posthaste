@@ -82,13 +82,24 @@ fn query_token(req: &Request) -> Option<String> {
 /// are exempt from token auth: liveness + browsable docs. Swagger UI is mounted
 /// at the app root under `/v1/docs` and never reaches this middleware.
 fn is_exempt_path(path: &str) -> bool {
-    matches!(path, "/health" | "/openapi.json" | "/asyncapi.json")
+    matches!(
+        nest_relative(path),
+        "/health" | "/openapi.json" | "/asyncapi.json"
+    )
 }
 
 /// Whether the request targets the SSE event stream, which accepts a token via
 /// the `access_token` query param because `EventSource` cannot set headers.
 fn is_events_path(path: &str) -> bool {
-    path == "/events"
+    nest_relative(path) == "/events"
+}
+
+/// Strip the `/v1` API nest prefix. The auth layer runs on the nested router but
+/// `req.uri().path()` is the full path (`/v1/events`), so these route checks
+/// must key on the nest-relative path the router declares — the same way the
+/// authz-map lookup strips `/v1` from the matched template.
+fn nest_relative(path: &str) -> &str {
+    path.strip_prefix("/v1").unwrap_or(path)
 }
 
 /// Validate that a browser-supplied `Origin`/`Referer` matches the allowlist.
@@ -504,6 +515,23 @@ mod tests {
         assert!(!constant_time_eq(b"token", b"toker"));
         assert!(!constant_time_eq(b"token", b"tok"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn route_checks_handle_the_v1_nest_prefix() {
+        // The auth layer runs on the nested router but sees the full request
+        // path, so the SSE stream arrives as `/v1/events`. Regression: it was
+        // only matched as `/events`, so EventSource's `access_token` query token
+        // was dropped and `/events` 401'd under require_auth, killing live
+        // updates (archived/deleted rows lingered until a manual refresh).
+        assert!(is_events_path("/v1/events"));
+        assert!(is_events_path("/events"));
+        assert!(!is_events_path("/v1/messages"));
+
+        assert!(is_exempt_path("/v1/openapi.json"));
+        assert!(is_exempt_path("/v1/health"));
+        assert!(is_exempt_path("/health"));
+        assert!(!is_exempt_path("/v1/sources"));
     }
 
     #[test]
