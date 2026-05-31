@@ -44,6 +44,14 @@ export function isMacDesktop(): boolean {
   return /Mac/i.test(navigator.userAgent)
 }
 
+// Toggle the current window's devtools. Gated by the "Developer tools" setting
+// at the call site; the command is a no-op when devtools are not compiled in.
+export async function toggleDevtools(): Promise<void> {
+  if (isTauriRuntime()) {
+    await invoke('toggle_devtools')
+  }
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   if (isTauriRuntime()) {
     await invoke('open_external_url', { url })

@@ -52,7 +52,9 @@ import {
   isMainDesktopWindow,
   isTauriRuntime,
   listenForDesktopCloseRequest,
+  toggleDevtools,
 } from './desktop'
+import { isDeveloperToolsEnabled } from './developerTools'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -710,6 +712,24 @@ export default function App() {
     routeState.kind === 'invalid' ? routeState.route : null
   const isStandaloneSurface =
     isTauriRuntime() && routeState.kind !== 'none' && !isMainDesktopWindow()
+
+  // Devtools shortcut for every window, gated by the "Developer tools" setting.
+  // `toggleDevtools` is a no-op off desktop, so the listener is harmless on web.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.altKey &&
+        event.code === 'KeyI' &&
+        isDeveloperToolsEnabled()
+      ) {
+        event.preventDefault()
+        void toggleDevtools()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>

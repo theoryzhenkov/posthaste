@@ -21,8 +21,6 @@ mod client_connection;
 mod e2e;
 
 const CLOSE_WINDOW_MENU_ID: &str = "close-window";
-#[cfg(any(debug_assertions, feature = "devtools"))]
-const TOGGLE_DEVTOOLS_MENU_ID: &str = "toggle-devtools";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -383,10 +381,6 @@ pub fn run() {
         if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
             close_remembered_webview_window(app);
         }
-        #[cfg(any(debug_assertions, feature = "devtools"))]
-        if event.id().as_ref() == TOGGLE_DEVTOOLS_MENU_ID {
-            toggle_remembered_webview_devtools(app);
-        }
     });
 
     #[cfg(feature = "e2e-testing")]
@@ -394,6 +388,7 @@ pub fn run() {
         log_from_frontend,
         open_external_url,
         open_surface_window,
+        toggle_devtools,
         client_connection::client_connections_read,
         client_connection::client_connections_write,
         client_connection::client_token_get,
@@ -407,6 +402,7 @@ pub fn run() {
         log_from_frontend,
         open_external_url,
         open_surface_window,
+        toggle_devtools,
         client_connection::client_connections_read,
         client_connection::client_connections_write,
         client_connection::client_token_get,
@@ -477,19 +473,9 @@ pub fn run() {
 }
 
 fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<R>> {
-    #[cfg(any(debug_assertions, feature = "devtools"))]
-    let view_menu = {
-        let toggle_devtools = tauri::menu::MenuItem::with_id(
-            manager,
-            TOGGLE_DEVTOOLS_MENU_ID,
-            "Toggle Developer Tools",
-            true,
-            Some("CmdOrCtrl+Alt+I"),
-        )?;
-        SubmenuBuilder::new(manager, "View")
-            .item(&toggle_devtools)
-            .build()?
-    };
+    // Devtools are no longer a native menu item; they are toggled from the web
+    // (Cmd/Ctrl+Alt+I) gated by the "Developer tools" setting via the
+    // `toggle_devtools` command, so they can be flipped on/off in one build.
 
     // macOS: build the standard App / Edit / Window submenus out of predefined
     // items. Predefined items map to native AppKit selectors (`performClose:`,
@@ -529,8 +515,6 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
             .build()?;
 
         let builder = MenuBuilder::new(manager).item(&app_menu).item(&edit_menu);
-        #[cfg(any(debug_assertions, feature = "devtools"))]
-        let builder = builder.item(&view_menu);
         let builder = builder.item(&window_menu);
         return builder.build();
     }
@@ -551,8 +535,6 @@ fn build_app_menu<M: Manager<R>, R: Runtime>(manager: &M) -> tauri::Result<Menu<
             .item(&close_window)
             .build()?;
         let builder = MenuBuilder::new(manager).item(&file_menu);
-        #[cfg(any(debug_assertions, feature = "devtools"))]
-        let builder = builder.item(&view_menu);
         builder.build()
     }
 }
@@ -596,31 +578,22 @@ fn close_remembered_webview_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-#[cfg(any(debug_assertions, feature = "devtools"))]
-fn toggle_remembered_webview_devtools<R: Runtime>(app: &AppHandle<R>) {
-    let remembered_label = app.state::<FocusedWindowLabel>().get();
-    if let Some(window) = app.get_webview_window(&remembered_label) {
-        toggle_webview_devtools(&window);
-        return;
-    }
-
-    if let Some(window) = app
-        .webview_windows()
-        .into_values()
-        .find(|window| window.is_focused().unwrap_or(false))
+/// Open or close the calling window's devtools. The `devtools` feature is
+/// compiled into release builds, so this is the runtime hook for the
+/// "Developer tools" setting: the web side only invokes it when that flip is on
+/// (and binds the shortcut), giving a single build with toggleable devtools
+/// instead of a separate DevTools bundle. A no-op when devtools are not
+/// compiled in.
+#[tauri::command]
+fn toggle_devtools(_window: tauri::WebviewWindow) {
+    #[cfg(any(debug_assertions, feature = "devtools"))]
     {
-        app.state::<FocusedWindowLabel>().set(window.label());
-        toggle_webview_devtools(&window);
+        if _window.is_devtools_open() {
+            _window.close_devtools();
+        } else {
+            _window.open_devtools();
+        }
     }
-}
-
-#[cfg(any(debug_assertions, feature = "devtools"))]
-fn toggle_webview_devtools<R: Runtime>(window: &WebviewWindow<R>) {
-    if window.is_devtools_open() {
-        window.close_devtools();
-        return;
-    }
-    window.open_devtools();
 }
 
 fn request_close_for_window_label<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
