@@ -121,7 +121,7 @@ fn build_state() -> Arc<AppState> {
 fn build_app(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/accounts", get(ok))
-        .route("/sidebar", get(ok))
+        .route("/read", post(ok))
         .route("/views/conversations", get(ok))
         .route("/smart-mailboxes/{smart_mailbox_id}/conversations", get(ok))
         .route("/events", get(ok))
@@ -415,10 +415,7 @@ async fn duplicate_filter_param_is_denied() {
 #[tokio::test]
 async fn scoped_token_on_global_route_is_forbidden() {
     let t = mint_with_caveats(&test_root_key(), &["account = acct-a"]);
-    assert_eq!(
-        status(&t, "GET", "/v1/sidebar").await,
-        StatusCode::FORBIDDEN
-    );
+    assert_eq!(status(&t, "POST", "/v1/read").await, StatusCode::FORBIDDEN);
 }
 
 // -- 401 vs 403 split: a forged token is 401, not 403. --

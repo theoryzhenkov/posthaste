@@ -538,7 +538,7 @@ export function findConversationIdForMessage(
   }
 
   for (const [, conversation] of queryClient.getQueriesData<ConversationView>({
-    queryKey: ['conversation'],
+    queryKey: mailKeys.conversationRoot,
   })) {
     if (
       conversation?.messages.some(
@@ -552,7 +552,7 @@ export function findConversationIdForMessage(
   }
 
   for (const [, summary] of queryClient.getQueriesData<ConversationSummary>({
-    queryKey: ['conversation-summary'],
+    queryKey: mailKeys.conversationSummaryRoot,
   })) {
     if (
       summary?.latestMessage.sourceId === target.sourceId &&

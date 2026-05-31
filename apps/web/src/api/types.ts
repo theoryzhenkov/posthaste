@@ -346,6 +346,48 @@ export interface OkResponse {
   ok: boolean
 }
 
+/** @spec docs/L1-api#read-calls */
+export type ReadOperation =
+  | 'Account/list'
+  | 'Mailbox/list'
+  | 'SmartMailbox/list'
+  | 'Tag/list'
+
+/** @spec docs/L1-api#read-calls */
+export type ReadAccountIdSelector = string[] | string
+
+/** @spec docs/L1-api#read-calls */
+export interface ReadCall {
+  id: string
+  op: ReadOperation
+  args?: {
+    accountIds?: ReadAccountIdSelector
+  }
+}
+
+/** @spec docs/L1-api#read-calls */
+export interface ReadRequest {
+  calls: ReadCall[]
+}
+
+/** @spec docs/L1-api#read-calls */
+export type ReadResult =
+  | {
+      op: 'Account/list'
+      value: { ids: string[]; enabledIds: string[]; items: AccountOverview[] }
+    }
+  | {
+      op: 'Mailbox/list'
+      value: { byAccountId: Record<string, Mailbox[]> }
+    }
+  | { op: 'SmartMailbox/list'; value: { items: SmartMailboxSummary[] } }
+  | { op: 'Tag/list'; value: { items: TagSummary[] } }
+
+/** @spec docs/L1-api#read-calls */
+export interface ReadResponse {
+  results: Record<string, ReadResult>
+}
+
 /** @spec docs/L1-api#endpoint-table */
 export interface Mailbox {
   id: string
@@ -582,33 +624,11 @@ export interface ConversationView {
   messages: MessageSummary[]
 }
 
-/** @spec docs/L1-ui#component-hierarchy */
-export interface SidebarSmartMailbox {
-  id: string
-  name: string
-  unreadMessages: number
-  totalMessages: number
-}
-
 /** @spec docs/L1-api#endpoint-table */
 export interface TagSummary {
   name: string
   unreadMessages: number
   totalMessages: number
-}
-
-/** @spec docs/L1-ui#component-hierarchy */
-export interface SidebarSource {
-  id: string
-  name: string
-  mailboxes: Mailbox[]
-}
-
-/** @spec docs/L1-api#endpoint-table */
-export interface SidebarResponse {
-  smartMailboxes: SidebarSmartMailbox[]
-  tags: TagSummary[]
-  sources: SidebarSource[]
 }
 
 /**

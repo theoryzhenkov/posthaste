@@ -336,6 +336,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute typed read calls
+         * @description Executes a JMAP-style batch of typed, read-only domain operations.
+         */
+        post: operations["read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sender-addresses": {
         parameters: {
             query?: never;
@@ -378,26 +398,6 @@ export interface paths {
          * @description Sparse-merges provided settings fields. Validates that a referenced default account exists before persisting.
          */
         patch: operations["patch_settings"];
-        trace?: never;
-    };
-    "/v1/sidebar": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get sidebar
-         * @description Returns the combined sidebar payload: smart mailboxes, tags, and per-source mailboxes.
-         */
-        get: operations["get_sidebar"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/smart-mailboxes": {
@@ -897,6 +897,16 @@ export interface components {
          */
         AccountId: string;
         /**
+         * @description Account id selector for read calls. A string beginning with `#` is a result
+         *     reference such as `#accounts.ids`; an array is an explicit account-id list.
+         */
+        AccountIdSelector: string[] | string;
+        AccountListReadResult: {
+            enabledIds: components["schemas"]["AccountId"][];
+            ids: components["schemas"]["AccountId"][];
+            items: components["schemas"]["AccountOverview"][];
+        };
+        /**
          * @description Combined account config and runtime state returned by the API.
          *
          *     @spec docs/L1-api#account-crud-lifecycle
@@ -1271,6 +1281,11 @@ export interface components {
          *     @spec docs/L1-jmap#core-types
          */
         MailboxId: string;
+        MailboxListReadResult: {
+            byAccountId: {
+                [key: string]: components["schemas"]["MailboxSummary"][];
+            };
+        };
         /**
          * @description Lightweight mailbox view for sidebar and list endpoints.
          *
@@ -1466,6 +1481,53 @@ export interface components {
             /** Format: int64 */
             size: number;
         };
+        /** @description A single domain read operation requested as part of `POST /v1/read`. */
+        ReadCall: {
+            args?: components["schemas"]["ReadCallArgs"];
+            id: string;
+            op: components["schemas"]["ReadOperation"];
+        };
+        /** @description Optional read-call arguments. Only `Mailbox/list` currently uses `accountIds`. */
+        ReadCallArgs: {
+            accountIds?: null | components["schemas"]["AccountIdSelector"];
+        };
+        /**
+         * @description Supported read operation names.
+         * @enum {string}
+         */
+        ReadOperation: "Account/list" | "Mailbox/list" | "SmartMailbox/list" | "Tag/list";
+        /**
+         * @description Request body for the typed read-call endpoint.
+         *
+         *     @spec docs/L1-api#read-calls
+         */
+        ReadRequest: {
+            calls: components["schemas"]["ReadCall"][];
+        };
+        /** @description Response body for the typed read-call endpoint. */
+        ReadResponse: {
+            results: {
+                [key: string]: components["schemas"]["ReadResult"];
+            };
+        };
+        /** @description A successful read-call result, discriminated by operation name. */
+        ReadResult: {
+            /** @enum {string} */
+            op: "Account/list";
+            value: components["schemas"]["AccountListReadResult"];
+        } | {
+            /** @enum {string} */
+            op: "Mailbox/list";
+            value: components["schemas"]["MailboxListReadResult"];
+        } | {
+            /** @enum {string} */
+            op: "SmartMailbox/list";
+            value: components["schemas"]["SmartMailboxListReadResult"];
+        } | {
+            /** @enum {string} */
+            op: "Tag/list";
+            value: components["schemas"]["TagListReadResult"];
+        };
         /**
          * @description Email address with optional display name.
          *
@@ -1563,39 +1625,6 @@ export interface components {
             remove: string[];
         };
         /**
-         * @description Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.
-         *
-         *     @spec docs/L1-api#navigation
-         */
-        SidebarResponse: {
-            smartMailboxes: components["schemas"]["SidebarSmartMailbox"][];
-            sources: components["schemas"]["SidebarSource"][];
-            tags: components["schemas"]["TagSummary"][];
-        };
-        /**
-         * @description Smart mailbox entry with live counts for the sidebar.
-         *
-         *     @spec docs/L1-api#navigation
-         */
-        SidebarSmartMailbox: {
-            id: components["schemas"]["SmartMailboxId"];
-            name: string;
-            /** Format: int64 */
-            totalMessages: number;
-            /** Format: int64 */
-            unreadMessages: number;
-        };
-        /**
-         * @description An account with its mailboxes, as rendered in the sidebar.
-         *
-         *     @spec docs/L1-api#navigation
-         */
-        SidebarSource: {
-            id: components["schemas"]["AccountId"];
-            mailboxes: components["schemas"]["MailboxSummary"][];
-            name: string;
-        };
-        /**
          * @description A saved query with display metadata that behaves like a virtual mailbox.
          *
          *     @spec docs/L0-search#smart-mailboxes
@@ -1662,6 +1691,9 @@ export interface components {
          * @enum {string}
          */
         SmartMailboxKind: "default" | "user";
+        SmartMailboxListReadResult: {
+            items: components["schemas"]["SmartMailboxSummary"][];
+        };
         /**
          * @description Comparison operator for a smart mailbox condition.
          *
@@ -1815,6 +1847,9 @@ export interface components {
          * @enum {string}
          */
         SyncTrigger: "startup" | "poll" | "push" | "manual";
+        TagListReadResult: {
+            items: components["schemas"]["TagSummary"][];
+        };
         /**
          * @description User-facing tag derived from non-system JMAP keywords.
          *
@@ -2554,6 +2589,48 @@ export interface operations {
             };
         };
     };
+    read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReadRequest"];
+            };
+        };
+        responses: {
+            /** @description Read-call results keyed by call id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadResponse"];
+                };
+            };
+            /** @description Invalid read call or result reference */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     list_sender_addresses: {
         parameters: {
             query?: never;
@@ -2636,35 +2713,6 @@ export interface operations {
             };
             /** @description Validation failed */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-        };
-    };
-    get_sidebar: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The sidebar payload */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SidebarResponse"];
-                };
-            };
-            /** @description Internal error */
-            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -20,7 +20,8 @@ export const queryKeys = {
   senderAddresses: ['sender-addresses'] as const,
   composeRecipientSuggestions: ['compose-recipient-suggestions'] as const,
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
-  sidebar: ['sidebar'] as const,
+  tags: ['tags'] as const,
+  mailNavigationRead: ['read', 'mail-navigation'] as const,
   messagesRoot: ['messages'] as const,
   conversationsRoot: ['conversations'] as const,
   messageDetailsRoot: ['message'] as const,
@@ -38,6 +39,7 @@ export const queryKeys = {
       sort ? { columnId: sort.columnId, direction: sort.direction } : null,
     ] as const,
   smartMailboxes: ['smart-mailboxes'] as const,
+  smartMailboxRoot: ['smart-mailbox'] as const,
   smartMailbox: (smartMailboxId: string | null) =>
     ['smart-mailbox', smartMailboxId] as const,
 }

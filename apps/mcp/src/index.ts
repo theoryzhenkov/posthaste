@@ -71,14 +71,34 @@ function buildServer(conn: Connection): McpServer {
   );
 
   server.registerTool(
-    "get_sidebar",
+    "read_mail_navigation",
     {
-      title: "Get sidebar",
+      title: "Read mail navigation",
       description:
-        "Get the sidebar tree (accounts, mailboxes, smart mailboxes) for navigation.",
+        "Read accounts, enabled-account mailboxes, smart mailboxes, and tags in one typed batch.",
       inputSchema: {},
     },
-    wrap(async () => apiFetch<Schemas["SidebarResponse"]>(conn, "/sidebar")),
+    wrap(async () =>
+      apiFetch<Schemas["ReadResponse"]>(conn, "/read", {
+        method: "POST",
+        body: {
+          calls: [
+            { id: "accounts", op: "Account/list" },
+            {
+              id: "mailboxes",
+              op: "Mailbox/list",
+              args: { accountIds: "#accounts.enabledIds" },
+            },
+            { id: "smartMailboxes", op: "SmartMailbox/list" },
+            {
+              id: "tags",
+              op: "Tag/list",
+              args: { accountIds: "#accounts.enabledIds" },
+            },
+          ],
+        },
+      }),
+    ),
   );
 
   server.registerTool(

@@ -24,22 +24,24 @@ import {
 import {
   buildMessageAttachmentUrl,
   fetchConversation,
+  fetchMailboxes,
   fetchMessage,
 } from '../api/client'
 import type {
   AccountOverview,
   MessageDetail as MessageDetailRecord,
   MessageSummary,
+  Mailbox,
   Recipient,
-  SidebarResponse,
   SourceMessageRef,
 } from '../api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '../attachments'
 import { openFocusedSurface } from '../hooks/useSurfaceRouting'
 import { cn } from '../lib/utils'
 import { downloadAuthedResource } from '../lib/downloadAuthedResource'
-import { mergeConversationView } from '../mailState'
+import { mailKeys, mergeConversationView } from '../mailState'
 import { resolveMessageBodyRender } from '../messageBody'
+import { queryKeys } from '../queryKeys'
 import { attachmentSurface } from '../surfaces'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -55,7 +57,6 @@ interface MessageSelection extends SourceMessageRef {
 interface MessageDetailProps {
   selection: MessageSelection | null
   accounts?: AccountOverview[]
-  sidebar?: SidebarResponse
   onArchive: () => void
   onForward: () => void
   onReply: () => void
@@ -133,15 +134,11 @@ function emailMatchesPattern(email: string, pattern: string): boolean {
 function isOutgoingMessage(
   message: MessageDetailRecord,
   accounts: AccountOverview[],
-  sidebar?: SidebarResponse,
+  sourceMailboxes: Mailbox[],
 ): boolean {
-  const source = sidebar?.sources.find(
-    (candidate) => candidate.id === message.sourceId,
-  )
-  const sentMailboxIds =
-    source?.mailboxes
-      .filter((mailbox) => mailbox.role === 'sent')
-      .map((mailbox) => mailbox.id) ?? []
+  const sentMailboxIds = sourceMailboxes
+    .filter((mailbox) => mailbox.role === 'sent')
+    .map((mailbox) => mailbox.id)
   if (
     message.mailboxIds.some((mailboxId) => sentMailboxIds.includes(mailboxId))
   ) {
@@ -167,7 +164,6 @@ function isOutgoingMessage(
 export function MessageDetail({
   selection,
   accounts = [],
-  sidebar,
   onArchive,
   onForward,
   onReply,
@@ -176,7 +172,9 @@ export function MessageDetail({
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
   const conversationQuery = useQuery({
-    queryKey: ['conversation', selection?.conversationId],
+    queryKey: selection
+      ? mailKeys.conversation(selection.conversationId)
+      : [...mailKeys.conversationRoot, null],
     queryFn: () => fetchConversation(selection!.conversationId),
     enabled: selection !== null,
   })
@@ -188,7 +186,9 @@ export function MessageDetail({
     isLoading: isMessageLoading,
     refetch: refetchMessage,
   } = useQuery({
-    queryKey: ['message', selection?.sourceId, selection?.messageId],
+    queryKey: selection
+      ? mailKeys.message(selection.sourceId, selection.messageId)
+      : [...mailKeys.messageRoot, null, null],
     queryFn: () => fetchMessage(selection!.messageId, selection!.sourceId),
     enabled: selection !== null,
   })
@@ -203,6 +203,12 @@ export function MessageDetail({
   const conversation = conversationQuery.data
   const hasMessageDetailPayload = isMessageDetailPayload(messageData)
   const message = hasMessageDetailPayload ? messageData : null
+  const messageSourceId = message?.sourceId ?? null
+  const sourceMailboxesQuery = useQuery({
+    queryKey: queryKeys.mailboxes(messageSourceId),
+    queryFn: () => fetchMailboxes(messageSourceId!),
+    enabled: messageSourceId !== null,
+  })
 
   useEffect(() => {
     if (!messageData || hasMessageDetailPayload || isMessageFetching) {
@@ -293,7 +299,11 @@ export function MessageDetail({
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
-  const recipientLabel = isOutgoingMessage(message, accounts, sidebar)
+  const recipientLabel = isOutgoingMessage(
+    message,
+    accounts,
+    sourceMailboxesQuery.data ?? [],
+  )
     ? `to ${formatRecipientList(message.to)}`
     : 'to me'
   const threadMessages = dedupeConversationMessages(conversation.messages)

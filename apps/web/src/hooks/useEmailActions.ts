@@ -9,15 +9,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { fetchSidebar, performMessageCommand } from '../api/client'
+import { fetchMailboxes, performMessageCommand } from '../api/client'
 import type {
   KnownMailboxRole,
   MessageCommand,
+  Mailbox,
   MessageDetail,
   MessageSummary,
-  SidebarResponse,
   SourceMessageRef,
 } from '../api/types'
+import {
+  invalidateMessageMutationReadModels,
+  invalidateMessageScopeReadModels,
+} from '../domainCache'
 import {
   MAILBOX_ROLES,
   SYSTEM_KEYWORD_PREFIX,
@@ -70,12 +74,11 @@ type MutationContext = {
 export type EmailActions = ReturnType<typeof useEmailActions>
 
 function requiredMailboxByRole(
-  sidebar: SidebarResponse | undefined,
+  mailboxes: Mailbox[] | undefined,
   sourceId: string,
   role: KnownMailboxRole,
 ) {
-  const source = sidebar?.sources.find((candidate) => candidate.id === sourceId)
-  const mailbox = source?.mailboxes.find((candidate) => candidate.role === role)
+  const mailbox = mailboxes?.find((candidate) => candidate.role === role)
   if (!mailbox) {
     throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`)
   }
@@ -201,33 +204,6 @@ function uniqueUserTags(tags: string[]): string[] {
   return unique
 }
 
-function invalidateMessageScope(
-  queryClient: ReturnType<typeof useQueryClient>,
-  target: SourceMessageRef,
-  conversationId: string | null,
-) {
-  queryClient.invalidateQueries({
-    queryKey: mailKeys.message(target.sourceId, target.messageId),
-  })
-  if (conversationId) {
-    queryClient.invalidateQueries({
-      queryKey: mailKeys.conversation(conversationId),
-    })
-    queryClient.invalidateQueries({
-      queryKey: mailKeys.conversationSummary(conversationId),
-    })
-  }
-  queryClient.invalidateQueries({ queryKey: ['conversations'] })
-}
-
-function invalidateKeywordMutationScope(
-  queryClient: ReturnType<typeof useQueryClient>,
-) {
-  queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-  queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-  queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
-}
-
 async function cancelKeywordMutationQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   target: SourceMessageRef,
@@ -335,13 +311,16 @@ export function useEmailActions() {
         if (!merged) {
           context.incomplete = true
         }
-        invalidateKeywordMutationScope(queryClient)
+        void invalidateMessageMutationReadModels(queryClient, input.target)
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: queryKeys.sidebar })
-      queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-      invalidateMessageScope(queryClient, input.target, conversationId)
+      void invalidateMessageMutationReadModels(queryClient, input.target)
+      void invalidateMessageScopeReadModels(
+        queryClient,
+        input.target,
+        conversationId,
+      )
     },
     onError: (error, _input, context) => {
       if (context?.snapshots.length) {
@@ -351,7 +330,7 @@ export function useEmailActions() {
     },
     onSettled: (_data, _error, _input, context) => {
       if (context?.isKeywordMutation && context.incomplete) {
-        invalidateMessageScope(
+        void invalidateMessageScopeReadModels(
           queryClient,
           context.target,
           context.conversationId,
@@ -548,13 +527,13 @@ async function replaceMailboxCommandByRole(
   target: SourceMessageRef,
   role: KnownMailboxRole,
 ): Promise<MessageCommand> {
-  const sidebar =
-    queryClient.getQueryData<SidebarResponse>(queryKeys.sidebar) ??
+  const mailboxes =
+    queryClient.getQueryData<Mailbox[]>(queryKeys.mailboxes(target.sourceId)) ??
     (await queryClient.ensureQueryData({
-      queryFn: fetchSidebar,
-      queryKey: queryKeys.sidebar,
+      queryFn: () => fetchMailboxes(target.sourceId),
+      queryKey: queryKeys.mailboxes(target.sourceId),
     }))
-  const mailbox = requiredMailboxByRole(sidebar, target.sourceId, role)
+  const mailbox = requiredMailboxByRole(mailboxes, target.sourceId, role)
   return {
     kind: 'replaceMailboxes',
     mailboxIds: [mailbox.id],

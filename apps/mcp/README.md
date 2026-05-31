@@ -79,7 +79,7 @@ Each tool maps to one documented `/v1` operation. Inputs are validated with
 | Tool                 | Operation                                                          |
 | -------------------- | ----------------------------------------------------------------- |
 | `list_accounts`      | `GET /accounts`                                                   |
-| `get_sidebar`        | `GET /sidebar`                                                    |
+| `read_mail_navigation` | `POST /read` typed batch for accounts, mailboxes, smart mailboxes, and tags |
 | `list_conversations` | `GET /views/conversations`                                        |
 | `get_conversation`   | `GET /views/conversations/{id}`                                   |
 | `search_messages`    | `GET /messages/search`                                            |

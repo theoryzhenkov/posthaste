@@ -23,13 +23,8 @@ import {
 import { Loader2, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { shouldForceAccountSettings } from './accountSetup'
-import {
-  fetchAccounts,
-  fetchMessage,
-  fetchSidebar,
-  triggerSync,
-} from './api/client'
-import type { MessageSummary } from './api/types'
+import { fetchAccounts, fetchMessage, triggerSync } from './api/client'
+import type { MessageSummary, TagSummary } from './api/types'
 import { ActionBar } from './components/ActionBar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { MessageDetail } from './components/MessageDetail'
@@ -55,6 +50,7 @@ import {
   toggleDevtools,
 } from './desktop'
 import { isDeveloperToolsEnabled } from './developerTools'
+import { invalidateSyncStartedReadModels } from './domainCache'
 import {
   ResizableHandle,
   ResizablePanel,
@@ -68,6 +64,7 @@ import { useEmailActions } from './hooks/useEmailActions'
 import { useGlobalMailShortcuts } from './hooks/useGlobalMailShortcuts'
 import { useMailboxRole } from './hooks/useMailboxRole'
 import { useMailLayoutPersistence } from './hooks/useMailLayoutPersistence'
+import { useMailNavigationReadBootstrap } from './mailboxNavigationReadModels'
 import {
   closeWebSurface,
   openFocusedSurface,
@@ -160,20 +157,18 @@ function MailClient({
     theme.setMode(theme.resolvedMode === 'dark' ? 'light' : 'dark')
   }, [theme])
 
-  const {
-    data: accounts = [],
-    isError: hasAccountsError,
-    isLoading,
-    isSuccess: hasLoadedAccounts,
-  } = useQuery({
+  const mailNavigationBootstrap = useMailNavigationReadBootstrap()
+  const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
+    enabled: false,
   })
-  const { data: sidebar } = useQuery({
-    queryKey: queryKeys.sidebar,
-    queryFn: fetchSidebar,
-  })
-
+  const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
+  const hasAccountsError =
+    accountsQuery.isError || mailNavigationBootstrap.isError
+  const isLoading = accountsQuery.isLoading || mailNavigationBootstrap.isLoading
+  const hasLoadedAccounts =
+    accountsQuery.isSuccess || mailNavigationBootstrap.isSuccess
   const enabledAccounts = useMemo(
     () => accounts.filter((account) => account.enabled),
     [accounts],
@@ -225,10 +220,16 @@ function MailClient({
     }
   }, [effectiveSurface, shouldRenderForcedSettings])
 
+  const tagsQuery = useQuery<TagSummary[]>({
+    queryKey: queryKeys.tags,
+    queryFn: () => Promise.resolve([]),
+    enabled: false,
+  })
+
   const selectedMessageQuery = useQuery({
     queryKey: selectedMessage
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
-      : ['message', null, null],
+      : [...mailKeys.messageRoot, null, null],
     queryFn: () =>
       fetchMessage(selectedMessage!.messageId, selectedMessage!.sourceId),
     enabled: selectedMessage !== null,
@@ -244,11 +245,9 @@ function MailClient({
   const actions = useEmailActions()
   const syncSourceMutation = useMutation({
     mutationFn: triggerSync,
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
-      ])
+    onSuccess: async (_result, input) => {
+      const sourceId = typeof input === 'string' ? input : input.sourceId
+      await invalidateSyncStartedReadModels(queryClient, sourceId)
       toast('Sync started')
     },
     onError: (error) => {
@@ -584,7 +583,6 @@ function MailClient({
                   <MessageDetail
                     selection={selectedMessage}
                     accounts={accounts}
-                    sidebar={sidebar}
                     onArchive={handleArchive}
                     onForward={handleForward}
                     onReply={handleReply}
@@ -626,7 +624,7 @@ function MailClient({
       {isTagEditorOpen && selectedMessageQuery.data && (
         <TagEditor
           actions={actions}
-          knownTags={sidebar?.tags ?? []}
+          knownTags={tagsQuery.data ?? []}
           message={selectedMessageQuery.data}
           onClose={() => setIsTagEditorOpen(false)}
         />

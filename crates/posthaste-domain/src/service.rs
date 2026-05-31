@@ -10,11 +10,10 @@ use crate::{
     MailGateway, MailStore, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
     MessageCursor, MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore,
     MessagePage, MessageSortField, MessageSummary, SendMessageRequest, ServiceError,
-    SharedConfigRepository, SidebarResponse, SidebarSmartMailbox, SidebarSource, SmartMailbox,
-    SmartMailboxId, SmartMailboxRule, SmartMailboxStore, SmartMailboxSummary, SortDirection,
-    SourceDataStore, SourceProjectionStore, SyncMode, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_SYNC_COMPLETED,
-    EVENT_TOPIC_SYNC_FAILED,
+    SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
+    SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore, SyncMode,
+    SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary, ThreadId,
+    ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -335,64 +334,6 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    /// Build the full sidebar: smart mailboxes with counts + per-source mailboxes.
-    ///
-    /// @spec docs/L1-api#navigation
-    pub fn get_sidebar(&self) -> Result<SidebarResponse, ServiceError> {
-        let smart_mailboxes = self.config.list_smart_mailboxes()?;
-        let sources = self.config.list_sources()?;
-
-        let sidebar_smart_mailboxes: Vec<SidebarSmartMailbox> = smart_mailboxes
-            .into_iter()
-            .map(|mailbox| -> Result<SidebarSmartMailbox, ServiceError> {
-                let (unread, total) = self
-                    .smart_mailboxes
-                    .query_smart_mailbox_counts(&mailbox.rule)?;
-                Ok(SidebarSmartMailbox {
-                    id: mailbox.id,
-                    name: mailbox.name,
-                    unread_messages: unread,
-                    total_messages: total,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let sidebar_sources: Vec<SidebarSource> = sources
-            .into_iter()
-            .filter(|source| source.enabled)
-            .map(|source| -> Result<SidebarSource, ServiceError> {
-                let mailboxes = self.mailbox_reader.list_mailboxes(&source.id)?;
-                Ok(SidebarSource {
-                    id: source.id,
-                    name: source.name,
-                    mailboxes,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut tag_totals = std::collections::BTreeMap::<String, (i64, i64)>::new();
-        for source in &sidebar_sources {
-            for tag in self.tag_reader.list_tags(&source.id)? {
-                let entry = tag_totals.entry(tag.name).or_insert((0, 0));
-                entry.0 += tag.unread_messages;
-                entry.1 += tag.total_messages;
-            }
-        }
-        let tags = tag_totals
-            .into_iter()
-            .map(|(name, (unread_messages, total_messages))| TagSummary {
-                name,
-                unread_messages,
-                total_messages,
-            })
-            .collect();
-
-        Ok(SidebarResponse {
-            smart_mailboxes: sidebar_smart_mailboxes,
-            tags,
-            sources: sidebar_sources,
-        })
-    }
-
     // -- Store delegates (runtime data) --
 
     /// List all mailboxes for an account.
@@ -403,6 +344,34 @@ impl MailService {
         self.mailbox_reader
             .list_mailboxes(account_id)
             .map_err(Into::into)
+    }
+
+    /// List user-facing tags for one account.
+    pub fn list_tags(&self, account_id: &AccountId) -> Result<Vec<TagSummary>, ServiceError> {
+        self.tag_reader.list_tags(account_id).map_err(Into::into)
+    }
+
+    /// List user-facing tags merged across the provided accounts.
+    pub fn list_merged_tags(
+        &self,
+        account_ids: &[AccountId],
+    ) -> Result<Vec<TagSummary>, ServiceError> {
+        let mut tag_totals = std::collections::BTreeMap::<String, (i64, i64)>::new();
+        for account_id in account_ids {
+            for tag in self.tag_reader.list_tags(account_id)? {
+                let entry = tag_totals.entry(tag.name).or_insert((0, 0));
+                entry.0 += tag.unread_messages;
+                entry.1 += tag.total_messages;
+            }
+        }
+        Ok(tag_totals
+            .into_iter()
+            .map(|(name, (unread_messages, total_messages))| TagSummary {
+                name,
+                unread_messages,
+                total_messages,
+            })
+            .collect())
     }
 
     /// Update server-side mailbox metadata and refresh the local mailbox projection.

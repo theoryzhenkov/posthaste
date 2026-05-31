@@ -36,6 +36,7 @@ import {
 } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
 import { openSurfaceInSeparateWindow } from '@/desktop'
+import { invalidateComposeSendReadModels } from '@/domainCache'
 import { shouldCloseOriginalComposeAfterWindowOpen } from '@/composeWindowElevation'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/queryKeys'
@@ -298,14 +299,8 @@ export function ComposeOverlay({
   const sendMutation = useMutation({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
       sendMessage(variables.sourceId, variables.input),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.senderAddresses,
-        }),
-        queryClient.invalidateQueries({ queryKey: ['conversations'] }),
-      ])
+    onSuccess: async (_result, variables) => {
+      await invalidateComposeSendReadModels(queryClient, variables.sourceId)
       toast('Message sent')
       onClose()
     },

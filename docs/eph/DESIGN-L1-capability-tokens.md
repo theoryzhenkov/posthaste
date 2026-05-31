@@ -101,23 +101,22 @@ keeping it a separate table is cleaner to review as a security artifact.
 - **Gate** (most endpoints): allow/deny the whole request. The resource is in the
   path, so checking `caveat.account == path.source_id` etc. is exact. Applies to
   all `/sources/{source_id}/…`, single-resource GETs, and command endpoints.
-- **Filter** (aggregate endpoints): `GET /views/conversations`,
-  `GET /messages/search`, `GET /sidebar` return cross-account data. **Phase-1
-  policy: require-matching-filter** — if the token is scoped to account X, the
-  request must carry the matching filter (`?source_id=X` / equivalent) or it's
-  rejected; the endpoint already supports these filters. Result-side filtering
-  (server injects the scope) is a later enhancement. Truly global endpoints
-  (`PATCH /settings`, `/sidebar` whole-tree) require the `manage` action and are
-  **not** finely grantable — a product limitation, documented, not a rewrite.
+- **Filter** (aggregate endpoints): `GET /views/conversations` and
+  `GET /messages/search` return cross-account data. **Phase-1 policy:
+  require-matching-filter** — if the token is scoped to account X, the request
+  must carry the matching filter (`?source_id=X` / equivalent) or it's rejected;
+  the endpoint already supports these filters. Result-side filtering (server
+  injects the scope) is a later enhancement. Truly global endpoints such as
+  `PATCH /settings` require the `manage` action and are **not** finely grantable
+  — a product limitation, documented, not a rewrite.
 
 This is the only place endpoints may need work: ensuring each aggregate endpoint
 *has* the filter a caveat needs (account today; mailbox may need adding).
 
 **Stage-B mapping decisions (judgment calls, confirmed against `openapi.json`):**
-- `GET /sidebar` carries **no** query filter, so it is a **global Gate read**,
-  not a Filter — an account-scoped token is (correctly) rejected on it. (The
-  design listed `/sidebar` as Filter; with no filter param available it can only
-  be a global read in Phase 1.)
+- `POST /read` can compose cross-account reads, so the initial authorization map
+  treats it as a global Gate read; an account-scoped token is rejected there until
+  per-call scoping is designed.
 - `GET /messages/search` has no `sourceId` filter param, so it is also a global
   read: an account-scoped token cannot be satisfied there.
 - `GET /sources/{source_id}/messages` is a **Gate** (account from the path), even
