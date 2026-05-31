@@ -432,7 +432,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             "/account-assets/logos/{image_id}",
             get(api::get_account_logo),
         )
-        .route("/sidebar", get(api::get_sidebar))
+        .route("/read", post(api::read))
         .route(
             "/smart-mailboxes",
             get(api::list_smart_mailboxes).post(api::create_smart_mailbox),

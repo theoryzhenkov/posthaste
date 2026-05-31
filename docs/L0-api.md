@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "REST API + SSE boundary between Rust backend and web frontend"
-modified: 2026-05-26
-reviewed: 2026-05-26
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: README
   - path: docs/L0-jmap
@@ -27,7 +27,7 @@ Axum handles routing, JSON serialization, CORS, and serving the static frontend 
 
 ## API design
 
-RESTful JSON endpoints serve reads. The frontend fetches sidebar data, message detail, and conversations through ordinary HTTP requests. Mutations such as move, delete, flag, and manual sync use POST or DELETE. All responses use camelCase JSON keys even though Rust uses snake_case internally.
+RESTful JSON endpoints serve reads. The frontend can compose related domain reads through the typed `POST /v1/read` endpoint, and fetches message detail and conversations through ordinary HTTP requests. Mutations such as move, delete, flag, and manual sync use POST or DELETE. All responses use camelCase JSON keys even though Rust uses snake_case internally.
 
 The main list surface is conversation-first rather than raw-message-first:
 

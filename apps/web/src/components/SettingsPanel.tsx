@@ -51,6 +51,7 @@ import { settingsReadinessStateFromQueries } from '../labReadiness'
 import {
   applyAccountMutationResult,
   invalidateAccountReadModels,
+  invalidateSmartMailboxMutationReadModels,
   removeAccountOverview,
 } from '../domainCache'
 import { cn } from '../lib/utils'
@@ -240,18 +241,8 @@ export function SettingsPanel({
     ) ??
     null
 
-  const invalidateSmartMailboxQueries = async (smartMailboxId?: string) => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.sidebar }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
-      smartMailboxId
-        ? queryClient.invalidateQueries({
-            queryKey: queryKeys.smartMailbox(smartMailboxId),
-          })
-        : Promise.resolve(),
-    ])
-  }
+  const invalidateSmartMailboxQueries = (smartMailboxId?: string) =>
+    invalidateSmartMailboxMutationReadModels(queryClient, smartMailboxId)
 
   const runSmartMailboxAction = async (
     pendingKey: string,

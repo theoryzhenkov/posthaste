@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { fetchAccounts, fetchSidebar } from '@/api/client'
+import { fetchAccounts } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
@@ -39,11 +39,6 @@ export function FocusedSurface({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
     enabled: surface.kind === 'settings' || surface.kind === 'message',
-  })
-  const sidebarQuery = useQuery({
-    queryKey: queryKeys.sidebar,
-    queryFn: fetchSidebar,
-    enabled: surface.kind === 'message',
   })
   const actions = useEmailActions()
   const {
@@ -113,7 +108,6 @@ export function FocusedSurface({
       <MessageDetail
         selection={surface.params}
         accounts={accountsQuery.data ?? []}
-        sidebar={sidebarQuery.data}
         onArchive={() =>
           actions.archive({
             sourceId: surface.params.sourceId,

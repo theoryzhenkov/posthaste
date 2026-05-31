@@ -1,4 +1,4 @@
-import type { MessageSummary, SidebarResponse } from './api/types'
+import type { Mailbox, MessageSummary, TagSummary } from './api/types'
 import { KNOWN_MAILBOX_ROLES, SYSTEM_KEYWORD_PREFIX } from './domainVocabulary'
 import {
   HELP_ENTRIES,
@@ -26,10 +26,17 @@ export type QueryValidation =
   | { state: 'incomplete'; message: string }
   | { state: 'invalid'; message: string }
 
+export interface QueryCompletionSource {
+  id: string
+  name: string
+  mailboxes: Mailbox[]
+}
+
 interface QueryCompletionContext {
-  sidebar: SidebarResponse | undefined
   messages: MessageSummary[]
   now?: Date
+  sources: QueryCompletionSource[]
+  tags: TagSummary[]
 }
 
 interface ValueCandidate {
@@ -454,14 +461,14 @@ function candidatesForPrefix(
   switch (definition.primary) {
     case 'in':
       return [
-        ...(context.sidebar?.sources.flatMap((source) =>
+        ...context.sources.flatMap((source) =>
           source.mailboxes.map((mailbox) => ({
             value: mailbox.name,
             label: mailbox.name,
             detail: source.name,
             keywords: `${mailbox.id} ${mailbox.role ?? ''}`,
           })),
-        ) ?? []),
+        ),
         ...KNOWN_MAILBOX_ROLES.map((role) => ({
           value: role,
           label: role,
@@ -469,14 +476,12 @@ function candidatesForPrefix(
         })),
       ]
     case 'source':
-      return (
-        context.sidebar?.sources.map((source) => ({
-          value: source.name,
-          label: source.name,
-          detail: 'Account',
-          keywords: source.id,
-        })) ?? []
-      )
+      return context.sources.map((source) => ({
+        value: source.name,
+        label: source.name,
+        detail: 'Account',
+        keywords: source.id,
+      }))
     case 'is':
       return IS_VALUES.map((value) => ({
         value,
@@ -489,10 +494,10 @@ function candidatesForPrefix(
       ]
     case 'tag':
       return uniqueCandidates([
-        ...(context.sidebar?.tags.flatMap((tag) => {
+        ...context.tags.flatMap((tag) => {
           const candidate = userTagCandidate(tag.name, 'Tag')
           return candidate ? [candidate] : []
-        }) ?? []),
+        }),
         ...context.messages.flatMap((message) =>
           message.keywords
             .map((keyword) => userTagCandidate(keyword, 'Keyword'))

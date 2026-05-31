@@ -15,8 +15,8 @@ import {
 } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
 
-import type { fetchSidebar } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
+import type { MailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
 import { renderMailboxRoleIcon, smartMailboxFallbackIcon } from '@/mailboxRoles'
 import { getQueryCompletions, getQueryHelpEntries } from '@/queryLanguage'
 import type { SettingsSurfaceCategory } from '@/surfaces'
@@ -51,8 +51,6 @@ export interface CommandPaletteResultGroup {
   items: CommandPaletteEntry[]
 }
 
-type SidebarData = Awaited<ReturnType<typeof fetchSidebar>>
-
 interface UseCommandPaletteResultsArgs {
   cachedMessages: MessageSummary[]
   hasSelectedMessage: boolean
@@ -73,7 +71,10 @@ interface UseCommandPaletteResultsArgs {
   ) => void
   onToggleFlag: () => void
   query: string
-  sidebar: SidebarData | undefined
+  readModels: Pick<
+    MailboxNavigationReadModels,
+    'smartMailboxes' | 'sources' | 'tags'
+  >
 }
 
 export const NO_COMMAND_PALETTE_SELECTION = '__posthaste_no_selection__'
@@ -95,10 +96,10 @@ function matchesQuery(query: string, text: string): boolean {
 }
 
 function resolveMessageMailbox(
-  sidebar: SidebarData | undefined,
+  sources: MailboxNavigationReadModels['sources'],
   message: MessageSummary,
 ) {
-  const source = sidebar?.sources.find((item) => item.id === message.sourceId)
+  const source = sources.find((item) => item.id === message.sourceId)
   if (!source) {
     return null
   }
@@ -115,10 +116,10 @@ function resolveMessageMailbox(
 
 function formatMessageSubline(
   message: MessageSummary,
-  sidebar: SidebarData | undefined,
+  sources: MailboxNavigationReadModels['sources'],
 ): string {
   const sender = message.fromName ?? message.fromEmail ?? 'Unknown'
-  const mailbox = resolveMessageMailbox(sidebar, message)
+  const mailbox = resolveMessageMailbox(sources, message)
   const location = mailbox
     ? `${mailbox.source.name} / ${mailbox.mailbox.name}`
     : message.sourceName
@@ -210,14 +211,15 @@ export function useCommandPaletteResults({
   onSelectSourceMailbox,
   onToggleFlag,
   query,
-  sidebar,
+  readModels,
 }: UseCommandPaletteResultsArgs): CommandPaletteResultGroup[] {
   return useMemo(() => {
     const normalized = normalizeQuery(query)
 
     const queryCompletions = getQueryCompletions(query, {
-      sidebar,
       messages: cachedMessages,
+      sources: readModels.sources,
+      tags: readModels.tags,
     }).map<CommandPaletteEntry>((completion) => ({
       id: completion.id,
       kind: 'query',
@@ -348,7 +350,7 @@ export function useCommandPaletteResults({
         id: `${message.sourceId}:${message.id}`,
         kind: 'message',
         label: message.subject ?? '(no subject)',
-        sub: formatMessageSubline(message, sidebar),
+        sub: formatMessageSubline(message, readModels.sources),
         keywords: `${message.subject ?? ''} ${message.preview ?? ''} ${message.fromName ?? ''} ${message.fromEmail ?? ''}`,
         icon: (
           <MessageSquareText
@@ -358,7 +360,7 @@ export function useCommandPaletteResults({
           />
         ),
         onSelect: () => {
-          const mailbox = resolveMessageMailbox(sidebar, message)
+          const mailbox = resolveMessageMailbox(readModels.sources, message)
           if (mailbox) {
             onSelectSourceMailbox(
               message.sourceId,
@@ -392,44 +394,42 @@ export function useCommandPaletteResults({
       }))
 
     const mailboxes: CommandPaletteEntry[] = []
-    if (sidebar) {
-      for (const smartMailbox of sidebar.smartMailboxes) {
-        if (matchesQuery(normalized, smartMailbox.name)) {
-          mailboxes.push({
-            id: `smart:${smartMailbox.id}`,
-            kind: 'mailbox',
-            label: smartMailbox.name,
-            sub: 'Smart mailbox',
-            keywords: smartMailbox.name,
-            icon: renderMailboxRoleIcon(
-              null,
-              15,
-              smartMailboxFallbackIcon(smartMailbox.name),
-            ),
-            onSelect: () =>
-              onSelectSmartMailbox(smartMailbox.id, smartMailbox.name),
-          })
-        }
+    for (const smartMailbox of readModels.smartMailboxes) {
+      if (matchesQuery(normalized, smartMailbox.name)) {
+        mailboxes.push({
+          id: `smart:${smartMailbox.id}`,
+          kind: 'mailbox',
+          label: smartMailbox.name,
+          sub: 'Smart mailbox',
+          keywords: smartMailbox.name,
+          icon: renderMailboxRoleIcon(
+            null,
+            15,
+            smartMailboxFallbackIcon(smartMailbox.name),
+          ),
+          onSelect: () =>
+            onSelectSmartMailbox(smartMailbox.id, smartMailbox.name),
+        })
       }
-      for (const source of sidebar.sources) {
-        for (const mailbox of source.mailboxes) {
-          const haystack = `${mailbox.name} ${source.name}`
-          if (matchesQuery(normalized, haystack)) {
-            mailboxes.push({
-              id: `${source.id}:${mailbox.id}`,
-              kind: 'mailbox',
-              label: mailbox.name,
-              sub: source.name,
-              keywords: haystack,
-              icon: renderMailboxRoleIcon(mailbox.role, 15),
-              onSelect: () =>
-                onSelectSourceMailbox(
-                  source.id,
-                  mailbox.id,
-                  `${source.name} / ${mailbox.name}`,
-                ),
-            })
-          }
+    }
+    for (const source of readModels.sources) {
+      for (const mailbox of source.mailboxes) {
+        const haystack = `${mailbox.name} ${source.name}`
+        if (matchesQuery(normalized, haystack)) {
+          mailboxes.push({
+            id: `${source.id}:${mailbox.id}`,
+            kind: 'mailbox',
+            label: mailbox.name,
+            sub: source.name,
+            keywords: haystack,
+            icon: renderMailboxRoleIcon(mailbox.role, 15),
+            onSelect: () =>
+              onSelectSourceMailbox(
+                source.id,
+                mailbox.id,
+                `${source.name} / ${mailbox.name}`,
+              ),
+          })
         }
       }
     }
@@ -458,6 +458,6 @@ export function useCommandPaletteResults({
     onSelectSourceMailbox,
     onToggleFlag,
     query,
-    sidebar,
+    readModels,
   ])
 }

@@ -38,6 +38,7 @@ export function useAccountDirectory(): AccountDirectory {
   const { data: accounts = [] } = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
+    enabled: false,
   })
 
   return useMemo(() => createAccountDirectory(accounts), [accounts])

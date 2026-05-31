@@ -59,9 +59,6 @@ import type {
   SecretInstructionInput,
   SecretStatus,
   SendMessageInput,
-  SidebarResponse,
-  SidebarSmartMailbox,
-  SidebarSource,
   SmartMailbox,
   SmartMailboxCondition,
   SmartMailboxField,
@@ -415,17 +412,8 @@ export type _ConversationView = AssertTrue<
   Conforms<ConversationView, Wire['ConversationView']>
 >
 
-/* --- Sidebar / tags ---------------------------------------------------- */
-export type _SidebarSmartMailbox = AssertTrue<
-  Conforms<SidebarSmartMailbox, Wire['SidebarSmartMailbox']>
->
+/* --- Tags -------------------------------------------------------------- */
 export type _TagSummary = AssertTrue<Conforms<TagSummary, Wire['TagSummary']>>
-export type _SidebarSource = AssertTrue<
-  Conforms<SidebarSource, Wire['SidebarSource']>
->
-export type _SidebarResponse = AssertTrue<
-  Conforms<SidebarResponse, Wire['SidebarResponse']>
->
 
 /* --- Events ------------------------------------------------------------ */
 export type _DomainEvent = AssertTrue<

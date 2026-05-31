@@ -3,8 +3,8 @@ scope: L1
 type: DESIGN
 lifecycle: ephemeral
 summary: "MCP adapter: a thin stdio MCP server over the documented /v1 API for agents"
-modified: 2026-05-29
-reviewed: 2026-05-29
+modified: 2026-05-31
+reviewed: 2026-05-31
 depends:
   - path: docs/eph/PLAN-L1-public-api-platform
   - path: docs/eph/DESIGN-L1-trust-model
@@ -39,7 +39,7 @@ it scaffolds from the same contract, so it inherits the typed surface for free.
   `require_auth` is enabled. Programmatic access implies daemon mode (see
   [[runtime-topology]]).
 - **Tools (initial, representative — not exhaustive):** read-oriented + core
-  actions: `list_accounts`, `get_sidebar`, `list_conversations`, `get_conversation`,
+  actions: `list_accounts`, `read`, `list_conversations`, `get_conversation`,
   `search_messages`, `get_message`, `set_keywords`, `move_to_mailbox`,
   `send_message`. Each maps 1:1 to a documented operation, with input/output typed
   from the generated schema. Additional tools are additive.

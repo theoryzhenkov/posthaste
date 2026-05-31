@@ -83,7 +83,7 @@ In MessageDetail, the sender email is displayed but not copyable. Add a small co
 
 **Difficulty**: Easy
 
-Browser tab just says "PostHaste". Create a `useDocumentTitle()` hook that computes total unread from sidebar data and updates `document.title` (e.g. "PostHaste (3)").
+Browser tab just says "PostHaste". Create a `useDocumentTitle()` hook that computes total unread from normalized mail-navigation data and updates `document.title` (e.g. "PostHaste (3)").
 
 **Files**: new `apps/web/src/hooks/useDocumentTitle.ts`, `apps/web/src/App.tsx`
 **Depends on**: nothing

@@ -1128,18 +1128,6 @@ pub struct ConversationView {
     pub messages: Vec<MessageSummary>,
 }
 
-/// An account with its mailboxes, as rendered in the sidebar.
-///
-/// @spec docs/L1-api#navigation
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SidebarSource {
-    pub id: AccountId,
-    pub name: String,
-    pub mailboxes: Vec<MailboxSummary>,
-}
-
 /// Distinguishes built-in smart mailboxes from user-created ones.
 ///
 /// @spec docs/L1-accounts#smart-mailbox-defaults
@@ -1149,19 +1137,6 @@ pub struct SidebarSource {
 pub enum SmartMailboxKind {
     Default,
     User,
-}
-
-/// Smart mailbox entry with live counts for the sidebar.
-///
-/// @spec docs/L1-api#navigation
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SidebarSmartMailbox {
-    pub id: SmartMailboxId,
-    pub name: String,
-    pub unread_messages: i64,
-    pub total_messages: i64,
 }
 
 /// User-facing tag derived from non-system JMAP keywords.
@@ -1174,18 +1149,6 @@ pub struct TagSummary {
     pub name: String,
     pub unread_messages: i64,
     pub total_messages: i64,
-}
-
-/// Combined sidebar payload: smart mailboxes at the top, then per-source mailboxes.
-///
-/// @spec docs/L1-api#navigation
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct SidebarResponse {
-    pub smart_mailboxes: Vec<SidebarSmartMailbox>,
-    pub tags: Vec<TagSummary>,
-    pub sources: Vec<SidebarSource>,
 }
 
 /// Boolean combinator for smart mailbox rule groups: `All` (AND) or `Any` (OR).

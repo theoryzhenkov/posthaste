@@ -37,9 +37,10 @@ import type {
   MessageSortField,
   OkResponse,
   PatchMailboxInput,
+  ReadRequest,
+  ReadResponse,
   ReplyContext,
   SendMessageInput,
-  SidebarResponse,
   SmartMailbox,
   SmartMailboxSummary,
   StartOAuthResponse,
@@ -269,6 +270,11 @@ export async function patchSettings(
   return jsonRequest<AppSettings>('/settings', 'PATCH', input)
 }
 
+/** @spec docs/L1-api#read-calls */
+export async function read(request: ReadRequest): Promise<ReadResponse> {
+  return jsonRequest<ReadResponse>('/read', 'POST', request)
+}
+
 /** @spec docs/L1-api#application-settings */
 export async function previewAutomationRule(
   input: AutomationRulePreviewInput,
@@ -377,11 +383,6 @@ export async function patchMailbox(
     'PATCH',
     input,
   )
-}
-
-/** @spec docs/L1-api#endpoint-table */
-export async function fetchSidebar(): Promise<SidebarResponse> {
-  return request<SidebarResponse>('/sidebar')
 }
 
 /** @spec docs/L1-api#smart-mailbox-crud */
