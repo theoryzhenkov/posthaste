@@ -630,11 +630,23 @@ fn build_window<M: Manager<R>, R: Runtime>(
     height: f64,
     backend: &BackendInjection,
 ) -> tauri::Result<WebviewWindow<R>> {
+    let opener_handle = manager.app_handle().clone();
     let builder = WebviewWindowBuilder::new(manager, label, WebviewUrl::App(path.into()))
         .initialization_script(backend_init_script(backend, label))
         .title(title)
         .inner_size(width, height)
-        .resizable(true);
+        .resizable(true)
+        // Email links navigate the top frame (`<base target="_top">`) because a
+        // click handler can't run in the no-scripts sandboxed reader iframe.
+        // Open external web URLs in the system browser and block the in-app
+        // navigation; the app's own (loopback / tauri) navigations pass through.
+        .on_navigation(move |url| {
+            if is_external_web_url(url) {
+                let _ = opener_handle.opener().open_url(url.as_str(), None::<&str>);
+                return false;
+            }
+            true
+        });
     // Every window inherits the inset/overlay macOS title bar so the traffic
     // lights ("semaphore") sit inside the app UI; the web shell paints the
     // matching drag region + inset. Keep this position in sync with
@@ -657,6 +669,20 @@ fn validate_external_url(url: &str) -> Result<(), String> {
         "http" | "https" => Ok(()),
         _ => Err("external URL must use http or https".to_string()),
     }
+}
+
+/// Whether a navigation target is an external web URL that should open in the
+/// system browser rather than navigate the webview. The bundled UI loads from
+/// `tauri://localhost` (or the dev loopback) and routes by hash, so any real
+/// `http`/`https` navigation to a non-loopback host is an outbound link.
+fn is_external_web_url(url: &url::Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    !matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("tauri.localhost")
+    )
 }
 
 fn backend_init_script(backend: &BackendInjection, window_label: &str) -> String {
@@ -918,6 +944,21 @@ fn stable_hash(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_web_urls_are_only_non_loopback_http() {
+        let external = |s: &str| is_external_web_url(&url::Url::parse(s).unwrap());
+        // Outbound email links open in the browser.
+        assert!(external("https://example.com/path?q=1"));
+        assert!(external("http://example.com/"));
+        // The app's own loopback / tauri origins navigate in-app.
+        assert!(!external("http://127.0.0.1:5173/index.html"));
+        assert!(!external("http://localhost:1420/"));
+        assert!(!external("https://tauri.localhost/index.html"));
+        assert!(!external("tauri://localhost/index.html"));
+        // Non-web schemes are never intercepted as web links.
+        assert!(!external("mailto:hello@example.com"));
+    }
 
     #[test]
     fn message_surface_route_uses_hash_route_and_encoded_params() {
