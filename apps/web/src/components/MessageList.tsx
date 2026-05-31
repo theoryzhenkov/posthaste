@@ -45,6 +45,8 @@ interface MessageListProps {
   onClearSelection: () => void
   onClearSearchQuery: () => void
   actions: EmailActions
+  /** Mailbox role of the current view (null when ambiguous); drives row actions. */
+  viewRole: string | null
   searchQuery?: string
   preparedSearchQuery: PreparedServerSearchQuery
 }
@@ -155,6 +157,7 @@ export function MessageList({
   onClearSelection,
   onClearSearchQuery,
   actions,
+  viewRole,
   searchQuery,
   preparedSearchQuery,
 }: MessageListProps) {
@@ -243,10 +246,6 @@ export function MessageList({
 
   const messages = displayMessages
   const selectedKey = selectionKey(selection)
-  // Mailbox role of the current view drives contextual row actions (e.g. "Move
-  // to Inbox" in Trash). Smart mailboxes and search are role-ambiguous → null.
-  const viewRole =
-    selectedView?.kind === 'source-mailbox' ? selectedView.role : null
   const errorKey = error ? `${currentViewKey}:${error.message}` : null
   const showClientQueryError = preparedSearchQuery.isBlocked
   const showServerError = Boolean(
