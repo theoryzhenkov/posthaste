@@ -18,6 +18,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
@@ -43,6 +44,9 @@ import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
+import { ConnectionScreen } from './connection/ConnectionScreen'
+import { useActiveConnection } from './connection/connectionContext'
+import { ActiveConnectionProvider } from './connection/useActiveConnection'
 import {
   closeCurrentSurfaceWindow,
   isMainDesktopWindow,
@@ -682,6 +686,23 @@ function renderAppRootError(error: Error) {
  * Root App component: wraps `MailClient` in a `QueryClientProvider`.
  * @spec docs/L1-ui#component-hierarchy
  */
+/**
+ * Gate the app behind a resolvable connection. The active connection is seeded
+ * synchronously to the embedded default at module load, so the bundled build
+ * renders mail immediately (status `loading` → `connected` with no flash). Only
+ * a true `needs-connection` (client-only build with no profile, or an
+ * unreachable local/remote daemon) shows the connect screen.
+ *
+ * @spec docs/eph/DESIGN-L1-deployment-modes#build-modes
+ */
+function ConnectionGate({ children }: { children: ReactNode }) {
+  const { status } = useActiveConnection()
+  if (status === 'needs-connection') {
+    return <ConnectionScreen />
+  }
+  return children
+}
+
 export default function App() {
   const routeState = useSurfaceRouteState()
   const routeSurface = routeState.kind === 'valid' ? routeState.surface : null
@@ -693,25 +714,31 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <DesignThemeProvider>
-        <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
-        <ErrorBoundary label="app-root" fallback={renderAppRootError}>
-          {isStandaloneSurface && routeSurface ? (
-            <FocusedSurfaceDocument surface={routeSurface} />
-          ) : isStandaloneSurface && invalidSurfaceRoute ? (
-            <InvalidSurfaceDocument route={invalidSurfaceRoute} />
-          ) : (
-            <MailClient
-              invalidSurfaceRoute={invalidSurfaceRoute}
-              routeSurface={routeSurface}
-            />
-          )}
-        </ErrorBoundary>
-        <Toaster
-          position="bottom-center"
-          toastOptions={{
-            className: 'font-sans text-sm',
-          }}
-        />
+        <ActiveConnectionProvider>
+          <DaemonEventBridge
+            key={isStandaloneSurface ? 'standalone' : 'mail'}
+          />
+          <ErrorBoundary label="app-root" fallback={renderAppRootError}>
+            <ConnectionGate>
+              {isStandaloneSurface && routeSurface ? (
+                <FocusedSurfaceDocument surface={routeSurface} />
+              ) : isStandaloneSurface && invalidSurfaceRoute ? (
+                <InvalidSurfaceDocument route={invalidSurfaceRoute} />
+              ) : (
+                <MailClient
+                  invalidSurfaceRoute={invalidSurfaceRoute}
+                  routeSurface={routeSurface}
+                />
+              )}
+            </ConnectionGate>
+          </ErrorBoundary>
+          <Toaster
+            position="bottom-center"
+            toastOptions={{
+              className: 'font-sans text-sm',
+            }}
+          />
+        </ActiveConnectionProvider>
       </DesignThemeProvider>
     </QueryClientProvider>
   )
