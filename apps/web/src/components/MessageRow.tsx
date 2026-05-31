@@ -6,8 +6,11 @@
  *
  * @spec docs/L1-ui#messagelist
  */
-import { Archive, Eye, EyeOff, MailOpen, Star, Trash2 } from 'lucide-react'
-import { memo, useCallback } from 'react'
+import { Fragment, memo, useCallback } from 'react'
+import {
+  buildMessageContextActions,
+  type MessageActionContext,
+} from '../actions/contextualActions'
 import type { MessageSummary } from '../api/types'
 import type { EmailActions } from '../hooks/useEmailActions'
 import { cn } from '../lib/utils'
@@ -33,6 +36,8 @@ interface MessageRowProps {
   columns: ColumnId[]
   layout: ThreadListLayout
   actions: EmailActions
+  /** Role of the current view, used to derive contextual actions; null = ambiguous. */
+  viewRole: string | null
 }
 
 /**
@@ -49,11 +54,21 @@ export const MessageRow = memo(function MessageRow({
   columns,
   layout,
   actions,
+  viewRole,
 }: MessageRowProps) {
   const messageRef = { messageId: message.id, sourceId: message.sourceId }
   const handleSelect = useCallback(() => {
     onSelectMessage(message)
   }, [message, onSelectMessage])
+  const context: MessageActionContext = {
+    message,
+    target: messageRef,
+    viewRole,
+    surface: 'context-menu',
+  }
+  const contextActions = buildMessageContextActions(actions, context, {
+    onOpen: handleSelect,
+  })
   const row = (
     <button
       className={cn(
@@ -95,30 +110,24 @@ export const MessageRow = memo(function MessageRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">
-        <ContextMenuItem onSelect={handleSelect}>
-          <MailOpen size={14} />
-          Open
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => actions.toggleRead(message)}>
-          {message.isRead ? <EyeOff size={14} /> : <Eye size={14} />}
-          {message.isRead ? 'Mark unread' : 'Mark read'}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => actions.toggleFlag(message)}>
-          <Star size={14} />
-          {message.isFlagged ? 'Unflag' : 'Flag'}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => actions.archive(messageRef)}>
-          <Archive size={14} />
-          Archive
-        </ContextMenuItem>
-        <ContextMenuItem
-          variant="destructive"
-          onSelect={() => actions.trash(messageRef)}
-        >
-          <Trash2 size={14} />
-          Move to Trash
-        </ContextMenuItem>
+        {contextActions.map((action, index) => {
+          const previous = contextActions[index - 1]
+          const Icon = action.icon
+          return (
+            <Fragment key={action.id}>
+              {previous && previous.group !== action.group && (
+                <ContextMenuSeparator />
+              )}
+              <ContextMenuItem
+                variant={action.destructive ? 'destructive' : 'default'}
+                onSelect={action.run}
+              >
+                <Icon size={14} />
+                {action.title}
+              </ContextMenuItem>
+            </Fragment>
+          )
+        })}
       </ContextMenuContent>
     </ContextMenu>
   )
