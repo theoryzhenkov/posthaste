@@ -258,18 +258,22 @@ export function MessageList({
       : error instanceof ApiError && error.code === 'invalid_query'
         ? `Search query is not valid: ${error.message}`
         : 'Failed to load messages'
-  // Remember the selected message's slot so that, once it leaves the list (e.g.
-  // archived with `E`), the next Up/Down moves relative to where it was rather
-  // than jumping to the top of the list.
-  const lastSelectedIndexRef = useRef(-1)
+  // Remember the selected message's slot *within the current view* so that,
+  // once it leaves the list — archived, trashed, moved, or removed by any
+  // refresh — the next Up/Down continues from where it was rather than jumping
+  // to the top. Scoped to the view key so a stale slot never leaks across
+  // mailbox / sort / search changes (those reset to top-of-list navigation).
+  const lastSelectedSlotRef = useRef<{ viewKey: string; index: number } | null>(
+    null,
+  )
   useEffect(() => {
     const index = messages.findIndex(
       (message) => messageKey(message) === selectedKey,
     )
     if (index !== -1) {
-      lastSelectedIndexRef.current = index
+      lastSelectedSlotRef.current = { viewKey: currentViewKey, index }
     }
-  }, [messages, selectedKey])
+  }, [messages, selectedKey, currentViewKey])
 
   const navigateMessage = useCallback(
     (direction: 1 | -1) => {
@@ -278,6 +282,10 @@ export function MessageList({
       const currentIndex = messages.findIndex(
         (message) => messageKey(message) === selectedKey,
       )
+      const rememberedSlot =
+        lastSelectedSlotRef.current?.viewKey === currentViewKey
+          ? lastSelectedSlotRef.current.index
+          : -1
 
       let nextIndex: number
       if (currentIndex !== -1) {
@@ -285,14 +293,11 @@ export function MessageList({
         if (nextIndex < 0 || nextIndex >= messages.length) {
           return
         }
-      } else if (lastSelectedIndexRef.current !== -1) {
-        // Selection left the list (archived/trashed); continue from its old
-        // slot — Down lands on the message that shifted up into it, Up on the
-        // one before it.
-        const base =
-          direction === 1
-            ? lastSelectedIndexRef.current
-            : lastSelectedIndexRef.current - 1
+      } else if (rememberedSlot !== -1) {
+        // Selection left this list (archived/trashed/moved); continue from its
+        // old slot — Down lands on the message that shifted up into it, Up on
+        // the one before it.
+        const base = direction === 1 ? rememberedSlot : rememberedSlot - 1
         nextIndex = Math.min(Math.max(base, 0), messages.length - 1)
       } else {
         nextIndex = direction === 1 ? 0 : messages.length - 1
@@ -305,7 +310,7 @@ export function MessageList({
         messageId: nextMessage.id,
       })
     },
-    [messages, onSelectMessage, selectedKey],
+    [messages, onSelectMessage, selectedKey, currentViewKey],
   )
 
   // Keyboard shortcuts -- suppressed when an input has focus.
