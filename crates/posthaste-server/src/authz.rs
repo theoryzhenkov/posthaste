@@ -33,12 +33,18 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use macaroon::Caveat;
+use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use utoipa::ToSchema;
 
 /// A permitted verb. The action a route represents must be a member of an
-/// `action = ...` caveat's set for that caveat to be satisfied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `action = ...` caveat's set for that caveat to be satisfied. Doubles as the
+/// wire enum for the token-mint request (`action = ...` caveats are built from
+/// it), so the lowercase serde form matches [`Action::as_str`] exactly — one
+/// source of truth for the action vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum Action {
     Read,
     Send,
@@ -222,6 +228,15 @@ const AUTHZ_TABLE: &[Entry] = &[
         template: "/accounts",
         authz: gate(Action::Manage, ResourceShape::empty()),
     },
+    // Token mint: derives a narrower capability token. `Manage` + no resource
+    // axis means only a full-scope (or `action = manage`, unscoped) caller may
+    // mint; the handler attenuates the CALLER's token, so a minted token can
+    // only narrow — never widen — the caller's authority.
+    Entry {
+        method: "POST",
+        template: "/auth/tokens",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
     // Single-account routes: account axis from the `account_id` path param.
     Entry {
         method: "GET",
@@ -319,38 +334,39 @@ const AUTHZ_TABLE: &[Entry] = &[
         template: "/smart-mailboxes:reset-defaults",
         authz: gate(Action::Manage, ResourceShape::empty()),
     },
-    // Smart-mailbox message/conversation lists return cross-account data. Both
-    // are GLOBAL reads in Phase 1: their handlers do NOT result-side filter by
-    // `sourceId`/`mailboxId` in every branch (the conversation list ignores the
-    // source/mailbox filter entirely; the message list has no source filter), so
-    // declaring a query axis as the satisfier would let an `account=X` token read
-    // ALL accounts. With `ResourceShape::empty()`, an account/mailbox caveat is
-    // unsatisfiable → such tokens are denied (403); full-scope and `action=read`
-    // (no resource caveat) still work. Proper result-side conversation scoping is
-    // a Phase-2 item (capability URLs). SECURITY: do not re-add a query axis here
-    // without first making the handler enforce it server-side.
+    // Smart-mailbox MESSAGE list: no `sourceId` query param exists, so it stays a
+    // global read (an account caveat is unsatisfiable → such tokens denied).
+    // SECURITY: do not add a query axis without first adding + enforcing a source
+    // filter param in the handler.
     Entry {
         method: "GET",
         template: "/smart-mailboxes/{smart_mailbox_id}/messages",
         authz: filter(Action::Read, ResourceShape::empty()),
     },
+    // Smart-mailbox CONVERSATION list: result-side scoped on `sourceId`. The
+    // handler ANDs a `source_message_scope_rule` into the smart-mailbox rule in
+    // BOTH branches (Tier-1 result-side scoping), so an `account=X` token with a
+    // matching `?sourceId=X` sees only that account; a mismatched/absent source
+    // makes the caveat unsatisfiable → 403. `mailbox` is intentionally NOT a
+    // satisfier here (mailbox ids are not account-unique).
     Entry {
         method: "GET",
         template: "/smart-mailboxes/{smart_mailbox_id}/conversations",
-        authz: filter(Action::Read, ResourceShape::empty()),
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },
-    // -- Conversation views. The list is a cross-account aggregate; in Phase 1 it
-    //    is a GLOBAL read: the search (`q`) branch of the handler drops the
-    //    source/mailbox filter, so an `account=X` token could read all accounts
-    //    if a query axis were the satisfier. Mapped with `ResourceShape::empty()`
-    //    so account/mailbox-scoped tokens are denied (403). A single conversation
-    //    is addressed by an opaque conversation id (no scopable account axis in
-    //    the path), so it is a global Gate read too. SECURITY: do not add a query
-    //    axis until the handler enforces source/mailbox scoping in every branch. --
+    // -- Conversation views. The list is result-side scoped on `sourceId`: the
+    //    handler ANDs a `source_message_scope_rule` into the query in BOTH the
+    //    search and non-search branches (Tier-1 result-side scoping), so an
+    //    `account=X` token with a matching `?sourceId=X` sees only that account;
+    //    a mismatched/absent source makes the caveat unsatisfiable → 403.
+    //    `mailbox` is intentionally NOT a satisfier (mailbox ids are not
+    //    account-unique). A single conversation is addressed by an opaque
+    //    conversation id (no scopable account axis in the path), so it is a global
+    //    Gate read. SECURITY: keep the handler's source scope in every branch. --
     Entry {
         method: "GET",
         template: "/views/conversations",
-        authz: filter(Action::Read, ResourceShape::empty()),
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },
     Entry {
         method: "GET",

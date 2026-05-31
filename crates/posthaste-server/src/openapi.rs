@@ -31,6 +31,7 @@ use utoipa::OpenApi;
         crate::api::create_account,
         crate::api::patch_account,
         crate::api::verify_account,
+        crate::api::create_auth_token,
         crate::api::start_provider_oauth,
         crate::api::start_account_oauth,
         crate::api::complete_account_oauth,
@@ -86,6 +87,9 @@ use utoipa::OpenApi;
         crate::api::AutomationRulePreviewResponse,
         crate::api::StartOAuthResponse,
         crate::api::CreateAccountRequest,
+        crate::api::CreateAuthTokenRequest,
+        crate::api::CreateAuthTokenResponse,
+        crate::authz::Action,
         crate::api::PatchAccountRequest,
         crate::api::StartOAuthRequest,
         crate::api::StartProviderOAuthRequest,
@@ -177,7 +181,8 @@ use utoipa::OpenApi;
         (name = "smart-mailboxes", description = "Saved-query smart mailboxes"),
         (name = "settings", description = "Application settings and automation rules"),
         (name = "sync", description = "Sync triggers and configuration reload"),
-        (name = "events", description = "Server-sent domain event stream")
+        (name = "events", description = "Server-sent domain event stream"),
+        (name = "auth", description = "Capability-token minting")
     )
 )]
 pub struct ApiDoc;

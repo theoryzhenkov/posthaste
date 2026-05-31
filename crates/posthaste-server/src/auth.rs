@@ -35,6 +35,14 @@ use crate::AppState;
 /// to loopback; an attacker-controlled rebinding domain will not be in this set.
 const LOOPBACK_HOSTS: &[&str] = &["localhost", "127.0.0.1", "::1"];
 
+/// The verified bearer token, placed in request extensions by
+/// [`require_auth_layer`] once authenticity is confirmed. Handlers that mint a
+/// derived token (the `POST /v1/auth/tokens` endpoint) read it and **attenuate**
+/// it, which can only add caveats — so a minted token never exceeds the
+/// caller's authority. Absent when `require_auth` is off (no caller token).
+#[derive(Clone)]
+pub struct PresentedToken(pub String);
+
 /// Constant-time byte equality. Compares the full length of both inputs
 /// without early-exit on the first mismatch, so timing does not leak how many
 /// leading bytes matched. Differing lengths short-circuit to `false` (length
@@ -222,7 +230,7 @@ fn host_allowed(req: &Request, allowed: &[String]) -> bool {
 /// @spec docs/eph/DESIGN-L1-capability-tokens
 pub async fn require_auth_layer(
     State(state): State<Arc<AppState>>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Response {
     if !state.require_auth {
@@ -273,6 +281,13 @@ pub async fn require_auth_layer(
             return unauthorized().into_response();
         }
     };
+
+    // Stash the verified token so a handler that derives a narrower token from
+    // it (the mint endpoint, `POST /v1/auth/tokens`) can attenuate THIS token —
+    // attenuation only narrows, so a minted token can never exceed the caller's
+    // authority, regardless of what scope it requests.
+    req.extensions_mut()
+        .insert(PresentedToken(presented.clone()));
 
     // Fast path: a full-scope macaroon (no caveats) is authorized everywhere,
     // exactly as before — no authz-map lookup needed.

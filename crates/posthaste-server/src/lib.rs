@@ -415,6 +415,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
                 .delete(api::delete_account),
         )
         .route("/accounts/{account_id}/verify", post(api::verify_account))
+        .route("/auth/tokens", post(api::create_auth_token))
         .route(
             "/accounts/{account_id}/oauth/start",
             post(api::start_account_oauth),

@@ -142,6 +142,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         )
         .route("/settings", patch(ok))
         .route("/config:reload", post(ok))
+        .route("/auth/tokens", post(ok))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_auth_layer,
@@ -349,43 +350,11 @@ async fn events_filter_route_requires_matching_account_filter() {
     );
 }
 
-// -- SECURITY regression: the conversation-list routes are GLOBAL reads in
-//    Phase 1 (their handlers do not result-side filter by source/mailbox in
-//    every branch). An account-scoped token must be DENIED on them even WITH a
-//    matching `sourceId` filter — otherwise an `account=X` token would read all
-//    accounts' conversations. This is the leak closure: assert 403, not 200. --
-
-#[tokio::test]
-async fn account_token_denied_on_conversation_list_even_with_matching_filter() {
-    let t = mint_with_caveats(&test_root_key(), &["account = acct-a"]);
-
-    // /views/conversations: the `q` search branch drops the source/mailbox
-    // filter, so the route is a global read; account caveat unsatisfiable → 403.
-    assert_eq!(
-        status(&t, "GET", "/v1/views/conversations?sourceId=acct-a").await,
-        StatusCode::FORBIDDEN,
-        "account-scoped token must be denied on /views/conversations (handler does \
-         not enforce source filter in the search branch)"
-    );
-    assert_eq!(
-        status(&t, "GET", "/v1/views/conversations").await,
-        StatusCode::FORBIDDEN
-    );
-
-    // /smart-mailboxes/{id}/conversations: handler never filters by
-    // source/mailbox in any branch → global read; account caveat → 403.
-    assert_eq!(
-        status(
-            &t,
-            "GET",
-            "/v1/smart-mailboxes/sm-1/conversations?sourceId=acct-a"
-        )
-        .await,
-        StatusCode::FORBIDDEN,
-        "account-scoped token must be denied on smart-mailbox conversations \
-         (handler ignores the source filter entirely)"
-    );
-}
+// -- Conversation-list routes are now result-side scoped on `sourceId` (Tier-1):
+//    an account-scoped token is allowed WITH a matching `?sourceId` (the handler
+//    restricts results to that account in every branch) and denied otherwise.
+//    The allow/deny matrix is covered by `conversation_views_filter_on_source_id`
+//    and `smart_mailbox_conversations_filter_on_source_id` above. --
 
 #[tokio::test]
 async fn full_scope_token_still_reads_conversation_lists() {
@@ -487,6 +456,105 @@ async fn combined_account_and_action_caveats_and_together() {
     // Right action (read), wrong account → denied.
     assert_eq!(
         status(&t, "GET", "/v1/sources/acct-b/messages/m1").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+// -- Conversation Filter routes: account-scoped via the `sourceId` query axis. --
+
+#[tokio::test]
+async fn conversation_views_filter_on_source_id() {
+    // Account-scoped read token. The route is a Filter on `sourceId`, so the
+    // token is allowed only with a matching `?sourceId`; the handler then
+    // result-side scopes the search to that account.
+    let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
+    // Matching source → allowed (both the plain list and the search branch).
+    assert_eq!(
+        status(&t, "GET", "/v1/views/conversations?sourceId=acct-a").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(&t, "GET", "/v1/views/conversations?sourceId=acct-a&q=hello").await,
+        StatusCode::OK
+    );
+    // Wrong source → denied.
+    assert_eq!(
+        status(&t, "GET", "/v1/views/conversations?sourceId=acct-b").await,
+        StatusCode::FORBIDDEN
+    );
+    // Absent source → the account caveat is unsatisfiable → denied (this is what
+    // forces the client to scope the request, which the handler then enforces).
+    assert_eq!(
+        status(&t, "GET", "/v1/views/conversations").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(&t, "GET", "/v1/views/conversations?q=hello").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn smart_mailbox_conversations_filter_on_source_id() {
+    let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
+    assert_eq!(
+        status(
+            &t,
+            "GET",
+            "/v1/smart-mailboxes/sm1/conversations?sourceId=acct-a"
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(
+            &t,
+            "GET",
+            "/v1/smart-mailboxes/sm1/conversations?sourceId=acct-b"
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(&t, "GET", "/v1/smart-mailboxes/sm1/conversations").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+// -- Token mint route (POST /auth/tokens): Manage action, no resource axis. --
+
+#[tokio::test]
+async fn mint_route_allows_full_scope_token() {
+    let t = full_scope();
+    assert_eq!(status(&t, "POST", "/v1/auth/tokens").await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn mint_route_allows_unscoped_manage_token() {
+    // A token carrying only `action = manage` (no resource caveat) may mint.
+    let t = mint_with_caveats(&test_root_key(), &["action = manage"]);
+    assert_eq!(status(&t, "POST", "/v1/auth/tokens").await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn mint_route_rejects_non_manage_token() {
+    // A read-only token cannot mint — the route requires the `manage` action.
+    let t = mint_with_caveats(&test_root_key(), &["action = read"]);
+    assert_eq!(
+        status(&t, "POST", "/v1/auth/tokens").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn mint_route_rejects_resource_scoped_token() {
+    // An account-scoped token carries an `account` caveat, which is unsatisfiable
+    // on this resource-less route (ResourceShape::empty) → 403. This forces
+    // minting through a full-scope / unscoped-manage caller, so the handler's
+    // attenuation always starts from a token that is at least as broad.
+    let t = mint_with_caveats(&test_root_key(), &["action = manage", "account = acct-a"]);
+    assert_eq!(
+        status(&t, "POST", "/v1/auth/tokens").await,
         StatusCode::FORBIDDEN
     );
 }
