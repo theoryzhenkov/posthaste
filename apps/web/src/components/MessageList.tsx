@@ -243,6 +243,10 @@ export function MessageList({
 
   const messages = displayMessages
   const selectedKey = selectionKey(selection)
+  // Mailbox role of the current view drives contextual row actions (e.g. "Move
+  // to Inbox" in Trash). Smart mailboxes and search are role-ambiguous → null.
+  const viewRole =
+    selectedView?.kind === 'source-mailbox' ? selectedView.role : null
   const errorKey = error ? `${currentViewKey}:${error.message}` : null
   const showClientQueryError = preparedSearchQuery.isBlocked
   const showServerError = Boolean(
@@ -682,6 +686,7 @@ export function MessageList({
                       columns={columns}
                       layout={tableLayout}
                       actions={actions}
+                      viewRole={viewRole}
                       onSelectMessage={handleSelectRowMessage}
                     />
                   </div>
