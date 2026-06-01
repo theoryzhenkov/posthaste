@@ -1,3 +1,3 @@
 ---
-title: Email for people who keep asking for more.
+title: Fast for daily mail. Flexible for weird workflows.
 ---

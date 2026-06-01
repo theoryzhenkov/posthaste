@@ -1,6 +1,6 @@
 ---
 scope: root
-summary: "Posthaste — open-source, local-first mail workstation with power-user search and a documented API"
+summary: "Posthaste — smart, fast, open-source mail you can shape, automate, and build on"
 modified: 2026-06-01
 reviewed: 2026-06-01
 dependents:
@@ -23,7 +23,7 @@ dependents:
 
 Your mail, delivered to you at Posthaste.
 
-Posthaste turns email into a fast, local, programmable workspace. It gives power users the parts they miss from classic mail clients: precise search, smart mailboxes, keyboard-first triage, and Markdown compose. The same Rust backend is exposed through a documented API for custom clients, scripts, and agents.
+Posthaste turns email into a smart, fast, local workspace you can shape around how you actually work. It is a full mail client with a serious desktop interface, a Rust-owned local replica, smart mailboxes, Markdown compose, provider adapters, and a programmable backend for custom clients, scripts, and agents.
 
 This is an early-stage build, not a conservative production recommendation. If you try it today, expect sharp edges and keep another mail client available.
 
@@ -33,15 +33,16 @@ Email should be more than a feed you clear. It is where work arrives, receipts l
 
 Posthaste is built around those handles:
 
-- **Search you can keep:** boolean queries, field prefixes, date ranges, and smart mailboxes turn recurring searches into reusable mail views.
-- **A local replica:** mail metadata syncs into SQLite, so the interface reads from your machine. Previously synced mail remains readable offline.
-- **A serious desktop shell:** three panes, compact rows, keyboard-first actions, and a reader that treats conversations as the main unit.
-- **Markdown compose:** write mail as plain text that becomes clean multipart plain text plus HTML.
-- **Protocol adapters:** JMAP is the first-class path, with IMAP/SMTP behind backend provider adapters so the UI can stay mail-native without becoming protocol-shaped.
+- **Smart mailboxes and views:** save the mail you care about as living views, backed by boolean queries, field prefixes, and date ranges.
+- **Fast local interaction:** mail metadata syncs into SQLite, so the interface reads from your machine. Previously synced mail remains readable offline.
+- **A polished desktop shell:** three panes, compact rows, keyboard-first actions, clear signal colors, and a reader that treats conversations as the main unit.
+- **Plain-text-first compose:** write in Markdown and send clean multipart plain text plus HTML.
+- **A modular backend:** protocol drivers, sync, storage, API, events, and UI are separated so Posthaste can grow without turning into a single hardwired client.
+- **Programmable mail:** the same backend that powers the app exposes OpenAPI, AsyncAPI/SSE events, and MCP for custom clients, scripts, and trusted local agents.
 
 ## Built for builders
 
-Posthaste is a local mail platform with a real contract.
+Posthaste is a local mail platform with a real contract. The app is the flagship client, but the architecture is intentionally bigger than one UI.
 
 - The Rust backend exposes a versioned JSON API under `/v1`.
 - `openapi.json` documents the REST surface.
@@ -49,7 +50,7 @@ Posthaste is a local mail platform with a real contract.
 - `apps/mcp/` contains an initial MCP server over the same API.
 - Daemon mode gives external clients a stable local endpoint for custom clients, scripts, and trusted local agents.
 
-That means the bundled UI is only one way to use Posthaste. You can build a different client, subscribe to mail events, wire mail into local automations, or let an agent search, tag, move, and draft through the same backend the app uses.
+You can build a different client, subscribe to mail events, wire mail into local automations, or let an agent search, tag, move, and draft through the same backend the app uses.
 
 The MCP adapter is still early. Until capability scoping is complete, it is for trusted-local use only: the daemon token grants broad access.
 

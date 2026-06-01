@@ -8,7 +8,7 @@ color: blue
 unread: true
 ---
 
-Posthaste turns email into a fast, local, programmable workspace. It brings together precise search, smart mailboxes, conversation-first reading, Markdown compose, and a desktop interface that is built for people who live in mail.
+Posthaste turns email into a smart, fast, local workspace you can shape around how you actually work. It brings together a polished desktop interface, smart mailboxes, conversation-first reading, Markdown compose, and a backend you can automate.
 
 The project is early, but the direction is clear: mail should be yours to search, shape, automate, and extend.
 
