@@ -9,30 +9,29 @@
  *
  * @spec docs/eph/DESIGN-L1-deployment-modes#connection-profiles
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
-// Establish a window with the injected globals BEFORE importing the modules
-// that read them at load time (runtime.ts seeds the active connection from the
-// injection synchronously).
+// Use an explicit injection override instead of mutating `window`: bun runs test
+// files concurrently, and DOM tests may register/unregister their own window.
 const PORT = 4815
 const TOKEN = 'embedded-token-abc'
 
-function installInjectedWindow(): void {
-  ;(globalThis as Record<string, unknown>).window = {
-    __POSTHASTE_PORT__: PORT,
-    __POSTHASTE_TOKEN__: TOKEN,
-  }
-}
+beforeAll(async () => {
+  const { setInjectedRuntimeForTesting } =
+    await import('../src/connection/injected')
+  setInjectedRuntimeForTesting({ port: PORT, token: TOKEN })
+})
 
 beforeEach(async () => {
-  installInjectedWindow()
   const { resetActiveConnectionForTesting } =
     await import('../src/connection/runtime')
   resetActiveConnectionForTesting()
 })
 
-afterEach(() => {
-  delete (globalThis as Record<string, unknown>).window
+afterAll(async () => {
+  const { setInjectedRuntimeForTesting } =
+    await import('../src/connection/injected')
+  setInjectedRuntimeForTesting(undefined)
 })
 
 describe('embedded resolution matches the legacy frozen consts', () => {

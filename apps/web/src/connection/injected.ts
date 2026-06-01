@@ -11,8 +11,25 @@ function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
 
+interface InjectedRuntimeForTesting {
+  port?: number
+  token?: string
+}
+
+let injectedRuntimeForTesting: InjectedRuntimeForTesting | undefined
+
+/** Test-only: override embedded runtime globals without mutating `window`. */
+export function setInjectedRuntimeForTesting(
+  runtime: InjectedRuntimeForTesting | undefined,
+): void {
+  injectedRuntimeForTesting = runtime
+}
+
 /** The embedded server's injected port, or `undefined` outside the bundled build. */
 export function injectedPort(): number | undefined {
+  if (injectedRuntimeForTesting) {
+    return injectedRuntimeForTesting.port
+  }
   if (typeof window === 'undefined') {
     return undefined
   }
@@ -22,6 +39,10 @@ export function injectedPort(): number | undefined {
 
 /** The embedded server's injected bearer token, or `undefined` when absent. */
 export function injectedToken(): string | undefined {
+  if (injectedRuntimeForTesting) {
+    const token = injectedRuntimeForTesting.token
+    return typeof token === 'string' && token.length > 0 ? token : undefined
+  }
   if (typeof window === 'undefined') {
     return undefined
   }
