@@ -15,10 +15,12 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
-  build:
-    name: Build ${{ matrix.platform }}
+  build-serve:
+    name: Build serve ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -38,9 +40,82 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.platform }}
+          shared-key: release-serve-${{ matrix.platform }}
+          cache-on-failure: true
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Linux serve dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            pkg-config
+
+      - name: Build browser-localhost package
+        shell: bash
+        run: |
+          bun --cwd=apps/web run build
+          cargo build --release --bin posthaste
+          POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
+
+      - name: Print sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posthaste-serve-${{ matrix.platform }}
+          if-no-files-found: error
+          path: target/distribute/posthaste-serve-*.tar.gz
+
+  build-desktop:
+    name: Build desktop ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            bundle_targets: appimage
+          - os: macos-latest
+            platform: macos
+            bundle_targets: dmg
+          - os: windows-latest
+            platform: windows-x86_64
+            bundle_targets: nsis
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-desktop-${{ matrix.platform }}
           cache-on-failure: true
 
       - uses: oven-sh/setup-bun@v2
@@ -71,15 +146,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             patchelf \
-            rpm \
             wget
-
-      - name: Build browser-localhost package
-        shell: bash
-        run: |
-          bun --cwd=apps/web run build
-          cargo build --release --bin posthaste
-          POSTHASTE_PACKAGE_PLATFORM="${{ matrix.platform }}" bash tools/package/serve.sh
 
       # Reflect the dogfood counter in the installed app version instead of the
       # frozen 0.1.0. `v0.1.0-dogfood.N` -> bundle version `0.1.N` (a valid
@@ -98,16 +165,26 @@ jobs:
           node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$version"
 
       # Single build (devtools compiled in, gated at runtime); no separate
-      # "DevTools" bundle.
+      # "DevTools" bundle. Build one installer format per OS to keep the release
+      # critical path short.
       - name: Build desktop bundles
         if: runner.os != 'macOS'
         shell: bash
-        run: bun run tauri build --ci --no-sign --features devtools --config '{"build":{"beforeBuildCommand":null}}'
+        run: |
+          bun --cwd=apps/web run build
+          bun run tauri build --ci --no-sign --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null}}'
 
-      - name: Build ad-hoc signed macOS desktop bundles
+      - name: Build ad-hoc signed macOS desktop bundle
         if: runner.os == 'macOS'
         shell: bash
-        run: bun run tauri build --ci --features devtools --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+        run: |
+          bun --cwd=apps/web run build
+          bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+
+      - name: Print sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
 
       - name: Verify macOS desktop app signature
         if: runner.os == 'macOS'
@@ -131,26 +208,23 @@ jobs:
             find target/release/bundle apps/desktop/target/release/bundle \
               -type f \( \
                 -name '*.AppImage' -o \
-                -name '*.deb' -o \
                 -name '*.dmg' -o \
-                -name '*.exe' -o \
-                -name '*.msi' -o \
-                -name '*.rpm' \
+                -name '*.exe' \
               \) 2>/dev/null
           )
           test -n "$(find "$out" -type f -print -quit)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: posthaste-${{ matrix.platform }}
+          name: posthaste-desktop-${{ matrix.platform }}
           if-no-files-found: error
-          path: |
-            target/distribute/posthaste-serve-*.tar.gz
-            target/distribute/desktop-${{ matrix.platform }}/*
+          path: target/distribute/desktop-${{ matrix.platform }}/*
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs:
+      - build-serve
+      - build-desktop
     runs-on: ubuntu-latest
     permissions:
       contents: write
