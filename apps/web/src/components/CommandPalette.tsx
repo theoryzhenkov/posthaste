@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 import {
   useCallback,
   useEffect,
@@ -6,33 +5,28 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type UIEvent as ReactUIEvent,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
-import { fetchSearchMessages } from '@/api/client'
-import type { MessageSummary } from '@/api/types'
-import {
-  commandPaletteEntryValue,
-  NO_COMMAND_PALETTE_SELECTION,
-  type CommandPaletteEntry,
-  type SettingsCategory,
-  useCommandPaletteResults,
-} from '@/hooks/useCommandPaletteResults'
-import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { createCommandProviders } from '@/command-search/providers'
+import { recentCachedMessages } from '@/command-search/recentMessages'
+import { useCommandSearch } from '@/command-search/useCommandSearch'
+import type {
+  CommandPaletteEntry,
+  PaletteAction,
+  PaletteRow,
+  RankingContext,
+  SearchCandidate,
+} from '@/command-search/types'
 import { useMailboxNavigationReadModels } from '@/mailboxNavigationReadModels'
-import { createOperationContext } from '@/observability'
-import { queryKeys } from '@/queryKeys'
+import type { MailSelection } from '@/mailState'
 import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'
+import type { SettingsSurfaceCategory as SettingsCategory } from '@/surfaces'
 
 import { FloatingPanel } from './FloatingPanel'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from './ui/command'
+import { Command, CommandInput, CommandItem, CommandList } from './ui/command'
 
 interface CommandPaletteProps {
   hasSelectedMessage: boolean
@@ -45,7 +39,7 @@ interface CommandPaletteProps {
   onPlaceholderAction: (label: string) => void
   onRejectSearchPreview: () => void
   onReply: () => void
-  onSelectMessage: (message: MessageSummary) => void
+  onSelectMessage: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
   onSelectSourceMailbox: (
     sourceId: string,
@@ -57,7 +51,54 @@ interface CommandPaletteProps {
 }
 
 const COMMAND_PANEL_STORAGE_KEY = 'posthaste.commandPalette.panelOffset'
-const EMPTY_MESSAGE_RESULTS: MessageSummary[] = []
+const NO_COMMAND_PALETTE_SELECTION = '__posthaste_no_selection__'
+
+function commandPaletteEntryValue(candidate: SearchCandidate): string {
+  return `candidate:${candidate.id}`
+}
+
+function emptyCounter() {
+  return { halfLifeMs: 7 * 24 * 60 * 60 * 1000, entries: {} }
+}
+
+function isItemRow(
+  row: PaletteRow,
+): row is Extract<PaletteRow, { kind: 'item' }> {
+  return row.kind === 'item'
+}
+
+function currentSearchableServerQuery(query: string): string {
+  const validation = validateSearchQuery(query)
+  if (validation.state !== 'valid') return ''
+  const normalized = normalizeAppliedSearchQuery(query)
+  if (!normalized) return ''
+  if (normalized.includes(':')) return normalized
+  return normalized.length >= 2 ? normalized : ''
+}
+
+function createRankingContext(input: {
+  hasSelectedMessage: boolean
+}): RankingContext {
+  return {
+    now: Date.now(),
+    app: {
+      route: input.hasSelectedMessage ? 'thread' : 'mailbox',
+      hasSelectedMessage: input.hasSelectedMessage,
+    },
+    session: {
+      paletteOpenReason: 'keyboard',
+    },
+    user: {
+      recentCommands: emptyCounter(),
+      recentEntities: emptyCounter(),
+      frequentCommands: emptyCounter(),
+      frequentMailboxes: emptyCounter(),
+      frequentContacts: emptyCounter(),
+      pinnedCommands: [],
+      pinnedMailboxes: [],
+    },
+  }
+}
 
 export function CommandPalette({
   hasSelectedMessage,
@@ -77,39 +118,68 @@ export function CommandPalette({
   onToggleFlag,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const hasPreviewedSearchRef = useRef(false)
-  const queryValidation = useMemo(() => validateSearchQuery(query), [query])
-  const serverQuery =
-    queryValidation.state === 'valid' ? normalizeAppliedSearchQuery(query) : ''
-  const debouncedServerQuery = useDebouncedValue(serverQuery, 180)
+  const queryClient = useQueryClient()
   const readModels = useMailboxNavigationReadModels()
-  const searchPreviewOperation = useMemo(
-    () =>
-      debouncedServerQuery
-        ? createOperationContext('mail.search.preview', 'command-palette')
-        : undefined,
-    [debouncedServerQuery],
+  // Snapshot recents once when the palette opens. They come from already-loaded
+  // React Query pages (not a fetch), so a stable snapshot for the session is
+  // intentional — we do not want recents reshuffling as background pages load.
+  const recentMessages = useMemo(
+    () => recentCachedMessages(queryClient),
+    [queryClient],
   )
-  const searchMessagesQuery = useQuery({
-    queryKey: [
-      ...queryKeys.messagesRoot,
-      'global-search',
-      debouncedServerQuery,
-    ] as const,
-    queryFn: ({ signal }) =>
-      fetchSearchMessages(debouncedServerQuery, {
-        limit: 8,
-        signal,
-        operation: searchPreviewOperation,
+  const readModelKey = useMemo(
+    () =>
+      JSON.stringify({
+        smartMailboxes: readModels.smartMailboxes.map((item) => item.id),
+        sources: readModels.sources.map((source) => ({
+          id: source.id,
+          mailboxes: source.mailboxes.map((mailbox) => mailbox.id),
+        })),
+        tags: readModels.tags.map((tag) => tag.name),
       }),
-    enabled: debouncedServerQuery.length > 0,
+    [readModels.smartMailboxes, readModels.sources, readModels.tags],
+  )
+  const providers = useMemo(
+    () =>
+      createCommandProviders({
+        readModels,
+        recentMessages,
+      }),
+    // readModelKey intentionally collapses unstable React Query wrapper arrays
+    // into the domain IDs that affect provider candidates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [readModelKey, recentMessages],
+  )
+  const rankingContext = useMemo(
+    () => createRankingContext({ hasSelectedMessage }),
+    [hasSelectedMessage],
+  )
+  const search = useCommandSearch({
+    query,
+    context: rankingContext,
+    providers,
   })
+  const itemRows = useMemo(
+    () => search.session.rows.filter(isItemRow),
+    [search.session.rows],
+  )
+  const activeSelectedIndex = search.session.selectedCandidateId
+    ? itemRows.findIndex(
+        (row) => row.candidate.id === search.session.selectedCandidateId,
+      )
+    : -1
+  const selectedValue =
+    activeSelectedIndex === -1
+      ? NO_COMMAND_PALETTE_SELECTION
+      : commandPaletteEntryValue(itemRows[activeSelectedIndex].candidate)
+
+  const serverQuery = currentSearchableServerQuery(query)
+  const messageProviderState = search.session.providerStates.get('messages')
   const canPreviewSearch =
-    debouncedServerQuery.length > 0 && searchMessagesQuery.isSuccess
-  const hasPreviewSearchError = searchMessagesQuery.isError
-  const canPreviewCurrentQuery =
-    serverQuery.length > 0 && debouncedServerQuery === serverQuery
+    serverQuery.length > 0 &&
+    messageProviderState?.status === 'done' &&
+    messageProviderState.candidates.length > 0
 
   useEffect(() => {
     if (serverQuery.length > 0 || !hasPreviewedSearchRef.current) {
@@ -120,61 +190,16 @@ export function CommandPalette({
   }, [onRejectSearchPreview, serverQuery])
 
   useEffect(() => {
-    if (!canPreviewCurrentQuery || !canPreviewSearch || hasPreviewSearchError) {
+    if (!canPreviewSearch) {
       return
     }
     hasPreviewedSearchRef.current = true
-    onPreviewSearch(debouncedServerQuery)
-  }, [
-    canPreviewCurrentQuery,
-    canPreviewSearch,
-    debouncedServerQuery,
-    hasPreviewSearchError,
-    onPreviewSearch,
-  ])
-
-  const cachedMessages =
-    searchMessagesQuery.data?.items ?? EMPTY_MESSAGE_RESULTS
-
-  const replaceQuery = useCallback((nextQuery: string) => {
-    setQuery(nextQuery)
-    setSelectedIndex(null)
-  }, [])
-  const results = useCommandPaletteResults({
-    cachedMessages,
-    hasSelectedMessage,
-    onApplySearch,
-    onArchive,
-    onCompose,
-    onOpenSettings,
-    onOpenShortcuts,
-    onPlaceholderAction,
-    onReplaceQuery: replaceQuery,
-    onReply,
-    onSelectMessage,
-    onSelectSmartMailbox,
-    onSelectSourceMailbox,
-    onToggleFlag,
-    query,
-    readModels,
-  })
-
-  const flatEntries = useMemo(
-    () => results.flatMap((group) => group.items),
-    [results],
-  )
-  const activeSelectedIndex =
-    selectedIndex !== null && selectedIndex < flatEntries.length
-      ? selectedIndex
-      : null
-  const selectedValue =
-    activeSelectedIndex === null
-      ? NO_COMMAND_PALETTE_SELECTION
-      : commandPaletteEntryValue(flatEntries[activeSelectedIndex])
+    onPreviewSearch(serverQuery)
+  }, [canPreviewSearch, onPreviewSearch, serverQuery])
 
   function handleQueryChange(value: string) {
     setQuery(value)
-    setSelectedIndex(null)
+    search.select(null)
   }
 
   function rejectPreviewedSearch() {
@@ -187,20 +212,13 @@ export function CommandPalette({
 
   function closeWithoutApplyingQuery() {
     rejectPreviewedSearch()
+    search.cancel()
     onClose()
-  }
-
-  function runEntry(entry: CommandPaletteEntry) {
-    rejectPreviewedSearch()
-    entry.onSelect()
-    if (entry.closeOnSelect !== false) {
-      onClose()
-    }
   }
 
   function applyCurrentQuery() {
     const normalized = normalizeAppliedSearchQuery(query)
-    if (!normalized || queryValidation.state !== 'valid') {
+    if (!normalized || validateSearchQuery(query).state !== 'valid') {
       return
     }
     onApplySearch(normalized)
@@ -208,13 +226,119 @@ export function CommandPalette({
     onClose()
   }
 
+  const executeAction = useCallback(
+    (action: PaletteAction) => {
+      switch (action.kind) {
+        case 'command':
+          switch (action.commandId) {
+            case 'compose':
+              onCompose()
+              break
+            case 'reply':
+              onReply()
+              break
+            case 'archive':
+              onArchive()
+              break
+            case 'flag':
+              onToggleFlag()
+              break
+            case 'shortcuts':
+              onOpenShortcuts()
+              break
+            case 'snooze':
+              onPlaceholderAction('Snooze')
+              break
+            case 'newSmart':
+            case 'newRule':
+              onOpenSettings('mailboxes')
+              break
+            case 'settings':
+              onOpenSettings()
+              break
+            case 'account':
+              onOpenSettings('accounts')
+              break
+          }
+          break
+        case 'apply-query':
+          onApplySearch(action.query)
+          break
+        case 'replace-query':
+          setQuery(action.query)
+          search.select(null)
+          break
+        case 'open-source-mailbox':
+          onSelectSourceMailbox(action.sourceId, action.mailboxId, action.name)
+          break
+        case 'open-smart-mailbox':
+          onSelectSmartMailbox(action.smartMailboxId, action.name)
+          break
+        case 'open-message':
+          if (action.mailboxHint) {
+            onSelectSourceMailbox(
+              action.sourceId,
+              action.mailboxHint.mailboxId,
+              action.mailboxHint.name,
+            )
+          }
+          onSelectMessage({
+            conversationId: action.conversationId,
+            sourceId: action.sourceId,
+            messageId: action.messageId,
+          })
+          break
+        case 'open-settings':
+          onOpenSettings(action.category)
+          break
+        case 'open-compose':
+          onCompose()
+          break
+        case 'open-contact':
+          onApplySearch(action.query)
+          break
+        case 'noop':
+          onPlaceholderAction(action.label)
+          break
+      }
+    },
+    [
+      onApplySearch,
+      onArchive,
+      onCompose,
+      onOpenSettings,
+      onOpenShortcuts,
+      onPlaceholderAction,
+      onReply,
+      onSelectMessage,
+      onSelectSmartMailbox,
+      onSelectSourceMailbox,
+      onToggleFlag,
+      search,
+    ],
+  )
+
+  function runEntry(entry: CommandPaletteEntry) {
+    if (entry.action.kind !== 'replace-query') {
+      rejectPreviewedSearch()
+    }
+    executeAction(entry.action)
+    if (entry.closeOnSelect !== false) {
+      onClose()
+    }
+  }
+
+  function runCandidate(candidate: SearchCandidate) {
+    runEntry(candidate.entry)
+  }
+
   function handlePaletteKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const isDownKey =
       event.key === 'ArrowDown' ||
-      (event.key === 'j' && (activeSelectedIndex !== null || event.ctrlKey))
+      (event.key === 'j' && (activeSelectedIndex !== -1 || event.ctrlKey))
     const isUpKey =
       event.key === 'ArrowUp' ||
-      (event.key === 'k' && (activeSelectedIndex !== null || event.ctrlKey))
+      (event.key === 'k' && (activeSelectedIndex !== -1 || event.ctrlKey))
 
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -224,34 +348,26 @@ export function CommandPalette({
 
     if (isDownKey) {
       event.preventDefault()
-      if (flatEntries.length === 0) {
-        setSelectedIndex(null)
+      if (itemRows.length === 0) {
+        search.select(null)
         return
       }
-      setSelectedIndex((current) => {
-        const bounded =
-          current !== null && current < flatEntries.length ? current : null
-        return bounded === null
+      const nextIndex =
+        activeSelectedIndex === -1
           ? 0
-          : Math.min(bounded + 1, flatEntries.length - 1)
-      })
+          : Math.min(activeSelectedIndex + 1, itemRows.length - 1)
+      search.select(itemRows[nextIndex].candidate.id)
       return
     }
 
     if (isUpKey) {
       event.preventDefault()
-      if (flatEntries.length === 0) {
-        setSelectedIndex(null)
+      if (itemRows.length === 0 || activeSelectedIndex === -1) {
+        search.select(itemRows.at(-1)?.candidate.id ?? null)
         return
       }
-      setSelectedIndex((current) => {
-        const bounded =
-          current !== null && current < flatEntries.length ? current : null
-        if (bounded === null) {
-          return flatEntries.length - 1
-        }
-        return bounded === 0 ? null : bounded - 1
-      })
+      const nextIndex = activeSelectedIndex - 1
+      search.select(nextIndex < 0 ? null : itemRows[nextIndex].candidate.id)
       return
     }
 
@@ -261,11 +377,78 @@ export function CommandPalette({
         applyCurrentQuery()
         return
       }
-      if (activeSelectedIndex !== null) {
-        runEntry(flatEntries[activeSelectedIndex])
+      if (activeSelectedIndex !== -1) {
+        runCandidate(itemRows[activeSelectedIndex].candidate)
         return
       }
       applyCurrentQuery()
+    }
+  }
+
+  function handleListScroll(event: ReactUIEvent<HTMLDivElement>) {
+    const node = event.currentTarget
+    const distanceToEnd = node.scrollHeight - node.scrollTop - node.clientHeight
+    if (distanceToEnd > 120) {
+      return
+    }
+    for (const [providerId, state] of search.session.providerStates) {
+      if (state.nextCursor) {
+        search.loadMore(providerId)
+        break
+      }
+    }
+  }
+
+  function renderRow(row: PaletteRow) {
+    switch (row.kind) {
+      case 'section':
+        return (
+          <div
+            key={row.id}
+            className="px-4 py-2 font-mono text-[10px] font-semibold tracking-[0.22em] text-muted-foreground/80 uppercase"
+          >
+            {row.label}
+          </div>
+        )
+      case 'item':
+        return (
+          <CommandItem
+            key={row.id}
+            value={commandPaletteEntryValue(row.candidate)}
+            className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
+            onSelect={() => runCandidate(row.candidate)}
+          >
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              {row.candidate.entry.icon}
+            </span>
+            <span className="min-w-0 flex-1 truncate">
+              {row.candidate.entry.label}
+            </span>
+            {row.candidate.entry.subtitle && (
+              <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
+                {row.candidate.entry.subtitle}
+              </span>
+            )}
+          </CommandItem>
+        )
+      case 'loading':
+        return (
+          <div key={row.id} className="px-4 py-2 text-sm text-muted-foreground">
+            {row.label}
+          </div>
+        )
+      case 'empty':
+        return (
+          <div key={row.id} className="px-4 py-2 text-sm text-muted-foreground">
+            {row.label}
+          </div>
+        )
+      case 'error':
+        return (
+          <div key={row.id} className="px-4 py-2 text-sm text-destructive">
+            {row.message}
+          </div>
+        )
     }
   }
 
@@ -276,10 +459,14 @@ export function CommandPalette({
       value={selectedValue}
       className="contents"
       onValueChange={(value) => {
-        const nextIndex = flatEntries.findIndex(
-          (entry) => commandPaletteEntryValue(entry) === value,
+        if (value === NO_COMMAND_PALETTE_SELECTION) {
+          search.select(null)
+          return
+        }
+        const next = itemRows.find(
+          (row) => commandPaletteEntryValue(row.candidate) === value,
         )
-        setSelectedIndex(nextIndex === -1 ? null : nextIndex)
+        search.select(next?.candidate.id ?? null)
       }}
       onKeyDown={handlePaletteKeyDown}
     >
@@ -299,44 +486,25 @@ export function CommandPalette({
         }
         onClose={closeWithoutApplyingQuery}
       >
-        <CommandList className="ph-scroll max-h-[min(440px,calc(100vh-170px))] px-0 py-1.5">
-          <CommandEmpty>No results. Try a different query.</CommandEmpty>
-          {flatEntries.length > 0 && (
+        <CommandList
+          className="ph-scroll max-h-[min(440px,calc(100vh-170px))] px-0 py-1.5"
+          onScroll={handleListScroll}
+        >
+          {itemRows.length > 0 && (
             <CommandItem
               aria-hidden="true"
               value={NO_COMMAND_PALETTE_SELECTION}
               className="hidden"
-              onSelect={() => setSelectedIndex(null)}
+              onSelect={() => search.select(null)}
             />
           )}
-          {results.map((group) => (
-            <CommandGroup
-              key={group.label}
-              heading={group.label}
-              className="py-1"
-            >
-              {group.items.map((item) => (
-                <CommandItem
-                  key={item.id}
-                  value={commandPaletteEntryValue(item)}
-                  className="mx-0 px-4 py-2.5 text-foreground data-[selected=true]:bg-[var(--hover-bg)]"
-                  onSelect={() => {
-                    runEntry(item)
-                  }}
-                >
-                  <span className="flex size-4 shrink-0 items-center justify-center">
-                    {item.icon}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {item.sub && (
-                    <span className="max-w-[14rem] truncate text-[12px] text-muted-foreground">
-                      {item.sub}
-                    </span>
-                  )}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
+          {search.session.rows.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              No results. Try a different query.
+            </div>
+          ) : (
+            search.session.rows.map(renderRow)
+          )}
         </CommandList>
       </FloatingPanel>
     </Command>

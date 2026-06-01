@@ -208,19 +208,28 @@ interaction. Dragged panel position is persisted locally and restored the next
 time the panel opens. While dragging, faint modal-width guide rails appear for
 left/center/right and top/bottom placement. When the panel reaches a rail, it
 resists movement for a short 12px breakout distance so the user can drag along
-the rail; the active rail is highlighted while resisting. As the user types,
-matching individual messages are fetched through the backend search endpoint and
-shown before commands. The same backend message-page query path also powers the
-main message list, so command search and mailbox filtering share query parsing,
-filter compilation, sorting, and cursor pagination. While the user types, a
-debounced query that the backend accepts may preview as the active message-list
-filter. If the current input becomes invalid or incomplete, any provisional
-preview from the open palette is cleared instead of leaving an earlier typed
-substring as the active filter. No row is selected by default after opening or editing the query. Down
-selects the first result, Up from the first result clears selection, Enter opens
-the selected result, and Enter with no selected result applies the current query
-as a persistent message list filter. Shift+Enter and Option/Alt+Enter always
-apply the current query as a filter.
+the rail; the active rail is highlighted while resisting.
+
+The palette uses independent bounded providers. Commands and query-language rows
+are local. Mailboxes and tags come from the typed `/read`-hydrated read models.
+Messages come from the backend global message search endpoint with cursor
+pagination. The client may reuse already-loaded message pages for empty-query
+recents, but it must not load or scan all messages across mailboxes for palette
+search. Free-text backend message search starts only after the query is long
+enough to be useful; incomplete prefix fragments such as `from:` stay local and
+drive completions.
+
+The same backend message-page query path also powers the main message list, so
+command search and mailbox filtering share query parsing, filter compilation,
+sorting, and cursor pagination. While the user types, a backend-accepted query
+may preview as the active message-list filter. If the current input becomes
+invalid or incomplete, any provisional preview from the open palette is cleared
+instead of leaving an earlier typed substring as the active filter. No row is
+selected by default after opening or editing the query. Down selects the first
+selectable item, Up from the first item clears selection, Enter opens the
+selected item, and Enter with no selected item applies the current query as a
+persistent message list filter. Shift+Enter and Option/Alt+Enter always apply
+the current query as a filter.
 
 When a message result is selected, the client switches to one of that message's
 source mailboxes when the mailbox is known, then opens the message. Selecting

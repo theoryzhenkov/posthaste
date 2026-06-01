@@ -171,13 +171,23 @@ unified command/search palette. The action bar does not contain an editable
 search field. When a query is applied, the current filter is rendered as a
 compact chip next to the command-search icon with a clear button.
 
-The palette shows query completions before message and command results when the
-current text has a valid completion point. Completion rows update the query text
-without closing the panel. Query language help is rendered in the same panel and
-uses the same floating-panel behavior as commands and keyboard shortcuts.
+The palette is backed by bounded search providers rather than one client-side
+filter over a global list. Local providers return commands, query-language rows,
+mailboxes, and tags from already-loaded read models. The message provider uses
+the global backend message search endpoint with cursor pagination, so the
+palette does not issue one search request per account and never loads all local
+messages to rank them. Empty-query message recents may come from message pages
+already present in the React Query cache; they must not trigger a backend
+message search.
 
-Search syntax and backend execution are defined by [L1-search](L1-search.md). The visual treatment is defined by L2.
-Message result previews use the global message search endpoint so the palette does not issue one search request per account.
+The palette renders a hybrid result list: a deduplicated Best matches section
+computed from loaded candidates, followed by vertical sections such as Messages,
+Mailboxes, Tags, Commands, and Query Language. Query completion rows update the
+query text without closing the panel. Non-item rows such as section headings,
+loading rows, and errors are skipped by keyboard navigation.
+
+Search syntax and backend execution are defined by [L1-search](L1-search.md).
+The visual treatment is defined by L2.
 
 ## Settings And Overlays
 
@@ -187,7 +197,7 @@ The connected accounts list and main sidebar account headers use the account's c
 
 Settings detail pages use shared settings primitives: a centered `SettingsPage`, quiet `SettingsPageHeader`, `SettingsSection` rows with label columns and whitespace, and `SettingsFooter` rows aligned with form content. Nested cards, divider lines, and tabbed subviews are avoided unless a card represents a concrete selectable/list item or nested rule-builder object.
 
-Global appearance settings are persisted through the backend `AppSettings.appearance` object rather than window-local browser state. The theme provider reads `queryKeys.settings`, writes appearance changes through `PATCH /settings`, and relies on `settings.updated` SSE invalidation so separate desktop windows converge on the same theme.
+Global appearance settings are client-owned presentation state behind a `ClientPreferencesStore` boundary, separate from the mail/backend `AppSettings` API. The current local adapter persists appearance under the existing design storage keys and publishes changes through a browser window-synchronization channel with storage-event fallback. `ThemeProvider` consumes the store with a React external-store subscription, so appearance changes apply immediately in the editing window and converge in other open client windows without a restart. A future Tauri, self-hosted, or hosted client-preferences backend can replace the adapter without changing theme consumers.
 
 Account editing follows that shared property-page pattern. Identity, server details, and credentials are saved through an Apply footer aligned with the form content. The footer also exposes connection verification and saved/unsaved state. Appearance remains a distinct section on the same page; it uses a single-letter mark with a hue slider and auto-saves for existing accounts. The rendered mark is a solid palette-fitted color, not a translucent badge.
 
