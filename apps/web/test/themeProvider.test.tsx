@@ -1,5 +1,12 @@
-import { beforeEach, describe, expect, it } from 'bun:test'
-import { act, fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from '@testing-library/react'
 
 import { clientPreferencesStore } from '../src/clientPreferences'
 import { DesignThemeProvider } from '../src/components/ThemeProvider'
@@ -9,6 +16,10 @@ import { defaultThemePreferences } from '../src/themeSettings'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
+
+afterEach(() => {
+  cleanup()
+})
 
 function ThemeProbe() {
   const theme = useDesignTheme()
@@ -39,10 +50,12 @@ describe('DesignThemeProvider', () => {
       </DesignThemeProvider>,
     )
 
-    fireEvent.click(view.getByRole('button', { name: 'Use glass' }))
+    const screen = within(view.container)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use glass' }))
 
     await waitFor(() =>
-      expect(view.getByTestId('palette-preset').textContent).toBe('glass'),
+      expect(screen.getByTestId('palette-preset').textContent).toBe('glass'),
     )
     expect(window.localStorage.getItem(designStorageKeys.palettePreset)).toBe(
       'glass',
@@ -56,7 +69,9 @@ describe('DesignThemeProvider', () => {
       </DesignThemeProvider>,
     )
 
-    expect(view.getByTestId('palette-preset').textContent).toBe('neutral')
+    const screen = within(view.container)
+
+    expect(screen.getByTestId('palette-preset').textContent).toBe('neutral')
     await waitFor(() =>
       expect(
         document.documentElement.getAttribute(
@@ -78,7 +93,7 @@ describe('DesignThemeProvider', () => {
     })
 
     await waitFor(() =>
-      expect(view.getByTestId('palette-preset').textContent).toBe('glass'),
+      expect(screen.getByTestId('palette-preset').textContent).toBe('glass'),
     )
     expect(
       document.documentElement.getAttribute(designDataAttributes.palettePreset),
