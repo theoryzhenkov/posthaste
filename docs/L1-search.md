@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Query grammar, filter compilation, smart mailbox model, thread arcs, search UX"
-modified: 2026-04-24
-reviewed: 2026-04-24
+modified: 2026-06-01
+reviewed: 2026-06-01
 depends:
   - path: docs/L0-search
   - path: docs/L1-sync
@@ -223,11 +223,13 @@ as a persistent message list filter. Shift+Enter and Option/Alt+Enter always
 apply the current query as a filter.
 
 When a message result is selected, the client switches to one of that message's
-source mailboxes when the mailbox is known, then opens the message. Applied
+source mailboxes when the mailbox is known, then opens the message. Selecting
+any palette row executes that row instead of applying the typed query; any
+provisional typed-query preview is cleared before the row action runs. Applied
 filters persist while navigating mailboxes until explicitly cleared. Pressing
 Esc with no open message clears the active filter. If the palette has previewed
 a typed query as the active message-list filter and the user closes the palette
-with Esc before applying it, the preview filter is cleared.
+without applying it, the preview filter is cleared.
 
 ### Clickable drill-down
 

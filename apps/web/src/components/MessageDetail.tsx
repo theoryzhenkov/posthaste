@@ -24,14 +24,11 @@ import {
 import {
   buildMessageAttachmentUrl,
   fetchConversation,
-  fetchMailboxes,
   fetchMessage,
 } from '../api/client'
 import type {
-  AccountOverview,
   MessageDetail as MessageDetailRecord,
   MessageSummary,
-  Mailbox,
   Recipient,
   SourceMessageRef,
 } from '../api/types'
@@ -41,7 +38,6 @@ import { cn } from '../lib/utils'
 import { downloadAuthedResource } from '../lib/downloadAuthedResource'
 import { mailKeys, mergeConversationView } from '../mailState'
 import { resolveMessageBodyRender } from '../messageBody'
-import { queryKeys } from '../queryKeys'
 import { attachmentSurface } from '../surfaces'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -56,7 +52,6 @@ interface MessageSelection extends SourceMessageRef {
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageDetailProps {
   selection: MessageSelection | null
-  accounts?: AccountOverview[]
   onArchive: () => void
   onForward: () => void
   onReply: () => void
@@ -102,58 +97,11 @@ function formatAbsoluteDate(value: string): string {
   }).format(new Date(value))
 }
 
-function formatRecipient(recipient: Recipient): string {
-  return recipient.name?.trim() || recipient.email
-}
-
-function formatRecipientList(recipients: Recipient[]): string {
+function formatRecipientEmailList(recipients: Recipient[]): string {
   if (recipients.length === 0) {
     return 'recipients unavailable'
   }
-  const names = recipients.map(formatRecipient)
-  if (names.length <= 2) {
-    return names.join(', ')
-  }
-  return `${names.slice(0, 2).join(', ')} +${names.length - 2}`
-}
-
-function emailMatchesPattern(email: string, pattern: string): boolean {
-  const normalizedEmail = email.trim().toLowerCase()
-  const normalizedPattern = pattern.trim().toLowerCase()
-  if (normalizedPattern.length === 0) {
-    return false
-  }
-  if (!normalizedPattern.includes('*')) {
-    return normalizedEmail === normalizedPattern
-  }
-  const escaped = normalizedPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`^${escaped.replaceAll('*', '.*')}$`)
-  return regex.test(normalizedEmail)
-}
-
-function isOutgoingMessage(
-  message: MessageDetailRecord,
-  accounts: AccountOverview[],
-  sourceMailboxes: Mailbox[],
-): boolean {
-  const sentMailboxIds = sourceMailboxes
-    .filter((mailbox) => mailbox.role === 'sent')
-    .map((mailbox) => mailbox.id)
-  if (
-    message.mailboxIds.some((mailboxId) => sentMailboxIds.includes(mailboxId))
-  ) {
-    return true
-  }
-
-  const account = accounts.find(
-    (candidate) => candidate.id === message.sourceId,
-  )
-  if (!account || !message.fromEmail) {
-    return false
-  }
-  return account.emailPatterns.some((pattern) =>
-    emailMatchesPattern(message.fromEmail ?? '', pattern),
-  )
+  return recipients.map((recipient) => recipient.email).join(', ')
 }
 
 /**
@@ -163,7 +111,6 @@ function isOutgoingMessage(
  */
 export function MessageDetail({
   selection,
-  accounts = [],
   onArchive,
   onForward,
   onReply,
@@ -203,13 +150,6 @@ export function MessageDetail({
   const conversation = conversationQuery.data
   const hasMessageDetailPayload = isMessageDetailPayload(messageData)
   const message = hasMessageDetailPayload ? messageData : null
-  const messageSourceId = message?.sourceId ?? null
-  const sourceMailboxesQuery = useQuery({
-    queryKey: queryKeys.mailboxes(messageSourceId),
-    queryFn: () => fetchMailboxes(messageSourceId!),
-    enabled: messageSourceId !== null,
-  })
-
   useEffect(() => {
     if (!messageData || hasMessageDetailPayload || isMessageFetching) {
       return
@@ -299,13 +239,7 @@ export function MessageDetail({
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
-  const recipientLabel = isOutgoingMessage(
-    message,
-    accounts,
-    sourceMailboxesQuery.data ?? [],
-  )
-    ? `to ${formatRecipientList(message.to)}`
-    : 'to me'
+  const recipientLabel = `to ${formatRecipientEmailList(message.to)}`
   const threadMessages = dedupeConversationMessages(conversation.messages)
   const bodyRender = resolveMessageBodyRender(message)
   const sourceId = message.sourceId
