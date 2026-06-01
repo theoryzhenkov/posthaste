@@ -1,5 +1,6 @@
-import { afterAll, beforeAll } from 'bun:test'
+import { afterAll, afterEach, beforeAll } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { cleanup } from '@testing-library/react'
 
 let activeDomSuites = 0
 let registeredByTestHarness = false
@@ -15,8 +16,17 @@ let registeredByTestHarness = false
  * DOM-free global. `react-dom` only touches `window` at render time, so
  * registering in `beforeAll` (before any `renderHook`/`render`) is sufficient
  * even though the imports are hoisted above it.
+ *
+ * Also runs `@testing-library/react`'s `cleanup` after every test. RTL only
+ * auto-registers that hook when `afterEach` is a global, which it is not under
+ * `bun:test`, so without this the DOM/React teardown between tests is left to
+ * runtime incidentals. Calling it explicitly unmounts rendered trees (running
+ * effect cleanups, e.g. store unsubscribes) deterministically.
  */
 export function setupDomEnvironment(): void {
+  afterEach(() => {
+    cleanup()
+  })
   beforeAll(() => {
     activeDomSuites += 1
     if (typeof (globalThis as { window?: unknown }).window === 'undefined') {

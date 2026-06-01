@@ -12,7 +12,10 @@ import {
   type ThemeMode,
   type UiDensity,
 } from '@/design'
-import { clientPreferencesStore } from '@/clientPreferences'
+import {
+  clientPreferencesStore,
+  type ClientPreferencesStore,
+} from '@/clientPreferences'
 import type { DesignThemePreferences } from '@/themeSettings'
 import {
   useCallback,
@@ -29,13 +32,22 @@ import {
 
 interface DesignThemeProviderProps {
   children: ReactNode
+  /**
+   * Client-preferences source. Defaults to the process-wide singleton; inject a
+   * fresh instance (via `createClientPreferencesStore`) to isolate tests from
+   * shared cross-window-sync state.
+   */
+  store?: ClientPreferencesStore
 }
 
-export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
+export function DesignThemeProvider({
+  children,
+  store = clientPreferencesStore,
+}: DesignThemeProviderProps) {
   const { appearance: preferences } = useSyncExternalStore(
-    clientPreferencesStore.subscribe,
-    clientPreferencesStore.getSnapshot,
-    clientPreferencesStore.getServerSnapshot,
+    store.subscribe,
+    store.getSnapshot,
+    store.getServerSnapshot,
   )
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
 
@@ -83,9 +95,9 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
 
   const updatePreferences = useCallback(
     (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
-      clientPreferencesStore.updateAppearance(updater)
+      store.updateAppearance(updater)
     },
-    [],
+    [store],
   )
 
   const setAccentHue = useCallback(

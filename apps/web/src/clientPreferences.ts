@@ -327,5 +327,9 @@ class LocalClientPreferencesStore implements ClientPreferencesStore {
   }
 }
 
+export function createClientPreferencesStore(): ClientPreferencesStore {
+  return new LocalClientPreferencesStore()
+}
+
 export const clientPreferencesStore: ClientPreferencesStore =
-  new LocalClientPreferencesStore()
+  createClientPreferencesStore()
