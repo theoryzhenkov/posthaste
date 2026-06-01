@@ -1,12 +1,12 @@
 ---
 id: community-extensions
 from: Posthaste
-subject: Community extensions
-tag: wip
-time: Soon
+subject: Your mail has an API
+tag: api
+time: Local
 color: violet
 ---
 
-Posthaste's community extension store is coming soon!
+Posthaste has a Rust backend, a documented `/v1` API, Server-Sent Events, OpenAPI, AsyncAPI, and an MCP adapter. The bundled app is one client; it is not the boundary of what you can build.
 
-Posthaste already supports local extensions and themes, and allows you to distribute them on your own. We are working on providing users with a convenient in-app plugin store.
+Write another client. Subscribe to local mail events. Give a trusted local agent a real mail interface.

@@ -1,6 +1,6 @@
 ---
-label: Ipsum
-title: Ut enim ad minim veniam.
+label: Local
+title: Fast interaction starts with a local replica.
 ---
 
-Quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Posthaste syncs mail metadata into SQLite, lazy-fetches bodies, and keeps previously synced mail readable offline.

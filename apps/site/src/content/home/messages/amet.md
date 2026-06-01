@@ -1,12 +1,12 @@
 ---
 id: amet
-from: Adipiscing Elit
-subject: Excepteur sint occaecat cupidatat
-tag: amet
-time: Tue
+from: Posthaste
+subject: Local by design
+tag: local
+time: Soon
 color: amber
 ---
 
-Nunc sed augue lacus viverra vitae congue eu consequat ac. Vitae purus faucibus ornare suspendisse sed.
+Posthaste is not a hosted mail service. Your provider remains the source of truth, and the app keeps a local SQLite replica so the interface can read from your machine.
 
-Velit ut tortor pretium viverra suspendisse potenti nullam ac tortor vitae purus faucibus.
+No product telemetry. No remote account to create. Just your mail client, your data, and code you can inspect.

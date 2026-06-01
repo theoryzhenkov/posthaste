@@ -1,6 +1,6 @@
 ---
-label: Dolor
-title: Duis aute irure dolor.
+label: Build
+title: The backend is a product surface.
 ---
 
-In reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+OpenAPI, AsyncAPI/SSE events, and the MCP adapter make the local backend useful for custom clients, scripts, and trusted local agents.
