@@ -1,5 +1,5 @@
 ---
-label: Build
+label: Extend
 title: The backend is a product surface.
 ---
 
