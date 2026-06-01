@@ -36,6 +36,7 @@ in
     pkgs.rustc
     pkgs.cargo
     pkgs.rustfmt
+    pkgs.clippy
     pkgs.rust-analyzer
     pkgs.pkg-config
     pkgs.nodejs_22
