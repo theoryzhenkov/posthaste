@@ -609,7 +609,7 @@ function MailClient({
             onPreviewSearch={handlePreviewSearch}
             onRejectSearchPreview={handleRejectSearchPreview}
             onReply={handleReply}
-            onSelectMessage={handleSelectMessage}
+            onSelectMessage={handleSelectMessageRef}
             onSelectSmartMailbox={handleSelectSmartMailbox}
             onSelectSourceMailbox={handleSelectSourceMailbox}
             onToggleFlag={handleToggleFlag}

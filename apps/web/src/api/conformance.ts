@@ -297,10 +297,9 @@ export type _SmartMailboxValue = AssertTrue<
 export type _MailEndpointSettings = AssertTrue<
   Conforms<MailEndpointSettings, Wire['ImapTransportSettings']>
 >
-// NOTE: appearance (ThemeMode / PalettePresetId / UiDensity /
-// AppAppearanceSettings / AppGlassThemeSettings / AppGlassBloomSettings) is
-// client-local presentation state and is intentionally NOT in the wire schema,
-// so it has no conformance assertion here.
+// NOTE: client appearance preferences live behind the frontend
+// ClientPreferencesStore boundary. They are intentionally NOT in the daemon
+// wire schema, so they have no conformance assertion here.
 export type _AppSettings = AssertTrue<
   Conforms<AppSettings, Wire['AppSettings']>
 >

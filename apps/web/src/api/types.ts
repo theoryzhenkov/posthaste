@@ -32,42 +32,6 @@ export interface MailEndpointSettings {
   security: TransportSecurity
 }
 
-// Appearance is client-local presentation state, persisted in localStorage (see
-// `ThemeProvider`). It is intentionally NOT part of the daemon wire contract
-// (`AppSettings`), so these types have no conformance assertion against the
-// generated schema. Kept here as the shared client-local appearance model.
-export type ThemeMode = 'light' | 'dark' | 'system'
-export type PalettePresetId =
-  | 'neutral'
-  | 'paperInk'
-  | 'brutalist'
-  | 'glass'
-  | 'acid'
-  | 'marzipan'
-  | 'botanical'
-export type UiDensity = 'compact' | 'cozy' | 'comfortable'
-
-export interface AppGlassBloomSettings {
-  id: string
-  hue: number
-  x: number
-  y: number
-  opacity: number
-  radius: number
-}
-
-export interface AppGlassThemeSettings {
-  blooms: AppGlassBloomSettings[]
-}
-
-export interface AppAppearanceSettings {
-  mode: ThemeMode
-  palettePreset: PalettePresetId
-  density: UiDensity
-  accentHue: number
-  glassTheme: AppGlassThemeSettings
-}
-
 /** @spec docs/L1-api#endpoint-table */
 export interface AppSettings {
   defaultAccountId: string | null

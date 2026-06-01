@@ -15,7 +15,6 @@ import {
   applyAccountNamesToMessages,
   useAccountDirectory,
 } from '../accountDirectory'
-import { fetchSmartMailboxMessages, fetchSourceMessages } from '../api/client'
 import { ApiError } from '../api/errors'
 import type {
   DomainEvent,
@@ -36,6 +35,7 @@ import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
 import { isEditableKeyboardTarget } from './keyboard/inputTargets'
 import { createOperationContext, type OperationContext } from '../observability'
+import { messagePageClient } from '../messagePageClient'
 
 /** @spec docs/L1-ui#messagelist */
 interface MessageListProps {
@@ -124,20 +124,22 @@ async function fetchMessagesForView(
   signal: AbortSignal,
   operation: OperationContext,
 ): Promise<MessagePage> {
-  const input = {
-    q: serverQuery,
+  return messagePageClient.fetchPage({
+    scope:
+      selectedView.kind === 'smart-mailbox'
+        ? { kind: 'smart-mailbox', smartMailboxId: selectedView.id }
+        : {
+            kind: 'source-mailbox',
+            sourceId: selectedView.sourceId,
+            mailboxId: selectedView.mailboxId,
+          },
+    query: serverQuery,
     cursor,
     limit: MESSAGE_PAGE_SIZE,
     sort: serverSortField(sort),
     sortDir: sort.direction,
     signal,
     operation,
-  }
-  if (selectedView.kind === 'smart-mailbox') {
-    return fetchSmartMailboxMessages(selectedView.id, input)
-  }
-  return fetchSourceMessages(selectedView.sourceId, selectedView.mailboxId, {
-    ...input,
   })
 }
 

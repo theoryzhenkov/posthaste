@@ -9,11 +9,11 @@ import {
 } from '../src/design'
 import { defaultThemePreferences } from '../src/themeSettings'
 
-// Appearance is now client-local presentation state persisted in localStorage
-// (see docs/eph/DESIGN-L1-deployment-modes); it no longer round-trips through
-// the daemon API, so the former server-appearance migration helpers are gone.
+// Appearance is client-owned presentation state behind ClientPreferencesStore;
+// it no longer round-trips through the daemon API, so the former
+// server-appearance migration helpers are gone.
 describe('default theme preferences', () => {
-  it('matches the design defaults used to seed local storage', () => {
+  it('matches the design defaults used to seed client preferences', () => {
     const preferences = defaultThemePreferences()
 
     expect(preferences.mode).toBe(defaultThemeMode)
