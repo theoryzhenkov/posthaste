@@ -38,7 +38,7 @@ export function FocusedSurface({
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: fetchAccounts,
-    enabled: surface.kind === 'settings' || surface.kind === 'message',
+    enabled: surface.kind === 'settings',
   })
   const actions = useEmailActions()
   const {
@@ -107,7 +107,6 @@ export function FocusedSurface({
     <>
       <MessageDetail
         selection={surface.params}
-        accounts={accountsQuery.data ?? []}
         onArchive={() =>
           actions.archive({
             sourceId: surface.params.sourceId,
