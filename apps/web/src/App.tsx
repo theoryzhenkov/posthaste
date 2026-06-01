@@ -37,6 +37,7 @@ import {
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
+import { CommandPalette } from './components/CommandPalette'
 import { TagEditor } from './components/TagEditor'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import { ConnectionScreen } from './connection/ConnectionScreen'
@@ -91,11 +92,10 @@ import {
   prepareServerSearchQuery,
 } from './searchQuery'
 
-const CommandPalette = lazy(() =>
-  import('./components/CommandPalette').then((module) => ({
-    default: module.CommandPalette,
-  })),
-)
+// Eager-loaded: the chunk is tiny (~38 KB), but resolving the dynamic import
+// over the `tauri://` asset protocol cost ~1s on first open per launch in the
+// packaged app. Bundling it into the main chunk (loaded once at startup) removes
+// that round-trip; the added parse weight at startup is negligible.
 const ComposeOverlay = lazy(() =>
   import('./components/ComposeOverlay').then((module) => ({
     default: module.ComposeOverlay,
