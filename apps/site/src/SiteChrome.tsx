@@ -21,11 +21,11 @@ export function InstallHeader({ active }: { active?: 'releases' } = {}) {
       </button>
       <a className="install-header-button" href="/releases">
         <Download aria-hidden="true" />
-        <span>Download</span>
+        <span>Try beta</span>
       </a>
       <nav className="install-header-nav" aria-label="Site">
-        <a href="/#notes">Documentation</a>
-        <a href="/#themes">Themes</a>
+        <a href="/#notes">Builders</a>
+        <a href="/#themes">Interface</a>
         <a
           href="/releases"
           aria-current={active === 'releases' ? 'page' : undefined}

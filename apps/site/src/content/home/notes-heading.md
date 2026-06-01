@@ -1,3 +1,3 @@
 ---
-title: Lorem ipsum dolor sit amet.
+title: Email for people who keep asking for more.
 ---

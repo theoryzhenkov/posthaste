@@ -8,8 +8,8 @@ color: blue
 unread: true
 ---
 
-Posthaste is a powerful, fast, modern email client with JMAP support designed for your needs. I am so excited to release it to the public! It is available on all desktop platforms, either as a native application or a localhost webpage, and soon is coming to mobile.
+Posthaste turns email into a fast, local, programmable workspace. It brings together precise search, smart mailboxes, conversation-first reading, Markdown compose, and a desktop interface that is built for people who live in mail.
 
-Enjoy it, and should you have any issues or feature requests, shoot me a message at posthaste@theor.net.
+The project is early, but the direction is clear: mail should be yours to search, shape, automate, and extend.
 
 Best, Theo

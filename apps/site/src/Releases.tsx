@@ -92,7 +92,7 @@ export function Releases({
       <section className="releases-hero" aria-labelledby="releases-title">
         <p className="releases-eyebrow">Download Posthaste</p>
         <h1 id="releases-title">
-          Get Posthaste{latest ? ` ${latest.version}` : ''}
+          Try Posthaste{latest ? ` ${latest.version}` : ''}
         </h1>
         {latest ? (
           <p className="releases-subtitle">
@@ -106,6 +106,11 @@ export function Releases({
         ) : (
           <p className="releases-subtitle">No releases published yet.</p>
         )}
+
+        <p className="releases-subtitle">
+          Early builds are for dogfooding and beta testing. Keep another mail
+          client available if you try them today.
+        </p>
 
         {latest ? (
           <div className="download-grid">

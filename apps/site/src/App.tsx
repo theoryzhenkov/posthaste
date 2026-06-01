@@ -188,8 +188,8 @@ function ClientToolbar() {
       </button>
       <div className="toolbar-spacer" />
       <div className="nav-links">
-        <a href="#notes">Notes</a>
-        <a href="#themes">Themes</a>
+        <a href="#notes">Builders</a>
+        <a href="#themes">Interface</a>
       </div>
       <div className="mock-search">
         <Search aria-hidden="true" />
@@ -294,10 +294,10 @@ function ReaderPreview({ message }: { message: SiteMessage }) {
 function SloganTitle({ id }: { id?: string }) {
   return (
     <h1 className="slogan" id={id}>
-      <span>Your Mail</span>
+      <span>Your mail,</span>
       <span>
-        Delivered at Post
-        <span className="letter-h">H</span>
+        delivered to you at Post
+        <span className="letter-h">h</span>
         <span className="letter-a">a</span>
         <span className="letter-s">s</span>
         <span className="letter-t">t</span>
@@ -373,7 +373,7 @@ function NotesSection({ content }: { content: HomeContent }) {
   return (
     <section className="notes-section" id="notes" aria-labelledby="notes-title">
       <div className="section-header" data-reveal>
-        <p className="eyebrow">Notes</p>
+        <p className="eyebrow">Notes for builders and power users</p>
         <h2 id="notes-title">{content.notesHeading.title}</h2>
       </div>
       <div className="note-list">
@@ -405,7 +405,7 @@ function ThemeSection({ content }: { content: HomeContent['theme'] }) {
         <div dangerouslySetInnerHTML={{ __html: content.html }} />
       </div>
       <div className="glass-panel" data-reveal>
-        <div className="glass-title">Theme preview</div>
+        <div className="glass-title">Interface preview</div>
         <div className="swatch-row" aria-hidden="true">
           {palette.map((color) => (
             <span className={color} key={color} />
