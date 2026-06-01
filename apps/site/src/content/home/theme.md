@@ -1,6 +1,6 @@
 ---
 eyebrow: Interface
-title: Pretty, dense, and built for motion.
+title: Pretty, dense, and made to live in.
 ---
 
-Compact rows, thin dividers, keyboard-first actions, and clear signal colors. Posthaste should feel fast and smart without losing the joy of a well-made tool.
+Compact rows, thin dividers, keyboard-first actions, and clear signal colors. A serious daily mail tool that still feels like a well-made thing — without the motion getting in your way.

@@ -1,6 +1,6 @@
 ---
-label: Smart
-title: Mail views you can name and reuse.
+label: Shape
+title: Views you can name and reuse.
 ---
 
-Smart mailboxes turn recurring queries into living views, so mail organization becomes something you define once and keep using.
+Smart mailboxes turn a recurring boolean query into a living view, so organizing mail is something you define once and keep using.
