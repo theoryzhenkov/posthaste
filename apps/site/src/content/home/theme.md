@@ -1,5 +1,5 @@
 ---
-eyebrow: Interface
+eyebrow: Craft
 title: Pretty, dense, and made to live in.
 ---
 
