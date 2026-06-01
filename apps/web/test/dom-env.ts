@@ -1,6 +1,9 @@
 import { afterAll, beforeAll } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 
+let activeDomSuites = 0
+let registeredByTestHarness = false
+
 /**
  * Register a happy-dom DOM (`window`/`document`/`HTMLElement`/…) for the calling
  * test file, and tear it down afterward. Call once at the top level of any test
@@ -15,11 +18,17 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
  */
 export function setupDomEnvironment(): void {
   beforeAll(() => {
+    activeDomSuites += 1
     if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
       GlobalRegistrator.register()
+      registeredByTestHarness = true
     }
   })
   afterAll(async () => {
-    await GlobalRegistrator.unregister()
+    activeDomSuites -= 1
+    if (activeDomSuites === 0 && registeredByTestHarness) {
+      registeredByTestHarness = false
+      await GlobalRegistrator.unregister()
+    }
   })
 }
