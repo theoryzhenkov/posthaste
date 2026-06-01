@@ -1,13 +1,13 @@
 ---
 id: dolor
 from: Posthaste
-subject: Search should be infrastructure
-tag: search
+subject: Smart mail, not just search
+tag: smart
 time: Beta
 color: sage
 unread: true
 ---
 
-Boolean search, field prefixes, date ranges, and smart mailboxes are core Posthaste features. Save the query once; use it like a mailbox.
+Posthaste gives mail structure you can reuse: smart mailboxes, saved views, keyboard triage, local state, and a conversation-first reader.
 
-The goal is to make repeated mail work disappear into reusable views.
+Search matters, but it is only one part of the larger idea: a mail client that understands how you work.

@@ -16,9 +16,9 @@ dependents: []
 
 The public website showcases PostHaste as a product without replacing the mail client application. It lives in `apps/site/` as a static Astro site, separate from the production client in `apps/web/`.
 
-The site should show the interface rather than argue for it. Product mockups, mailbox color, search, smart mailbox flow, and theme surfaces are primary. Copy stays short and project-like.
+The site should show the interface rather than argue for it. Product mockups, mailbox color, smart mailbox flow, local/API surfaces, and theme surfaces are primary. Copy stays short and project-like.
 
-Home page copy should be editable as Markdown under `apps/site/src/content/home/`. Public copy should stay short, honest about the pre-production status, and grounded in implemented or explicitly planned product surfaces. Current deliberate non-placeholder copy includes the title-page slogan, beta-status `Welcome` mock email, builder/API mock email, search/local-first mock emails, notes section, interface section, footer, and open-source landscape strip.
+Home page copy should be editable as Markdown under `apps/site/src/content/home/`. Public copy should be confident, short, and grounded in implemented or explicitly planned product surfaces. It should include one clear early-build caveat without making every section apologize for the project's stage. Current deliberate non-placeholder copy includes the title-page slogan, product-direction `Welcome` mock email, builder/API mock email, search/local-first mock emails, notes section, interface section, footer, and open-source landscape strip.
 
 ## Visual Direction
 
