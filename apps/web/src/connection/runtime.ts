@@ -45,6 +45,13 @@ export function getActiveConnection(): ResolvedConnection {
   return active
 }
 
+/** Test-only: restore the active connection to the embedded runtime default. */
+export function resetActiveConnectionForTesting(): void {
+  active = embeddedDefault()
+  activeProfileId = null
+  notify()
+}
+
 /** The id of the profile backing the active connection, if known. */
 export function getActiveProfileId(): string | null {
   return activeProfileId

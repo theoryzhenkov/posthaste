@@ -24,8 +24,11 @@ function installInjectedWindow(): void {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   installInjectedWindow()
+  const { resetActiveConnectionForTesting } =
+    await import('../src/connection/runtime')
+  resetActiveConnectionForTesting()
 })
 
 afterEach(() => {
