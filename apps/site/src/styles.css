@@ -211,11 +211,6 @@ a {
   background: #28c940;
 }
 
-.nav-links {
-  display: flex;
-  align-items: center;
-}
-
 .toolbar-chip,
 .icon-chip {
   height: 28px;
@@ -257,17 +252,6 @@ a {
 
 .toolbar-spacer {
   flex: 1;
-}
-
-.nav-links {
-  gap: 14px;
-  margin-right: 10px;
-  color: var(--subtle);
-  font-size: 12px;
-}
-
-.nav-links a:hover {
-  color: var(--fg);
 }
 
 .mock-search {
@@ -1115,8 +1099,7 @@ h1 {
 
   .traffic-lights,
   .toolbar-chip,
-  .icon-chip,
-  .nav-links {
+  .icon-chip {
     display: none;
   }
 

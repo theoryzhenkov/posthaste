@@ -41,7 +41,9 @@ export function FooterSection({ content }: { content: HomeContent['footer'] }) {
   return (
     <footer className="footer-section">
       <span>{content.brand}</span>
-      <div dangerouslySetInnerHTML={{ __html: content.html }} />
+      {content.html.trim() ? (
+        <div dangerouslySetInnerHTML={{ __html: content.html }} />
+      ) : null}
     </footer>
   )
 }
