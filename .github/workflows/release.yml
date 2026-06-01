@@ -99,7 +99,11 @@ jobs:
             bundle_targets: appimage
           - os: macos-latest
             platform: macos
-            bundle_targets: dmg
+            # Emit the standalone .app alongside the .dmg: the .dmg is the
+            # distributed artifact, but the "Verify macOS desktop app signature"
+            # step codesign-verifies the .app, which dmg-only bundling does not
+            # leave in bundle/macos/.
+            bundle_targets: app,dmg
           - os: windows-latest
             platform: windows-x86_64
             bundle_targets: nsis
