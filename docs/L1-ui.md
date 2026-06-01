@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-05-31
-reviewed: 2026-05-31
+modified: 2026-06-01
+reviewed: 2026-06-01
 depends:
   - path: docs/L0-ui
   - path: docs/L0-testing
@@ -160,7 +160,7 @@ without HTML. This matches normal mail-client behavior for
 `multipart/alternative` and prevents rendered Markdown email from appearing as
 its Markdown source when a provider also supplies the HTML part.
 
-The reader header, attachment strip, and plain text body must follow the L2 visual contract. The metadata header labels incoming messages as addressed to the user, and sent/outgoing messages as addressed to their stored recipients. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or add a default white background.
+The reader header, attachment strip, and plain text body must follow the L2 visual contract. The metadata header always displays the stored recipient email address list instead of collapsing account-owned addresses to a generic label. HTML email may be rendered through an iframe, but the surrounding frame must not dominate the reader or add a default white background.
 
 Attachment rows are preview targets when the MIME type is image, PDF, or text. The preview affordance uses an eye icon, and clicking anywhere on the row outside explicit secondary actions opens a focused attachment surface. Attachment previews are never expanded inline inside the message reader; the focused surface fetches by source, message, and attachment IDs and renders the attachment full-window with a download action.
 

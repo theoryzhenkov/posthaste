@@ -177,7 +177,21 @@ export function CommandPalette({
     setSelectedIndex(null)
   }
 
+  function rejectPreviewedSearch() {
+    if (!hasPreviewedSearchRef.current) {
+      return
+    }
+    onRejectSearchPreview()
+    hasPreviewedSearchRef.current = false
+  }
+
+  function closeWithoutApplyingQuery() {
+    rejectPreviewedSearch()
+    onClose()
+  }
+
   function runEntry(entry: CommandPaletteEntry) {
+    rejectPreviewedSearch()
     entry.onSelect()
     if (entry.closeOnSelect !== false) {
       onClose()
@@ -204,11 +218,7 @@ export function CommandPalette({
 
     if (event.key === 'Escape') {
       event.preventDefault()
-      if (hasPreviewedSearchRef.current) {
-        onRejectSearchPreview()
-        hasPreviewedSearchRef.current = false
-      }
-      onClose()
+      closeWithoutApplyingQuery()
       return
     }
 
@@ -287,7 +297,7 @@ export function CommandPalette({
             wrapperClassName="min-w-0 flex-1 h-12 px-3"
           />
         }
-        onClose={onClose}
+        onClose={closeWithoutApplyingQuery}
       >
         <CommandList className="ph-scroll max-h-[min(440px,calc(100vh-170px))] px-0 py-1.5">
           <CommandEmpty>No results. Try a different query.</CommandEmpty>
