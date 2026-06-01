@@ -82,6 +82,8 @@ Mutable account display fields are canonical in the accounts query. Message DTOs
 
 Domain events and mutation results update caches through the centralized domain cache helper. Components should not invent ad hoc cache keys or scatter account/message invalidation rules locally. Typed read-call bootstraps hydrate normalized caches; feature code reads the domain keys. The message list still listens for live domain events and refreshes the current view when a relevant message or mailbox event arrives.
 
+Message mutations are optimistic. Keyword changes (read/flag/tags) patch the message detail, conversation view, and list rows in place via `applyKeywordPatch`; mailbox moves and permanent deletes patch the same caches via `applyMailboxPatch`, which additionally removes the row from any source-mailbox list view it no longer belongs to (and from every list view on delete). Both return rollback snapshots and an `incomplete` flag: when membership cannot be decided from the cache (smart-mailbox or unscoped views) the row is left in place and server reconciliation settles it. The optimistic patch is applied before the command is sent, so the row leaves the current view immediately; on success the result is merged and read models are invalidated for background reconciliation, and on failure the snapshots are restored.
+
 ## Loading And Progress
 
 Long-running loads and process state use the shared `ProgressBar` primitive rather than one-off pulse bars. It supports determinate percentages when the backend exposes counts and indeterminate motion when only pending state is known. Message detail loads, uncached body fetches, attachment preview loads, and account sync progress all use the same primitive so future tasks can share labels, accessibility, and reduced-motion behavior.
@@ -260,7 +262,11 @@ ignore modified key chords, so `Cmd/Ctrl+K` cannot also trigger `k` navigation.
 
 ## Undo system
 
-Not implemented yet. Current mutations invalidate and refetch; they do not provide a toast-based undo layer.
+Every mutation is modelled as a `MailOperation` (`operations.ts`): a set of targets plus a `project(target, current)` function that maps a target's current mutable state (`{ mailboxIds, keywords }`) to its desired next state. The runner (`OperationsProvider` / `useOperations`) captures each target's before-image, applies the optimistic patch, derives the minimal command(s) with `diffMutableState`, and sends them. This makes undo a single generic primitive rather than per-operation logic: `invertOperation` projects every target back to its captured before-image, so undoing a move restores the message to the mailbox it actually came from — trashing a message from Archive and undoing returns it to Archive, not a hardcoded Inbox.
+
+Moves (archive, trash, move to inbox) are recorded on an undo stack and surface a toast with an Undo action; redo is the symmetric replay to the captured after-image. `Cmd/Ctrl+Z` undoes and `Cmd/Ctrl+Shift+Z` redoes, suppressed while an editor or overlay owns input so native text undo still wins. The stack is capped (`MAX_HISTORY`) and undo/redo pop synchronously so two quick presses revert distinct entries. History entries hold **absolute** before/after images, not relative deltas: undo restores the captured before-image regardless of intervening remote changes (last-writer-wins, reconciled by the server's returned detail), so a recorded entry can be stale if the message changed externally in the meantime. Each built-in operation changes a single facet (mailboxes _or_ keywords), which keeps optimistic patching and rollback snapshots unambiguous; a combined-facet operation is expressible by the model but not currently produced.
+
+Keyword toggles (read/flag/tags, including auto-mark-read) run optimistically but are intentionally neither toasted nor recorded — they are trivially reversed by toggling again, and automatic actions must never sit on the undo stack. Permanent delete (`destroy`) is irreversible: it runs optimistically, is reported non-invertible, and clears the redo timeline.
 
 ## Invariants
 
