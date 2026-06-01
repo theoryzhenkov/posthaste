@@ -57,6 +57,13 @@ describe('DesignThemeProvider', () => {
     )
 
     expect(view.getByTestId('palette-preset').textContent).toBe('neutral')
+    await waitFor(() =>
+      expect(
+        document.documentElement.getAttribute(
+          designDataAttributes.palettePreset,
+        ),
+      ).toBe('neutral'),
+    )
 
     act(() => {
       window.localStorage.setItem(designStorageKeys.palettePreset, 'glass')
