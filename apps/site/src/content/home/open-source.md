@@ -1,7 +1,7 @@
 ---
-title: Open Source
+title: Open source mail you can build on
 ---
 
-I believe you should own your communication.
+Posthaste is free and open source under the MIT License. If the client does not do what you need yet, the answer should not be “wait for a vendor.” The backend contract is there so you can build the missing piece.
 
-Posthaste is open source and available under a free license, perpetually. Make its development possible at [placeholder.theor.net](https://placeholder.theor.net).
+Current builds are for people who want to try the direction early and help shape what comes next.

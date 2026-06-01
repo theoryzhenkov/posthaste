@@ -1,8 +1,8 @@
 ---
 scope: L0
 summary: "Public PostHaste product showcase site, visual direction, and container deployment"
-modified: 2026-05-31
-reviewed: 2026-05-31
+modified: 2026-06-01
+reviewed: 2026-06-01
 depends:
   - path: README
   - path: docs/L0-branding
@@ -18,7 +18,7 @@ The public website showcases PostHaste as a product without replacing the mail c
 
 The site should show the interface rather than argue for it. Product mockups, mailbox color, search, smart mailbox flow, and theme surfaces are primary. Copy stays short and project-like.
 
-Home page copy should be editable as Markdown under `apps/site/src/content/home/`. Placeholder lorem ipsum may remain until final copy is curated, but current deliberate non-placeholder copy includes the title-page slogan, the `Welcome` mock email, the `Community extensions` mock email, and the `Open Source` landscape strip.
+Home page copy should be editable as Markdown under `apps/site/src/content/home/`. Public copy should stay short, honest about the pre-production status, and grounded in implemented or explicitly planned product surfaces. Current deliberate non-placeholder copy includes the title-page slogan, beta-status `Welcome` mock email, builder/API mock email, search/local-first mock emails, notes section, interface section, footer, and open-source landscape strip.
 
 ## Visual Direction
 
@@ -28,7 +28,7 @@ The website inherits the product's shell language from [L0-branding](L0-branding
 - Multiple semantic accent colors for mailboxes, tags, unread state, flag state, and theme previews.
 - Glass treatment reserved for theme and overlay moments, not the base page.
 - Product UI mockups should use the client shell as the main website structure.
-- The title-page reader pane should present `Your Mail Delivered at PostHaste` as the main slogan, with a small line gap between `Your Mail` and `Delivered at PostHaste`.
+- The title-page reader pane should present `Your mail, delivered to you at Posthaste` as the main slogan, with a small line gap between `Your mail,` and `delivered to you at Posthaste`.
 - Mock email rows in the title-page shell should be selectable and update the reader pane.
 - The title-page shell should keep outer page padding, but sit directly on the dark site background without an outer framed-card border or drop shadow.
 - Install should be exposed through a fixed floating command strip at the top of the page. The strip should keep page-edge padding, include a drag handle, an active pin button, a direct install button, and compact navigation links. The title-page shell should start lower so the strip does not obscure the mail UI on first load.

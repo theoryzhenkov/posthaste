@@ -1,8 +1,8 @@
 ---
 scope: root
-summary: "PostHaste — JMAP mail client with MailMate-grade search and conversation-first web UI"
-modified: 2026-05-26
-reviewed: 2026-05-26
+summary: "Posthaste — open-source, local-first mail workstation with power-user search and a documented API"
+modified: 2026-06-01
+reviewed: 2026-06-01
 dependents:
   - path: docs/L0-branding
   - path: docs/L0-providers
@@ -19,13 +19,56 @@ dependents:
   - path: docs/L0-website
 ---
 
-# PostHaste
+# Posthaste
 
-A JMAP mail client that brings MailMate's power-user features to a modern web UI. Boolean search, smart mailboxes, conversation-first reading, Markdown composition, and a Rust-owned local replica.
+Your mail, delivered to you at Posthaste.
 
-## Setup
+Posthaste turns email into a fast, local, programmable workspace. It gives power users the parts they miss from classic mail clients: precise search, smart mailboxes, keyboard-first triage, and Markdown compose. The same Rust backend is exposed through a documented API for custom clients, scripts, and agents.
 
-Requires `nix` and `direnv` installed. Create local environment files if they are missing, allow direnv, then run setup inside the flake dev shell:
+This is an early-stage build, not a conservative production recommendation. If you try it today, expect sharp edges and keep another mail client available.
+
+## Why Posthaste
+
+Email should be more than a feed you clear. It is where work arrives, receipts live, projects move, and agents can help — if the mail client gives you the right handles.
+
+Posthaste is built around those handles:
+
+- **Search you can keep:** boolean queries, field prefixes, date ranges, and smart mailboxes turn recurring searches into reusable mail views.
+- **A local replica:** mail metadata syncs into SQLite, so the interface reads from your machine. Previously synced mail remains readable offline.
+- **A serious desktop shell:** three panes, compact rows, keyboard-first actions, and a reader that treats conversations as the main unit.
+- **Markdown compose:** write mail as plain text that becomes clean multipart plain text plus HTML.
+- **Protocol adapters:** JMAP is the first-class path, with IMAP/SMTP behind backend provider adapters so the UI can stay mail-native without becoming protocol-shaped.
+
+## Built for builders
+
+Posthaste is a local mail platform with a real contract.
+
+- The Rust backend exposes a versioned JSON API under `/v1`.
+- `openapi.json` documents the REST surface.
+- `asyncapi.json` documents the Server-Sent Events stream at `/v1/events`.
+- `apps/mcp/` contains an initial MCP server over the same API.
+- Daemon mode gives external clients a stable local endpoint for custom clients, scripts, and trusted local agents.
+
+That means the bundled UI is only one way to use Posthaste. You can build a different client, subscribe to mail events, wire mail into local automations, or let an agent search, tag, move, and draft through the same backend the app uses.
+
+The MCP adapter is still early. Until capability scoping is complete, it is for trusted-local use only: the daemon token grants broad access.
+
+## Privacy and security posture
+
+Posthaste is not a hosted mail service. Your mail provider remains the source of truth, and Posthaste keeps a local replica for the app. Posthaste does not collect product telemetry.
+
+The security model is being built in concrete layers: HTML mail is sanitized in Rust and rendered with scripts disabled, and the local API perimeter uses bearer-token plus Host/Origin checks when auth is enabled. Non-loopback exposure, rate limiting, and narrower agent capabilities are still early-stage work.
+
+## Try it
+
+Builds are published from GitHub releases and listed on the site:
+
+- <https://posthaste.theor.net/releases>
+- <https://github.com/theoryzhenkov/posthaste/releases>
+
+## Development setup
+
+Requires `nix` and `direnv`. Create local environment files if they are missing, allow direnv, then run setup inside the flake dev shell:
 
 ```sh
 cp -n .env.example .env
@@ -34,89 +77,75 @@ direnv allow
 just setup       # generate age key, init jj
 ```
 
-## Updating from upstream templates
-
-```sh
-just template update
-```
-
-## Development
-
 The full local dev stacks run through Overmind in the Nix dev shell:
 
 ```sh
 just dev web       # Stalwart + seed + posthaste serve --api-only + Vite
 just dev desktop   # Stalwart + seed + Tauri dev shell
 just dev services  # Stalwart + seed + posthaste serve --api-only
-just dev smoke     # Validate dev-stack path wiring without starting services
+just dev smoke     # validate dev-stack path wiring without starting services
 just web dev       # Vite only, assumes the backend is already running
 just desktop dev   # Tauri only, assumes Stalwart is already running if needed
-just desktop test  # Desktop Rust tests with constrained Cargo parallelism
-just build-serve   # Build web assets plus the browser-localhost server binary
-just package-serve # Create target/distribute/posthaste-serve-*.tar.gz
-just serve         # Run `posthaste serve` against apps/web/dist
+just desktop test  # desktop Rust tests with constrained Cargo parallelism
+just build-serve   # build web assets plus the browser-localhost server binary
+just package-serve # create target/distribute/posthaste-serve-*.tar.gz
+just serve         # run `posthaste serve` against apps/web/dist
 ```
 
-Rust backend validation intentionally excludes the Tauri desktop shell from
-normal workspace checks. Use `just test` or `just backend check` for routine
-backend/frontend validation. On constrained Linux VMs, avoid raw
-`cargo test --workspace` or `cargo clippy --workspace`: they include
-`apps/desktop` and can compile the GTK/WebKit stack alongside every backend
-test target. Run desktop tests and builds explicitly with `just desktop test`
-or `just desktop build`.
-
-OAuth provider secrets are read by the Nix dev shell from
-`secrets/oauth.yaml` when that SOPS file and `.age-key` are present. Supported
-keys:
-
-```yaml
-google_oauth_client_secret: "..."
-microsoft_oauth_client_secret: "..."
-```
-
-The shell exports these as Vite variables for local builds. Public OAuth client
-IDs remain in `apps/web/src/config/oauthProviders.json`.
-
-Tagged releases publish installable artifacts through GitHub Actions:
-
-```sh
-jj desc -m "chore(release): v0.1.0"
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The release workflow attaches unsigned Tauri desktop installers for Linux, macOS, and Windows plus `posthaste serve` browser-localhost archives. Release assets also include `SHA256SUMS`, GitHub build provenance attestations, cosign keyless signature bundles named `*.sigstore.json`, and the release GPG public key from `keys/release-gpg-public.asc`.
-
-GPG signing material is stored in `secrets/release-signing.yaml`, encrypted with SOPS to the local `.age-key` recipient and the GitHub CI recipient in `.age-key.github`. Add the full contents of `.age-key.github` to the repository secret `RELEASE_SOPS_AGE_KEY`; when that secret is present, CI decrypts the release key and publishes detached armored GPG signatures named `*.asc`.
-
-Verify a downloaded asset with:
-
-```sh
-sha256sum --check SHA256SUMS
-gh attestation verify posthaste-serve-0.1.0-linux-x86_64.tar.gz --repo theoryzhenkov/posthaste
-cosign verify-blob posthaste-serve-0.1.0-linux-x86_64.tar.gz \
-  --bundle posthaste-serve-0.1.0-linux-x86_64.tar.gz.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/theoryzhenkov/posthaste/.github/workflows/release.yml@refs/tags/v.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gpg --import release-gpg-public.asc
-gpg --verify posthaste-serve-0.1.0-linux-x86_64.tar.gz.asc posthaste-serve-0.1.0-linux-x86_64.tar.gz
-```
-
-The stacks use utility scripts and fixtures from `tools/dev/`, with isolated generated config and state under `var/dev/`.
-After changing `flake.nix`, reload the dev shell with `direnv reload` or `nix develop`.
+Rust backend validation intentionally excludes the Tauri desktop shell from normal workspace checks. Use `just test` or `just backend check` for routine backend/frontend validation. On constrained Linux VMs, avoid raw `cargo test --workspace` or `cargo clippy --workspace`: they include `apps/desktop` and can compile the GTK/WebKit stack alongside every backend test target. Run desktop tests and builds explicitly with `just desktop test` or `just desktop build`.
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
 | `crates/` | Rust domain, engine, store, config, and server crates |
-| `apps/web/` | React/Vite frontend application |
-| `apps/site/` | Static public product showcase site |
+| `apps/web/` | React/Vite mail client |
+| `apps/site/` | Static public product site |
 | `apps/desktop/` | Tauri desktop shell |
+| `apps/mcp/` | MCP adapter over the local `/v1` API |
 | `docs/` | SPECial project documentation and MkDocs content |
 | `tools/dev/` | Local development utilities, Procfiles, Stalwart config, and fixtures |
 | `var/dev/` | Ignored local runtime data generated by dev stacks |
 | `target/`, `apps/web/dist/`, `apps/site/dist/`, `site/` | Ignored build artifacts |
+
+## Stack
+
+| Layer | Choice | Why |
+|-------|--------|-----|
+| Provider drivers | JMAP first; IMAP/SMTP adapter path | JMAP fits the local replica model; IMAP/SMTP keeps common providers reachable |
+| Target servers | Fastmail and Stalwart initially; Gmail/iCloud/Outlook through IMAP/SMTP | Covers modern JMAP servers without excluding mainstream providers |
+| Backend | Rust + Axum | Owns protocol, sync, storage, API, event log, and sanitization |
+| Storage | SQLite via rusqlite | Embedded, zero-config, portable |
+| Frontend | React + TypeScript | Dense interactive mail UI, typed API contract, keyboard handling |
+| Desktop | Tauri | Native shell around the local web client/backend model |
+| Site | Astro + React island | Static public site with an interactive product mock |
+
+## Scope
+
+In scope for MVP:
+
+- JMAP Mail objects: Email, Mailbox, Thread, Identity, EmailSubmission
+- Boolean query language with field prefixes and date ranges
+- Smart mailboxes: saved queries with display metadata
+- Conversation-first reading view with paginated conversation list
+- Markdown composition with multipart HTML+plain output
+- Offline reading of synced mail
+- Local `/v1` API, OpenAPI spec, SSE event stream, and initial MCP adapter
+
+Out of scope for now:
+
+- CalDAV/CardDAV
+- Sieve management UI
+- PGP/S-MIME
+- Multi-account UI, though the data model is account-scoped from day one
+- Plugin or extension store
+- Production-stable agent authorization model
+
+## Architecture
+
+Posthaste uses a hexagonal Rust core. The backend owns protocol drivers, sync reconciliation, SQLite storage, HTML sanitization, the REST API, and the SSE event stream. The frontend consumes paginated conversation endpoints and reacts to domain events from `/v1/events`.
+
+That boundary is deliberate: the mail app, custom clients, scripts, and agents can all speak the same local API instead of each owning a separate mail cache.
 
 ## Documentation
 
@@ -127,65 +156,8 @@ just mkdocs serve  # serve docs locally
 just mkdocs build  # build docs into site/
 ```
 
-## Stack
+The top-level SPECial domains are listed in the docs and tracked through the frontmatter above.
 
-| Layer | Choice | Why |
-|-------|--------|-----|
-| Provider drivers | JMAP first; IMAP/SMTP next | JMAP remains preferred, with traditional-provider support through backend adapters |
-| Target servers | Fastmail and Stalwart initially; Gmail/iCloud/Outlook through IMAP/SMTP | Covers modern JMAP servers without excluding mainstream providers |
-| Backend | Rust + Axum | Owns protocol, sync, storage, and API |
-| Storage | SQLite via rusqlite | Embedded, zero-config, portable |
-| Frontend | React + TypeScript | Component model, React Query caching, keyboard handling |
-| Build tool | Vite + Bun scripts | Fast dev server and builds |
-| HTML sanitization | ammonia (Rust) | Whitelist-based, built on html5ever |
-| Markdown | pulldown-cmark (Rust) | CommonMark + GFM extensions |
+## License
 
-## Scope
-
-In scope for MVP:
-
-- JMAP Mail objects: Email, Mailbox, Thread, Identity, EmailSubmission
-- Boolean query language with field prefixes and date ranges
-- Smart mailboxes (saved queries with auto-grouping)
-- Conversation-first reading view with per-message thread switcher
-- Markdown composition with multipart HTML+plain output
-- Offline reading of synced mail
-
-Out of scope (for now):
-
-- CalDAV/CardDAV
-- Sieve management UI
-- PGP/S-MIME
-- Multi-account UI (data model is account-scoped from day one)
-- Plugins/extensions
-
-## Architecture
-
-Hexagonal core in Rust. The backend owns all business logic, JMAP protocol handling, SQLite storage, sync reconciliation, and HTML sanitization. It exposes a localhost JSON API plus a Server-Sent Events stream at `/v1/events`. The React frontend consumes paginated conversation endpoints, renders a virtualized middle pane, and reacts to domain events from the SSE stream. This keeps protocol and cache ownership in Rust while leaving the UI free to evolve independently.
-
-## Domains
-
-- **branding** -- Name, identity, palette, typography, logo. [L0](docs/L0-branding.md)
-- **providers** -- Provider driver strategy for JMAP, IMAP/SMTP, and future native APIs. [L0](docs/L0-providers.md)
-- **jmap** -- JMAP protocol types, session, method calls, push. [L0](docs/L0-jmap.md)
-- **sync** -- Bidirectional sync engine, local SQLite replica, state tokens
-- **search** -- Query language, smart mailboxes, search execution. [L0](docs/L0-search.md)
-- **compose** -- Markdown composition, MIME assembly, send/draft lifecycle
-- **ui** -- Web UI, React components, conversation list, HTML rendering, keyboard model
-- **website** -- Public product showcase site and static Docker deployment. [L0](docs/L0-website.md)
-- **accounts** -- Multi-account scoping, config repository, TOML persistence. [L0](docs/L0-accounts.md) [L1](docs/L1-accounts.md)
-- **api** -- REST API + SSE boundary, Axum handlers, pagination, error mapping. [L0](docs/L0-api.md) [L1](docs/L1-api.md)
-- **logging** -- Structured tracing and logging across backend and frontend. [L0](docs/L0-logging.md) [L1](docs/L1-logging.md)
-- **testing** -- Red-first behavior contracts, provider observation matrix, and coverage standards. [L0](docs/L0-testing.md)
-
-## MVP acceptance criteria
-
-1. Connect to Fastmail via JMAP, authenticate with an OAuth bearer token or JMAP API token
-2. Sync all mailboxes and email metadata, lazy-fetch bodies on demand, and prune stale local mailboxes and messages on authoritative full resyncs
-3. Search with boolean queries (AND/OR/NOT, field prefixes, date ranges)
-4. Create and use smart mailboxes (saved queries with auto-grouping)
-5. Read email in a conversation-first view with paginated conversation list, anchored live updates, and on-demand message body fetch
-6. Compose in Markdown, send as multipart HTML+plain via JMAP
-
-Post-MVP publishing readiness adds generic IMAP/SMTP provider support without
-changing the local-replica or frontend API architecture.
+Posthaste is open source under the MIT License.

@@ -1,6 +1,6 @@
 ---
-label: Lorem
-title: Lorem ipsum dolor sit amet.
+label: Search
+title: Mail views you can name and reuse.
 ---
 
-Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Use boolean queries, field prefixes, and date ranges to turn recurring searches into smart mailboxes.

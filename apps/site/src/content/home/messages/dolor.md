@@ -1,13 +1,13 @@
 ---
 id: dolor
-from: Amet Consectetur
-subject: Ut enim ad minim veniam
-tag: dolor
-time: Yesterday
-color: violet
+from: Posthaste
+subject: Search should be infrastructure
+tag: search
+time: Beta
+color: sage
 unread: true
 ---
 
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+Boolean search, field prefixes, date ranges, and smart mailboxes are core Posthaste features. Save the query once; use it like a mailbox.
 
-Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+The goal is to make repeated mail work disappear into reusable views.
