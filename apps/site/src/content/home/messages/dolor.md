@@ -1,13 +1,13 @@
 ---
 id: dolor
 from: Posthaste
-subject: Smart mail, not just search
-tag: smart
-time: Beta
+subject: Mail you can shape
+tag: views
+time: '08:52'
 color: sage
 unread: true
 ---
 
-Posthaste gives mail structure you can reuse: smart mailboxes, saved views, keyboard triage, local state, and a conversation-first reader.
+Save the mail you care about as living views, backed by a boolean query language with field prefixes and date ranges. Define an organization once and keep using it.
 
-Search matters, but it is only one part of the larger idea: a mail client that understands how you work.
+Conversation-first reading, keyboard triage, and Markdown compose round it out. Search is the engine underneath — useful, but not the whole point.

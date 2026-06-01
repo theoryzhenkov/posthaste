@@ -1,15 +1,17 @@
 ---
 id: welcome
 from: Theo
-subject: Welcome
+subject: Why I'm building Posthaste
 tag: welcome
 time: '09:18'
 color: blue
 unread: true
 ---
 
-Posthaste turns email into a smart, fast, local workspace you can shape around how you actually work. It brings together a polished desktop interface, smart mailboxes, conversation-first reading, Markdown compose, and a backend you can automate.
+I wanted a mail client that treated my mail as mine: kept on my machine, in an open format, behind an interface I could build on — not a thin window onto someone else's server.
 
-The project is early, but the direction is clear: mail should be yours to search, shape, automate, and extend.
+So Posthaste keeps a local replica of your mail and puts a documented API in front of it. The desktop app is the first client. It is not the boundary of what you can build.
+
+It's early and the edges are sharp, but the direction is set: mail you own, shape, and program.
 
 Best, Theo

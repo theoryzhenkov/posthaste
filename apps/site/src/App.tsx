@@ -294,9 +294,9 @@ function ReaderPreview({ message }: { message: SiteMessage }) {
 function SloganTitle({ id }: { id?: string }) {
   return (
     <h1 className="slogan" id={id}>
-      <span>Your mail,</span>
+      <span>Your email,</span>
       <span>
-        delivered to you at Post
+        delivered at Post
         <span className="letter-h">h</span>
         <span className="letter-a">a</span>
         <span className="letter-s">s</span>

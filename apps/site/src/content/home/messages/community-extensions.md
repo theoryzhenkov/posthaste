@@ -3,10 +3,12 @@ id: community-extensions
 from: Posthaste
 subject: Your mail has an API
 tag: api
-time: Local
+time: '09:05'
 color: violet
 ---
 
-Posthaste has a Rust backend, a documented `/v1` API, Server-Sent Events, OpenAPI, AsyncAPI, and an MCP adapter. The bundled app is one client; it is not the boundary of what you can build.
+The same Rust backend that powers the app exposes a versioned local API: REST under `/v1` (OpenAPI), a live event stream over SSE (AsyncAPI), and an MCP adapter.
 
-Write another client. Subscribe to local mail events. Give a trusted local agent a real mail interface.
+Write another client. Subscribe to mail events and wire up local automations. Point a trusted local agent at a real mail interface.
+
+The MCP adapter is early and trusted-local only — the daemon token grants broad access until capability scoping lands.

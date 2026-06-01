@@ -1,6 +1,6 @@
 ---
 scope: root
-summary: "Posthaste — smart, fast, open-source mail you can shape, automate, and build on"
+summary: "Posthaste — local-first, open-source mail you own and can build on"
 modified: 2026-06-01
 reviewed: 2026-06-01
 dependents:
@@ -21,44 +21,54 @@ dependents:
 
 # Posthaste
 
-Your mail, delivered to you at Posthaste.
+Your email, delivered at Posthaste.
 
-Posthaste turns email into a smart, fast, local workspace you can shape around how you actually work. It is a full mail client with a serious desktop interface, a Rust-owned local replica, smart mailboxes, Markdown compose, provider adapters, and a programmable backend for custom clients, scripts, and agents.
+A local-first, open-source mail client: a Rust backend that keeps a local replica of your mail and puts a programmable local API in front of it. The desktop app is the first client — not the boundary of what you can build.
 
-This is an early-stage build, not a conservative production recommendation. If you try it today, expect sharp edges and keep another mail client available.
+> **Pre-beta.** Posthaste runs daily for the people building it, but it is not production-ready. Expect sharp edges, providers still landing, and an API that is still moving. If you try it, keep another mail client available.
 
-## Why Posthaste
+## What works today
 
-Email should be more than a feed you clear. It is where work arrives, receipts live, projects move, and agents can help — if the mail client gives you the right handles.
+- **Three-pane desktop mail client** — sidebar, tabular conversation list, conversation-first reader, keyboard-first actions, clear signal colors.
+- **Smart mailboxes / saved views** — a boolean query language with field prefixes and date ranges, saved as living views.
+- **Markdown compose** — write in Markdown, send clean multipart plain text plus HTML.
+- **Local replica** — mail metadata syncs into SQLite and the interface reads from your machine; bodies are lazy-fetched and cached. Previously synced mail stays readable offline.
+- **A programmable local API** — versioned JSON under `/v1` (`openapi.json`), an SSE event stream at `/v1/events` (`asyncapi.json`), and an initial MCP adapter in `apps/mcp/` (9 tools).
+- **JMAP provider** — Fastmail and Stalwart are the initial targets.
 
-Posthaste is built around those handles:
+## Planned / in progress
 
-- **Smart mailboxes and views:** save the mail you care about as living views, backed by boolean queries, field prefixes, and date ranges.
-- **Fast local interaction:** mail metadata syncs into SQLite, so the interface reads from your machine. Previously synced mail remains readable offline.
-- **A polished desktop shell:** three panes, compact rows, keyboard-first actions, clear signal colors, and a reader that treats conversations as the main unit.
-- **Plain-text-first compose:** write in Markdown and send clean multipart plain text plus HTML.
-- **A modular backend:** protocol drivers, sync, storage, API, events, and UI are separated so Posthaste can grow without turning into a single hardwired client.
-- **Programmable mail:** the same backend that powers the app exposes OpenAPI, AsyncAPI/SSE events, and MCP for custom clients, scripts, and trusted local agents.
+- **IMAP/SMTP adapter path** — to broaden provider support beyond JMAP.
+- **Capability scoping for agents** — until it lands, the MCP/daemon token grants broad access (trusted-local only).
+- **Hardening** — non-loopback exposure, rate limiting.
+- **Multi-account UI** — the data model is account-scoped from day one; the UI is not built yet.
+
+Explicitly **out of scope for now:** CalDAV/CardDAV, Sieve management UI, PGP/S-MIME, a plugin/extension store, and a production-stable agent authorization model.
 
 ## Built for builders
 
-Posthaste is a local mail platform with a real contract. The app is the flagship client, but the architecture is intentionally bigger than one UI.
+The same Rust backend that powers the app is a product surface in its own right.
 
-- The Rust backend exposes a versioned JSON API under `/v1`.
-- `openapi.json` documents the REST surface.
+- Versioned JSON API under `/v1`; `openapi.json` documents the REST surface.
 - `asyncapi.json` documents the Server-Sent Events stream at `/v1/events`.
-- `apps/mcp/` contains an initial MCP server over the same API.
-- Daemon mode gives external clients a stable local endpoint for custom clients, scripts, and trusted local agents.
+- `apps/mcp/` is an initial MCP server over the same API.
+- Daemon mode gives external clients a stable local endpoint.
 
-You can build a different client, subscribe to mail events, wire mail into local automations, or let an agent search, tag, move, and draft through the same backend the app uses.
+You can build a different client, subscribe to mail events and wire mail into local automations, or point a trusted local agent at the same backend the app uses to search, tag, move, and draft.
 
-The MCP adapter is still early. Until capability scoping is complete, it is for trusted-local use only: the daemon token grants broad access.
+> The MCP adapter is early. Until capability scoping is complete, it is **trusted-local only**: the daemon token grants broad access.
 
 ## Privacy and security posture
 
-Posthaste is not a hosted mail service. Your mail provider remains the source of truth, and Posthaste keeps a local replica for the app. Posthaste does not collect product telemetry.
+Posthaste is not a hosted mail service. Your mail provider stays the source of truth; Posthaste keeps a local replica for the app, and there is no remote account to create.
 
-The security model is being built in concrete layers: HTML mail is sanitized in Rust and rendered with scripts disabled, and the local API perimeter uses bearer-token plus Host/Origin checks when auth is enabled. Non-loopback exposure, rate limiting, and narrower agent capabilities are still early-stage work.
+The security model is built in concrete layers:
+
+- HTML mail is sanitized in Rust (`ammonia`) and rendered in a sandboxed iframe with scripts disabled.
+- The local API perimeter is **on by default**: bearer token plus Host/Origin checks.
+
+Non-loopback exposure, rate limiting, and narrower agent capabilities are still early-stage work.
+
 
 ## Try it
 
@@ -114,39 +124,18 @@ Rust backend validation intentionally excludes the Tauri desktop shell from norm
 | Layer | Choice | Why |
 |-------|--------|-----|
 | Provider drivers | JMAP first; IMAP/SMTP adapter path | JMAP fits the local replica model; IMAP/SMTP keeps common providers reachable |
-| Target servers | Fastmail and Stalwart initially; Gmail/iCloud/Outlook through IMAP/SMTP | Covers modern JMAP servers without excluding mainstream providers |
+| Provider targets | Fastmail and Stalwart via JMAP today; IMAP/SMTP path planned/in progress | Starts with modern JMAP servers while keeping a path to mainstream providers |
 | Backend | Rust + Axum | Owns protocol, sync, storage, API, event log, and sanitization |
 | Storage | SQLite via rusqlite | Embedded, zero-config, portable |
 | Frontend | React + TypeScript | Dense interactive mail UI, typed API contract, keyboard handling |
 | Desktop | Tauri | Native shell around the local web client/backend model |
 | Site | Astro + React island | Static public site with an interactive product mock |
 
-## Scope
-
-In scope for MVP:
-
-- JMAP Mail objects: Email, Mailbox, Thread, Identity, EmailSubmission
-- Boolean query language with field prefixes and date ranges
-- Smart mailboxes: saved queries with display metadata
-- Conversation-first reading view with paginated conversation list
-- Markdown composition with multipart HTML+plain output
-- Offline reading of synced mail
-- Local `/v1` API, OpenAPI spec, SSE event stream, and initial MCP adapter
-
-Out of scope for now:
-
-- CalDAV/CardDAV
-- Sieve management UI
-- PGP/S-MIME
-- Multi-account UI, though the data model is account-scoped from day one
-- Plugin or extension store
-- Production-stable agent authorization model
-
 ## Architecture
 
 Posthaste uses a hexagonal Rust core. The backend owns protocol drivers, sync reconciliation, SQLite storage, HTML sanitization, the REST API, and the SSE event stream. The frontend consumes paginated conversation endpoints and reacts to domain events from `/v1/events`.
 
-That boundary is deliberate: the mail app, custom clients, scripts, and agents can all speak the same local API instead of each owning a separate mail cache.
+That boundary is deliberate: the mail app, custom clients, scripts, and agents all speak the same local API instead of each owning a separate mail cache.
 
 ## Documentation
 
