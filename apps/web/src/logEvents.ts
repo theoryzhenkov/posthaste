@@ -7,6 +7,10 @@ export const LOG_EVENTS = {
   frontendConsoleOutput: 'frontend.console.output',
   frontendErrorUncaught: 'frontend.error.uncaught',
   frontendErrorUnhandledRejection: 'frontend.error.unhandled_rejection',
+  paletteProviderCompleted: 'palette.provider.completed',
+  paletteProviderFailed: 'palette.provider.failed',
+  paletteSearchCancelled: 'palette.search.cancelled',
+  paletteSearchStale: 'palette.search.stale',
   resourceFetchError: 'resource.fetch.error',
 } as const
 

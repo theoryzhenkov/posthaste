@@ -1,33 +1,25 @@
 import {
   applyRootTheme,
   appendGlassBloom,
-  designStorageKeys,
   getSystemThemeMode,
-  isPalettePresetId,
-  isThemeMode,
-  isUiDensity,
-  normalizeGlassThemeParameters,
   normalizeAccentHue,
-  parseAccentHue,
   removeGlassBloom as removeGlassBloomFromTheme,
   updateGlassBloom,
   type AppliedRootTheme,
   type GlassBloomId,
   type GlassBloomPatch,
-  type GlassThemeParameters,
   type PalettePresetId,
   type ThemeMode,
   type UiDensity,
 } from '@/design'
-import {
-  defaultThemePreferences,
-  type DesignThemePreferences,
-} from '@/themeSettings'
+import { clientPreferencesStore } from '@/clientPreferences'
+import type { DesignThemePreferences } from '@/themeSettings'
 import {
   useCallback,
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
 import {
@@ -39,89 +31,13 @@ interface DesignThemeProviderProps {
   children: ReactNode
 }
 
-function storedThemeMode(): ThemeMode {
-  const value = localStorage.getItem(designStorageKeys.themeMode)
-  return value && isThemeMode(value) ? value : defaultThemePreferences().mode
-}
-
-function storedPalettePreset(): PalettePresetId {
-  const value = localStorage.getItem(designStorageKeys.palettePreset)
-  return value && isPalettePresetId(value)
-    ? value
-    : defaultThemePreferences().palettePreset
-}
-
-function storedDensity(): UiDensity {
-  const value = localStorage.getItem(designStorageKeys.uiDensity)
-  return value && isUiDensity(value) ? value : defaultThemePreferences().density
-}
-
-function storedAccentHue(): number {
-  return parseAccentHue(localStorage.getItem(designStorageKeys.accentHue))
-}
-
-function storedGlassTheme(): GlassThemeParameters {
-  const value = localStorage.getItem(designStorageKeys.themeParameters)
-  if (!value) {
-    return normalizeGlassThemeParameters(null)
-  }
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
-    return normalizeGlassThemeParameters(parsed.glass)
-  } catch {
-    return normalizeGlassThemeParameters(null)
-  }
-}
-
-function readStoredThemePreferences(): DesignThemePreferences {
-  if (typeof window === 'undefined') {
-    return defaultThemePreferences()
-  }
-
-  return {
-    accentHue: storedAccentHue(),
-    glassTheme: storedGlassTheme(),
-    mode: storedThemeMode(),
-    palettePreset: storedPalettePreset(),
-    density: storedDensity(),
-  }
-}
-
-/**
- * Persist appearance preferences to localStorage. Appearance is client-local
- * presentation state (see the ownership boundary in
- * docs/eph/DESIGN-L1-deployment-modes): it never touches the daemon API.
- */
-function persistThemePreferences(preferences: DesignThemePreferences) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  const normalizedGlass = normalizeGlassThemeParameters(preferences.glassTheme)
-  localStorage.setItem(designStorageKeys.themeMode, preferences.mode)
-  localStorage.setItem(
-    designStorageKeys.palettePreset,
-    preferences.palettePreset,
-  )
-  localStorage.setItem(designStorageKeys.uiDensity, preferences.density)
-  localStorage.setItem(
-    designStorageKeys.accentHue,
-    String(normalizeAccentHue(preferences.accentHue)),
-  )
-  localStorage.setItem(
-    designStorageKeys.themeParameters,
-    JSON.stringify({ glass: normalizedGlass }),
-  )
-}
-
 export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
-  const [preferences, setPreferences] = useState<DesignThemePreferences>(
-    readStoredThemePreferences,
+  const { appearance: preferences } = useSyncExternalStore(
+    clientPreferencesStore.subscribe,
+    clientPreferencesStore.getSnapshot,
+    clientPreferencesStore.getServerSnapshot,
   )
   const { accentHue, density, glassTheme, mode, palettePreset } = preferences
-
-  useEffect(() => {
-    persistThemePreferences(preferences)
-  }, [preferences])
 
   const [applied, setApplied] = useState<AppliedRootTheme>(() => ({
     accentHue,
@@ -167,7 +83,7 @@ export function DesignThemeProvider({ children }: DesignThemeProviderProps) {
 
   const updatePreferences = useCallback(
     (updater: (current: DesignThemePreferences) => DesignThemePreferences) => {
-      setPreferences((current) => updater(current))
+      clientPreferencesStore.updateAppearance(updater)
     },
     [],
   )
