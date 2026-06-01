@@ -1,0 +1,235 @@
+//! Full-stack integration harness: a real [`AppState`] (real `DatabaseStore` +
+//! `MailService` + on-disk config) wired into the REAL `/v1` router via
+//! [`posthaste_server::build_api_router`]. Tests drive the actual handlers
+//! through the actual `require_auth` perimeter — no stub routes — so handler
+//! result-side scoping and end-to-end token behavior are exercised against real
+//! seeded data.
+//!
+//! Seed via [`Harness::seed_source`] + [`Harness::seed_messages`] (the public
+//! store API), mint tokens with [`Harness::full_scope`] / [`Harness::scoped`],
+//! and drive requests with [`Harness::get_json`].
+
+#![allow(dead_code)]
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use axum::Router;
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+use posthaste_config::TomlConfigRepository;
+use posthaste_domain::{
+    AccountId, ConfigRepository, MailService, MailStore, MailboxId, MailboxRecord, MessageId,
+    MessageRecord, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
+    SyncCursor, SyncObject, SyncWriteStore, ThreadId,
+};
+use posthaste_server::supervisor::AccountSupervisor;
+use posthaste_server::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
+use posthaste_server::{build_api_router, AppState};
+use posthaste_store::DatabaseStore;
+use tokio::sync::broadcast;
+
+const CORS_ORIGIN: &str = "http://localhost:5173";
+
+/// A deterministic 32-byte root key so minted/attenuated tokens verify.
+fn test_root_key() -> RootKey {
+    RootKey::from_test_bytes([42u8; 32])
+}
+
+static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn temp_root() -> PathBuf {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after epoch")
+        .as_nanos();
+    let seq = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("posthaste-full-stack-test-{now}-{seq}"))
+}
+
+/// A no-op secret store; the full-stack reads exercised here need no secrets.
+struct TestSecretStore;
+
+impl SecretStore for TestSecretStore {
+    fn resolve(&self, _secret_ref: &SecretRef) -> Result<String, SecretStoreError> {
+        Err(SecretStoreError::Unavailable("unused".to_string()))
+    }
+    fn save(&self, _secret_ref: &SecretRef, _value: &str) -> Result<(), SecretStoreError> {
+        Err(SecretStoreError::Unsupported("unused".to_string()))
+    }
+    fn update(&self, _secret_ref: &SecretRef, _value: &str) -> Result<(), SecretStoreError> {
+        Err(SecretStoreError::Unsupported("unused".to_string()))
+    }
+    fn delete(&self, _secret_ref: &SecretRef) -> Result<(), SecretStoreError> {
+        Err(SecretStoreError::Unsupported("unused".to_string()))
+    }
+}
+
+/// A full-stack test server: real state + real `/v1` router.
+pub struct Harness {
+    db: Arc<DatabaseStore>,
+    router: Router,
+    root: RootKey,
+}
+
+impl Harness {
+    /// Build a fresh harness with `require_auth` ON and an empty store.
+    pub fn new() -> Self {
+        let root_dir = temp_root();
+        let config_root = root_dir.join("config");
+        let state_root = root_dir.join("state");
+        let config_repo =
+            TomlConfigRepository::open(&config_root).expect("config repository should open");
+        config_repo
+            .initialize_defaults()
+            .expect("config defaults should initialize");
+        let db = Arc::new(
+            DatabaseStore::open(state_root.join("mail.sqlite"), &state_root)
+                .expect("database store should open"),
+        );
+        let store: Arc<dyn MailStore> = db.clone();
+        let config: Arc<dyn ConfigRepository> = Arc::new(config_repo);
+        let service = Arc::new(MailService::new(db.clone(), config));
+        let (event_sender, _) = broadcast::channel(16);
+        let secret_store: Arc<dyn SecretStore> = Arc::new(TestSecretStore);
+        let supervisor = Arc::new(AccountSupervisor::new(
+            service.clone(),
+            store.clone(),
+            secret_store.clone(),
+            event_sender.clone(),
+            Duration::from_secs(60),
+        ));
+        let root = test_root_key();
+        let state = Arc::new(AppState {
+            service,
+            store,
+            secret_store,
+            supervisor,
+            event_sender,
+            account_logo_root: state_root.join("account-assets/logos"),
+            oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
+            auth_token: mint_full_scope_token(&root),
+            macaroon_root_key: root.clone(),
+            require_auth: true,
+            origin_allowlist: posthaste_server::auth::origin_allowlist(CORS_ORIGIN, &[]),
+            host_allowlist: posthaste_server::auth::host_allowlist("127.0.0.1:3001"),
+        });
+        let router = Router::new().nest("/v1", build_api_router(state));
+        Self { db, router, root }
+    }
+
+    /// Register a source (account id → display name) so conversation/message
+    /// joins resolve. Call before seeding messages for that account.
+    pub fn seed_source(&self, account: &str, name: &str) {
+        self.db
+            .upsert_source_projection(&AccountId::from(account), name)
+            .expect("seed source projection");
+    }
+
+    /// Apply a sync batch of `messages` (in `mailbox`) to `account`.
+    pub fn seed_messages(&self, account: &str, mailbox: &str, messages: Vec<MessageRecord>) {
+        self.db
+            .apply_sync_batch(
+                &AccountId::from(account),
+                &SyncBatch {
+                    mailboxes: vec![MailboxRecord {
+                        id: MailboxId::from(mailbox),
+                        name: "Inbox".to_string(),
+                        role: Some("inbox".to_string()),
+                        unread_emails: 0,
+                        total_emails: 0,
+                    }],
+                    messages,
+                    imap_mailbox_states: Vec::new(),
+                    imap_message_locations: Vec::new(),
+                    deleted_imap_message_locations: Vec::new(),
+                    deleted_mailbox_ids: Vec::new(),
+                    deleted_message_ids: Vec::new(),
+                    replace_all_mailboxes: false,
+                    replace_all_messages: false,
+                    cursors: vec![SyncCursor {
+                        object_type: SyncObject::Message,
+                        state: format!("{account}-state"),
+                        updated_at: "2026-03-31T10:00:00Z".to_string(),
+                    }],
+                },
+            )
+            .expect("seed messages");
+    }
+
+    /// A full-scope token (no caveats) for this harness's root key.
+    pub fn full_scope(&self) -> String {
+        mint_full_scope_token(&self.root)
+    }
+
+    /// A token carrying the given caveat predicates (e.g. `"action = read"`).
+    pub fn scoped(&self, predicates: &[&str]) -> String {
+        mint_with_caveats(&self.root, predicates)
+    }
+
+    /// Attenuate an existing token with one more predicate.
+    pub fn attenuate(&self, token: &str, predicate: &str) -> String {
+        attenuate(token, predicate).expect("attenuate should succeed")
+    }
+
+    /// `GET path` with a bearer token and an allowlisted Host; returns the
+    /// status and parsed JSON body (`Null` when empty/unparseable).
+    pub async fn get_json(&self, token: &str, path: &str) -> (StatusCode, serde_json::Value) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(path)
+            .header(header::HOST, "127.0.0.1")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("request should build");
+        let response = self
+            .router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router should respond");
+        let status = response.status();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let json = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+        };
+        (status, json)
+    }
+}
+
+/// A `MessageRecord` with sensible defaults; override fields at the call site.
+pub fn message(id: &str, subject: &str, mailbox: &str) -> MessageRecord {
+    MessageRecord {
+        id: MessageId::from(id),
+        source_thread_id: ThreadId::from(format!("thread-{id}")),
+        remote_blob_id: None,
+        subject: Some(subject.to_string()),
+        from_name: Some("Alice".to_string()),
+        from_email: Some("alice@example.com".to_string()),
+        to: Vec::new(),
+        preview: Some("Preview".to_string()),
+        received_at: "2026-03-31T10:00:00Z".to_string(),
+        has_attachment: false,
+        size: 42,
+        mailbox_ids: vec![MailboxId::from(mailbox)],
+        keywords: vec!["$seen".to_string()],
+        body_html: Some("<p>Hello</p>".to_string()),
+        body_text: Some("Hello".to_string()),
+        raw_mime: None,
+        rfc_message_id: Some(format!("<{id}@example.test>")),
+        in_reply_to: None,
+        references: Vec::new(),
+    }
+}
