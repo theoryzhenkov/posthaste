@@ -34,6 +34,7 @@ import {
   InvalidSurface,
   InvalidSurfaceDocument,
 } from './components/InvalidSurface'
+import { OperationsProvider } from './components/OperationsProvider'
 import { ShortcutReference } from './components/ShortcutReference'
 import { Sidebar, type SidebarSelection } from './components/Sidebar'
 import { SurfaceHost } from './components/SurfaceHost'
@@ -66,6 +67,7 @@ import { useGlobalMailShortcuts } from './hooks/useGlobalMailShortcuts'
 import { useMailboxRole } from './hooks/useMailboxRole'
 import { useMailLayoutPersistence } from './hooks/useMailLayoutPersistence'
 import { useMailNavigationReadBootstrap } from './mailboxNavigationReadModels'
+import { useOperations } from './operationsContext'
 import {
   closeWebSurface,
   openFocusedSurface,
@@ -243,6 +245,7 @@ function MailClient({
     shellDefaultLayout,
   } = useMailLayoutPersistence(isMessageDetailOpen)
   const actions = useEmailActions()
+  const operations = useOperations()
   const syncSourceMutation = useMutation({
     mutationFn: triggerSync,
     onSuccess: async (_result, input) => {
@@ -408,9 +411,11 @@ function MailClient({
     onOpenFocusedMessage: handleOpenFocusedMessage,
     onOpenSettings: handleOpenSettingsShortcut,
     onOpenTagEditor: handleOpenTagEditor,
+    onRedo: operations.redo,
     onReply: handleReply,
     onToggleFlag: handleToggleFlag,
     onToggleShortcuts: handleToggleShortcuts,
+    onUndo: operations.undo,
     searchQuery,
     selectedMessage,
   })
@@ -745,18 +750,20 @@ export default function App() {
             key={isStandaloneSurface ? 'standalone' : 'mail'}
           />
           <ErrorBoundary label="app-root" fallback={renderAppRootError}>
-            <ConnectionGate>
-              {isStandaloneSurface && routeSurface ? (
-                <FocusedSurfaceDocument surface={routeSurface} />
-              ) : isStandaloneSurface && invalidSurfaceRoute ? (
-                <InvalidSurfaceDocument route={invalidSurfaceRoute} />
-              ) : (
-                <MailClient
-                  invalidSurfaceRoute={invalidSurfaceRoute}
-                  routeSurface={routeSurface}
-                />
-              )}
-            </ConnectionGate>
+            <OperationsProvider>
+              <ConnectionGate>
+                {isStandaloneSurface && routeSurface ? (
+                  <FocusedSurfaceDocument surface={routeSurface} />
+                ) : isStandaloneSurface && invalidSurfaceRoute ? (
+                  <InvalidSurfaceDocument route={invalidSurfaceRoute} />
+                ) : (
+                  <MailClient
+                    invalidSurfaceRoute={invalidSurfaceRoute}
+                    routeSurface={routeSurface}
+                  />
+                )}
+              </ConnectionGate>
+            </OperationsProvider>
           </ErrorBoundary>
           <Toaster
             position="bottom-center"
