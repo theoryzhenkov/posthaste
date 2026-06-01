@@ -12,6 +12,7 @@ import type {
   ConversationSummary,
   ConversationView,
   DomainEvent,
+  MessageCommand,
   MessageDetail,
   MessagePage,
   MessageSummary,
@@ -98,6 +99,17 @@ export type KeywordState = Pick<
 export type KeywordPatch = {
   next: KeywordState
   previous: KeywordState
+}
+
+/**
+ * The full mutable JMAP state of a message that any mail operation can change
+ * and later restore. Capturing this before-image is what lets undo be a single
+ * generic "restore to previous state" primitive instead of per-operation logic.
+ * @spec docs/L1-ui#undo-system
+ */
+export type MutableState = {
+  mailboxIds: string[]
+  keywords: string[]
 }
 
 type ReconcileOptions = {
@@ -522,6 +534,249 @@ export function mergeMessageDetail(
   return true
 }
 
+/** Two string arrays hold the same members regardless of order. */
+function sameMembers(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) {
+    return false
+  }
+  const set = new Set(a)
+  return b.every((value) => set.has(value))
+}
+
+/**
+ * Read a message's current mutable state from the cache, checking message
+ * detail, then any message-list page, then any cached conversation view.
+ * Returns null when the message is not present in the cache (the caller then
+ * cannot optimistically patch or invert the operation).
+ * @spec docs/L1-ui#undo-system
+ */
+export function captureMutableState(
+  queryClient: QueryClient,
+  target: SourceMessageRef,
+): MutableState | null {
+  const detail = queryClient.getQueryData<MessageDetail>(
+    mailKeys.message(target.sourceId, target.messageId),
+  )
+  if (detail) {
+    return { keywords: detail.keywords, mailboxIds: detail.mailboxIds }
+  }
+
+  for (const [, data] of queryClient.getQueriesData<
+    InfiniteData<MessagePage, string | null>
+  >({ queryKey: queryKeys.messagesRoot })) {
+    const match = data?.pages
+      .flatMap((page) => page.items)
+      .find(
+        (message) =>
+          message.sourceId === target.sourceId &&
+          message.id === target.messageId,
+      )
+    if (match) {
+      return { keywords: match.keywords, mailboxIds: match.mailboxIds }
+    }
+  }
+
+  for (const [, conversation] of queryClient.getQueriesData<ConversationView>({
+    queryKey: mailKeys.conversationRoot,
+  })) {
+    const match = conversation?.messages.find(
+      (message) =>
+        message.sourceId === target.sourceId && message.id === target.messageId,
+    )
+    if (match) {
+      return { keywords: match.keywords, mailboxIds: match.mailboxIds }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Produce the minimal set of commands that drives a message from `current` to
+ * `target` state. This is the engine behind both forward moves and undo: an
+ * inverse is just a diff back to the captured before-image.
+ * @spec docs/L1-ui#undo-system
+ */
+export function diffMutableState(
+  current: MutableState,
+  target: MutableState,
+): MessageCommand[] {
+  const commands: MessageCommand[] = []
+  if (!sameMembers(current.mailboxIds, target.mailboxIds)) {
+    commands.push({ kind: 'replaceMailboxes', mailboxIds: target.mailboxIds })
+  }
+  const add = target.keywords.filter(
+    (keyword) => !current.keywords.includes(keyword),
+  )
+  const remove = current.keywords.filter(
+    (keyword) => !target.keywords.includes(keyword),
+  )
+  if (add.length > 0 || remove.length > 0) {
+    commands.push({ kind: 'setKeywords', add, remove })
+  }
+  return commands
+}
+
+/**
+ * Decide whether a message with `nextMailboxIds` still belongs in the list view
+ * identified by `queryKey`. Source-mailbox views are decidable from membership;
+ * smart-mailbox and unscoped views are not (returns null → caller marks the
+ * patch incomplete and falls back to invalidation).
+ */
+function messageBelongsToListView(
+  queryKey: QueryKey,
+  nextMailboxIds: string[],
+): boolean | null {
+  const selection = queryKey[1] as
+    | { kind: 'source-mailbox'; sourceId: string; mailboxId: string }
+    | { kind: 'smart-mailbox'; id: string }
+    | null
+    | undefined
+  if (!selection) {
+    return null
+  }
+  if (selection.kind === 'source-mailbox') {
+    return nextMailboxIds.includes(selection.mailboxId)
+  }
+  return null
+}
+
+function patchMessageListMembership(
+  queryClient: QueryClient,
+  target: SourceMessageRef,
+  nextMailboxIds: string[],
+  destroy: boolean,
+): { incomplete: boolean; snapshots: QuerySnapshot[] } {
+  const snapshots: QuerySnapshot[] = []
+  let incomplete = false
+  for (const [queryKey, data] of queryClient.getQueriesData<
+    InfiniteData<MessagePage, string | null>
+  >({ queryKey: queryKeys.messagesRoot })) {
+    const hasTarget = data?.pages.some((page) =>
+      page.items.some(
+        (message) =>
+          message.sourceId === target.sourceId &&
+          message.id === target.messageId,
+      ),
+    )
+    if (!data || !hasTarget) {
+      continue
+    }
+
+    const belongs = destroy
+      ? false
+      : messageBelongsToListView(queryKey, nextMailboxIds)
+    if (belongs === null) {
+      // Membership cannot be decided from the cache (smart mailbox / unscoped):
+      // leave the row in place and let server reconciliation settle it.
+      incomplete = true
+    }
+
+    snapshots.push(snapshotQuery(queryClient, queryKey))
+    queryClient.setQueryData<InfiniteData<MessagePage, string | null>>(
+      queryKey,
+      {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          items:
+            belongs === false
+              ? page.items.filter(
+                  (message) =>
+                    !(
+                      message.sourceId === target.sourceId &&
+                      message.id === target.messageId
+                    ),
+                )
+              : page.items.map((message) =>
+                  message.sourceId === target.sourceId &&
+                  message.id === target.messageId
+                    ? { ...message, mailboxIds: nextMailboxIds }
+                    : message,
+                ),
+        })),
+      },
+    )
+  }
+  return { incomplete, snapshots }
+}
+
+/**
+ * Optimistically apply a mailbox-membership change (move/archive/trash) or a
+ * destroy across message detail, conversation view + summary, and list views.
+ * Mirrors {@link applyKeywordPatch}: returns rollback snapshots and whether the
+ * patch was incomplete and needs server confirmation.
+ * @spec docs/L1-ui#data-fetching
+ */
+export function applyMailboxPatch(
+  queryClient: QueryClient,
+  target: MailSelection,
+  nextMailboxIds: string[],
+  options?: { destroy?: boolean },
+): CachePatchResult {
+  const destroy = options?.destroy ?? false
+  const snapshots: QuerySnapshot[] = []
+  let incomplete = false
+
+  const messageKey = mailKeys.message(target.sourceId, target.messageId)
+  const currentMessage = queryClient.getQueryData<MessageDetail>(messageKey)
+  if (currentMessage) {
+    snapshots.push(snapshotQuery(queryClient, messageKey))
+    if (destroy) {
+      queryClient.removeQueries({ queryKey: messageKey, exact: true })
+    } else {
+      queryClient.setQueryData<MessageDetail>(messageKey, {
+        ...currentMessage,
+        mailboxIds: nextMailboxIds,
+      })
+    }
+  }
+
+  const conversationKey = mailKeys.conversation(target.conversationId)
+  const conversation =
+    queryClient.getQueryData<ConversationView>(conversationKey)
+  if (conversation) {
+    const messages = destroy
+      ? conversation.messages.filter(
+          (message) =>
+            !(
+              message.sourceId === target.sourceId &&
+              message.id === target.messageId
+            ),
+        )
+      : conversation.messages.map((message) =>
+          message.sourceId === target.sourceId &&
+          message.id === target.messageId
+            ? { ...message, mailboxIds: nextMailboxIds }
+            : message,
+        )
+    snapshots.push(snapshotQuery(queryClient, conversationKey))
+    queryClient.setQueryData(conversationKey, { ...conversation, messages })
+
+    const summaryKey = mailKeys.conversationSummary(target.conversationId)
+    snapshots.push(snapshotQuery(queryClient, summaryKey))
+    if (messages.length === 0) {
+      queryClient.removeQueries({ queryKey: summaryKey, exact: true })
+    } else {
+      queryClient.setQueryData(
+        summaryKey,
+        summarizeConversation({ ...conversation, messages }),
+      )
+    }
+  }
+
+  const listResult = patchMessageListMembership(
+    queryClient,
+    target,
+    nextMailboxIds,
+    destroy,
+  )
+  snapshots.push(...listResult.snapshots)
+  incomplete ||= listResult.incomplete
+
+  return { incomplete, snapshots }
+}
+
 /**
  * Look up a conversation ID for a message by checking cached detail,
  * conversation views, and conversation summaries.
@@ -535,6 +790,21 @@ export function findConversationIdForMessage(
   )
   if (cachedMessage) {
     return cachedMessage.conversationId
+  }
+
+  for (const [, data] of queryClient.getQueriesData<
+    InfiniteData<MessagePage, string | null>
+  >({ queryKey: queryKeys.messagesRoot })) {
+    const match = data?.pages
+      .flatMap((page) => page.items)
+      .find(
+        (message) =>
+          message.sourceId === target.sourceId &&
+          message.id === target.messageId,
+      )
+    if (match) {
+      return match.conversationId
+    }
   }
 
   for (const [, conversation] of queryClient.getQueriesData<ConversationView>({

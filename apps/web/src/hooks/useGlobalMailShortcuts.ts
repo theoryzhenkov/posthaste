@@ -20,9 +20,11 @@ export function useGlobalMailShortcuts({
   onOpenFocusedMessage,
   onOpenSettings,
   onOpenTagEditor,
+  onRedo,
   onReply,
   onToggleFlag,
   onToggleShortcuts,
+  onUndo,
 }: {
   effectiveSurface: SurfaceDescriptor | null
   isCommandPaletteOpen: boolean
@@ -39,9 +41,11 @@ export function useGlobalMailShortcuts({
   onOpenFocusedMessage: () => void
   onOpenSettings: () => void
   onOpenTagEditor: () => void
+  onRedo: () => void
   onReply: () => void
   onToggleFlag: () => void
   onToggleShortcuts: () => void
+  onUndo: () => void
 }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -92,6 +96,26 @@ export function useGlobalMailShortcuts({
         return
       }
       if (isTypingTarget) return
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+        // Undo/redo only act on the mail surface; don't hijack the chord while
+        // an overlay or editor owns input (native undo wins there).
+        if (
+          isComposeOpen ||
+          isCommandPaletteOpen ||
+          isSettingsSurfaceOpen ||
+          isShortcutReferenceOpen ||
+          isTagEditorOpen
+        ) {
+          return
+        }
+        event.preventDefault()
+        if (event.shiftKey) {
+          onRedo()
+        } else {
+          onUndo()
+        }
+        return
+      }
       if (
         event.key === 'Escape' &&
         !isSettingsSurfaceOpen &&
@@ -157,9 +181,11 @@ export function useGlobalMailShortcuts({
     onOpenFocusedMessage,
     onOpenSettings,
     onOpenTagEditor,
+    onRedo,
     onReply,
     onToggleFlag,
     onToggleShortcuts,
+    onUndo,
     searchQuery,
     selectedMessage,
   ])
