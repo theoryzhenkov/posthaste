@@ -1,25 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { beforeEach, describe, expect, it } from 'bun:test'
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 
-import { clientPreferencesStore } from '../src/clientPreferences'
+import {
+  createClientPreferencesStore,
+  type ClientPreferencesStore,
+} from '../src/clientPreferences'
 import { DesignThemeProvider } from '../src/components/ThemeProvider'
 import { useDesignTheme } from '../src/hooks/useDesignTheme'
 import { designDataAttributes, designStorageKeys } from '../src/design'
-import { defaultThemePreferences } from '../src/themeSettings'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
-
-afterEach(() => {
-  cleanup()
-})
 
 function ThemeProbe() {
   const theme = useDesignTheme()
@@ -35,16 +26,21 @@ function ThemePaletteButton() {
   )
 }
 
+// A fresh store per test isolates this suite from the process-wide singleton's
+// cross-window-sync state, so the synthetic StorageEvent below is not coupled to
+// the global subscribe ordering of the whole run.
+let store: ClientPreferencesStore
+
 beforeEach(() => {
   window.localStorage.clear()
-  clientPreferencesStore.setAppearance(defaultThemePreferences())
   document.documentElement.removeAttribute(designDataAttributes.palettePreset)
+  store = createClientPreferencesStore()
 })
 
 describe('DesignThemeProvider', () => {
   it('persists appearance changes through the client preferences store', async () => {
     const view = render(
-      <DesignThemeProvider>
+      <DesignThemeProvider store={store}>
         <ThemeProbe />
         <ThemePaletteButton />
       </DesignThemeProvider>,
@@ -64,7 +60,7 @@ describe('DesignThemeProvider', () => {
 
   it('applies appearance changes written by another window', async () => {
     const view = render(
-      <DesignThemeProvider>
+      <DesignThemeProvider store={store}>
         <ThemeProbe />
       </DesignThemeProvider>,
     )
