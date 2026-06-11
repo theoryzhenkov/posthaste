@@ -1,0 +1,282 @@
+use super::*;
+use crate::defaults::default_smart_mailboxes;
+
+#[test]
+fn source_toml_round_trips() {
+    let settings = AccountSettings {
+        id: AccountId::from("primary"),
+        name: "My Fastmail".to_string(),
+        full_name: Some("Example User".to_string()),
+        email_patterns: vec!["user@example.com".to_string(), "*@example.net".to_string()],
+        driver: AccountDriver::Jmap,
+        enabled: true,
+        appearance: Some(AccountAppearance::Initials {
+            initials: "MF".to_string(),
+            color_hue: 245,
+        }),
+        transport: AccountTransportSettings {
+            base_url: Some("https://api.fastmail.com".to_string()),
+            username: Some("user@example.com".to_string()),
+            secret_ref: Some(SecretRef {
+                kind: SecretKind::Os,
+                key: "account:primary".to_string(),
+            }),
+            ..Default::default()
+        },
+        created_at: "2026-03-31T00:00:00Z".to_string(),
+        updated_at: "2026-03-31T00:00:00Z".to_string(),
+    };
+
+    let toml_struct = SourceToml::from_account_settings(&settings);
+    let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+    let parsed: SourceToml = toml::from_str(&toml_string).unwrap();
+    let round_tripped = parsed.to_account_settings().unwrap();
+
+    assert_eq!(round_tripped, settings);
+}
+
+#[test]
+fn imap_smtp_source_toml_round_trips_provider_transport() {
+    let settings = AccountSettings {
+        id: AccountId::from("icloud"),
+        name: "iCloud".to_string(),
+        full_name: None,
+        email_patterns: vec!["user@icloud.com".to_string()],
+        driver: AccountDriver::ImapSmtp,
+        enabled: true,
+        appearance: None,
+        transport: AccountTransportSettings {
+            provider: ProviderHint::Icloud,
+            auth: ProviderAuthKind::AppPassword,
+            username: Some("user@icloud.com".to_string()),
+            secret_ref: Some(SecretRef {
+                kind: SecretKind::Os,
+                key: "account:icloud".to_string(),
+            }),
+            imap: Some(ImapTransportSettings {
+                host: "imap.mail.me.com".to_string(),
+                port: 993,
+                security: TransportSecurity::Tls,
+            }),
+            smtp: Some(SmtpTransportSettings {
+                host: "smtp.mail.me.com".to_string(),
+                port: 587,
+                security: TransportSecurity::StartTls,
+            }),
+            ..Default::default()
+        },
+        created_at: "2026-04-25T00:00:00Z".to_string(),
+        updated_at: "2026-04-25T00:00:00Z".to_string(),
+    };
+
+    let toml_struct = SourceToml::from_account_settings(&settings);
+    let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+    assert!(toml_string.contains("driver = \"imap_smtp\""));
+    assert!(toml_string.contains("provider = \"icloud\""));
+
+    let parsed: SourceToml = toml::from_str(&toml_string).unwrap();
+    let round_tripped = parsed.to_account_settings().unwrap();
+
+    assert_eq!(round_tripped, settings);
+}
+
+#[test]
+fn imap_smtp_source_toml_requires_runtime_transport_fields() {
+    let parsed: SourceToml = toml::from_str(
+        r#"
+id = "icloud"
+name = "iCloud"
+email_patterns = ["*@icloud.com"]
+driver = "imap_smtp"
+
+[transport]
+provider = "icloud"
+auth = "app_password"
+"#,
+    )
+    .unwrap();
+
+    let error = parsed
+        .to_account_settings()
+        .expect_err("missing transport fields should be rejected");
+
+    assert!(error.contains("transport.username"));
+}
+
+#[test]
+fn default_smart_mailboxes_round_trip_through_toml() {
+    for mailbox in default_smart_mailboxes() {
+        let toml_struct = SmartMailboxToml::from_smart_mailbox(&mailbox);
+        let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+        let parsed: SmartMailboxToml = toml::from_str(&toml_string).unwrap();
+        let round_tripped = parsed.to_smart_mailbox().unwrap();
+
+        assert_eq!(round_tripped.id, mailbox.id);
+        assert_eq!(round_tripped.name, mailbox.name);
+        assert_eq!(round_tripped.kind, mailbox.kind);
+        assert_eq!(round_tripped.default_key, mailbox.default_key);
+        assert_eq!(round_tripped.rule, mailbox.rule);
+    }
+}
+
+#[test]
+fn app_toml_round_trips() {
+    let settings = AppSettings {
+        default_account_id: Some(AccountId::from("primary")),
+        automation_rules: vec![AutomationRule {
+            id: "rule-newsletters".to_string(),
+            name: "Newsletters".to_string(),
+            enabled: true,
+            triggers: vec![AutomationTrigger::MessageArrived],
+            condition: SmartMailboxRule {
+                root: SmartMailboxGroup {
+                    operator: SmartMailboxGroupOperator::Any,
+                    negated: false,
+                    nodes: vec![
+                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                            field: SmartMailboxField::FromName,
+                            operator: SmartMailboxOperator::Contains,
+                            negated: false,
+                            value: SmartMailboxValue::String("Posthaste".to_string()),
+                        }),
+                        SmartMailboxRuleNode::Condition(SmartMailboxCondition {
+                            field: SmartMailboxField::FromEmail,
+                            operator: SmartMailboxOperator::Contains,
+                            negated: false,
+                            value: SmartMailboxValue::String("Posthaste".to_string()),
+                        }),
+                    ],
+                },
+            },
+            actions: vec![AutomationAction::ApplyTag {
+                tag: "newsletter".to_string(),
+            }],
+            backfill: true,
+        }],
+        automation_drafts: vec![AutomationRule {
+            id: "draft-newsletters".to_string(),
+            name: "Draft newsletters".to_string(),
+            enabled: true,
+            triggers: vec![AutomationTrigger::MessageArrived],
+            condition: SmartMailboxRule {
+                root: SmartMailboxGroup {
+                    operator: SmartMailboxGroupOperator::Any,
+                    negated: false,
+                    nodes: Vec::new(),
+                },
+            },
+            actions: vec![AutomationAction::ApplyTag { tag: String::new() }],
+            backfill: true,
+        }],
+        ..Default::default()
+    };
+    let existing = AppToml {
+        schema_version: 1,
+        default_source_id: None,
+        automations: Vec::new(),
+        draft_automations: Vec::new(),
+        daemon: DaemonToml::default(),
+        logging: LoggingToml::default(),
+        cache: CachePolicyToml::default(),
+    };
+    let toml_struct = AppToml::from_app_settings(&settings, &existing);
+    let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
+    let parsed: AppToml = toml::from_str(&toml_string).unwrap();
+    let round_tripped = parsed.to_app_settings().unwrap();
+
+    assert_eq!(round_tripped, settings);
+}
+
+#[test]
+fn app_toml_accepts_missing_daemon_runtime_for_compatibility() {
+    let parsed: AppToml = toml::from_str(
+        r#"
+        schema_version = 1
+
+        [daemon]
+        bind = "127.0.0.1:2525"
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(parsed.daemon.bind.as_deref(), Some("127.0.0.1:2525"));
+    assert_eq!(parsed.daemon.runtime, DaemonRuntimeTuning::default());
+}
+
+#[test]
+fn app_toml_daemon_runtime_round_trips() {
+    let input = r#"
+        schema_version = 1
+
+        [daemon]
+        bind = "127.0.0.1:2525"
+
+        [daemon.runtime.supervisor]
+        automation_backfill_batch_size = 20
+        command_channel_buffer_size = 64
+
+        [daemon.runtime.oauth]
+        refresh_skew_seconds = 600
+
+        [daemon.runtime.push]
+        api_sse_keep_alive_seconds = 30
+
+        [daemon.runtime.sync]
+        jmap_email_get_chunk_size = 50
+
+        [daemon.runtime.store]
+        sender_address_cache_cap = 80
+    "#;
+
+    let parsed: AppToml = toml::from_str(input).unwrap();
+    let serialized = toml::to_string_pretty(&parsed).unwrap();
+    let round_tripped: AppToml = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(round_tripped.daemon.runtime, parsed.daemon.runtime);
+    assert_eq!(
+        round_tripped
+            .daemon
+            .runtime
+            .supervisor
+            .automation_backfill_batch_size,
+        20
+    );
+    assert_eq!(round_tripped.daemon.runtime.oauth.refresh_skew_seconds, 600);
+    assert_eq!(
+        round_tripped.daemon.runtime.push.api_sse_keep_alive_seconds,
+        30
+    );
+    assert_eq!(
+        round_tripped.daemon.runtime.sync.jmap_email_get_chunk_size,
+        50
+    );
+    assert_eq!(
+        round_tripped.daemon.runtime.store.sender_address_cache_cap,
+        80
+    );
+}
+
+#[test]
+fn app_settings_serialization_preserves_existing_daemon_runtime() {
+    let existing = AppToml {
+        schema_version: 1,
+        daemon: DaemonToml {
+            runtime: DaemonRuntimeTuning {
+                store: crate::runtime::StoreRuntimeTuning {
+                    sender_address_cache_cap: 80,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let toml_struct = AppToml::from_app_settings(&AppSettings::default(), &existing);
+
+    assert_eq!(
+        toml_struct.daemon.runtime.store.sender_address_cache_cap,
+        80
+    );
+}

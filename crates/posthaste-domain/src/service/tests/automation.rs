@@ -1,0 +1,106 @@
+use super::*;
+
+#[tokio::test]
+async fn sync_applies_matching_automation_tag() {
+    let account_id = AccountId::from("primary");
+    let account = sample_source();
+    let store = Arc::new(TestStore::default());
+    *store.rule_page.lock().expect("rule page lock poisoned") =
+        vec![sample_message_summary("message-1", Vec::new())];
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        app_settings: Mutex::new(AppSettings {
+            default_account_id: None,
+            automation_rules: vec![sample_automation_rule()],
+            automation_drafts: Vec::new(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let gateway = MutationGateway::with_sync_batch(
+        1,
+        SyncBatch {
+            mailboxes: Vec::new(),
+            messages: vec![MessageRecord {
+                id: MessageId::from("message-1"),
+                source_thread_id: ThreadId::from("thread-1"),
+                remote_blob_id: None,
+                subject: Some("Welcome".to_string()),
+                from_name: Some("PostHaste Updates".to_string()),
+                from_email: Some("hello@example.com".to_string()),
+                to: Vec::new(),
+                preview: None,
+                received_at: crate::RFC3339_EPOCH.to_string(),
+                has_attachment: false,
+                size: 0,
+                mailbox_ids: vec![MailboxId::from("inbox")],
+                keywords: Vec::new(),
+                body_html: None,
+                body_text: None,
+                raw_mime: None,
+                rfc_message_id: None,
+                in_reply_to: None,
+                references: Vec::new(),
+            }],
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
+            replace_all_messages: false,
+            cursors: Vec::new(),
+        },
+    );
+
+    service
+        .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
+        .await
+        .expect("sync should apply action");
+
+    assert_eq!(
+        *store
+            .keyword_adds
+            .lock()
+            .expect("keyword adds lock poisoned"),
+        vec![(MessageId::from("message-1"), vec!["newsletter".to_string()])]
+    );
+}
+
+#[tokio::test]
+async fn automation_backfill_processes_one_bounded_batch() {
+    let account_id = AccountId::from("primary");
+    let account = sample_source();
+    let store = Arc::new(TestStore::default());
+    *store.rule_page.lock().expect("rule page lock poisoned") = vec![
+        sample_message_summary("message-1", Vec::new()),
+        sample_message_summary("message-2", Vec::new()),
+    ];
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        app_settings: Mutex::new(AppSettings {
+            default_account_id: None,
+            automation_rules: vec![sample_automation_rule()],
+            automation_drafts: Vec::new(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+    let gateway = MutationGateway::with_revision(1);
+
+    let (_events, has_more) = service
+        .backfill_automation_rules_batch(&account_id, &gateway, 1)
+        .await
+        .expect("backfill should apply one bounded batch");
+
+    assert!(has_more);
+    assert_eq!(
+        *store
+            .keyword_adds
+            .lock()
+            .expect("keyword adds lock poisoned"),
+        vec![(MessageId::from("message-1"), vec!["newsletter".to_string()])]
+    );
+}
