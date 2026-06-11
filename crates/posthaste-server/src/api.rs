@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
+use std::io;
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
@@ -35,6 +36,10 @@ use serde_json::json;
 use tokio::fs;
 use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 use utoipa::{IntoParams, ToSchema};
+
+const MAX_SEND_ATTACHMENTS: usize = 10;
+const MAX_SEND_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_SEND_TOTAL_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 
 use crate::authz::Action;
 use crate::oauth::{
@@ -2669,11 +2674,59 @@ fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), Api
             "recipient email addresses cannot be empty",
         ));
     }
+    if request.attachments.len() > MAX_SEND_ATTACHMENTS {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::InvalidCompose,
+            "too many attachments",
+        ));
+    }
+    let mut total_attachment_bytes = 0_u64;
+    for attachment in &request.attachments {
+        if attachment.filename.trim().is_empty() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidCompose,
+                "attachment filename is required",
+            ));
+        }
+        let attachment_size = decoded_attachment_size(attachment.content_base64.trim())
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    ApiErrorCode::InvalidCompose,
+                    "attachment content must be valid base64",
+                )
+            })?;
+        if attachment_size > MAX_SEND_ATTACHMENT_BYTES {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidCompose,
+                "attachment is too large",
+            ));
+        }
+        total_attachment_bytes = total_attachment_bytes.saturating_add(attachment_size);
+        if total_attachment_bytes > MAX_SEND_TOTAL_ATTACHMENT_BYTES {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidCompose,
+                "attachments are too large",
+            ));
+        }
+    }
     Ok(())
 }
 
 fn recipient_email_is_empty(recipient: &Recipient) -> bool {
     recipient.email.trim().is_empty()
+}
+
+fn decoded_attachment_size(content: &str) -> Option<u64> {
+    let mut decoder = base64::read::DecoderReader::new(
+        content.as_bytes(),
+        &base64::engine::general_purpose::STANDARD,
+    );
+    io::copy(&mut decoder, &mut io::sink()).ok()
 }
 
 async fn live_gateway(state: &AppState, account_id: &AccountId) -> Result<SharedGateway, ApiError> {
@@ -3401,8 +3454,63 @@ mod tests {
             body: "Body".to_string(),
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         })
         .expect_err("empty To should be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, ApiErrorCode::InvalidCompose);
+    }
+
+    #[test]
+    fn send_message_rejects_invalid_attachment_base64() {
+        let error = validate_send_message_request(&SendMessageRequest {
+            from: None,
+            to: vec![Recipient {
+                name: None,
+                email: "to@example.test".to_string(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Hello".to_string(),
+            body: "Body".to_string(),
+            in_reply_to: None,
+            references: None,
+            attachments: vec![posthaste_domain::SendMessageAttachment {
+                filename: "notes.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                content_base64: "not base64".to_string(),
+            }],
+        })
+        .expect_err("invalid attachment should be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.code, ApiErrorCode::InvalidCompose);
+    }
+
+    #[test]
+    fn send_message_rejects_too_many_attachments() {
+        let error = validate_send_message_request(&SendMessageRequest {
+            from: None,
+            to: vec![Recipient {
+                name: None,
+                email: "to@example.test".to_string(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Hello".to_string(),
+            body: "Body".to_string(),
+            in_reply_to: None,
+            references: None,
+            attachments: (0..=MAX_SEND_ATTACHMENTS)
+                .map(|index| posthaste_domain::SendMessageAttachment {
+                    filename: format!("notes-{index}.txt"),
+                    mime_type: "text/plain".to_string(),
+                    content_base64: "aGVsbG8=".to_string(),
+                })
+                .collect(),
+        })
+        .expect_err("too many attachments should be rejected");
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.body.code, ApiErrorCode::InvalidCompose);

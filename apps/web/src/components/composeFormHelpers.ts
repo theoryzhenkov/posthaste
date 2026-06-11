@@ -13,14 +13,19 @@ import type {
   Recipient,
 } from '@/api/types'
 
-export type { ComposeForm } from '@/composeMessage'
+export type { ComposeAttachment, ComposeForm } from '@/composeMessage'
 export {
   EMPTY_COMPOSE_FORM as EMPTY_FORM,
+  MAX_COMPOSE_ATTACHMENT_BYTES,
+  MAX_COMPOSE_ATTACHMENTS,
+  MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES,
   buildSendInput,
+  composeAttachmentFromFile,
   formatRecipient,
   formatRecipients,
   parseRecipients,
   parseSender,
+  readAttachmentForSend,
 } from '@/composeMessage'
 
 export interface FromAddressOption {

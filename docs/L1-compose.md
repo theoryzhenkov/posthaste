@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Markdown subset, MIME structure rules, draft lifecycle, reply/forward quoting"
-modified: 2026-05-24
-reviewed: 2026-05-24
+modified: 2026-06-02
+reviewed: 2026-06-02
 depends:
   - path: docs/L0-compose
   - path: docs/L1-jmap
@@ -140,7 +140,20 @@ The user configures a signature per Identity, stored locally. The signature is a
 
 ## Attachment handling
 
-Files are uploaded through the JMAP Session `uploadUrl` endpoint before the email is assembled. Each uploaded blob gets a `blobId` referenced in the MIME structure. RFC 9404 `Blob/upload` may be used only when the server advertises the blob-management capability; it is not the baseline RFC 8620 upload path. The compose session tracks pending uploads and blocks `send()` until all uploads complete. Maximum attachment size is determined by the server's `maxSizeUpload` capability, which the client reads from the JMAP Session object.
+The composer keeps selected browser `File` objects locally until send. On submit,
+the frontend encodes each file as base64 in `SendMessageRequest.attachments[]`
+with `filename`, `mimeType`, and `contentBase64`. The frontend and daemon limit
+one send to 10 attachments, 10 MiB per attachment, and 25 MiB total decoded
+attachment bytes. The daemon validates that attachment payloads are named, within
+those limits, and valid base64 before dispatch.
+
+For JMAP accounts, the provider adapter uploads each decoded attachment through
+the JMAP Session `uploadUrl` endpoint before `Email/set` and references the
+returned `blobId` in the email attachment body parts. RFC 9404 `Blob/upload` may
+be used only when the server advertises the blob-management capability; it is not
+the baseline RFC 8620 upload path. For IMAP/SMTP accounts, the adapter embeds the
+decoded bytes as MIME attachments in a `multipart/mixed` message whose first part
+is the existing `multipart/alternative` text/html body.
 
 ## Error model
 

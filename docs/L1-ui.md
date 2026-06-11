@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "React component hierarchy, visual contract boundaries, list behavior, live updates, HTML rendering"
-modified: 2026-06-01
-reviewed: 2026-06-01
+modified: 2026-06-02
+reviewed: 2026-06-02
 depends:
   - path: docs/L0-ui
   - path: docs/L0-testing
@@ -228,7 +228,7 @@ Every desktop window — the main shell and each separate surface window — inh
 
 The desktop ships as a single build with webview devtools compiled in (no separate DevTools bundle). Devtools are gated by a client-local "Developer tools" setting (General settings, desktop only, off by default): when on, `Cmd/Ctrl+Alt+I` toggles the focused window's inspector via the `toggle_devtools` command. The installed bundle version is derived from the release tag (`v0.1.0-dogfood.N` → `0.1.N`) rather than a frozen `0.1.0`.
 
-Surface route parameters own visible navigation state inside focused surfaces. Settings category and drill-in state, including account editors, smart-mailbox editors, source-mailbox editors, and create flows, are encoded in the settings surface descriptor. Compose routes encode only the initial compose intent (`new`, `reply`, or `forward`); before the user edits the popup, compose may be opened as a desktop/window surface from that initial intent. Live draft contents remain component/session state and are not teleported between popup and desktop-window shells. Invalid `/surface/...` routes render an explicit closeable invalid-surface state instead of falling back to the mail shell; forced first-run account setup still takes precedence in the main web shell. Component state may hold ephemeral form or pending-operation state, but server/cache refreshes must not replay initial route parameters or otherwise change visible navigation unless they are explicitly correcting an invalid route.
+Surface route parameters own visible navigation state inside focused surfaces. Settings category and drill-in state, including account editors, smart-mailbox editors, source-mailbox editors, and create flows, are encoded in the settings surface descriptor. Compose routes encode only the initial compose intent (`new`, `reply`, or `forward`); before the user edits the popup, compose may be opened as a desktop/window surface from that initial intent. Live draft contents, including selected outgoing attachment `File` objects, remain component/session state and are not teleported between popup and desktop-window shells. Invalid `/surface/...` routes render an explicit closeable invalid-surface state instead of falling back to the mail shell; forced first-run account setup still takes precedence in the main web shell. Component state may hold ephemeral form or pending-operation state, but server/cache refreshes must not replay initial route parameters or otherwise change visible navigation unless they are explicitly correcting an invalid route.
 
 ## Keyboard shortcuts
 

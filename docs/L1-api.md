@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "REST endpoint contracts, request/response schemas, error codes, SSE event stream"
-modified: 2026-06-01
-reviewed: 2026-06-01
+modified: 2026-06-02
+reviewed: 2026-06-02
 depends:
   - path: docs/L0-api
   - path: docs/L0-testing
@@ -139,6 +139,10 @@ per-call errors.
 backend uses that sender address for the outgoing RFC 5322 `From` field. The
 route `source_id` is still the account that submits the message; the frontend
 may choose that account from configured sender suggestions or wildcard ownership.
+It also includes `attachments: SendMessageAttachment[]`, where each attachment
+has `filename`, `mimeType`, and base64 `contentBase64`. The API rejects unnamed
+attachments, invalid base64, more than 10 attachments, any attachment over 10 MiB
+decoded, or total decoded attachments over 25 MiB with `invalid_compose`.
 After a successful send, the backend records the selected sender in the local
 SQLite `sender_address_cache`; failed or rejected sends do not update it.
 `GET /sender-addresses` returns those accepted free-form sender suggestions

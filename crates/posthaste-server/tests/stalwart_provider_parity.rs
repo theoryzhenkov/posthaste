@@ -423,6 +423,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 body: "Sent through the JMAP gateway.".to_string(),
                 in_reply_to: None,
                 references: None,
+                attachments: Vec::new(),
             },
             &jmap_gateway,
         )
@@ -460,6 +461,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 body: "Sent through the IMAP/SMTP gateway.".to_string(),
                 in_reply_to: None,
                 references: None,
+                attachments: Vec::new(),
             },
             &imap_gateway,
         )

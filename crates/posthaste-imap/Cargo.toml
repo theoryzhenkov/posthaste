@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 async-stream = "0.3"
+base64 = { workspace = true }
 hex = { workspace = true }
 imap-client = { workspace = true }
 lettre = { workspace = true }

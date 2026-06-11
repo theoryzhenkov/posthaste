@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
@@ -38,6 +39,8 @@ use crate::config::resolve_roots;
 use crate::oauth::OAuthFlowStore;
 use crate::secret::SystemSecretStore;
 use crate::supervisor::AccountSupervisor;
+
+const SEND_MESSAGE_BODY_LIMIT_BYTES: usize = 40 * 1024 * 1024;
 
 /// Shared application state threaded through all Axum handlers.
 ///
@@ -341,7 +344,7 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/sources/{source_id}/commands/send",
-            post(api::send_message),
+            post(api::send_message).layer(DefaultBodyLimit::max(SEND_MESSAGE_BODY_LIMIT_BYTES)),
         )
         .route(
             "/sources/{source_id}/commands/messages/{message_id}/set-keywords",

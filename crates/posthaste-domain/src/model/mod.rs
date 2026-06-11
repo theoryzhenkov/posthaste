@@ -1593,6 +1593,21 @@ pub struct ReplyContext {
     pub references: Option<String>,
 }
 
+/// File attachment payload for an outgoing compose request.
+///
+/// The frontend sends base64 content to the daemon; the provider adapter uploads
+/// or embeds the bytes using the transport-native attachment path before send.
+///
+/// @spec docs/L1-compose#attachment-handling
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SendMessageAttachment {
+    pub filename: String,
+    pub mime_type: String,
+    pub content_base64: String,
+}
+
 /// Request payload for sending a new email via `EmailSubmission/set`.
 ///
 /// @spec docs/L1-jmap#methods-used
@@ -1608,6 +1623,8 @@ pub struct SendMessageRequest {
     pub body: String,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<SendMessageAttachment>,
 }
 
 /// Errors from JMAP gateway operations.

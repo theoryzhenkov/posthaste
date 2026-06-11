@@ -1605,7 +1605,13 @@ export interface components {
          *
          *     @spec docs/L1-jmap#methods-used
          */
+        SendMessageAttachment: {
+            contentBase64: string;
+            filename: string;
+            mimeType: string;
+        };
         SendMessageRequest: {
+            attachments: components["schemas"]["SendMessageAttachment"][];
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
