@@ -1,5 +1,38 @@
 use super::*;
 
+/// Request body for `PATCH /v1/settings`.
+///
+/// @spec docs/L1-api#settings
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchSettingsRequest {
+    #[serde(default)]
+    pub default_account_id: Option<Option<String>>,
+    pub cache_policy: Option<CachePolicy>,
+    pub automation_rules: Option<Vec<AutomationRule>>,
+    pub automation_drafts: Option<Vec<AutomationRule>>,
+}
+
+/// Request body for `POST /v1/automation-rules:preview`.
+///
+/// @spec docs/L1-api#application-settings
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAutomationRuleRequest {
+    pub condition: SmartMailboxRule,
+    pub limit: Option<usize>,
+}
+
+/// Matching message preview for a draft automation rule condition.
+///
+/// @spec docs/L1-api#application-settings
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRulePreviewResponse {
+    pub total: i64,
+    pub items: Vec<MessageSummary>,
+}
+
 const DEFAULT_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 5;
 const MAX_AUTOMATION_RULE_PREVIEW_LIMIT: usize = 50;
 
