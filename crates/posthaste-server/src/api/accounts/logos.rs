@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_ACCOUNT_LOGO_BYTES: usize = 2 * 1024 * 1024;
+
 /// POST /v1/accounts/{account_id}/logo
 ///
 /// Stores a user-uploaded account logo under the config root and updates the
