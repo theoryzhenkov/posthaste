@@ -1,0 +1,134 @@
+use super::*;
+
+/// Metadata for a locally-cached raw MIME message file.
+///
+/// @spec docs/L1-sync#sync-loop
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RawMessageRef {
+    pub path: String,
+    pub sha256: String,
+    pub size: i64,
+    pub mime_type: String,
+    pub fetched_at: String,
+}
+
+/// Lightweight mailbox view for sidebar and list endpoints.
+///
+/// @spec docs/L1-api#navigation
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MailboxSummary {
+    pub id: MailboxId,
+    pub name: String,
+    pub role: Option<String>,
+    pub unread_emails: i64,
+    pub total_emails: i64,
+}
+
+/// Message metadata for list views (no body content).
+///
+/// @spec docs/L1-api#conversations-and-messages
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageSummary {
+    pub id: MessageId,
+    pub source_id: AccountId,
+    pub source_name: String,
+    pub source_thread_id: ThreadId,
+    pub conversation_id: ConversationId,
+    pub subject: Option<String>,
+    pub from_name: Option<String>,
+    pub from_email: Option<String>,
+    pub to: Vec<Recipient>,
+    pub preview: Option<String>,
+    pub received_at: String,
+    pub has_attachment: bool,
+    pub is_read: bool,
+    pub is_flagged: bool,
+    pub mailbox_ids: Vec<MailboxId>,
+    pub keywords: Vec<String>,
+}
+
+/// Column by which message lists can be sorted.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum MessageSortField {
+    #[default]
+    Date,
+    From,
+    Subject,
+    Source,
+    Flagged,
+    Attachment,
+}
+
+/// Opaque seek-pagination cursor for message lists.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCursor {
+    pub sort_value: String,
+    pub source_id: AccountId,
+    pub message_id: MessageId,
+}
+
+/// A single page of message summaries with an optional cursor for the next page.
+///
+/// @spec docs/L1-api#cursor-pagination
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    pub items: Vec<MessageSummary>,
+    pub next_cursor: Option<MessageCursor>,
+}
+
+/// Full message including sanitized body content, returned by message detail endpoint.
+///
+/// @spec docs/L1-api#message-body-sanitization
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageAttachment {
+    pub id: String,
+    pub blob_id: BlobId,
+    pub part_id: Option<String>,
+    pub filename: Option<String>,
+    pub mime_type: String,
+    pub size: i64,
+    pub disposition: Option<String>,
+    pub cid: Option<String>,
+    pub is_inline: bool,
+}
+
+/// Full message including sanitized body content, returned by message detail endpoint.
+///
+/// @spec docs/L1-api#message-body-sanitization
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageDetail {
+    #[serde(flatten)]
+    pub summary: MessageSummary,
+    pub body_html: Option<String>,
+    pub body_text: Option<String>,
+    pub raw_message: Option<RawMessageRef>,
+    pub attachments: Vec<MessageAttachment>,
+}
+
+/// All messages belonging to a single JMAP thread, ordered by `receivedAt`.
+///
+/// @spec docs/L1-search#thread-view
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadView {
+    pub id: ThreadId,
+    pub messages: Vec<MessageSummary>,
+}
