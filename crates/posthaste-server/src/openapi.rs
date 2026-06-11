@@ -175,6 +175,7 @@ use utoipa::OpenApi;
         posthaste_domain::AddToMailboxCommand,
         posthaste_domain::RemoveFromMailboxCommand,
         posthaste_domain::ReplaceMailboxesCommand,
+        posthaste_domain::SendMessageAttachment,
         posthaste_domain::SendMessageRequest,
         posthaste_domain::SyncMode,
         posthaste_domain::DomainEvent,

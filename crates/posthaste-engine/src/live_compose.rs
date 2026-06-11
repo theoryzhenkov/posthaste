@@ -1,6 +1,8 @@
+use base64::Engine;
 use jmap_client::{email, identity, mailbox};
 use posthaste_domain::{
-    AccountId, GatewayError, Identity, MessageId, ReplyContext, SendMessageRequest,
+    AccountId, GatewayError, Identity, MessageId, ReplyContext, SendMessageAttachment,
+    SendMessageRequest,
 };
 
 use crate::compose::{
@@ -117,7 +119,7 @@ pub(crate) async fn fetch_reply_context(
 /// @spec docs/L1-jmap#methods-used
 pub(crate) async fn send_message(
     gateway: &LiveJmapGateway,
-    _account_id: &AccountId,
+    account_id: &AccountId,
     request_data: &SendMessageRequest,
 ) -> Result<(), GatewayError> {
     let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
@@ -128,6 +130,8 @@ pub(crate) async fn send_message(
         .fetch_mailbox_id_by_role(mailbox::Role::Sent)
         .await?;
     let html_body = render_markdown(&request_data.body);
+    let uploaded_attachments =
+        upload_send_attachments(gateway, account_id, &request_data.attachments).await?;
 
     let mut request = gateway.client().build();
     let email_obj = request.set_email().create();
@@ -160,6 +164,14 @@ pub(crate) async fn send_message(
     }
     if let Some(references) = &request_data.references {
         email_obj.references(references.split_whitespace().collect::<Vec<_>>());
+    }
+    for attachment in uploaded_attachments {
+        email_obj.attachment(
+            jmap_client::email::EmailBodyPart::new()
+                .blob_id(attachment.blob_id)
+                .name(attachment.filename)
+                .content_type(attachment.mime_type),
+        );
     }
 
     let submission_set = request.set_email_submission();
@@ -199,6 +211,58 @@ pub(crate) async fn send_message(
         .unwrap_update_errors()
         .map_err(map_gateway_error)?;
     Ok(())
+}
+
+struct UploadedSendAttachment {
+    filename: String,
+    mime_type: String,
+    blob_id: String,
+}
+
+async fn upload_send_attachments(
+    gateway: &LiveJmapGateway,
+    account_id: &AccountId,
+    attachments: &[SendMessageAttachment],
+) -> Result<Vec<UploadedSendAttachment>, GatewayError> {
+    let mut uploaded = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        let bytes = decode_attachment_bytes(attachment)?;
+        let response = gateway
+            .client()
+            .upload(
+                Some(account_id.as_str()),
+                bytes,
+                Some(normalized_attachment_mime_type(attachment).as_str()),
+            )
+            .await
+            .map_err(map_gateway_error)?;
+        uploaded.push(UploadedSendAttachment {
+            filename: attachment.filename.trim().to_string(),
+            mime_type: normalized_attachment_mime_type(attachment),
+            blob_id: response.blob_id().to_string(),
+        });
+    }
+    Ok(uploaded)
+}
+
+fn decode_attachment_bytes(attachment: &SendMessageAttachment) -> Result<Vec<u8>, GatewayError> {
+    base64::engine::general_purpose::STANDARD
+        .decode(attachment.content_base64.trim())
+        .map_err(|_| {
+            GatewayError::Rejected(format!(
+                "attachment {} is not valid base64",
+                attachment.filename
+            ))
+        })
+}
+
+fn normalized_attachment_mime_type(attachment: &SendMessageAttachment) -> String {
+    let mime_type = attachment.mime_type.trim();
+    if mime_type.is_empty() {
+        "application/octet-stream".to_string()
+    } else {
+        mime_type.to_string()
+    }
 }
 
 /// Resolve the sender identity for an account before composing or sending.

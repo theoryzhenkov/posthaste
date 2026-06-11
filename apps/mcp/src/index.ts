@@ -240,6 +240,11 @@ function buildServer(conn: Connection): McpServer {
     email: z.string(),
     name: z.string().nullish(),
   });
+  const attachmentSchema = z.object({
+    filename: z.string(),
+    mimeType: z.string(),
+    contentBase64: z.string(),
+  });
 
   server.registerTool(
     "send_message",
@@ -247,7 +252,8 @@ function buildServer(conn: Connection): McpServer {
       title: "Send message",
       description:
         "Send a new email via the source's submission identity. 'to', 'cc', " +
-        "'bcc' are arrays of {email, name?}; 'subject' and 'body' are required.",
+        "'bcc' are arrays of {email, name?}; 'subject' and 'body' are required. " +
+        "attachments are optional {filename, mimeType, contentBase64} objects.",
       inputSchema: {
         sourceId: z.string(),
         to: z.array(recipientSchema),
@@ -258,6 +264,7 @@ function buildServer(conn: Connection): McpServer {
         from: recipientSchema.nullish(),
         inReplyTo: z.string().nullish(),
         references: z.string().nullish(),
+        attachments: z.array(attachmentSchema).optional(),
       },
     },
     wrap(async (args) => {
@@ -270,6 +277,7 @@ function buildServer(conn: Connection): McpServer {
         from: args.from ?? undefined,
         inReplyTo: args.inReplyTo ?? undefined,
         references: args.references ?? undefined,
+        attachments: args.attachments ?? [],
       };
       return apiFetch<unknown>(
         conn,

@@ -5,7 +5,16 @@
  * @spec docs/L1-compose#mime-structure
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Forward, Loader2, Mail, Reply, Send } from 'lucide-react'
+import {
+  ChevronDown,
+  Forward,
+  Loader2,
+  Mail,
+  Paperclip,
+  Reply,
+  Send,
+  X,
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -48,13 +57,18 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import {
   EMPTY_FORM,
+  MAX_COMPOSE_ATTACHMENT_BYTES,
+  MAX_COMPOSE_ATTACHMENTS,
+  MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES,
   accountFromOptions,
   buildSendInput,
+  composeAttachmentFromFile,
   formatRecipient,
   formatRecipients,
   isConcreteEmailPattern,
   optionLabel,
   parseRecipients,
+  readAttachmentForSend,
   wildcardMatchesEmail,
   type ComposeForm,
 } from './composeFormHelpers'
@@ -77,6 +91,7 @@ export function ComposeOverlay({
   onClose,
 }: ComposeOverlayProps) {
   const bodyRef = useRef<MarkdownComposerEditorHandle>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const identityQuery = useQuery({
     queryKey: ['identity', intent.sourceId],
@@ -133,6 +148,7 @@ export function ComposeOverlay({
           ? replyContextQuery.data.replySubject
           : replyContextQuery.data.forwardSubject,
       body: quoted,
+      attachments: [],
     }
   }, [intent.kind, replyContextQuery.data])
   const formResetKey = isMessageBasedCompose
@@ -147,6 +163,7 @@ export function ComposeOverlay({
   const [fromInputFocused, setFromInputFocused] = useState(false)
   const [editedResetKey, setEditedResetKey] = useState<string | null>(null)
   const [isOpeningWindow, setIsOpeningWindow] = useState(false)
+  const [isReadingAttachments, setIsReadingAttachments] = useState(false)
   const editedResetKeyRef = useRef<string | null>(null)
 
   const needsFormReset = composeState.resetKey !== formResetKey
@@ -190,6 +207,37 @@ export function ComposeOverlay({
   const handleBodyChange = useCallback(
     (value: string) => setField('body', value),
     [setField],
+  )
+  const removeAttachment = useCallback(
+    (attachmentId: string) => {
+      setField(
+        'attachments',
+        form.attachments.filter((attachment) => attachment.id !== attachmentId),
+      )
+    },
+    [form.attachments, setField],
+  )
+  const handleAttachFiles = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) {
+        return
+      }
+      const nextAttachments = [
+        ...form.attachments,
+        ...Array.from(files).map(composeAttachmentFromFile),
+      ]
+      const error = validateAttachmentLimits(nextAttachments)
+      if (error) {
+        setErrorMessage(error)
+      } else {
+        setErrorMessage(null)
+        setField('attachments', nextAttachments)
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    },
+    [form.attachments, setErrorMessage, setField],
   )
 
   useEffect(() => {
@@ -363,32 +411,52 @@ export function ComposeOverlay({
   }
 
   const handleSubmit = useCallback(() => {
-    if (isForwardUnavailable) {
-      setErrorMessage(
-        'Forward is disabled until forwarded headers and attachments are implemented.',
-      )
-      return
-    }
-    if (isWaitingForMessageContext) {
-      setErrorMessage('Wait for the message context to finish loading.')
-      return
-    }
+    void (async () => {
+      if (isForwardUnavailable) {
+        setErrorMessage(
+          'Forward is disabled until forwarded headers and attachments are implemented.',
+        )
+        return
+      }
+      if (isWaitingForMessageContext) {
+        setErrorMessage('Wait for the message context to finish loading.')
+        return
+      }
 
-    const input = buildSendInput(form)
-    if (intent.kind === 'reply' && replyContextQuery.data) {
-      input.inReplyTo = replyContextQuery.data.inReplyTo
-      input.references = replyContextQuery.data.references
-    }
-    const validationError = validate(form, input)
-    if (validationError) {
-      setErrorMessage(validationError)
-      return
-    }
-    setErrorMessage(null)
-    sendMutation.mutate({
-      sourceId: resolveSubmissionSourceId(input.from),
-      input,
-    })
+      const input = buildSendInput(form)
+      if (intent.kind === 'reply' && replyContextQuery.data) {
+        input.inReplyTo = replyContextQuery.data.inReplyTo
+        input.references = replyContextQuery.data.references
+      }
+      const validationError = validate(form, input)
+      if (validationError) {
+        setErrorMessage(validationError)
+        return
+      }
+      const attachmentError = validateAttachmentLimits(form.attachments)
+      if (attachmentError) {
+        setErrorMessage(attachmentError)
+        return
+      }
+      setErrorMessage(null)
+      setIsReadingAttachments(true)
+      try {
+        input.attachments = await Promise.all(
+          form.attachments.map(readAttachmentForSend),
+        )
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Failed to read attachment.',
+        )
+        return
+      } finally {
+        setIsReadingAttachments(false)
+      }
+      sendMutation.mutate({
+        sourceId: resolveSubmissionSourceId(input.from),
+        input,
+      })
+    })()
   }, [
     form,
     intent.kind,
@@ -601,7 +669,51 @@ export function ComposeOverlay({
         )}
       </div>
 
+      {form.attachments.length > 0 && (
+        <div className="flex shrink-0 flex-wrap gap-2 border-t border-border/70 px-4 py-2">
+          {form.attachments.map((attachment) => (
+            <div
+              key={attachment.id}
+              className="flex max-w-full items-center gap-2 rounded-full border border-border bg-background/45 px-2.5 py-1 text-[12px] text-muted-foreground"
+            >
+              <Paperclip size={13} />
+              <span className="min-w-0 max-w-56 truncate text-foreground">
+                {attachment.filename}
+              </span>
+              <span>{formatFileSize(attachment.size)}</span>
+              <button
+                type="button"
+                className="rounded-full p-0.5 hover:bg-[var(--hover-bg)]"
+                aria-label={`Remove attachment ${attachment.filename}`}
+                disabled={fieldsDisabled || sendMutation.isPending || isReadingAttachments}
+                onClick={() => removeAttachment(attachment.id)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex min-h-12 shrink-0 items-center gap-3 border-t border-border/70 px-4 py-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => handleAttachFiles(event.target.files)}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 text-muted-foreground hover:bg-[var(--hover-bg)]"
+          title="Attach files"
+          disabled={fieldsDisabled || sendMutation.isPending || isReadingAttachments}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip size={16} />
+        </Button>
         <div
           className={cn(
             'min-w-0 flex-1 truncate text-[12px]',
@@ -611,7 +723,9 @@ export function ComposeOverlay({
           {errorMessage ??
             (isForwardUnavailable
               ? 'Forward is not available in this dogfood build.'
-              : 'Ready')}
+              : isReadingAttachments
+                ? 'Reading attachments...'
+                : 'Ready')}
         </div>
         <Button
           type="button"
@@ -624,10 +738,10 @@ export function ComposeOverlay({
         <Button
           type="button"
           onClick={handleSubmit}
-          disabled={sendMutation.isPending || fieldsDisabled}
+          disabled={sendMutation.isPending || isReadingAttachments || fieldsDisabled}
           className="bg-brand-coral text-white hover:bg-brand-coral/90"
         >
-          {sendMutation.isPending ? (
+          {sendMutation.isPending || isReadingAttachments ? (
             <Loader2 size={15} className="animate-spin" />
           ) : (
             <Send size={15} />
@@ -667,6 +781,38 @@ export function ComposeOverlay({
       {content}
     </FloatingPanel>
   )
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function validateAttachmentLimits(
+  attachments: ComposeForm['attachments'],
+): string | null {
+  if (attachments.length > MAX_COMPOSE_ATTACHMENTS) {
+    return `Attach at most ${MAX_COMPOSE_ATTACHMENTS} files.`
+  }
+  const oversized = attachments.find(
+    (attachment) => attachment.size > MAX_COMPOSE_ATTACHMENT_BYTES,
+  )
+  if (oversized) {
+    return `${oversized.filename} is larger than ${formatFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)}.`
+  }
+  const totalSize = attachments.reduce(
+    (total, attachment) => total + attachment.size,
+    0,
+  )
+  if (totalSize > MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES) {
+    return `Attachments can total at most ${formatFileSize(MAX_COMPOSE_TOTAL_ATTACHMENT_BYTES)}.`
+  }
+  return null
 }
 
 function RecipientSuggestionInput({

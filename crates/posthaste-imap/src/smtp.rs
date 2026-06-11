@@ -1,7 +1,8 @@
 use std::num::NonZeroU32;
 
+use base64::Engine;
 use imap_client::imap_types::flag::Flag;
-use lettre::message::{header, Mailbox, MultiPart, SinglePart};
+use lettre::message::{header, Attachment, Body, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use posthaste_domain::{
@@ -147,19 +148,54 @@ pub fn build_smtp_message(
     }
 
     let html_body = render_smtp_markdown(&request.body);
-    Ok(builder.multipart(
-        MultiPart::alternative()
-            .singlepart(
-                SinglePart::builder()
-                    .header(header::ContentType::TEXT_PLAIN)
-                    .body(request.body.clone()),
-            )
-            .singlepart(
-                SinglePart::builder()
-                    .header(header::ContentType::TEXT_HTML)
-                    .body(html_body),
-            ),
-    )?)
+    let alternatives = MultiPart::alternative()
+        .singlepart(
+            SinglePart::builder()
+                .header(header::ContentType::TEXT_PLAIN)
+                .body(request.body.clone()),
+        )
+        .singlepart(
+            SinglePart::builder()
+                .header(header::ContentType::TEXT_HTML)
+                .body(html_body),
+        );
+    if request.attachments.is_empty() {
+        return Ok(builder.multipart(alternatives)?);
+    }
+
+    let mut mixed = MultiPart::mixed().multipart(alternatives);
+    for attachment in &request.attachments {
+        mixed = mixed.singlepart(smtp_attachment_part(attachment)?);
+    }
+    Ok(builder.multipart(mixed)?)
+}
+
+fn smtp_attachment_part(
+    attachment: &posthaste_domain::SendMessageAttachment,
+) -> Result<SinglePart, ImapAdapterError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(attachment.content_base64.trim())
+        .map_err(|_| {
+            ImapAdapterError::BuildSmtpMessage(format!(
+                "attachment {} is not valid base64",
+                attachment.filename
+            ))
+        })?;
+    let content_type = header::ContentType::parse(normalized_attachment_mime_type(attachment))
+        .map_err(|error| ImapAdapterError::BuildSmtpMessage(error.to_string()))?;
+    Ok(
+        Attachment::new(attachment.filename.trim().to_string())
+            .body(Body::new(bytes), content_type),
+    )
+}
+
+fn normalized_attachment_mime_type(attachment: &posthaste_domain::SendMessageAttachment) -> &str {
+    let mime_type = attachment.mime_type.trim();
+    if mime_type.is_empty() {
+        "application/octet-stream"
+    } else {
+        mime_type
+    }
 }
 
 /// Send one message through the configured SMTP endpoint.
@@ -336,6 +372,7 @@ mod tests {
             body: "Hello **world**".to_string(),
             in_reply_to: Some("original@example.test".to_string()),
             references: Some("root@example.test original@example.test".to_string()),
+            attachments: Vec::new(),
         };
 
         let message = build_smtp_message(&config, &request).expect("SMTP message");
@@ -356,6 +393,35 @@ mod tests {
         assert!(render_smtp_markdown(&request.body).contains("<strong>world</strong>"));
         assert!(!formatted.contains("Bcc:"));
         assert!(!formatted.contains("dana@example.test"));
+    }
+
+    #[test]
+    fn builds_multipart_mixed_message_with_attachments() {
+        let config = test_config();
+        let request = SendMessageRequest {
+            from: None,
+            to: vec![recipient(Some("Bob"), "bob@example.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Files".to_string(),
+            body: "See attached.".to_string(),
+            in_reply_to: None,
+            references: None,
+            attachments: vec![posthaste_domain::SendMessageAttachment {
+                filename: "notes.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                content_base64: "aGVsbG8gYXR0YWNobWVudA==".to_string(),
+            }],
+        };
+
+        let message = build_smtp_message(&config, &request).expect("SMTP message");
+        let formatted = String::from_utf8(message.formatted()).expect("message is UTF-8");
+
+        assert!(formatted.contains("Content-Type: multipart/mixed;"));
+        assert!(formatted.contains("Content-Type: multipart/alternative;"));
+        assert!(formatted.contains("Content-Type: text/plain"));
+        assert!(formatted.contains("Content-Disposition: attachment; filename=\"notes.txt\""));
+        assert!(formatted.contains("hello attachment"));
     }
 
     #[test]
@@ -383,6 +449,7 @@ mod tests {
             body: "Hello".to_string(),
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         };
 
         let message = build_smtp_message(&config, &request).expect("SMTP message");
@@ -498,6 +565,7 @@ mod tests {
             body: "Hello from **SMTP**".to_string(),
             in_reply_to: None,
             references: None,
+            attachments: Vec::new(),
         };
 
         let submitted = submit_smtp_message(&config, &request)
