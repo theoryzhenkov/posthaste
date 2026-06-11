@@ -27,7 +27,7 @@ Approved 2026-06-02. Implementation starts with phase **B** (backend event-contr
 
 The client is a server-authoritative **replica**. Events are **idempotent post-state assertions** of per-object state — applied through one primitive on the client. Optimistic mutations are predicted assertions that the authoritative diff later confirms (no-op) or corrects. **The server is the authority for per-object state; the client is the authority for per-view state** (filters/sorts/window/derived rendering). Views are derived locally from the replica, so per-object updates don't trigger view recomputation — eliminating the blink, the echo-suppression hack, and the rotting per-event invalidate/skip matrix.
 
-The end-state API surface is **two channels**: commands (HTTP write submission) and the sync stream (`/events` with live, bootstrap, and collapsed-catch-up modes, one envelope). HTTP list/detail endpoints retire — the replica answers reads locally. Attachment HTTP stays as plain file transfer.
+The end-state API surface is minimal: **commands** (HTTP write), a **snapshot read** (scope-parameterized, used for bootstrap and resnapshot), and the **event stream** (cursor-parameterized; backlog + live tail in one connection — catch-up and live-following are different cursor values, not different modes). The snapshot read and event stream return the **same assertion envelope** to the same client apply path. HTTP list/detail endpoints retire — the replica answers reads locally. Attachment HTTP stays as plain file transfer.
 
 The backend is already a server-authoritative replica against providers (state tokens, `*/changes` deltas, `cannotCalculateChanges` → authoritative resnapshot, monotonic `seq` event log). We extend that same discipline across the last hop into the browser, and harden the emission contract so it holds uniformly across object types (phase B) rather than by per-call-site convention.
 
@@ -152,14 +152,19 @@ Object-scoped update events carry the fields needed to compute local position: `
 - Bootstrap — `POST /read`.
 - Asset transfer — blob/attachment HTTP.
 
-**Target** (two surfaces, plus assets):
+**Target** (two assertion-producing operations + commands + assets):
 
-- **Commands** — single HTTP envelope, accepts mutation batches, responds with the resulting post-state assertions (same shape as live events). All writes.
-- **Sync stream** — `/events` with three modes sharing one envelope:
-  - **Live subscribe**: SSE pushes assertions as they happen (current behavior, hardened).
-  - **Catch-up pull** (`?afterSeq=N&collapse=byId`): collapsed assertions since N — at most one event per `(account, type, id)`, in seq order, same envelope. Subsumes a dedicated `/changes` endpoint.
-  - **Bootstrap pull** (`?cursor=∅` or a scoped query): the current post-state of the requested scope, as assertions in the same envelope. The replica is seeded by the same primitive that keeps it current.
-- **Assets** — plain HTTP for blob/attachment file transfer. Fundamentally different concern; stays as-is.
+There are **two genuinely distinct server operations** that deliver post-state assertions, differing only in their input shape; both feed the same client apply path:
+
+- **Snapshot read** (`POST /read`, scope-parameterized) — "give me the current state of objects matching this scope." Returns a finite stream of current-state assertions plus a cursor at the end so the client knows where to resume the live stream. Used for **bootstrap** (initial population, scope = what the user wants loaded) and **authoritative resnapshot** (recovery from too-old gap, scope = the diverged `(account, type)`). Generalizes the existing `POST /read` endpoint to return the same envelope events use.
+- **Event stream** (`GET /events?afterSeq=N[&collapse=byId][&scope=...]`, cursor-parameterized) — "give me everything since seq N, then keep streaming live." Backlog from N (collapsed by default — idempotent assertions make intermediate states redundant) transitions seamlessly to the live tail in the same connection. Used for **catch-up** (cursor = last applied seq) and **live-following** (cursor = current head); these are not distinct modes, just different cursor values for the same operation.
+
+Plus:
+
+- **Commands** — single HTTP envelope, accepts mutation batches, responds with the resulting post-state assertions in the same envelope. All writes.
+- **Assets** — plain HTTP for blob/attachment file transfer. Different concern; stays as-is.
+
+The unification is at the **output layer** (one envelope, one client apply path); at the input layer snapshot and stream are honestly different — a snapshot is a query against current state (cheap, indexed), a stream is a walk of history (replay). Forcing them into one endpoint would conflate those, and a year-old client would replay millions of log entries instead of issuing one snapshot read. Two operations is the honest minimum.
 
 HTTP list/detail endpoints retire. The replica answers reads locally; client view-derivation handles filtering/sorting/windowing. The server stays stateless about per-client views.
 
@@ -277,7 +282,7 @@ The summary is an aggregate over thread messages (`isFlagged = any`, `preview`/`
 - Per-view derivation logic (filter + sort + window + insertion math from §"Per-view derivation") implemented on the replica.
 - Stateless `query`-style endpoint for server-only filters (full-text search, opaque smart-mailbox rules), returning IDs that the replica then ensures are loaded.
 - HTTP list/detail endpoints removed (`GET /messages`, `GET /conversations/{id}`, `GET /messages/{id}/detail`, etc.).
-- Bootstrap fold: `POST /read` retained or merged into `/events?cursor=∅` (decided at U planning time; either works under the assertion-envelope contract).
+- `POST /read` generalized to return the unified assertion envelope (the same shape `/events` delivers), plus a cursor at the end so the client transitions seamlessly into the event stream. Bootstrap and resnapshot both use this one operation, distinguished only by the scope they ask for.
 
 *Unblocks:* the API surface collapses to commands + sync stream + assets. New features inherit the replica abstraction with no per-endpoint plumbing. *Risk:* high (breadth) — frontend rewrite of every data-fetching site. Mitigated by the abstraction: components migrate one at a time; the replica can be fed by both event stream and old endpoints during the transition.
 
@@ -290,7 +295,7 @@ The summary is an aggregate over thread messages (`isFlagged = any`, `preview`/`
 
 - **Sparse replica details.** Does the live `/events` stream stay account-scoped (server filters by account subscription) or fully broadcast with client-side filtering? Lean toward account-scoped at the connection level (matches existing `/events` shape) with client-side row-level filtering. Decide during P1.
 - **Convergence-test scope at B.** Which mutation paths and which object types are covered in the property test for v1? At minimum every command in `commands.rs` against the message-object-scoped envelope. Decide during B planning.
-- **Bootstrap transport for U.** A new `POST /read` style endpoint that returns assertions in the same envelope, or `/events?cursor=∅&scope=…` reusing the catch-up pull. Decide at U planning time; either is consistent with the contract.
+- **Snapshot-read response shape.** The existing `POST /read` returns per-endpoint shapes; under U it returns the unified assertion envelope (same as events) plus a cursor for the client to resume the stream. Confirm the migration path and whether old shapes need a transition period during U.
 
 ## Security/privacy note
 
