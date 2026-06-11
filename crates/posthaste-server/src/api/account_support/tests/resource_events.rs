@@ -1,0 +1,61 @@
+use super::*;
+
+#[test]
+fn resource_change_serializes_wire_compatible_json() {
+    let account_id = AccountId::from("primary");
+    assert_eq!(
+        serde_json::to_value(ResourceChange::account(
+            ResourceOperation::Updated,
+            &account_id,
+        ))
+        .expect("resource change should serialize"),
+        json!({
+            "kind": "account",
+            "operation": "updated",
+            "id": "primary",
+            "accountId": "primary",
+        }),
+    );
+
+    assert_eq!(
+        serde_json::to_value(ResourceChange::app_settings_updated())
+            .expect("resource change should serialize"),
+        json!({
+            "kind": "appSettings",
+            "operation": "updated",
+        }),
+    );
+
+    assert_eq!(
+        serde_json::to_value(ResourceChange::smart_mailbox_reset())
+            .expect("resource change should serialize"),
+        json!({
+            "kind": "smartMailbox",
+            "operation": "reset",
+        }),
+    );
+}
+
+#[test]
+fn account_events_include_declarative_resource_payload() {
+    let test = test_app_state();
+    let state = Arc::new(test.state);
+    let account_id = AccountId::from("primary");
+    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+        .expect("account event should append");
+
+    let events = state
+        .service
+        .list_events(&EventFilter {
+            account_id: Some(account_id.clone()),
+            topic: Some(EVENT_TOPIC_ACCOUNT_UPDATED.to_string()),
+            mailbox_id: None,
+            after_seq: None,
+        })
+        .expect("events should list");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].payload["accountId"], account_id.as_str());
+    assert_eq!(events[0].payload["resources"][0]["kind"], "account");
+    assert_eq!(events[0].payload["resources"][0]["operation"], "updated");
+    assert_eq!(events[0].payload["resources"][0]["id"], account_id.as_str());
+}
