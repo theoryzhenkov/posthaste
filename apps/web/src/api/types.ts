@@ -294,6 +294,13 @@ export interface ReplyContext {
 }
 
 /** @spec docs/L1-api#compose */
+export interface SendMessageAttachmentInput {
+  filename: string
+  mimeType: string
+  contentBase64: string
+}
+
+/** @spec docs/L1-api#compose */
 export interface SendMessageInput {
   from: Recipient | null
   to: Recipient[]
@@ -303,6 +310,7 @@ export interface SendMessageInput {
   body: string
   inReplyTo: string | null
   references: string | null
+  attachments: SendMessageAttachmentInput[]
 }
 
 /** @spec docs/L1-api#error-format */

@@ -4,6 +4,7 @@ import {
   buildSendInput,
   formatRecipients,
   parseRecipients,
+  readAttachmentForSend,
 } from '../src/composeMessage'
 
 describe('compose message helpers', () => {
@@ -17,6 +18,26 @@ describe('compose message helpers', () => {
       { name: null, email: 'bob@example.test' },
       { name: 'Cy', email: 'cy@example.test' },
     ])
+  })
+
+  it('reads attachments as base64 send payloads', async () => {
+    const file = new File(['hello attachment'], 'notes.txt', {
+      type: 'text/plain',
+    })
+
+    const payload = await readAttachmentForSend({
+      id: 'a1',
+      file,
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      size: file.size,
+    })
+
+    expect(payload).toEqual({
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      contentBase64: 'aGVsbG8gYXR0YWNobWVudA==',
+    })
   })
 
   it('formats recipient display names only when present', () => {
@@ -37,6 +58,7 @@ describe('compose message helpers', () => {
         bcc: 'blind@example.test',
         subject: '  Hello  ',
         body: 'Markdown body',
+        attachments: [],
       }),
     ).toEqual({
       from: { name: null, email: 'anything@example.test' },
@@ -47,6 +69,7 @@ describe('compose message helpers', () => {
       body: 'Markdown body',
       inReplyTo: null,
       references: null,
+      attachments: [],
     })
   })
 })
