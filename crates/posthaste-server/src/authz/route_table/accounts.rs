@@ -1,0 +1,106 @@
+use super::*;
+
+pub(super) const ROUTES: &[Entry] = &[
+    // -- Account / settings / config: management surface, no resource axis the
+    //    caveat model can scope (you cannot scope "list all accounts" to one
+    //    account), so a scoped token is correctly rejected on these. --
+    Entry {
+        method: "GET",
+        template: "/settings",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
+    Entry {
+        method: "PATCH",
+        template: "/settings",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    Entry {
+        method: "POST",
+        template: "/automation-rules:preview",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
+    Entry {
+        method: "GET",
+        template: "/accounts",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    // Token mint: derives a narrower capability token. `Manage` + no resource
+    // axis means only a full-scope (or `action = manage`, unscoped) caller may
+    // mint; the handler attenuates the CALLER's token, so a minted token can
+    // only narrow — never widen — the caller's authority.
+    Entry {
+        method: "POST",
+        template: "/auth/tokens",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    // Single-account routes: account axis from the `account_id` path param.
+    Entry {
+        method: "GET",
+        template: "/accounts/{account_id}",
+        authz: gate(Action::Read, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "PATCH",
+        template: "/accounts/{account_id}",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "DELETE",
+        template: "/accounts/{account_id}",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts/{account_id}/verify",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts/{account_id}/oauth/start",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/oauth/start",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    Entry {
+        method: "GET",
+        template: "/oauth/callback",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts/{account_id}/enable",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts/{account_id}/disable",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/accounts/{account_id}/logo",
+        authz: gate(Action::Manage, ResourceShape::account("account_id")),
+    },
+    // Logo asset is keyed by an opaque image id, not an account/message — a
+    // read with no scopable resource axis.
+    Entry {
+        method: "GET",
+        template: "/account-assets/logos/{image_id}",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
+    // -- Typed read calls can be cross-account reads; an account-scoped token
+    //    cannot be satisfied here in the initial global-gate implementation. --
+    Entry {
+        method: "POST",
+        template: "/read",
+        authz: gate(Action::Read, ResourceShape::empty()),
+    },
+];
