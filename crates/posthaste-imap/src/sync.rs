@@ -1,14 +1,27 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use posthaste_domain::{
-    AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapMessageLocationKey, ImapUid,
-    ImapUidValidity, MailboxId, MailboxRecord, MessageId, MessageRecord, SyncBatch, SyncCursor,
-    SyncObject,
+    AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId,
+    MailboxRecord, SyncBatch, SyncCursor, SyncObject,
 };
 
 use crate::{
-    message::ImapMailboxMembershipSource, provider::ImapAdapterProviderProfile,
     DiscoveredImapAccount, ImapChangedSinceSnapshot, ImapMailboxHeaderSnapshot, ImapMappedHeader,
+};
+
+mod cursors;
+mod deletions;
+mod projection;
+
+use cursors::{mailbox_cursor_state, message_cursor_state};
+use deletions::{
+    deleted_locations_for_delta, deleted_locations_matching_vanished_uids,
+    deleted_locations_missing_from_remote, deleted_message_ids_for_deleted_locations,
+    preserve_delta_mailboxes_from_locations,
+};
+use projection::{
+    messages_and_locations_for_batch, messages_and_locations_from_headers, project_imap_headers,
+    ProjectedMessages,
 };
 
 /// Convert an IMAP mailbox discovery result into an authoritative mailbox
@@ -235,220 +248,6 @@ pub fn imap_mailbox_state_from_changed_since_snapshot(
     }
 
     state
-}
-
-fn messages_and_locations_for_batch(
-    discovery: &DiscoveredImapAccount,
-    headers: Vec<ImapMappedHeader>,
-) -> ProjectedMessages {
-    messages_and_locations_from_headers(project_imap_headers(discovery, headers))
-}
-
-struct ProjectedMessages {
-    messages: Vec<MessageRecord>,
-    locations: Vec<ImapMessageLocation>,
-    provider_absent_mailbox_ids_by_message: BTreeMap<MessageId, BTreeSet<MailboxId>>,
-}
-
-fn messages_and_locations_from_headers(headers: Vec<ImapMappedHeader>) -> ProjectedMessages {
-    let mut messages_by_id = BTreeMap::<MessageId, MessageRecord>::new();
-    let mut locations = Vec::with_capacity(headers.len());
-    let mut provider_absent_mailbox_ids_by_message =
-        BTreeMap::<MessageId, BTreeSet<MailboxId>>::new();
-
-    for header in headers {
-        if header.mailbox_membership_source == ImapMailboxMembershipSource::ProviderLabels {
-            provider_absent_mailbox_ids_by_message
-                .entry(header.message.id.clone())
-                .or_default()
-                .extend(header.provider_absent_mailbox_ids.iter().cloned());
-        }
-        messages_by_id
-            .entry(header.message.id.clone())
-            .or_insert(header.message);
-        locations.push(header.location);
-    }
-
-    ProjectedMessages {
-        messages: messages_by_id.into_values().collect(),
-        locations,
-        provider_absent_mailbox_ids_by_message,
-    }
-}
-
-fn project_imap_headers(
-    discovery: &DiscoveredImapAccount,
-    headers: Vec<ImapMappedHeader>,
-) -> Vec<ImapMappedHeader> {
-    ImapAdapterProviderProfile::from_discovery(discovery).project_headers(headers)
-}
-
-fn deleted_locations_missing_from_remote(
-    local_locations: &[ImapMessageLocation],
-    remote_locations: &BTreeSet<ImapMessageLocationKey>,
-) -> Vec<ImapMessageLocationKey> {
-    local_locations
-        .iter()
-        .map(ImapMessageLocation::key)
-        .filter(|key| !remote_locations.contains(key))
-        .collect()
-}
-
-fn deleted_locations_matching_vanished_uids(
-    local_locations: &[ImapMessageLocation],
-    vanished_locations: &BTreeSet<(MailboxId, ImapUidValidity, ImapUid)>,
-) -> Vec<ImapMessageLocationKey> {
-    local_locations
-        .iter()
-        .map(ImapMessageLocation::key)
-        .filter(|key| {
-            vanished_locations.contains(&(key.mailbox_id.clone(), key.uid_validity, key.uid))
-        })
-        .collect()
-}
-
-fn deleted_locations_for_delta(
-    local_locations: &[ImapMessageLocation],
-    base_deleted_locations: Vec<ImapMessageLocationKey>,
-    provider_absent_mailbox_ids_by_message: &BTreeMap<MessageId, BTreeSet<MailboxId>>,
-) -> Vec<ImapMessageLocationKey> {
-    let mut deleted_locations = base_deleted_locations;
-    deleted_locations.extend(
-        local_locations
-            .iter()
-            .filter(|location| {
-                provider_absent_mailbox_ids_by_message
-                    .get(&location.message_id)
-                    .is_some_and(|mailbox_ids| mailbox_ids.contains(&location.mailbox_id))
-            })
-            .map(ImapMessageLocation::key),
-    );
-    deduplicate_location_keys(deleted_locations)
-}
-
-fn deleted_message_ids_for_deleted_locations(
-    local_locations: &[ImapMessageLocation],
-    deleted_locations: &[ImapMessageLocationKey],
-    new_locations: &[ImapMessageLocation],
-) -> Vec<MessageId> {
-    let deleted_keys = deleted_locations.iter().cloned().collect::<BTreeSet<_>>();
-    let mut remaining_location_counts = BTreeMap::<MessageId, usize>::new();
-
-    for location in local_locations {
-        if deleted_keys.contains(&location.key()) {
-            continue;
-        }
-        *remaining_location_counts
-            .entry(location.message_id.clone())
-            .or_default() += 1;
-    }
-    for location in new_locations {
-        *remaining_location_counts
-            .entry(location.message_id.clone())
-            .or_default() += 1;
-    }
-
-    deduplicate_message_ids(
-        deleted_locations
-            .iter()
-            .filter(|key| {
-                remaining_location_counts
-                    .get(&key.message_id)
-                    .copied()
-                    .unwrap_or(0)
-                    == 0
-            })
-            .map(|key| key.message_id.clone())
-            .collect(),
-    )
-}
-
-fn preserve_delta_mailboxes_from_locations(
-    messages: &mut [MessageRecord],
-    local_locations: &[ImapMessageLocation],
-    deleted_locations: &[ImapMessageLocationKey],
-    new_locations: &[ImapMessageLocation],
-    provider_absent_mailbox_ids_by_message: &BTreeMap<MessageId, BTreeSet<MailboxId>>,
-) {
-    let deleted_keys = deleted_locations.iter().cloned().collect::<BTreeSet<_>>();
-    let mut mailbox_ids_by_message = BTreeMap::<MessageId, BTreeSet<MailboxId>>::new();
-
-    for location in local_locations {
-        if deleted_keys.contains(&location.key()) {
-            continue;
-        }
-        if provider_absent_mailbox_ids_by_message
-            .get(&location.message_id)
-            .is_some_and(|mailbox_ids| mailbox_ids.contains(&location.mailbox_id))
-        {
-            continue;
-        }
-        mailbox_ids_by_message
-            .entry(location.message_id.clone())
-            .or_default()
-            .insert(location.mailbox_id.clone());
-    }
-    for location in new_locations {
-        mailbox_ids_by_message
-            .entry(location.message_id.clone())
-            .or_default()
-            .insert(location.mailbox_id.clone());
-    }
-
-    for message in messages {
-        if let Some(mailbox_ids) = mailbox_ids_by_message.remove(&message.id) {
-            message.mailbox_ids = mailbox_ids.into_iter().collect();
-        }
-    }
-}
-
-fn deduplicate_location_keys(keys: Vec<ImapMessageLocationKey>) -> Vec<ImapMessageLocationKey> {
-    let mut seen = BTreeSet::new();
-    let mut deduplicated = Vec::with_capacity(keys.len());
-    for key in keys {
-        if seen.insert(key.clone()) {
-            deduplicated.push(key);
-        }
-    }
-    deduplicated
-}
-
-fn deduplicate_message_ids(mut message_ids: Vec<MessageId>) -> Vec<MessageId> {
-    message_ids.sort();
-    message_ids.dedup();
-    message_ids
-}
-
-fn mailbox_cursor_state(mailboxes: &[MailboxRecord]) -> String {
-    let mut fingerprint = String::new();
-    for mailbox in mailboxes {
-        fingerprint.push_str(mailbox.id.as_str());
-        fingerprint.push('\0');
-        fingerprint.push_str(&mailbox.name);
-        fingerprint.push('\0');
-        fingerprint.push_str(mailbox.role.as_deref().unwrap_or(""));
-        fingerprint.push('\0');
-    }
-    format!("imap-mailboxes:{}", hex::encode(fingerprint.as_bytes()))
-}
-
-fn message_cursor_state(messages: &[MessageRecord], locations: &[ImapMessageLocation]) -> String {
-    let mut fingerprint = String::new();
-    for message in messages {
-        fingerprint.push_str(message.id.as_str());
-        fingerprint.push('\0');
-    }
-    for location in locations {
-        fingerprint.push_str(location.message_id.as_str());
-        fingerprint.push('\0');
-        fingerprint.push_str(location.mailbox_id.as_str());
-        fingerprint.push('\0');
-        fingerprint.push_str(&location.uid_validity.0.to_string());
-        fingerprint.push('\0');
-        fingerprint.push_str(&location.uid.0.to_string());
-        fingerprint.push('\0');
-    }
-    format!("imap-messages:{}", hex::encode(fingerprint.as_bytes()))
 }
 
 #[cfg(test)]
