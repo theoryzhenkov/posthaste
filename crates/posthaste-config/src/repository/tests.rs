@@ -1,5 +1,7 @@
 use super::*;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
+
+use posthaste_domain::{AccountId, AccountSettings, AppSettings, ConfigRepository};
 
 fn temp_root() -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
