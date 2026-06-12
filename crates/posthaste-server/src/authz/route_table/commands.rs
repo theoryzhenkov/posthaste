@@ -1,0 +1,74 @@
+use super::*;
+
+pub(super) const ROUTES: &[Entry] = &[
+    // -- Commands: write verbs scoped to the source (and message where present). --
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/send",
+        authz: gate(Action::Send, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
+        authz: gate(
+            Action::Tag,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox",
+        authz: gate(
+            Action::Move,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/remove-from-mailbox",
+        authz: gate(
+            Action::Move,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/replace-mailboxes",
+        authz: gate(
+            Action::Move,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/messages/{message_id}/destroy",
+        authz: gate(
+            Action::Delete,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/sync",
+        authz: gate(Action::Manage, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/config:reload",
+        authz: gate(Action::Manage, ResourceShape::empty()),
+    },
+    // SSE event stream: a cross-account read feed. It accepts an `accountId`
+    // filter, so it is a Filter aggregate keyed on that query param.
+    Entry {
+        method: "GET",
+        template: "/events",
+        authz: filter(
+            Action::Read,
+            ResourceShape {
+                account: Some("accountId"),
+                mailbox: Some("mailboxId"),
+                message: None,
+            },
+        ),
+    },
+];
