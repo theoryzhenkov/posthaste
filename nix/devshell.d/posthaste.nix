@@ -51,6 +51,11 @@ in
   ]
   ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
     [
+      # Linker used by .cargo/config.toml on Linux (-fuse-ld=mold). mold is far
+      # lighter on memory and faster than the default bfd linker, which matters
+      # for Posthaste's large test binaries. Declared here so the committed cargo
+      # config never depends on a linker that merely happens to be on PATH.
+      pkgs.mold
       pkgs.webkitgtk_4_1
       pkgs.libsoup_3
       pkgs.gtk3
