@@ -1,0 +1,121 @@
+use super::*;
+
+impl DatabaseStore {
+    /// Lists all messages in a thread, ordered by `received_at ASC`.
+    ///
+    /// @spec docs/L1-search#thread-view
+    fn list_messages_for_thread(
+        &self,
+        account_id: &AccountId,
+        thread_id: &ThreadId,
+    ) -> Result<Vec<MessageSummary>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+                        m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
+                        m.is_read, m.is_flagged
+                 FROM message m
+                 JOIN source_projection a ON a.source_id = m.account_id
+                 WHERE m.account_id = ?1 AND m.thread_id = ?2
+                 ORDER BY received_at ASC",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = load_message_summary_rows(
+            &mut statement,
+            params![account_id.as_str(), thread_id.as_str()],
+        )?;
+        hydrate_message_summaries(&connection, rows)
+    }
+}
+
+impl MessageDetailStore for DatabaseStore {
+    /// Returns full message detail including body (if fetched) and raw message
+    /// reference.
+    ///
+    /// @spec docs/L1-sync#email-bodies-are-fetched-lazily
+    fn get_message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+                        m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
+                        m.is_read, m.is_flagged
+                 FROM message m
+                 JOIN source_projection a
+                   ON a.source_id = m.account_id
+                 WHERE m.account_id = ?1 AND m.id = ?2",
+            )
+            .map_err(sql_to_store_error)?;
+        let rows = load_message_summary_rows(
+            &mut statement,
+            params![account_id.as_str(), message_id.as_str()],
+        )?;
+        let mut summaries = hydrate_message_summaries(&connection, rows)?;
+        let Some(summary) = summaries.pop() else {
+            return Ok(None);
+        };
+
+        let body = connection
+            .query_row(
+                "SELECT body_html, body_text, raw_path, raw_sha256, raw_size, raw_mime_type, fetched_at
+                 FROM message_body
+                 WHERE account_id = ?1 AND message_id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+                |row| {
+                    let raw_path: Option<String> = row.get(2)?;
+                    let raw_sha256: Option<String> = row.get(3)?;
+                    let raw_size: Option<i64> = row.get(4)?;
+                    let raw_mime_type: Option<String> = row.get(5)?;
+                    let fetched_at: Option<String> = row.get(6)?;
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        raw_path.and_then(|path| {
+                            Some(RawMessageRef {
+                                path,
+                                sha256: raw_sha256?,
+                                size: raw_size?,
+                                mime_type: raw_mime_type?,
+                                fetched_at: fetched_at?,
+                            })
+                        }),
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sql_to_store_error)?;
+        let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
+
+        Ok(Some(MessageDetail {
+            summary,
+            body_html: body.as_ref().and_then(|row| row.0.clone()),
+            body_text: body.as_ref().and_then(|row| row.1.clone()),
+            raw_message: body.and_then(|row| row.2),
+            attachments,
+        }))
+    }
+
+    /// Returns a thread view with all messages ordered chronologically, or
+    /// `None` if empty.
+    ///
+    /// @spec docs/L1-search#thread-view
+    fn get_thread(
+        &self,
+        account_id: &AccountId,
+        thread_id: &ThreadId,
+    ) -> Result<Option<ThreadView>, StoreError> {
+        let messages = self.list_messages_for_thread(account_id, thread_id)?;
+        if messages.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(ThreadView {
+            id: thread_id.clone(),
+            messages,
+        }))
+    }
+}
