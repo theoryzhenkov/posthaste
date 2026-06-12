@@ -103,5 +103,5 @@ fn lookup_unmapped_route_is_none() {
 #[test]
 fn authz_table_has_no_duplicate_keys() {
     // Building the map debug-asserts uniqueness; force it here.
-    assert_eq!(authz_map().len(), AUTHZ_TABLE.len());
+    assert_eq!(authz_map().len(), authz_entry_count());
 }
