@@ -1,5 +1,10 @@
-use imap_client::imap_types::flag::Flag;
-use posthaste_domain::{ImapUid, ImapUidValidity, MailboxId, MessageId};
+use std::num::NonZeroU32;
+
+use imap_client::imap_types::{command::CommandBody, fetch::MessageDataItem, flag::Flag};
+use imap_client::tasks::Task;
+use posthaste_domain::{
+    ImapMessageLocation, ImapUid, ImapUidValidity, MailboxId, MessageId, SystemKeyword,
+};
 
 use super::*;
 
