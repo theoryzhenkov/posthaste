@@ -1,10 +1,17 @@
+mod outcome;
+mod requests;
+
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, GatewayError, MailboxId, MailboxRole, MessageId,
-    MutationOutcome, SetKeywordsCommand, SyncCursor, SyncObject,
+    GatewayError, MailboxId, MailboxRole, MessageId, MutationOutcome, SetKeywordsCommand,
 };
-use serde_json::{json, Map, Value};
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
+use crate::live_mutation::outcome::{
+    mailbox_mutation_outcome, message_mutation_outcome, set_keywords_mutation_outcome,
+};
+use crate::live_mutation::requests::{
+    send_json_request, set_keywords_request_body, set_mailbox_role_request_body,
+};
 
 /// Add or remove keywords (flags) on a message via `Email/set`.
 ///
@@ -77,149 +84,6 @@ pub(crate) async fn set_mailbox_role(
     mailbox_mutation_outcome(response, mailbox_id)
 }
 
-/// Build an `Email/set` request for keyword patches.
-///
-/// JMAP keyword values are presence-only and must be `true`; removing a keyword
-/// uses JSON `null` patch syntax rather than `false`.
-fn set_keywords_request_body(
-    account_id: &str,
-    expected_state: Option<&str>,
-    message_id: &MessageId,
-    command: &SetKeywordsCommand,
-) -> Value {
-    let mut patch = Map::new();
-    for keyword in &command.add {
-        patch.insert(format!("keywords/{keyword}"), Value::Bool(true));
-    }
-    for keyword in &command.remove {
-        patch.insert(format!("keywords/{keyword}"), Value::Null);
-    }
-
-    let mut arguments = Map::new();
-    arguments.insert(
-        "accountId".to_string(),
-        Value::String(account_id.to_string()),
-    );
-    if let Some(expected_state) = expected_state {
-        arguments.insert(
-            "ifInState".to_string(),
-            Value::String(expected_state.to_string()),
-        );
-    }
-    arguments.insert(
-        "update".to_string(),
-        json!({ message_id.as_str(): Value::Object(patch) }),
-    );
-
-    json!({
-        "using": [
-            "urn:ietf:params:jmap:core",
-            "urn:ietf:params:jmap:mail"
-        ],
-        "methodCalls": [
-            ["Email/set", Value::Object(arguments), "s0"]
-        ]
-    })
-}
-
-fn set_mailbox_role_request_body(
-    account_id: &str,
-    expected_state: Option<&str>,
-    mailbox_id: &MailboxId,
-    role: Option<&str>,
-) -> Value {
-    let mut patch = Map::new();
-    patch.insert(
-        "role".to_string(),
-        role.map_or(Value::Null, |role| Value::String(role.to_string())),
-    );
-
-    let mut arguments = Map::new();
-    arguments.insert(
-        "accountId".to_string(),
-        Value::String(account_id.to_string()),
-    );
-    if let Some(expected_state) = expected_state {
-        arguments.insert(
-            "ifInState".to_string(),
-            Value::String(expected_state.to_string()),
-        );
-    }
-    arguments.insert(
-        "update".to_string(),
-        json!({ mailbox_id.as_str(): Value::Object(patch) }),
-    );
-
-    json!({
-        "using": [
-            "urn:ietf:params:jmap:core",
-            "urn:ietf:params:jmap:mail"
-        ],
-        "methodCalls": [
-            ["Mailbox/set", Value::Object(arguments), "s0"]
-        ]
-    })
-}
-
-async fn send_json_request(
-    gateway: &LiveJmapGateway,
-    request: Value,
-) -> Result<
-    jmap_client::core::response::Response<jmap_client::core::response::TaggedMethodResponse>,
-    GatewayError,
-> {
-    let body = serde_json::to_string(&request)
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
-    let response = reqwest::Client::builder()
-        .timeout(gateway.client().timeout())
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| GatewayError::Network(error.to_string()))?
-        .post(gateway.client().session().api_url())
-        .headers(gateway.client().headers().clone())
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
-
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(GatewayError::Auth);
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(GatewayError::Network(format!(
-            "JMAP request failed with HTTP {status}: {body}"
-        )));
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| GatewayError::Network(error.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|error| GatewayError::Network(error.to_string()))
-}
-
-fn set_keywords_mutation_outcome(
-    mut response: jmap_client::core::response::EmailSetResponse,
-    message_id: &MessageId,
-) -> Result<MutationOutcome, GatewayError> {
-    response
-        .updated(message_id.as_str())
-        .map_err(map_gateway_error)?;
-    message_mutation_outcome(response.new_state().to_string())
-}
-
-fn mailbox_mutation_outcome(
-    mut response: jmap_client::core::response::MailboxSetResponse,
-    mailbox_id: &MailboxId,
-) -> Result<MutationOutcome, GatewayError> {
-    response
-        .updated(mailbox_id.as_str())
-        .map_err(map_gateway_error)?;
-    sync_object_mutation_outcome(SyncObject::Mailbox, response.new_state().to_string())
-}
-
 /// Replace a message's mailbox membership via `Email/set`.
 ///
 /// Used for move and archive operations. Supports optimistic concurrency.
@@ -266,30 +130,6 @@ pub(crate) async fn destroy_message(
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
     message_mutation_outcome(response.new_state().to_string())
-}
-
-/// Build a `MutationOutcome` with a message-type sync cursor from the server's new state string.
-///
-/// @spec docs/L1-jmap#core-types
-/// @spec docs/L1-sync#state-management
-fn message_mutation_outcome(state: String) -> Result<MutationOutcome, GatewayError> {
-    sync_object_mutation_outcome(
-        SyncObject::Message,
-        crate::sync::encode_email_cursor_state(&state),
-    )
-}
-
-fn sync_object_mutation_outcome(
-    object_type: SyncObject,
-    state: String,
-) -> Result<MutationOutcome, GatewayError> {
-    Ok(MutationOutcome {
-        cursor: Some(SyncCursor {
-            object_type,
-            state,
-            updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
-        }),
-    })
 }
 
 fn validate_mailbox_role(role: Option<&str>) -> Result<(), GatewayError> {
