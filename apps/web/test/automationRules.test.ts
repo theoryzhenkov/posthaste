@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import type {
-  AutomationRule,
-  SmartMailbox,
-  SmartMailboxRule,
-} from '../src/api/types'
+import type { AutomationRule, SmartMailbox } from '../src/api/types'
 import {
   actionConditionFromSourceMailboxRule,
   actionConditionFromSmartMailboxRule,
@@ -18,50 +14,11 @@ import {
   smartMailboxDraftToRule,
   smartMailboxRulePrefix,
 } from '../src/automationRules'
-
-const actionRule: SmartMailboxRule = {
-  root: {
-    operator: 'all',
-    negated: false,
-    nodes: [
-      {
-        type: 'condition',
-        field: 'fromName',
-        operator: 'contains',
-        negated: false,
-        value: 'Posthaste',
-      },
-    ],
-  },
-}
-
-const smartMailboxRule: SmartMailboxRule = {
-  root: {
-    operator: 'all',
-    negated: false,
-    nodes: [
-      {
-        type: 'condition',
-        field: 'mailboxRole',
-        operator: 'equals',
-        negated: false,
-        value: 'archive',
-      },
-    ],
-  },
-}
-
-const smartMailbox: SmartMailbox = {
-  id: 'smart-archive',
-  name: 'Archive',
-  position: 0,
-  kind: 'user',
-  defaultKey: null,
-  parentId: null,
-  rule: smartMailboxRule,
-  createdAt: '2026-04-24T00:00:00Z',
-  updatedAt: '2026-04-24T00:00:00Z',
-}
+import {
+  actionRule,
+  smartMailbox,
+  smartMailboxRule,
+} from './automationRules.fixtures'
 
 describe('automation rule projection', () => {
   it('serializes an account draft as a global source-scoped automation rule', () => {
