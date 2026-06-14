@@ -1,3 +1,5 @@
+use posthaste_domain::{ProviderAuthKind, ProviderHint, SendMessageRequest, TransportSecurity};
+
 use super::*;
 
 #[tokio::test]
