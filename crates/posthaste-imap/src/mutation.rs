@@ -1,25 +1,23 @@
-use std::num::NonZeroU32;
+mod keywords;
+mod validation;
 
-use imap_client::client::tokio::Client as ImapClient;
-use imap_client::imap_types::{
-    command::CommandBody,
-    fetch::MessageDataItem,
-    fetch::{MacroOrMessageDataItemNames, MessageDataItemName},
-    flag::{Flag, StoreType},
-    response::{Data, StatusBody, StatusKind},
-    sequence::{SeqOrUid, SequenceSet},
-    IntoStatic,
-};
-use imap_client::tasks::tasks::TaskError;
-use imap_client::tasks::Task;
-use posthaste_domain::{
-    ImapMessageLocation, MailboxId, MutationOutcome, SetKeywordsCommand, SystemKeyword,
-};
+use imap_client::imap_types::flag::{Flag, StoreType};
+use posthaste_domain::{ImapMessageLocation, MutationOutcome, SetKeywordsCommand};
 
 use crate::discovery::connect_authenticated_client;
-use crate::{selected_mailbox_from_examine, ImapAdapterError, ImapConnectionConfig};
+use crate::mutation::validation::{
+    select_validated_mailbox, uid_expunge, uid_sequence_set, verify_uid_fetch_response,
+};
+use crate::{ImapAdapterError, ImapConnectionConfig};
 
-const IMAP_FLAG_FORWARDED: &str = "\\Forwarded";
+pub use keywords::{
+    imap_flags_for_keywords, imap_mailbox_replacement_delta, ImapMailboxReplacementDelta,
+};
+
+#[cfg(test)]
+pub(crate) use keywords::IMAP_FLAG_FORWARDED;
+#[cfg(test)]
+pub(crate) use validation::{verify_message_data_contains_uid, UidExpungeTask};
 
 /// Apply a JMAP keyword delta using UID STORE in the selected IMAP mailbox.
 ///
@@ -145,178 +143,6 @@ pub async fn expunge_imap_message_by_location(
     let _expunged = uid_expunge(&mut client, location).await?;
 
     Ok(MutationOutcome { cursor: None })
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ImapMailboxReplacementDelta {
-    pub add: Vec<MailboxId>,
-    pub remove: Vec<MailboxId>,
-}
-
-pub fn imap_mailbox_replacement_delta(
-    current_mailbox_ids: &[MailboxId],
-    target_mailbox_ids: &[MailboxId],
-) -> ImapMailboxReplacementDelta {
-    let current = current_mailbox_ids
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    let target = target_mailbox_ids
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-
-    ImapMailboxReplacementDelta {
-        add: target.difference(&current).cloned().collect(),
-        remove: current.difference(&target).cloned().collect(),
-    }
-}
-
-pub fn imap_flags_for_keywords(
-    keywords: &[String],
-) -> Result<Vec<Flag<'static>>, ImapAdapterError> {
-    keywords
-        .iter()
-        .map(|keyword| imap_flag_for_keyword(keyword))
-        .collect()
-}
-
-fn imap_flag_for_keyword(keyword: &str) -> Result<Flag<'static>, ImapAdapterError> {
-    let normalized_keyword = keyword.to_ascii_lowercase();
-    let flag = match SystemKeyword::parse(&normalized_keyword) {
-        Some(system_keyword) => imap_flag_for_system_keyword(system_keyword),
-        None => Flag::try_from(keyword)
-            .map_err(|error| ImapAdapterError::InvalidKeywordFlag {
-                keyword: keyword.to_string(),
-                reason: error.to_string(),
-            })?
-            .into_static(),
-    };
-
-    Ok(flag)
-}
-
-fn imap_flag_for_system_keyword(keyword: SystemKeyword) -> Flag<'static> {
-    match keyword {
-        SystemKeyword::Seen => Flag::Seen,
-        SystemKeyword::Flagged => Flag::Flagged,
-        SystemKeyword::Answered => Flag::Answered,
-        SystemKeyword::Draft => Flag::Draft,
-        SystemKeyword::Forwarded => {
-            Flag::try_from(IMAP_FLAG_FORWARDED).expect("static IMAP flag is valid")
-        }
-    }
-}
-
-fn uid_sequence_set(location: &ImapMessageLocation) -> Result<SequenceSet, ImapAdapterError> {
-    let uid = NonZeroU32::new(location.uid.0)
-        .ok_or_else(|| ImapAdapterError::InvalidUidSequence("UID 0".to_string()))?;
-    Ok(SequenceSet::from(SeqOrUid::from(uid)))
-}
-
-async fn select_validated_mailbox(
-    client: &mut ImapClient,
-    mailbox_name: &str,
-    location: &ImapMessageLocation,
-) -> Result<(), ImapAdapterError> {
-    let selected = selected_mailbox_from_examine(mailbox_name, client.select(mailbox_name).await?)?;
-    if selected.uid_validity != location.uid_validity {
-        return Err(ImapAdapterError::UidValidityMismatch {
-            mailbox_name: mailbox_name.to_string(),
-            expected: location.uid_validity.0,
-            actual: selected.uid_validity.0,
-        });
-    }
-    Ok(())
-}
-
-async fn verify_uid_fetch_response(
-    client: &mut ImapClient,
-    location: &ImapMessageLocation,
-) -> Result<(), ImapAdapterError> {
-    let items = client
-        .uid_fetch_first(uid(location)?, uid_fetch_item_names())
-        .await
-        .map_err(ImapAdapterError::from)?;
-    verify_message_data_contains_uid(location, items, "matching UID FETCH response")
-}
-
-fn uid(location: &ImapMessageLocation) -> Result<NonZeroU32, ImapAdapterError> {
-    NonZeroU32::new(location.uid.0)
-        .ok_or_else(|| ImapAdapterError::InvalidUidSequence("UID 0".to_string()))
-}
-
-fn uid_fetch_item_names() -> MacroOrMessageDataItemNames<'static> {
-    MacroOrMessageDataItemNames::MessageDataItemNames(vec![MessageDataItemName::Uid])
-}
-
-fn verify_message_data_contains_uid(
-    location: &ImapMessageLocation,
-    items: impl IntoIterator<Item = MessageDataItem<'static>>,
-    missing_label: &'static str,
-) -> Result<(), ImapAdapterError> {
-    let found_matching_uid = items.into_iter().any(|item| match item {
-        MessageDataItem::Uid(uid) => uid.get() == location.uid.0,
-        _ => false,
-    });
-    if found_matching_uid {
-        Ok(())
-    } else {
-        Err(ImapAdapterError::MissingFetchData(missing_label))
-    }
-}
-
-async fn uid_expunge(
-    client: &mut ImapClient,
-    location: &ImapMessageLocation,
-) -> Result<Vec<NonZeroU32>, ImapAdapterError> {
-    client
-        .resolve(UidExpungeTask::new(uid_sequence_set(location)?))
-        .await
-        .map_err(ImapAdapterError::from)?
-        .map_err(|error| ImapAdapterError::Client(error.to_string()))
-}
-
-#[derive(Clone, Debug)]
-struct UidExpungeTask {
-    sequence_set: SequenceSet,
-    output: Vec<NonZeroU32>,
-}
-
-impl UidExpungeTask {
-    fn new(sequence_set: SequenceSet) -> Self {
-        Self {
-            sequence_set,
-            output: Vec::new(),
-        }
-    }
-}
-
-impl Task for UidExpungeTask {
-    type Output = Result<Vec<NonZeroU32>, TaskError>;
-
-    fn command_body(&self) -> CommandBody<'static> {
-        CommandBody::ExpungeUid {
-            sequence_set: self.sequence_set.clone(),
-        }
-    }
-
-    fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
-        if let Data::Expunge(seq) = data {
-            self.output.push(seq);
-            None
-        } else {
-            Some(data)
-        }
-    }
-
-    fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
-        match status_body.kind {
-            StatusKind::Ok => Ok(self.output),
-            StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
-            StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
-        }
-    }
 }
 
 #[cfg(test)]

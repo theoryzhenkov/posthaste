@@ -1,3 +1,7 @@
+use posthaste_domain::{ProviderAuthKind, ProviderHint, SendMessageRequest};
+
+use crate::ImapAdapterError;
+
 use super::*;
 
 #[test]
