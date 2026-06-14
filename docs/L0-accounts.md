@@ -1,6 +1,6 @@
 ---
 scope: L0
-summary: "Multi-account scoping invariant and deferral rationale"
+summary: "Posthaste's account architecture"
 modified: 2026-04-24
 reviewed: 2026-04-24
 depends:
@@ -11,11 +11,7 @@ dependents:
   - path: docs/L1-accounts
 ---
 
-# Accounts domain -- L0
 
-## Deferred but designed for
-
-Multi-account UI is out of scope for MVP. The implementation targets a single Fastmail account. However, every data structure in the system is account-scoped from day one because retrofitting account isolation after the fact is expensive and error-prone. Tables need composite keys, queries need scoping predicates, state tokens need namespacing. Doing this later means migrating production data and auditing every query. Doing it now costs almost nothing.
 
 ## The invariant
 
@@ -31,6 +27,4 @@ JMAP auth secrets are stored in the OS keyring as generic secrets, keyed by loca
 
 Account setup starts from a configured Session URL or provider origin. Generic JMAP providers may support `GET /.well-known/jmap` on their domain. Fastmail documents `https://api.fastmail.com/jmap/session` as the Session resource. The Session response reveals the JMAP API URL, upload/download URLs, capabilities, and server account IDs. If discovery fails, the user can manually provide the Session URL.
 
-## What "deferred" means concretely
 
-The account settings UI can add, edit, verify, enable/disable, and delete configured accounts, but the primary mail shell still treats the configured sources as one workspace rather than a full account-picker product. This L0 exists so that other domain specs reference the account-scoping invariant and do not accidentally introduce single-account assumptions into data models, interfaces, or queries.
