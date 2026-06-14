@@ -6,11 +6,10 @@
  *
  * @spec docs/L1-search#smart-mailbox-data-model
  */
-import type { SmartMailboxCondition, SmartMailboxGroup } from '../../api/types'
+import type { SmartMailboxGroup } from '../../api/types'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
-import { Input } from '../ui/input'
 import {
   Select,
   SelectContent,
@@ -21,13 +20,10 @@ import {
 import {
   defaultCondition,
   defaultGroup,
-  FIELD_OPTIONS,
   GROUP_OPERATOR_OPTIONS,
-  operatorOptionsForField,
-  parseField,
   parseGroupOperator,
-  parseOperator,
 } from './helpers'
+import { ConditionEditor } from './rule-group/ConditionEditor'
 
 /**
  * Recursive editor for a `SmartMailboxGroup` node.
@@ -188,166 +184,6 @@ export function RuleGroupEditor({
             )}
           </div>
         ))}
-      </div>
-    </div>
-  )
-}
-
-/**
- * Single condition row editor: field, operator, value, and negate toggle.
- * @spec docs/L1-search#smart-mailbox-data-model
- */
-function ConditionEditor({
-  condition,
-  onChange,
-  onRemove,
-}: {
-  condition: SmartMailboxCondition
-  onChange: (condition: SmartMailboxCondition) => void
-  onRemove: () => void
-}) {
-  const operators = operatorOptionsForField(condition.field)
-  const usesList = condition.operator === 'in'
-  const isBooleanField =
-    condition.field === 'isRead' ||
-    condition.field === 'isFlagged' ||
-    condition.field === 'hasAttachment'
-
-  return (
-    <div className="grid gap-2 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center">
-      <span className="text-[12px] font-medium text-muted-foreground">
-        Where
-      </span>
-
-      <div className="grid gap-2 lg:grid-cols-[minmax(0,1.05fr)_auto_minmax(0,0.85fr)_minmax(0,1.1fr)] lg:items-center">
-        <div className="grid gap-1 text-[13px]">
-          <Select
-            value={condition.field}
-            onValueChange={(value) => {
-              const field = parseField(value, condition.field)
-              const nextOperator = operatorOptionsForField(field)[0]
-              onChange({
-                ...defaultCondition(field),
-                operator: nextOperator,
-              })
-            }}
-          >
-            <SelectTrigger
-              aria-label="Field"
-              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {FIELD_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <label className="flex h-8 items-center justify-center gap-1.5 px-1 text-[12px] text-muted-foreground">
-          <Checkbox
-            checked={condition.negated}
-            onCheckedChange={(checked) =>
-              onChange({ ...condition, negated: checked === true })
-            }
-          />
-          not
-        </label>
-
-        <div className="grid gap-1 text-[13px]">
-          <Select
-            value={condition.operator}
-            onValueChange={(value) => {
-              const operator = parseOperator(
-                value,
-                condition.field,
-                condition.operator,
-              )
-              onChange({
-                ...condition,
-                operator,
-                value: operator === 'in' ? [] : isBooleanField ? false : '',
-              })
-            }}
-          >
-            <SelectTrigger
-              aria-label="Operator"
-              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {operators.map((operator) => (
-                <SelectItem key={operator} value={operator}>
-                  {operator}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="grid gap-1 text-[13px]">
-          {isBooleanField ? (
-            <Select
-              value={String(Boolean(condition.value))}
-              onValueChange={(value) =>
-                onChange({
-                  ...condition,
-                  value: value === 'true',
-                })
-              }
-            >
-              <SelectTrigger
-                aria-label="Value"
-                className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="true">true</SelectItem>
-                <SelectItem value="false">false</SelectItem>
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              className="h-8 rounded-md border-border bg-background text-[13px] shadow-none"
-              value={
-                Array.isArray(condition.value)
-                  ? condition.value.join(', ')
-                  : String(condition.value)
-              }
-              placeholder={usesList ? 'comma, separated, values' : 'value'}
-              onChange={(event) =>
-                onChange({
-                  ...condition,
-                  value: usesList
-                    ? event.target.value
-                        .split(',')
-                        .map((value) => value.trim())
-                        .filter(Boolean)
-                    : event.target.value,
-                })
-              }
-            />
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          type="button"
-          className="h-8 rounded-md border-border bg-background px-2 font-mono text-[12px] text-muted-foreground hover:text-destructive"
-          aria-label="Remove expression"
-          onClick={onRemove}
-        >
-          -
-        </Button>
       </div>
     </div>
   )
