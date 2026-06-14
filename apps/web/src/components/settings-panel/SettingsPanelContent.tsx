@@ -1,0 +1,157 @@
+import type { UseMutationResult } from '@tanstack/react-query'
+
+import type {
+  AccountOverview,
+  AppSettings,
+  SmartMailbox,
+  SmartMailboxSummary,
+} from '../../api/types'
+import type { SettingsSurfaceDescriptor } from '../../surfaces'
+import { AccountsPane } from './AccountsPane'
+import { AppearancePane } from './AppearancePane'
+import { GeneralPane } from './GeneralPane'
+import { SmartMailboxesPane, type MailboxEditorTarget } from './SmartMailboxesPane'
+import type { EditorTarget } from './types'
+
+interface SettingsPanelContentProps {
+  accounts: AccountOverview[]
+  accountCommandError: string | null
+  activeCategory: SettingsSurfaceDescriptor['params']['category']
+  commandMutation: UseMutationResult<unknown, Error, {
+    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata'
+    account: AccountOverview
+  }>
+  defaultAccountId: string | null | undefined
+  defaultMutation: UseMutationResult<AppSettings, Error, string | null>
+  editingAccount: AccountOverview | null
+  editingSmartMailbox: SmartMailbox | SmartMailboxSummary | null
+  editorKey: string
+  effectiveEditorTarget: EditorTarget | null
+  effectiveSmartMailboxTarget: string | null
+  mailboxEditorTarget: MailboxEditorTarget | null
+  settings: AppSettings | null
+  smartMailboxActionError: string | null
+  smartMailboxActionPendingKey: string | null
+  smartMailboxEditorKey: string
+  smartMailboxSummaries: SmartMailboxSummary[]
+  onAutomationSettingsSaved: (settings: AppSettings) => Promise<void>
+  onBackToAccounts: () => void
+  onBackToMailboxes: () => void
+  onCreateAccount: () => void
+  onCreateMailbox: () => void
+  onDefaultAccountChange: (accountId: string | null) => void
+  onDeletedSmartMailbox: (mailboxId: string) => Promise<void>
+  onReorderSmartMailbox: (mailbox: SmartMailboxSummary, position: number) => void
+  onResetSmartMailboxes: () => void
+  onSavedAccount: (account: AccountOverview) => Promise<void>
+  onSavedSmartMailbox: (mailbox: SmartMailbox) => Promise<void>
+  onSelectAccount: (accountId: string) => void
+  onSelectSmartMailbox: (mailboxId: string) => void
+  onSelectSourceMailbox: (accountId: string, mailboxId: string) => void
+  onVerifiedAccount: () => Promise<void>
+}
+
+export function SettingsPanelContent({
+  accounts,
+  accountCommandError,
+  activeCategory,
+  commandMutation,
+  defaultAccountId,
+  defaultMutation,
+  editingAccount,
+  editingSmartMailbox,
+  editorKey,
+  effectiveEditorTarget,
+  effectiveSmartMailboxTarget,
+  mailboxEditorTarget,
+  settings,
+  smartMailboxActionError,
+  smartMailboxActionPendingKey,
+  smartMailboxEditorKey,
+  smartMailboxSummaries,
+  onAutomationSettingsSaved,
+  onBackToAccounts,
+  onBackToMailboxes,
+  onCreateAccount,
+  onCreateMailbox,
+  onDefaultAccountChange,
+  onDeletedSmartMailbox,
+  onReorderSmartMailbox,
+  onResetSmartMailboxes,
+  onSavedAccount,
+  onSavedSmartMailbox,
+  onSelectAccount,
+  onSelectSmartMailbox,
+  onSelectSourceMailbox,
+  onVerifiedAccount,
+}: SettingsPanelContentProps) {
+  return (
+    <main className="min-w-0 flex-1 bg-background">
+      <div className="h-full min-h-0 overflow-hidden bg-transparent">
+        {activeCategory === 'general' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <GeneralPane
+              accounts={accounts}
+              defaultAccountId={defaultAccountId}
+              onDefaultAccountChange={onDefaultAccountChange}
+              isPending={defaultMutation.isPending}
+            />
+          </div>
+        )}
+
+        {activeCategory === 'appearance' && (
+          <div className="ph-scroll h-full min-h-0 overflow-y-auto px-6 py-8">
+            <AppearancePane />
+          </div>
+        )}
+
+        {activeCategory === 'accounts' && (
+          <AccountsPane
+            accounts={accounts}
+            selectedAccountId={effectiveEditorTarget}
+            editingAccount={editingAccount}
+            editorKey={editorKey}
+            onSelectAccount={onSelectAccount}
+            onBackToAccounts={onBackToAccounts}
+            onCreateAccount={onCreateAccount}
+            onCommand={(action, account) =>
+              commandMutation.mutate({ action, account })
+            }
+            onSaved={onSavedAccount}
+            onVerified={onVerifiedAccount}
+            commandMutation={commandMutation}
+            commandError={accountCommandError}
+          />
+        )}
+
+        {activeCategory === 'mailboxes' && (
+          <SmartMailboxesPane
+            smartMailboxes={smartMailboxSummaries}
+            accounts={accounts}
+            settings={settings}
+            selectedMailboxTarget={
+              mailboxEditorTarget?.kind === 'smart'
+                ? effectiveSmartMailboxTarget
+                  ? { kind: 'smart', id: effectiveSmartMailboxTarget }
+                  : null
+                : mailboxEditorTarget
+            }
+            editingSmartMailbox={editingSmartMailbox}
+            editorKey={smartMailboxEditorKey}
+            actionPendingKey={smartMailboxActionPendingKey}
+            actionError={smartMailboxActionError}
+            onSelectSmartMailbox={onSelectSmartMailbox}
+            onSelectSourceMailbox={onSelectSourceMailbox}
+            onBackToMailboxes={onBackToMailboxes}
+            onCreateMailbox={onCreateMailbox}
+            onResetDefaults={onResetSmartMailboxes}
+            onReorderMailbox={onReorderSmartMailbox}
+            onSaved={onSavedSmartMailbox}
+            onAutomationSettingsSaved={onAutomationSettingsSaved}
+            onDeleted={onDeletedSmartMailbox}
+          />
+        )}
+      </div>
+    </main>
+  )
+}
