@@ -1,3 +1,5 @@
+use posthaste_domain::Identity;
+
 use super::*;
 
 #[test]
