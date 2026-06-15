@@ -337,6 +337,36 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
     assert_eq!(reload_body["ok"], true);
 }
 
+// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/backend/L3#message-mutations-runtime-backed
+#[test]
+fn message_mutation_routes_do_not_call_legacy_state_directly() {
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
+    for relative in [
+        "message_commands.rs",
+        "messages/compose.rs",
+        "messages/detail.rs",
+        "mailboxes.rs",
+    ] {
+        let path = server_dir.join(relative);
+        let source = fs::read_to_string(&path).expect("route source should be readable");
+        for forbidden in [
+            "live_gateway(state.as_ref()",
+            "optional_live_gateway(state.as_ref()",
+            "state.service",
+            "state.store",
+            "state.supervisor",
+            "state.publish_events",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} should use AuthorityRuntimeHandle instead of {forbidden}",
+                path.display()
+            );
+        }
+    }
+}
+
 #[test]
 fn api_route_modules_do_not_construct_new_mail_runtime_graphs() {
     let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");

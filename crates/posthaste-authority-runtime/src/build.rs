@@ -3,17 +3,20 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountId, AppSettings, ConfigError, ConfigRepository, DomainEvent, MailService, MailStore,
-    MessageId, SecretStore, ServiceError, ServiceErrorKind, SmartMailboxId, StoreError, SyncMode,
+    AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
+    MailService, MailStore, MailboxId, MailboxSummary, MessageId, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, SecretStore, SendMessageRequest, ServiceError, ServiceErrorKind,
+    SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode, SyncTrigger,
 };
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, PatchAccountMutation,
-    RuntimeAccountList, RuntimeAdapterError, RuntimeCaller, RuntimeCore, RuntimeError,
-    RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    RuntimeAccountList, RuntimeAdapterError, RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore,
+    RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
@@ -23,8 +26,8 @@ use crate::account_mutations::AccountMutationService;
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::bootstrap::initialize_config;
 use crate::{
-    AccountRuntimeOverviewProvider, LiveAccountRuntimeProvider, SystemSecretStore,
-    UnavailableLiveAccountRuntimeProvider,
+    AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
+    SystemSecretStore, UnavailableLiveAccountRuntimeProvider,
 };
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
@@ -43,6 +46,7 @@ pub struct AuthorityRuntimeBuildConfig {
     pub bootstrap_path: Option<PathBuf>,
     pub secret_store: Option<Arc<dyn SecretStore>>,
     pub event_channel_capacity: usize,
+    pub poll_interval: Duration,
 }
 
 impl AuthorityRuntimeBuildConfig {
@@ -58,6 +62,7 @@ impl AuthorityRuntimeBuildConfig {
             bootstrap_path: None,
             secret_store: None,
             event_channel_capacity: DEFAULT_EVENT_CHANNEL_CAPACITY,
+            poll_interval: Duration::from_secs(60),
         }
     }
 
@@ -80,6 +85,11 @@ impl AuthorityRuntimeBuildConfig {
         self.event_channel_capacity = event_channel_capacity;
         self
     }
+
+    pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
+        self.poll_interval = poll_interval;
+        self
+    }
 }
 
 /// Result of building the authority runtime.
@@ -89,6 +99,7 @@ pub struct AuthorityRuntimeBuild {
     pub handle: AuthorityRuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
     pub runtime_status: RuntimeStatus,
+    pub account_supervisor: Arc<AccountSupervisor>,
     /// MIGRATION(api-runtime-wrapper): exposes the existing mail service/store
     /// graph to the Axum adapter while handlers move behind runtime methods.
     ///
@@ -176,17 +187,39 @@ pub async fn build_authority_runtime(
         account_count,
     };
 
-    let api_bridge =
-        AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender);
+    let api_bridge = AuthorityRuntimeApiMigrationBridge::new(
+        service.clone(),
+        store.clone(),
+        secret_store.clone(),
+        event_sender.clone(),
+    );
+    let account_supervisor = Arc::new(AccountSupervisor::new(
+        service.clone(),
+        store.clone(),
+        secret_store.clone(),
+        event_sender.clone(),
+        config.poll_interval,
+    ));
+    for source in service.list_sources()? {
+        account_supervisor.start_account(&source).await;
+    }
     let account_reads = Arc::new(AccountReadService::new(
         api_bridge.service.clone(),
-        Arc::new(DefaultAccountRuntimeOverviewProvider),
+        account_supervisor.clone(),
+    ));
+    let account_mutations = Arc::new(AccountMutationService::new(
+        api_bridge.service.clone(),
+        api_bridge.store.clone(),
+        api_bridge.secret_store.clone(),
+        api_bridge.event_sender.clone(),
+        account_supervisor.clone(),
+        account_reads.clone(),
     ));
     let core = Arc::new(AuthorityRuntimeCore {
         api_bridge: api_bridge.clone(),
         account_reads,
-        account_mutations: None,
-        live_accounts: Arc::new(UnavailableLiveAccountRuntimeProvider),
+        account_mutations: Some(account_mutations),
+        live_accounts: account_supervisor.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
     });
@@ -195,6 +228,7 @@ pub async fn build_authority_runtime(
         handle: AuthorityRuntimeHandle { core },
         shutdown: RuntimeShutdownHandle { stopped },
         runtime_status,
+        account_supervisor,
         api_bridge,
     })
 }
@@ -232,21 +266,19 @@ impl AuthorityRuntimeHandle {
     fn service_error_to_runtime_error(error: ServiceError) -> RuntimeError {
         let code = match error.kind() {
             ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
-            ServiceErrorKind::Conflict | ServiceErrorKind::StateMismatch => {
-                RuntimeErrorCode::Conflict
-            }
+            ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
+            ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
             ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
-            ServiceErrorKind::GatewayUnavailable | ServiceErrorKind::NetworkError => {
-                RuntimeErrorCode::ProviderUnavailable
-            }
-            ServiceErrorKind::CannotCalculateChanges
-            | ServiceErrorKind::GatewayRejected
-            | ServiceErrorKind::SecretUnavailable
-            | ServiceErrorKind::SecretUnsupported
-            | ServiceErrorKind::StorageFailure
-            | ServiceErrorKind::ConfigValidation
-            | ServiceErrorKind::ConfigIo
-            | ServiceErrorKind::ConfigParse => RuntimeErrorCode::Internal,
+            ServiceErrorKind::GatewayUnavailable => RuntimeErrorCode::ProviderUnavailable,
+            ServiceErrorKind::NetworkError => RuntimeErrorCode::NetworkError,
+            ServiceErrorKind::CannotCalculateChanges => RuntimeErrorCode::CannotCalculateChanges,
+            ServiceErrorKind::GatewayRejected => RuntimeErrorCode::GatewayRejected,
+            ServiceErrorKind::SecretUnavailable => RuntimeErrorCode::SecretUnavailable,
+            ServiceErrorKind::SecretUnsupported => RuntimeErrorCode::SecretUnsupported,
+            ServiceErrorKind::StorageFailure => RuntimeErrorCode::StorageFailure,
+            ServiceErrorKind::ConfigValidation => RuntimeErrorCode::ConfigValidation,
+            ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
+            ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
         };
         RuntimeError(RuntimeAdapterError {
             code,
@@ -375,6 +407,19 @@ impl AuthorityRuntimeHandle {
                 details: serde_json::Value::Null,
             })
         })
+    }
+
+    fn publish_events(&self, events: &[DomainEvent]) {
+        for event in events {
+            let _ = self.core.api_bridge.event_sender.send(event.clone());
+        }
+    }
+
+    async fn optional_gateway(
+        &self,
+        account_id: &AccountId,
+    ) -> Option<posthaste_domain::SharedGateway> {
+        self.core.live_accounts.gateway(account_id).await.ok()
     }
 }
 
@@ -528,6 +573,280 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
             .await
             .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn send_message(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.core
+            .api_bridge
+            .service
+            .send_message(&account_id, &request, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        if let Some(sender) = &request.from {
+            if let Err(error) = self
+                .core
+                .api_bridge
+                .store
+                .remember_sender_address(&account_id, sender)
+            {
+                tracing::warn!(
+                    source_id = %account_id,
+                    sender = %sender.email,
+                    error = %error,
+                    "send accepted but sender address cache update failed"
+                );
+            }
+        }
+        if let Err(error) = self
+            .core
+            .live_accounts
+            .trigger_account_sync(&account_id, SyncTrigger::Manual)
+            .await
+        {
+            tracing::warn!(
+                source_id = %account_id,
+                error = %error,
+                "send accepted but follow-up sync trigger failed"
+            );
+        }
+        Ok(())
+    }
+
+    async fn set_message_keywords(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: SetKeywordsCommand,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .set_keywords(&account_id, &message_id, &command, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn add_message_to_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: AddToMailboxCommand,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .add_to_mailbox(&account_id, &message_id, &command, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn remove_message_from_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: RemoveFromMailboxCommand,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .remove_from_mailbox(&account_id, &message_id, &command, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn replace_message_mailboxes(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: ReplaceMailboxesCommand,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .replace_mailboxes(&account_id, &message_id, &command, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn destroy_message(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .destroy_message(&account_id, &message_id, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn set_mailbox_role(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        role: Option<String>,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        let events = self
+            .core
+            .api_bridge
+            .service
+            .set_mailbox_role(&account_id, &mailbox_id, role.as_deref(), gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&events);
+        self.core
+            .api_bridge
+            .service
+            .list_mailboxes(&account_id)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn get_message_detail(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let gateway = self.optional_gateway(&account_id).await;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .get_message_detail(&account_id, &message_id, gateway.as_deref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        Ok(result)
+    }
+
+    async fn get_message_attachment(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        attachment_id: String,
+    ) -> Result<RuntimeAttachmentBytes, RuntimeError> {
+        let gateway = self.optional_gateway(&account_id).await;
+        let result = self
+            .core
+            .api_bridge
+            .service
+            .get_message_detail(&account_id, &message_id, gateway.as_deref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.publish_events(&result.events);
+        let detail = result.detail.ok_or_else(|| {
+            RuntimeError(RuntimeAdapterError {
+                code: RuntimeErrorCode::NotFound,
+                message: "message detail not available".to_string(),
+                retryable: false,
+                correlation_id: None,
+                details: serde_json::Value::Null,
+            })
+        })?;
+        let attachment = detail
+            .attachments
+            .into_iter()
+            .find(|attachment| attachment.id == attachment_id)
+            .ok_or_else(|| {
+                RuntimeError(RuntimeAdapterError {
+                    code: RuntimeErrorCode::NotFound,
+                    message: "attachment not found".to_string(),
+                    retryable: false,
+                    correlation_id: None,
+                    details: serde_json::Value::Null,
+                })
+            })?;
+        let gateway = gateway.ok_or_else(|| {
+            RuntimeError(RuntimeAdapterError {
+                code: RuntimeErrorCode::ProviderUnavailable,
+                message: format!("gateway unavailable for account {account_id}"),
+                retryable: true,
+                correlation_id: None,
+                details: serde_json::Value::Null,
+            })
+        })?;
+        let bytes = self
+            .core
+            .api_bridge
+            .service
+            .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        Ok(RuntimeAttachmentBytes {
+            bytes,
+            mime_type: attachment.mime_type,
+            filename: attachment.filename,
+        })
     }
 
     async fn sync_account(

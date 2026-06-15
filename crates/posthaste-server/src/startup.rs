@@ -32,7 +32,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             roots.state_root.clone(),
             roots.state_root.join("cache"),
         )
-        .with_bootstrap_path_option(roots.bootstrap_path.clone()),
+        .with_bootstrap_path_option(roots.bootstrap_path.clone())
+        .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds)),
     )
     .await
     .expect("failed to build authority runtime");
@@ -56,20 +57,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let store = runtime_build.api_bridge.store.clone();
     let secret_store = runtime_build.api_bridge.secret_store.clone();
     let event_sender = runtime_build.api_bridge.event_sender.clone();
-    let supervisor = Arc::new(AccountSupervisor::new(
-        service.clone(),
-        store.clone(),
-        secret_store.clone(),
-        event_sender.clone(),
-        Duration::from_secs(runtime.poll_interval_seconds),
-    ));
-
-    for source in service
-        .list_sources()
-        .expect("failed to load source configuration")
-    {
-        supervisor.start_account(&source).await;
-    }
+    let supervisor = runtime_build.account_supervisor.clone();
 
     // Per-process bearer token for the loopback trust model: a full-scope
     // macaroon (no caveats) minted from the per-install root key. Replaces the
@@ -91,16 +79,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .unwrap_or_else(|| runtime.bind_address.clone());
     let host_allowlist = auth::host_allowlist(&bind_address);
 
-    let runtime_handle = AppState::runtime_handle_with_account_runtime_provider_for_migration(
-        service.clone(),
-        store.clone(),
-        secret_store.clone(),
-        event_sender.clone(),
-        supervisor.clone(),
-    );
-
     let state = Arc::new(AppState {
-        runtime: runtime_handle,
+        runtime: runtime_build.handle.clone(),
         service,
         store,
         secret_store,
