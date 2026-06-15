@@ -1,0 +1,13 @@
+[package]
+name = "posthaste-runtime-contract"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "posthaste_runtime_contract"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
