@@ -230,7 +230,7 @@ pub struct CreateAccountMutation {
     pub secret: SecretWriteMutation,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchAccountMutation {
     pub name: Option<String>,
@@ -688,6 +688,12 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         mutation: PatchAccountMutation,
     ) -> Result<AccountOverview, RuntimeError>;
+
+    async fn delete_account(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<(), RuntimeError>;
 
     async fn verify_account(
         &self,
