@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+use posthaste_domain::{AccountSettings, AccountTransportSettings};
+
 pub(crate) fn oauth_success_html() -> Html<String> {
     Html(
         "<!doctype html><meta charset=\"utf-8\"><title>Posthaste OAuth</title><p>Authentication complete. You can return to Posthaste.</p>".to_string(),
@@ -53,6 +56,54 @@ pub(crate) async fn create_oauth_account_from_exchange(
         .await
         .map(|account| account.id)
         .map_err(ApiError::from_runtime_error)
+}
+
+#[cfg(test)]
+pub(crate) fn oauth_account_settings(
+    account_id: AccountId,
+    provider: ProviderHint,
+    name: String,
+    identity_email: String,
+    email_patterns: Vec<String>,
+    secret_ref: SecretRef,
+    timestamp: String,
+) -> Result<AccountSettings, ApiError> {
+    let (imap, smtp) = oauth_provider_mail_transport(&provider)?;
+    Ok(AccountSettings {
+        id: account_id,
+        name,
+        full_name: None,
+        email_patterns,
+        driver: AccountDriver::ImapSmtp,
+        enabled: true,
+        appearance: None,
+        transport: AccountTransportSettings {
+            provider,
+            auth: ProviderAuthKind::OAuth2,
+            base_url: None,
+            username: Some(identity_email),
+            secret_ref: Some(secret_ref),
+            imap: Some(imap),
+            smtp: Some(smtp),
+        },
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn oauth_provider_mail_transport(
+    provider: &ProviderHint,
+) -> Result<(ImapTransportSettings, SmtpTransportSettings), ApiError> {
+    OAuthProviderProfile::for_provider(provider)
+        .and_then(|profile| profile.default_mail_transport())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                ApiErrorCode::InvalidProvider,
+                "provider does not support built-in OAuth account creation",
+            )
+        })
 }
 
 pub(crate) async fn persist_oauth_token_set(

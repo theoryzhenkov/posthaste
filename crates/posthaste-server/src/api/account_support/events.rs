@@ -10,7 +10,6 @@ pub(crate) const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
 pub(crate) enum ResourceKind {
     Account,
     AppSettings,
-    Config,
     SmartMailbox,
 }
 
@@ -24,7 +23,6 @@ pub(crate) enum ResourceOperation {
     Updated,
     Deleted,
     Reset,
-    Reloaded,
 }
 
 /// Declarative resource-change payload item for domain events.
@@ -58,15 +56,6 @@ impl ResourceChange {
         Self {
             kind: ResourceKind::AppSettings,
             operation: ResourceOperation::Updated,
-            id: None,
-            account_id: None,
-        }
-    }
-
-    pub(crate) fn config_reloaded() -> Self {
-        Self {
-            kind: ResourceKind::Config,
-            operation: ResourceOperation::Reloaded,
             id: None,
             account_id: None,
         }
@@ -191,34 +180,4 @@ pub(crate) fn generate_smart_mailbox_id(name: &str) -> String {
         },
         Uuid::new_v4()
     )
-}
-
-/// Generate an internal account ID from identity fields. The ID is deliberately
-/// hidden from the UI; it only needs to be stable after account creation.
-pub(crate) fn generate_account_id_seed(name: &str, email_patterns: &[String]) -> String {
-    let seed = email_patterns
-        .iter()
-        .map(|pattern| pattern.trim())
-        .find(|pattern| !pattern.is_empty())
-        .unwrap_or_else(|| name.trim());
-    let slug = seed
-        .trim_start_matches("*@")
-        .trim_start_matches('@')
-        .to_lowercase()
-        .chars()
-        .map(|char| {
-            if char.is_ascii_alphanumeric() {
-                char
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-    if slug.is_empty() {
-        "account".to_string()
-    } else {
-        slug
-    }
 }

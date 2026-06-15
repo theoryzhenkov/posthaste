@@ -4,6 +4,7 @@ use super::*;
 /// keyring and update the account's `secret_ref` accordingly.
 ///
 /// @spec docs/L1-api#secret-management
+#[cfg(test)]
 pub(crate) fn apply_secret_instruction(
     state: &AppState,
     account: &mut AccountSettings,
@@ -47,34 +48,21 @@ pub(crate) fn apply_secret_instruction(
     Ok(())
 }
 
+#[cfg(test)]
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct SecretInstructionDecision<'a> {
     pub(crate) account_secret_ref: AccountSecretRefUpdate,
     pub(crate) store_instruction: SecretStoreInstruction<'a>,
 }
 
-impl SecretInstructionDecision<'_> {
-    /// The `secret_ref` the account should carry after this write — the single
-    /// source of truth for "what ref does this account end up with". Used to set
-    /// the account's ref before validation; `apply_secret_instruction` applies
-    /// the same decision to the keyring.
-    pub(crate) fn resolved_secret_ref(
-        &self,
-        previous_secret_ref: Option<&SecretRef>,
-    ) -> Option<SecretRef> {
-        match &self.account_secret_ref {
-            AccountSecretRefUpdate::Preserve => previous_secret_ref.cloned(),
-            AccountSecretRefUpdate::Set(secret_ref) => secret_ref.clone(),
-        }
-    }
-}
-
+#[cfg(test)]
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum AccountSecretRefUpdate {
     Preserve,
     Set(Option<SecretRef>),
 }
 
+#[cfg(test)]
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum SecretStoreInstruction<'a> {
     None,
@@ -91,6 +79,7 @@ pub(crate) enum SecretStoreInstruction<'a> {
     },
 }
 
+#[cfg(test)]
 pub(crate) fn decide_secret_instruction<'a>(
     account_id: &AccountId,
     previous_secret_ref: Option<&SecretRef>,
@@ -144,6 +133,7 @@ pub(crate) fn decide_secret_instruction<'a>(
 /// (e.g. `replace` requires a password, `keep`/`clear` forbid one).
 ///
 /// @spec docs/L1-api#secret-management
+#[cfg(test)]
 pub(crate) fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(), ApiError> {
     match secret.mode {
         SecretWriteMode::Keep => {
@@ -172,6 +162,7 @@ pub(crate) fn validate_secret_request(secret: &SecretWriteRequest) -> Result<(),
 }
 
 /// Extract a non-empty password from the request, returning an error if missing.
+#[cfg(test)]
 fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiError> {
     secret
         .password
@@ -188,6 +179,7 @@ fn required_secret_password(secret: &SecretWriteRequest) -> Result<&str, ApiErro
 }
 
 /// Build the default OS keyring secret reference for an account (`account:{id}`).
+#[cfg(test)]
 pub(crate) fn account_secret_ref(account_id: &AccountId) -> SecretRef {
     SecretRef {
         kind: SecretKind::Os,
