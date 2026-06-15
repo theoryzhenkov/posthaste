@@ -3548,16 +3548,28 @@ dependencies = [
 name = "posthaste-authority-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "async-trait",
+ "base64 0.22.1",
+ "futures-util",
+ "jsonwebtoken",
  "keyring",
+ "oauth2",
  "posthaste-config",
  "posthaste-domain",
+ "posthaste-engine",
+ "posthaste-imap",
+ "posthaste-observability",
  "posthaste-runtime-contract",
  "posthaste-store",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "toml 0.8.2",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3670,6 +3682,7 @@ name = "posthaste-runtime-contract"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "posthaste-domain",
  "serde",
  "serde_json",
 ]
