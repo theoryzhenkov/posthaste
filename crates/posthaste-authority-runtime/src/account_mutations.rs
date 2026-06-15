@@ -6,10 +6,10 @@ use posthaste_domain::{
     CachePolicy, DomainEvent, ImapTransportSettings, MailService, MailStore, MailboxId,
     MessageSortField, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SecretStore,
     ServiceError, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmtpTransportSettings,
-    SortDirection, StoreError, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_UPDATED,
-    EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
-    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
-    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+    SortDirection, StoreError, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
+    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
+    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, AccountVerificationResult, AutomationRulePreviewMutation,
@@ -414,6 +414,16 @@ impl AccountMutationService {
             },
         )
         .await
+    }
+
+    pub async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
+        let account = self.load_account(&account_id)?;
+        self.delete_managed_secret(account.transport.secret_ref.as_ref())?;
+        self.supervisor.remove_account(&account_id).await;
+        self.service
+            .delete_source(&account_id)
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_account_event(&account_id, EVENT_TOPIC_ACCOUNT_DELETED)
     }
 
     pub async fn verify_account(

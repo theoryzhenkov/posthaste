@@ -338,6 +338,27 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
 }
 
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/backend/L3#account-logo-metadata-runtime-backed
+#[test]
+fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
+    let source = fs::read_to_string(server_dir.join("accounts/logos.rs"))
+        .expect("account logo route source should be readable");
+    for forbidden in [
+        "state.service.save_source",
+        "state.service.delete_source",
+        "state.supervisor",
+        "delete_managed_secret(state.as_ref()",
+        "append_and_publish_account_event",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "account asset routes should use AuthorityRuntimeHandle instead of {forbidden}"
+        );
+    }
+}
+
+// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 // spec: docs/backend/L3#message-mutations-runtime-backed
 #[test]
 fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
