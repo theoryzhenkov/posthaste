@@ -11,10 +11,12 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::Html;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+#[cfg(test)]
+use posthaste_domain::AccountTransportSettings;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
-    AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AddToMailboxCommand,
-    AppSettings, AutomationAction, AutomationRule, CachePolicy, CachedSenderAddress, CommandResult,
+    AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings,
+    AutomationAction, AutomationRule, CachePolicy, CachedSenderAddress, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
     ConversationSummary, ConversationView, DomainEvent, EventFilter, Identity,
     ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
@@ -110,9 +112,8 @@ pub use sync_events::{
 #[cfg(test)]
 use account_support::apply_account_patch;
 use account_support::{
-    account_overview, account_secret_ref, append_and_publish_account_event,
-    append_and_publish_config_event, default_account_appearance, delete_managed_secret,
-    generate_account_id_seed, generate_smart_mailbox_id, internal_error,
+    account_overview, append_and_publish_account_event, append_and_publish_config_event,
+    default_account_appearance, delete_managed_secret, generate_smart_mailbox_id, internal_error,
     normalize_account_appearance, normalize_automation_rules, store_error_to_api,
     validate_account_settings, validate_automation_drafts, validate_automation_rules,
     validate_logo_image_id, ResourceChange, ResourceOperation,

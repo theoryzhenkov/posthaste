@@ -5,7 +5,6 @@ pub(crate) mod lifecycle;
 pub(crate) mod logos;
 pub(crate) mod oauth;
 mod oauth_support;
-mod support;
 mod types;
 
 pub use crud::{create_account, get_account, list_accounts, patch_account, verify_account};
@@ -19,7 +18,5 @@ pub use types::{
 };
 
 use logos::{account_appearance_image_id, delete_account_logo_file};
-use support::{allocate_unique_account_id, persist_new_account};
-
 #[cfg(test)]
 pub(super) use oauth_support::{oauth_account_settings, oauth_provider_mail_transport};

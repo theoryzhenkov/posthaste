@@ -16,6 +16,7 @@ pub(crate) fn normalize_optional(value: Option<String>) -> Option<String> {
 /// (including transport sub-fields) are preserved.
 ///
 /// @spec docs/L1-api#account-crud-lifecycle
+#[cfg(test)]
 pub(crate) fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountRequest) {
     if let Some(name) = &request.name {
         account.name = name.trim().to_string();
@@ -123,6 +124,7 @@ pub(crate) fn validate_automation_drafts(
 
 /// Normalize user-owned email addresses/patterns by trimming whitespace and
 /// dropping empty entries. Patterns such as `*@example.com` are preserved.
+#[cfg(test)]
 pub(crate) fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {
     patterns
         .iter()

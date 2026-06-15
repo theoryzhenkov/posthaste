@@ -14,26 +14,26 @@ pub(super) use appearance::{
     validate_logo_image_id,
 };
 pub(super) use events::{
-    append_and_publish_account_event, append_and_publish_config_event, generate_account_id_seed,
-    generate_smart_mailbox_id, internal_error, store_error_to_api, ResourceChange,
-    ResourceOperation,
+    append_and_publish_account_event, append_and_publish_config_event, generate_smart_mailbox_id,
+    internal_error, store_error_to_api, ResourceChange, ResourceOperation,
 };
+#[cfg(test)]
+pub(super) use normalization::apply_account_patch;
 pub(super) use normalization::{
-    apply_account_patch, normalize_automation_rules, normalize_email_patterns, normalize_optional,
-    validate_automation_drafts,
+    normalize_automation_rules, normalize_optional, validate_automation_drafts,
 };
 pub(super) use overview::account_overview;
+pub(super) use secrets::delete_managed_secret;
+#[cfg(test)]
 pub(super) use secrets::{
-    account_secret_ref, apply_secret_instruction, decide_secret_instruction, delete_managed_secret,
+    account_secret_ref, apply_secret_instruction, decide_secret_instruction,
+    AccountSecretRefUpdate, SecretInstructionDecision, SecretStoreInstruction,
 };
 
 #[cfg(test)]
 pub(super) use overview::secret_status;
 #[cfg(test)]
-pub(super) use secrets::{
-    validate_secret_request, AccountSecretRefUpdate, SecretInstructionDecision,
-    SecretStoreInstruction,
-};
+pub(super) use secrets::validate_secret_request;
 pub(super) use validation::{validate_account_settings, validate_automation_rules};
 
 #[cfg(test)]
