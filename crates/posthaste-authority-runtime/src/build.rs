@@ -25,6 +25,7 @@ use tokio::sync::broadcast;
 use crate::account_mutations::AccountMutationService;
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::bootstrap::initialize_config;
+use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
     SystemSecretStore, UnavailableLiveAccountRuntimeProvider,
@@ -407,6 +408,26 @@ impl AuthorityRuntimeHandle {
                 details: serde_json::Value::Null,
             })
         })
+    }
+
+    pub async fn create_oauth_account_from_exchange(
+        &self,
+        profile: &OAuthProviderProfile,
+        exchange: OAuthExchangeResult,
+    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.account_mutations()?
+            .create_oauth_account_from_exchange(profile, exchange)
+            .await
+    }
+
+    pub async fn persist_oauth_token_set(
+        &self,
+        account_id: AccountId,
+        token_set: OAuthTokenSet,
+    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.account_mutations()?
+            .persist_oauth_token_set(account_id, token_set)
+            .await
     }
 
     fn publish_events(&self, events: &[DomainEvent]) {
