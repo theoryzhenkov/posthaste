@@ -3682,6 +3682,7 @@ name = "posthaste-runtime-contract"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "posthaste-domain",
  "serde",
  "serde_json",

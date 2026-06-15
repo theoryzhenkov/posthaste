@@ -39,7 +39,7 @@ use posthaste_runtime_contract::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::StreamExt;
 use utoipa::{IntoParams, ToSchema};
 
 const MAX_SEND_ATTACHMENTS: usize = 10;
@@ -118,7 +118,7 @@ use account_support::{
     validate_logo_image_id, ResourceChange, ResourceOperation,
 };
 use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
+    conversation_limit, conversation_page_response, event_to_sse, message_limit,
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
 use search_support::{
@@ -200,9 +200,8 @@ use accounts::{oauth_account_settings, oauth_provider_mail_transport};
 #[cfg(test)]
 use auth_tokens::{build_token_caveats, derive_capability_token};
 #[cfg(test)]
-use messages::validate_send_message_request;
+use cursor_support::matches_event;
 #[cfg(test)]
-use sync_events::is_live_event_after_backlog;
-
+use messages::validate_send_message_request;
 #[cfg(test)]
 mod tests;

@@ -18,6 +18,7 @@ const MAX_CONVERSATION_LIMIT: usize = 250;
 /// topic, mailbox, afterSeq).
 ///
 /// @spec docs/L1-api#sse-event-stream
+#[cfg(test)]
 pub(super) fn matches_event(event: &DomainEvent, filter: &EventFilter) -> bool {
     if let Some(account_id) = &filter.account_id {
         if &event.account_id != account_id {
