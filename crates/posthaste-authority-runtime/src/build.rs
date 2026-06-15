@@ -6,17 +6,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
-    MailService, MailStore, MailboxId, MailboxSummary, MessageId, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SecretStore, SendMessageRequest, ServiceError, ServiceErrorKind,
-    SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode, SyncTrigger,
+    EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
+    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
+    SyncTrigger,
 };
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, PatchAccountMutation,
     RuntimeAccountList, RuntimeAdapterError, RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore,
-    RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeLifecycle, RuntimeStatus,
+    RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
@@ -441,6 +444,53 @@ impl AuthorityRuntimeHandle {
         account_id: &AccountId,
     ) -> Option<posthaste_domain::SharedGateway> {
         self.core.live_accounts.gateway(account_id).await.ok()
+    }
+
+    fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
+        if let Some(account_id) = &filter.account_id {
+            if &event.account_id != account_id {
+                return false;
+            }
+        }
+        if let Some(after_seq) = filter.after_seq {
+            if event.seq <= after_seq {
+                return false;
+            }
+        }
+        if let Some(topic) = &filter.topic {
+            if &event.topic != topic {
+                return false;
+            }
+        }
+        if let Some(mailbox_id) = &filter.mailbox_id {
+            if event.mailbox_id.as_ref() != Some(mailbox_id) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn live_event_stream(
+        mut receiver: broadcast::Receiver<DomainEvent>,
+        filter: EventFilter,
+        replayed_through: Option<i64>,
+    ) -> posthaste_runtime_contract::RuntimeEventStream {
+        let stream = async_stream::stream! {
+            loop {
+                match receiver.recv().await {
+                    Ok(event)
+                        if replayed_through.is_none_or(|seq| event.seq > seq)
+                            && Self::event_matches_filter(&event, &filter) =>
+                    {
+                        yield event;
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        };
+        stream.boxed()
     }
 }
 
@@ -881,6 +931,38 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .sync_account_with_mode(&account_id, mode)
             .await
             .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn replay_events(
+        &self,
+        _caller: RuntimeCaller,
+        filter: EventFilter,
+    ) -> Result<Vec<DomainEvent>, RuntimeError> {
+        self.core
+            .api_bridge
+            .service
+            .list_events(&filter)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn subscribe_events(
+        &self,
+        _caller: RuntimeCaller,
+        filter: EventFilter,
+    ) -> Result<RuntimeEventSubscription, RuntimeError> {
+        let receiver = self.core.api_bridge.event_sender.subscribe();
+        let replay = if filter.after_seq.is_some() {
+            self.replay_events(RuntimeCaller::system(), filter.clone())
+                .await?
+                .into_iter()
+                .filter(|event| Self::event_matches_filter(event, &filter))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let replayed_through = replay.last().map(|event| event.seq).or(filter.after_seq);
+        let live = Self::live_event_stream(receiver, filter, replayed_through);
+        Ok(RuntimeEventSubscription { replay, live })
     }
 
     async fn create_account(

@@ -133,24 +133,6 @@ fn matches_event_applies_all_filters() {
 }
 
 #[test]
-fn live_events_skip_sequences_already_replayed_from_backlog() {
-    let event = DomainEvent {
-        seq: 9,
-        account_id: AccountId::from("primary"),
-        topic: EVENT_TOPIC_MESSAGE_ARRIVED.to_string(),
-        occurred_at: "2026-03-31T10:00:00Z".to_string(),
-        mailbox_id: None,
-        message_id: None,
-        payload: json!({}),
-    };
-
-    assert!(!is_live_event_after_backlog(&event, Some(9)));
-    assert!(!is_live_event_after_backlog(&event, Some(10)));
-    assert!(is_live_event_after_backlog(&event, Some(8)));
-    assert!(is_live_event_after_backlog(&event, None));
-}
-
-#[test]
 fn api_error_maps_state_mismatch_to_conflict() {
     let error = ApiError::from_service_error(ServiceError::from(GatewayError::StateMismatch));
 

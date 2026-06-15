@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+futures-util = { workspace = true }
 posthaste-domain = { path = "../posthaste-domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }

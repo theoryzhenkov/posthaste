@@ -4,13 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures_util::StreamExt;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
 };
 use posthaste_domain::{
-    AccountDriver, ImapTransportSettings, ProviderAuthKind, ProviderHint, SecretRef, SecretStore,
-    SecretStoreError, SmtpTransportSettings, TransportSecurity,
+    AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, ProviderAuthKind,
+    ProviderHint, SecretRef, SecretStore, SecretStoreError, SmtpTransportSettings,
+    TransportSecurity, EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeLifecycle,
@@ -255,6 +257,99 @@ async fn oauth_token_persistence_writes_secret_and_patches_account_through_runti
         .expect("source lookup should succeed")
         .expect("account should exist after OAuth patch");
     assert_eq!(account.transport.auth, ProviderAuthKind::OAuth2);
+}
+
+// spec: docs/runtime/L3#event-subscription-runtime-backed
+#[tokio::test]
+async fn event_subscription_replays_backlog_then_filters_live_events() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let filter = EventFilter {
+        account_id: Some(AccountId::from("primary")),
+        topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
+        mailbox_id: Some(MailboxId::from("inbox")),
+        after_seq: Some(0),
+    };
+    let replayed = build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("primary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("inbox")),
+            None,
+            serde_json::json!({"kind": "replayed"}),
+        )
+        .expect("backlog event should append");
+    build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("secondary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("inbox")),
+            None,
+            serde_json::json!({"kind": "ignored"}),
+        )
+        .expect("non-matching backlog event should append");
+
+    let mut subscription = build
+        .handle
+        .subscribe_events(RuntimeCaller::test(), filter)
+        .await
+        .expect("runtime should subscribe to filtered events");
+
+    assert_eq!(subscription.replay.len(), 1);
+    assert_eq!(subscription.replay[0].seq, replayed.seq);
+
+    let ignored_live = build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("primary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("archive")),
+            None,
+            serde_json::json!({"kind": "ignored-live"}),
+        )
+        .expect("non-matching live event should append");
+    build
+        .api_bridge
+        .event_sender
+        .send(ignored_live)
+        .expect("ignored live event should broadcast");
+    let matching_live = build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("primary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("inbox")),
+            None,
+            serde_json::json!({"kind": "live"}),
+        )
+        .expect("matching live event should append");
+    build
+        .api_bridge
+        .event_sender
+        .send(matching_live.clone())
+        .expect("matching live event should broadcast");
+
+    let received = subscription
+        .live
+        .next()
+        .await
+        .expect("matching live event should pass runtime filter");
+    assert_eq!(received.seq, matching_live.seq);
 }
 
 #[tokio::test]

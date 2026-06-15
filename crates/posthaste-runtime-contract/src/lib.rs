@@ -7,12 +7,13 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#contract-no-transport-types
 
 use async_trait::async_trait;
+use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    CachedSenderAddress, CommandResult, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
-    MessageId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
+    CachedSenderAddress, CommandResult, DomainEvent, EventFilter, Identity, ImapTransportSettings,
+    MailboxId, MailboxSummary, MessageId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox,
+    SmartMailboxId, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -263,6 +264,15 @@ pub struct RuntimeAttachmentBytes {
     pub bytes: Vec<u8>,
     pub mime_type: String,
     pub filename: Option<String>,
+}
+
+/// Live runtime event stream returned by authority runtimes.
+pub type RuntimeEventStream = BoxStream<'static, DomainEvent>;
+
+/// Runtime-owned event subscription: optional replayed backlog followed by live events.
+pub struct RuntimeEventSubscription {
+    pub replay: Vec<DomainEvent>,
+    pub live: RuntimeEventStream,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -576,6 +586,18 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         mode: SyncMode,
     ) -> Result<usize, RuntimeError>;
+
+    async fn replay_events(
+        &self,
+        caller: RuntimeCaller,
+        filter: EventFilter,
+    ) -> Result<Vec<DomainEvent>, RuntimeError>;
+
+    async fn subscribe_events(
+        &self,
+        caller: RuntimeCaller,
+        filter: EventFilter,
+    ) -> Result<RuntimeEventSubscription, RuntimeError>;
 
     async fn create_account(
         &self,
