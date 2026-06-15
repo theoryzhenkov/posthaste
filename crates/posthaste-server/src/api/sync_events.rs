@@ -64,10 +64,10 @@ pub async fn trigger_sync(
         .map(|Json(request)| request.mode)
         .unwrap_or_default();
     let event_count = state
-        .supervisor
-        .sync_account_with_mode(&account_id, mode)
+        .runtime
+        .sync_account(RuntimeCaller::api(), account_id, mode)
         .await
-        .map_err(ApiError::from_service_error)?;
+        .map_err(ApiError::from_runtime_error)?;
     Ok(Json(TriggerSyncResponse {
         ok: true,
         event_count,

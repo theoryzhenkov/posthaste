@@ -20,14 +20,12 @@ pub async fn get_identity(
     State(state): State<Arc<AppState>>,
     Path(source_id): Path<String>,
 ) -> Result<Json<Identity>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
-        .service
-        .fetch_identity(&account_id, gateway.as_ref())
+        .runtime
+        .get_identity(RuntimeCaller::api(), AccountId(source_id))
         .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// GET /v1/sender-addresses
@@ -48,10 +46,11 @@ pub async fn list_sender_addresses(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<CachedSenderAddress>>, ApiError> {
     state
-        .store
-        .list_sender_address_cache()
+        .runtime
+        .list_sender_addresses(RuntimeCaller::api())
+        .await
         .map(Json)
-        .map_err(store_error_to_api)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// GET /v1/sources/{source_id}/messages/{id}/reply-context
@@ -78,14 +77,16 @@ pub async fn get_reply_context(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<ReplyContext>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
-        .service
-        .fetch_reply_context(&account_id, &MessageId(message_id), gateway.as_ref())
+        .runtime
+        .get_reply_context(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+        )
         .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/sources/{source_id}/commands/send

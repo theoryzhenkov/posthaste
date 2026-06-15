@@ -114,6 +114,22 @@ impl ApiError {
         }
     }
 
+    /// Map a runtime-contract error to the `/v1` error envelope.
+    ///
+    /// @spec docs/backend/L4#runtime-error-to-api
+    pub fn from_runtime_error(error: RuntimeError) -> Self {
+        let envelope = error.envelope();
+        let (status, code) = runtime_error_status_code(&envelope.code);
+        Self {
+            status,
+            body: ApiErrorBody {
+                code,
+                message: envelope.message.clone(),
+                details: envelope.details.clone(),
+            },
+        }
+    }
+
     /// Construct an `ApiError` with explicit status, code, and message.
     pub fn new(status: StatusCode, code: ApiErrorCode, message: impl Into<String>) -> Self {
         Self {
@@ -124,6 +140,28 @@ impl ApiError {
                 details: json!({}),
             },
         }
+    }
+}
+
+fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCode) {
+    match code {
+        RuntimeErrorCode::RuntimeNotReady => {
+            (StatusCode::SERVICE_UNAVAILABLE, ApiErrorCode::InternalError)
+        }
+        RuntimeErrorCode::InvalidDescriptor | RuntimeErrorCode::InvalidMutation => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::InvalidQuery)
+        }
+        RuntimeErrorCode::Unauthorized => (StatusCode::UNAUTHORIZED, ApiErrorCode::Unauthorized),
+        RuntimeErrorCode::NotFound => (StatusCode::NOT_FOUND, ApiErrorCode::NotFound),
+        RuntimeErrorCode::ProviderUnavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            ApiErrorCode::GatewayUnavailable,
+        ),
+        RuntimeErrorCode::Conflict => (StatusCode::CONFLICT, ApiErrorCode::Conflict),
+        RuntimeErrorCode::TransportDisconnected | RuntimeErrorCode::Internal => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::InternalError,
+        ),
     }
 }
 

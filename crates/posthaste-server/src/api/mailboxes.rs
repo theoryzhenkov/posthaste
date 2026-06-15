@@ -31,12 +31,17 @@ pub async fn list_mailboxes(
     Path(source_id): Path<String>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
     let account_id = AccountId(source_id);
-    load_account(state.as_ref(), &account_id)?;
     state
-        .service
-        .list_mailboxes(&account_id)
-        .map(Json)
-        .map_err(ApiError::from_service_error)
+        .runtime
+        .list_mailboxes(
+            RuntimeCaller::api(),
+            AccountScopeRequest::Explicit {
+                account_ids: vec![account_id.clone()],
+            },
+        )
+        .await
+        .map(|mut by_account_id| Json(by_account_id.remove(&account_id).unwrap_or_default()))
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// PATCH /v1/sources/{source_id}/mailboxes/{mailbox_id}

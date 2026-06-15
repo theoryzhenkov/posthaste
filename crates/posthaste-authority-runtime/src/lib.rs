@@ -7,13 +7,21 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#runtime-contract-crate-first
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 
+mod account_reads;
 mod bootstrap;
 mod build;
+mod live_accounts;
+pub mod oauth;
+mod push;
 mod secret;
+pub mod supervisor;
 
+pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{
     build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuild,
     AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError, AuthorityRuntimeHandle,
     AuthorityRuntimeShutdownError, RuntimeShutdownHandle,
 };
+pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use secret::SystemSecretStore;
+pub use supervisor::AccountSupervisor;

@@ -7,18 +7,23 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    ConfigError, ConfigRepository, DomainEvent, MailService, MailStore, SecretStore, ServiceError,
-    StoreError,
+    AccountId, AppSettings, ConfigError, ConfigRepository, DomainEvent, MailService, MailStore,
+    MessageId, SecretStore, ServiceError, ServiceErrorKind, SmartMailboxId, StoreError, SyncMode,
 };
 use posthaste_runtime_contract::{
-    RuntimeCaller, RuntimeCore, RuntimeError, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    AccountScopeRequest, RuntimeAccountList, RuntimeAdapterError, RuntimeCaller, RuntimeCore,
+    RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
+use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::bootstrap::initialize_config;
-use crate::SystemSecretStore;
+use crate::{
+    AccountRuntimeOverviewProvider, LiveAccountRuntimeProvider, SystemSecretStore,
+    UnavailableLiveAccountRuntimeProvider,
+};
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
@@ -171,8 +176,14 @@ pub async fn build_authority_runtime(
 
     let api_bridge =
         AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender);
+    let account_reads = Arc::new(AccountReadService::new(
+        api_bridge.service.clone(),
+        Arc::new(DefaultAccountRuntimeOverviewProvider),
+    ));
     let core = Arc::new(AuthorityRuntimeCore {
         api_bridge: api_bridge.clone(),
+        account_reads,
+        live_accounts: Arc::new(UnavailableLiveAccountRuntimeProvider),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
     });
@@ -188,6 +199,8 @@ pub async fn build_authority_runtime(
 struct AuthorityRuntimeCore {
     #[allow(dead_code)]
     api_bridge: AuthorityRuntimeApiMigrationBridge,
+    account_reads: Arc<AccountReadService>,
+    live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
 }
@@ -202,6 +215,44 @@ pub struct AuthorityRuntimeHandle {
 }
 
 impl AuthorityRuntimeHandle {
+    fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
+        RuntimeError(RuntimeAdapterError {
+            code: RuntimeErrorCode::Internal,
+            message: error.to_string(),
+            retryable: false,
+            correlation_id: None,
+            details: serde_json::Value::Null,
+        })
+    }
+
+    fn service_error_to_runtime_error(error: ServiceError) -> RuntimeError {
+        let code = match error.kind() {
+            ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
+            ServiceErrorKind::Conflict | ServiceErrorKind::StateMismatch => {
+                RuntimeErrorCode::Conflict
+            }
+            ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
+            ServiceErrorKind::GatewayUnavailable | ServiceErrorKind::NetworkError => {
+                RuntimeErrorCode::ProviderUnavailable
+            }
+            ServiceErrorKind::CannotCalculateChanges
+            | ServiceErrorKind::GatewayRejected
+            | ServiceErrorKind::SecretUnavailable
+            | ServiceErrorKind::SecretUnsupported
+            | ServiceErrorKind::StorageFailure
+            | ServiceErrorKind::ConfigValidation
+            | ServiceErrorKind::ConfigIo
+            | ServiceErrorKind::ConfigParse => RuntimeErrorCode::Internal,
+        };
+        RuntimeError(RuntimeAdapterError {
+            code,
+            message: error.to_string(),
+            retryable: false,
+            correlation_id: None,
+            details: serde_json::Value::Null,
+        })
+    }
+
     /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
     /// test/API parts until all router state is produced by the authority
     /// runtime builder.
@@ -211,6 +262,36 @@ impl AuthorityRuntimeHandle {
         api_bridge: AuthorityRuntimeApiMigrationBridge,
         account_count: usize,
     ) -> Self {
+        Self::from_api_bridge_with_status_provider_for_migration(
+            api_bridge,
+            account_count,
+            Arc::new(DefaultAccountRuntimeOverviewProvider),
+        )
+    }
+
+    pub fn from_api_bridge_with_status_provider_for_migration(
+        api_bridge: AuthorityRuntimeApiMigrationBridge,
+        account_count: usize,
+        status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
+    ) -> Self {
+        Self::from_api_bridge_with_providers_for_migration(
+            api_bridge,
+            account_count,
+            status_provider,
+            Arc::new(UnavailableLiveAccountRuntimeProvider),
+        )
+    }
+
+    pub fn from_api_bridge_with_providers_for_migration(
+        api_bridge: AuthorityRuntimeApiMigrationBridge,
+        account_count: usize,
+        status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
+        live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
+    ) -> Self {
+        let account_reads = Arc::new(AccountReadService::new(
+            api_bridge.service.clone(),
+            status_provider,
+        ));
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
@@ -223,6 +304,8 @@ impl AuthorityRuntimeHandle {
         Self {
             core: Arc::new(AuthorityRuntimeCore {
                 api_bridge,
+                account_reads,
+                live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
             }),
@@ -242,6 +325,165 @@ impl AuthorityRuntimeHandle {
 impl RuntimeCore for AuthorityRuntimeHandle {
     async fn runtime_status(&self, _caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError> {
         Ok(self.current_status())
+    }
+
+    async fn get_app_settings(&self, _caller: RuntimeCaller) -> Result<AppSettings, RuntimeError> {
+        self.core
+            .account_reads
+            .app_settings()
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn list_accounts(
+        &self,
+        _caller: RuntimeCaller,
+    ) -> Result<RuntimeAccountList, RuntimeError> {
+        self.core
+            .account_reads
+            .list_accounts()
+            .await
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn get_account(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.core
+            .account_reads
+            .get_account(account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?
+            .ok_or_else(|| {
+                RuntimeError(RuntimeAdapterError {
+                    code: RuntimeErrorCode::NotFound,
+                    message: "account not found".to_string(),
+                    retryable: false,
+                    correlation_id: None,
+                    details: serde_json::Value::Null,
+                })
+            })
+    }
+
+    async fn resolve_account_scope(
+        &self,
+        _caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<AccountId>, RuntimeError> {
+        self.core
+            .account_reads
+            .resolve_account_scope(scope)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn list_mailboxes(
+        &self,
+        _caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<
+        std::collections::BTreeMap<AccountId, Vec<posthaste_domain::MailboxSummary>>,
+        RuntimeError,
+    > {
+        self.core
+            .account_reads
+            .list_mailboxes(scope)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn list_smart_mailboxes(
+        &self,
+        _caller: RuntimeCaller,
+    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+        self.core
+            .account_reads
+            .list_smart_mailboxes()
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn get_smart_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.core
+            .account_reads
+            .get_smart_mailbox(&smart_mailbox_id)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn list_tags(
+        &self,
+        _caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<posthaste_domain::TagSummary>, RuntimeError> {
+        self.core
+            .account_reads
+            .list_tags(scope)
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn get_identity(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<posthaste_domain::Identity, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.core
+            .api_bridge
+            .service
+            .fetch_identity(&account_id, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn list_sender_addresses(
+        &self,
+        _caller: RuntimeCaller,
+    ) -> Result<Vec<posthaste_domain::CachedSenderAddress>, RuntimeError> {
+        self.core
+            .api_bridge
+            .store
+            .list_sender_address_cache()
+            .map_err(Self::store_error_to_runtime_error)
+    }
+
+    async fn get_reply_context(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<posthaste_domain::ReplyContext, RuntimeError> {
+        let gateway = self
+            .core
+            .live_accounts
+            .gateway(&account_id)
+            .await
+            .map_err(Self::service_error_to_runtime_error)?;
+        self.core
+            .api_bridge
+            .service
+            .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
+            .await
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn sync_account(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError> {
+        self.core
+            .live_accounts
+            .sync_account_with_mode(&account_id, mode)
+            .await
+            .map_err(Self::service_error_to_runtime_error)
     }
 }
 

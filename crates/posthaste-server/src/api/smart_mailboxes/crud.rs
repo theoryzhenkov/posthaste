@@ -18,10 +18,11 @@ pub async fn list_smart_mailboxes(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
     state
-        .service
-        .list_smart_mailboxes()
+        .runtime
+        .list_smart_mailboxes(RuntimeCaller::api())
+        .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/smart-mailboxes
@@ -94,10 +95,11 @@ pub async fn get_smart_mailbox(
     Path(smart_mailbox_id): Path<String>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
     state
-        .service
-        .get_smart_mailbox(&SmartMailboxId::from(smart_mailbox_id))
+        .runtime
+        .get_smart_mailbox(RuntimeCaller::api(), SmartMailboxId::from(smart_mailbox_id))
+        .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// PATCH /v1/smart-mailboxes/{id}

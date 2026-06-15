@@ -17,18 +17,19 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, Method, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountId, ConfigRepository, MailService, MailStore, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
-    SyncCursor, SyncObject, SyncWriteStore, ThreadId,
+    AccountDriver, AccountId, AccountSettings, AccountTransportSettings, AppSettings,
+    ConfigRepository, MailService, MailStore, MailboxId, MailboxRecord, MessageId, MessageRecord,
+    Recipient, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
+    SyncCursor, SyncObject, SyncWriteStore, ThreadId, RFC3339_EPOCH,
 };
-use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeStatus};
+use posthaste_runtime_contract::{RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeStatus};
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
 use posthaste_server::{build_api_router, AppState};
@@ -108,11 +109,12 @@ impl Harness {
         ));
         let root = test_root_key();
         let state = Arc::new(AppState {
-            runtime: AppState::runtime_handle_for_migration(
+            runtime: AppState::runtime_handle_with_account_runtime_provider_for_migration(
                 service.clone(),
                 store.clone(),
                 secret_store.clone(),
                 event_sender.clone(),
+                supervisor.clone(),
             ),
             service,
             store,
@@ -143,6 +145,71 @@ impl Harness {
             .runtime_status(RuntimeCaller::test())
             .await
             .expect("runtime status should be readable")
+    }
+
+    /// Read account list through the runtime handle in API adapter state.
+    pub async fn runtime_accounts(&self) -> RuntimeAccountList {
+        self.state
+            .runtime
+            .list_accounts(RuntimeCaller::test())
+            .await
+            .expect("runtime accounts should be readable")
+    }
+
+    /// Read app settings through the runtime handle in API adapter state.
+    pub async fn runtime_app_settings(&self) -> AppSettings {
+        self.state
+            .runtime
+            .get_app_settings(RuntimeCaller::test())
+            .await
+            .expect("runtime app settings should be readable")
+    }
+
+    /// Persist a configured account through the service.
+    pub fn remember_sender_address(&self, account: &str, name: Option<&str>, email: &str) {
+        self.state
+            .store
+            .remember_sender_address(
+                &AccountId::from(account),
+                &Recipient {
+                    name: name.map(str::to_string),
+                    email: email.to_string(),
+                },
+            )
+            .expect("sender address should save");
+    }
+
+    pub fn save_account(&self, id: &str, name: &str, enabled: bool) {
+        self.state
+            .service
+            .save_source(&AccountSettings {
+                id: AccountId::from(id),
+                name: name.to_string(),
+                full_name: None,
+                email_patterns: Vec::new(),
+                driver: AccountDriver::Mock,
+                enabled,
+                appearance: None,
+                transport: AccountTransportSettings::default(),
+                created_at: RFC3339_EPOCH.to_string(),
+                updated_at: RFC3339_EPOCH.to_string(),
+            })
+            .expect("account should save");
+    }
+
+    pub async fn start_account_runtime(&self, id: &str) {
+        let account = self
+            .state
+            .service
+            .get_source(&AccountId::from(id))
+            .expect("account lookup should succeed")
+            .expect("account should exist");
+        self.state.supervisor.start_account(&account).await;
+        self.state
+            .supervisor
+            .sync_account(&account.id)
+            .await
+            .expect("mock account runtime should sync");
     }
 
     /// Register a source (account id → display name) so conversation/message
@@ -202,12 +269,37 @@ impl Harness {
     /// `GET path` with a bearer token and an allowlisted Host; returns the
     /// status and parsed JSON body (`Null` when empty/unparseable).
     pub async fn get_json(&self, token: &str, path: &str) -> (StatusCode, serde_json::Value) {
+        self.request_json(Method::GET, token, path, None).await
+    }
+
+    /// `POST path` with a bearer token, JSON body, and allowlisted Host.
+    pub async fn post_json(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        self.request_json(Method::POST, token, path, Some(body))
+            .await
+    }
+
+    async fn request_json(
+        &self,
+        method: Method,
+        token: &str,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let body = body
+            .map(|body| Body::from(serde_json::to_vec(&body).expect("body should serialize")))
+            .unwrap_or_else(Body::empty);
         let request = Request::builder()
-            .method("GET")
+            .method(method)
             .uri(path)
             .header(header::HOST, "127.0.0.1")
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
-            .body(Body::empty())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body)
             .expect("request should build");
         let response = self
             .router

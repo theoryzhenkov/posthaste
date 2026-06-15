@@ -162,10 +162,11 @@ async fn execute_read_call(
             .await
             .map(ReadResult::MailboxList),
         ReadOperation::SmartMailboxList => state
-            .service
-            .list_smart_mailboxes()
+            .runtime
+            .list_smart_mailboxes(RuntimeCaller::api())
+            .await
             .map(|items| ReadResult::SmartMailboxList(SmartMailboxListReadResult { items }))
-            .map_err(ApiError::from_service_error),
+            .map_err(ApiError::from_runtime_error),
         ReadOperation::TagList => read_tags(state, prior_results, args)
             .await
             .map(ReadResult::TagList),
@@ -173,29 +174,20 @@ async fn execute_read_call(
 }
 
 async fn read_accounts(state: &Arc<AppState>) -> Result<AccountListReadResult, ApiError> {
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    let accounts = state
-        .service
-        .list_sources()
-        .map_err(ApiError::from_service_error)?;
-    let mut ids = Vec::with_capacity(accounts.len());
-    let mut enabled_ids = Vec::new();
-    let mut items = Vec::with_capacity(accounts.len());
-    for account in accounts {
-        ids.push(account.id.clone());
-        if account.enabled {
-            enabled_ids.push(account.id.clone());
-        }
-        items.push(account_overview(state, &settings, account).await);
+    state
+        .runtime
+        .list_accounts(RuntimeCaller::api())
+        .await
+        .map(account_list_read_result)
+        .map_err(ApiError::from_runtime_error)
+}
+
+fn account_list_read_result(accounts: RuntimeAccountList) -> AccountListReadResult {
+    AccountListReadResult {
+        ids: accounts.ids,
+        enabled_ids: accounts.enabled_ids,
+        items: accounts.items,
     }
-    Ok(AccountListReadResult {
-        ids,
-        enabled_ids,
-        items,
-    })
 }
 
 async fn read_mailboxes(
@@ -204,16 +196,15 @@ async fn read_mailboxes(
     args: ReadCallArgs,
 ) -> Result<MailboxListReadResult, ApiError> {
     let account_ids = resolve_read_account_ids(state, prior_results, args.account_ids).await?;
-    let mut by_account_id = BTreeMap::new();
-    for account_id in account_ids {
-        load_account(state.as_ref(), &account_id)?;
-        let mailboxes = state
-            .service
-            .list_mailboxes(&account_id)
-            .map_err(ApiError::from_service_error)?;
-        by_account_id.insert(account_id, mailboxes);
-    }
-    Ok(MailboxListReadResult { by_account_id })
+    state
+        .runtime
+        .list_mailboxes(
+            RuntimeCaller::api(),
+            AccountScopeRequest::Explicit { account_ids },
+        )
+        .await
+        .map(|by_account_id| MailboxListReadResult { by_account_id })
+        .map_err(ApiError::from_runtime_error)
 }
 
 async fn read_tags(
@@ -223,10 +214,14 @@ async fn read_tags(
 ) -> Result<TagListReadResult, ApiError> {
     let account_ids = resolve_read_account_ids(state, prior_results, args.account_ids).await?;
     state
-        .service
-        .list_merged_tags(&account_ids)
+        .runtime
+        .list_tags(
+            RuntimeCaller::api(),
+            AccountScopeRequest::Explicit { account_ids },
+        )
+        .await
         .map(|items| TagListReadResult { items })
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 async fn resolve_read_account_ids(
@@ -239,17 +234,11 @@ async fn resolve_read_account_ids(
         Some(AccountIdSelector::Reference(reference)) => {
             resolve_account_id_reference(prior_results, &reference)
         }
-        None => {
-            let accounts = state
-                .service
-                .list_sources()
-                .map_err(ApiError::from_service_error)?;
-            Ok(accounts
-                .into_iter()
-                .filter(|account| account.enabled)
-                .map(|account| account.id)
-                .collect())
-        }
+        None => state
+            .runtime
+            .resolve_account_scope(RuntimeCaller::api(), AccountScopeRequest::EnabledAccounts)
+            .await
+            .map_err(ApiError::from_runtime_error),
     }
 }
 

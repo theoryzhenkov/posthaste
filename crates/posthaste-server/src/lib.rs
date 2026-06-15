@@ -3,13 +3,16 @@ pub mod auth;
 pub mod authz;
 pub mod config;
 pub mod logging;
-pub mod oauth;
+pub mod oauth {
+    pub use posthaste_authority_runtime::oauth::*;
+}
 pub mod observability;
 pub mod openapi;
-pub mod push;
 pub mod sanitize;
 pub mod secret;
-pub mod supervisor;
+pub mod supervisor {
+    pub use posthaste_authority_runtime::supervisor::*;
+}
 pub mod token;
 
 use std::net::SocketAddr;
@@ -25,11 +28,13 @@ use axum::{middleware, Router};
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeHandle, RuntimeShutdownHandle,
+    build_authority_runtime, AccountRuntimeOverviewProvider, AuthorityRuntimeApiMigrationBridge,
+    AuthorityRuntimeBuildConfig, AuthorityRuntimeHandle, RuntimeShutdownHandle,
 };
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{DomainEvent, MailService, MailStore, SecretStore};
+use posthaste_domain::{
+    AccountId, AccountRuntimeOverview, DomainEvent, MailService, MailStore, SecretStore,
+};
 use posthaste_observability::{events, ph_info};
 use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -40,7 +45,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::resolve_roots;
 use crate::oauth::OAuthFlowStore;
-use crate::supervisor::AccountSupervisor;
+use posthaste_authority_runtime::AccountSupervisor;
 
 const SEND_MESSAGE_BODY_LIMIT_BYTES: usize = 40 * 1024 * 1024;
 
