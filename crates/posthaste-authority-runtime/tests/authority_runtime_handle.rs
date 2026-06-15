@@ -1,15 +1,20 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
 };
-use posthaste_domain::{SecretRef, SecretStore, SecretStoreError};
+use posthaste_domain::{
+    AccountDriver, ImapTransportSettings, ProviderAuthKind, ProviderHint, SecretRef, SecretStore,
+    SecretStoreError, SmtpTransportSettings, TransportSecurity,
+};
 use posthaste_runtime_contract::{
     AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeLifecycle,
-    SecretWriteMutation,
+    SecretWriteMode, SecretWriteMutation,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -23,24 +28,54 @@ fn temp_root() -> PathBuf {
     std::env::temp_dir().join(format!("posthaste-authority-runtime-test-{now}-{seq}"))
 }
 
-struct TestSecretStore;
+#[derive(Default)]
+struct TestSecretStore {
+    values: Mutex<HashMap<String, String>>,
+}
+
+impl TestSecretStore {
+    fn value(&self, secret_ref: &SecretRef) -> Option<String> {
+        self.values
+            .lock()
+            .expect("secret store mutex")
+            .get(&secret_key(secret_ref))
+            .cloned()
+    }
+}
 
 impl SecretStore for TestSecretStore {
-    fn resolve(&self, _secret_ref: &SecretRef) -> Result<String, SecretStoreError> {
-        Err(SecretStoreError::Unavailable("unused".to_string()))
+    fn resolve(&self, secret_ref: &SecretRef) -> Result<String, SecretStoreError> {
+        self.values
+            .lock()
+            .expect("secret store mutex")
+            .get(&secret_key(secret_ref))
+            .cloned()
+            .ok_or_else(|| SecretStoreError::Unavailable("secret not found".to_string()))
     }
 
-    fn save(&self, _secret_ref: &SecretRef, _value: &str) -> Result<(), SecretStoreError> {
-        Err(SecretStoreError::Unsupported("unused".to_string()))
+    fn save(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+        self.values
+            .lock()
+            .expect("secret store mutex")
+            .insert(secret_key(secret_ref), value.to_string());
+        Ok(())
     }
 
-    fn update(&self, _secret_ref: &SecretRef, _value: &str) -> Result<(), SecretStoreError> {
-        Err(SecretStoreError::Unsupported("unused".to_string()))
+    fn update(&self, secret_ref: &SecretRef, value: &str) -> Result<(), SecretStoreError> {
+        self.save(secret_ref, value)
     }
 
-    fn delete(&self, _secret_ref: &SecretRef) -> Result<(), SecretStoreError> {
-        Err(SecretStoreError::Unsupported("unused".to_string()))
+    fn delete(&self, secret_ref: &SecretRef) -> Result<(), SecretStoreError> {
+        self.values
+            .lock()
+            .expect("secret store mutex")
+            .remove(&secret_key(secret_ref));
+        Ok(())
     }
+}
+
+fn secret_key(secret_ref: &SecretRef) -> String {
+    format!("{:?}:{}", secret_ref.kind, secret_ref.key)
 }
 
 // spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
@@ -54,7 +89,7 @@ async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
         root.join("state"),
         root.join("cache"),
     )
-    .with_secret_store(Arc::new(TestSecretStore));
+    .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -97,7 +132,7 @@ async fn authority_builder_handle_supports_account_mutations() {
         root.join("state"),
         root.join("cache"),
     )
-    .with_secret_store(Arc::new(TestSecretStore));
+    .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -126,6 +161,102 @@ async fn authority_builder_handle_supports_account_mutations() {
     assert_eq!(created.name, "Builder Account");
 }
 
+// spec: docs/backend/L3#account-mutations-runtime-backed
+// spec: docs/runtime/L4#account-mutation-contract-pattern
+#[tokio::test]
+async fn oauth_token_persistence_writes_secret_and_patches_account_through_runtime() {
+    let root = temp_root();
+    let secret_store = Arc::new(TestSecretStore::default());
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(secret_store.clone());
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let created = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            CreateAccountMutation {
+                id: Some("oauth-existing".to_string()),
+                name: "OAuth Existing".to_string(),
+                full_name: None,
+                email_patterns: vec!["user@example.com".to_string()],
+                driver: Some(AccountDriver::ImapSmtp),
+                enabled: Some(false),
+                appearance: None,
+                transport: AccountTransportMutation {
+                    provider: Some(ProviderHint::Gmail),
+                    auth: Some(ProviderAuthKind::Password),
+                    base_url: None,
+                    username: Some("user@example.com".to_string()),
+                    imap: Some(ImapTransportSettings {
+                        host: "imap.example.com".to_string(),
+                        port: 993,
+                        security: TransportSecurity::Tls,
+                    }),
+                    smtp: Some(SmtpTransportSettings {
+                        host: "smtp.example.com".to_string(),
+                        port: 465,
+                        security: TransportSecurity::Tls,
+                    }),
+                },
+                secret: SecretWriteMutation {
+                    mode: SecretWriteMode::Replace,
+                    password: Some("old-password".to_string()),
+                },
+            },
+        )
+        .await
+        .expect("existing account should be created");
+
+    let secret_ref = build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .expect("created account should exist")
+        .transport
+        .secret_ref
+        .expect("created account should have a secret");
+    build
+        .handle
+        .persist_oauth_token_set(
+            created.id.clone(),
+            OAuthTokenSet {
+                r#type: "oauth2".to_string(),
+                provider: ProviderHint::Gmail,
+                client_id: "client-id".to_string(),
+                client_secret: Some("client-secret".to_string()),
+                access_token: "access-token".to_string(),
+                refresh_token: Some("refresh-token".to_string()),
+                expires_at: Some("2026-04-27T10:00:00Z".to_string()),
+                scopes: vec!["email".to_string()],
+            },
+        )
+        .await
+        .expect("OAuth token set should be persisted by runtime");
+
+    let stored = secret_store
+        .value(&secret_ref)
+        .expect("OAuth token set should be written to existing managed secret");
+    let decoded =
+        OAuthTokenSet::decode(&stored).expect("stored secret should be an OAuth token set");
+    assert_eq!(decoded.access_token, "access-token");
+
+    let account = build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .expect("account should exist after OAuth patch");
+    assert_eq!(account.transport.auth, ProviderAuthKind::OAuth2);
+}
+
 #[tokio::test]
 async fn zero_event_channel_capacity_returns_typed_build_error() {
     let root = temp_root();
@@ -134,7 +265,7 @@ async fn zero_event_channel_capacity_returns_typed_build_error() {
         root.join("state"),
         root.join("cache"),
     )
-    .with_secret_store(Arc::new(TestSecretStore))
+    .with_secret_store(Arc::new(TestSecretStore::default()))
     .with_event_channel_capacity(0);
 
     let error = match build_authority_runtime(config).await {

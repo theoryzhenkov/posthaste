@@ -3,9 +3,9 @@ use std::sync::Arc;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
     AccountOverview, AccountSettings, AccountTransportSettings, DomainEvent, ImapTransportSettings,
-    MailService, MailStore, SecretKind, SecretRef, SecretStore, ServiceError,
-    SmtpTransportSettings, StoreError, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_UPDATED,
-    EVENT_TOPIC_CONFIG_RELOADED,
+    MailService, MailStore, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SecretStore,
+    ServiceError, SmtpTransportSettings, StoreError, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, AccountVerificationResult, CreateAccountMutation,
@@ -17,6 +17,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::account_reads::AccountReadService;
+use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
 use crate::supervisor::AccountSupervisor;
 
 const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
@@ -143,6 +144,77 @@ impl AccountMutationService {
         self.supervisor.start_account(&account).await;
         self.append_and_publish_account_event(&account_id, EVENT_TOPIC_ACCOUNT_UPDATED)?;
         self.read_account_overview(account_id).await
+    }
+
+    pub async fn create_oauth_account_from_exchange(
+        &self,
+        profile: &OAuthProviderProfile,
+        exchange: OAuthExchangeResult,
+    ) -> Result<AccountOverview, RuntimeError> {
+        let identity_email = exchange.identity_email.trim().to_string();
+        let encoded = exchange
+            .token_set
+            .encode()
+            .map_err(ServiceError::from)
+            .map_err(service_error_to_runtime_error)?;
+        let (imap, smtp) = oauth_provider_mail_transport(&profile.provider)?;
+        self.create_account(CreateAccountMutation {
+            id: None,
+            name: identity_email.clone(),
+            full_name: None,
+            email_patterns: vec![identity_email.clone()],
+            driver: Some(AccountDriver::ImapSmtp),
+            enabled: Some(true),
+            appearance: None,
+            transport: AccountTransportMutation {
+                provider: Some(profile.provider.clone()),
+                auth: Some(ProviderAuthKind::OAuth2),
+                base_url: None,
+                username: Some(identity_email),
+                imap: Some(imap),
+                smtp: Some(smtp),
+            },
+            secret: SecretWriteMutation {
+                mode: SecretWriteMode::Replace,
+                password: Some(encoded),
+            },
+        })
+        .await
+    }
+
+    pub async fn persist_oauth_token_set(
+        &self,
+        account_id: AccountId,
+        token_set: OAuthTokenSet,
+    ) -> Result<AccountOverview, RuntimeError> {
+        let encoded = token_set
+            .encode()
+            .map_err(ServiceError::from)
+            .map_err(service_error_to_runtime_error)?;
+        self.patch_account(
+            account_id,
+            PatchAccountMutation {
+                name: None,
+                full_name: None,
+                email_patterns: None,
+                driver: None,
+                enabled: None,
+                appearance: None,
+                transport: Some(AccountTransportMutation {
+                    provider: None,
+                    auth: Some(ProviderAuthKind::OAuth2),
+                    base_url: None,
+                    username: None,
+                    imap: None,
+                    smtp: None,
+                }),
+                secret: Some(SecretWriteMutation {
+                    mode: SecretWriteMode::Replace,
+                    password: Some(encoded),
+                }),
+            },
+        )
+        .await
     }
 
     pub async fn verify_account(
@@ -381,6 +453,19 @@ fn account_transport_from_mutation(mutation: AccountTransportMutation) -> Accoun
         imap: mutation.imap,
         smtp: mutation.smtp,
     }
+}
+
+fn oauth_provider_mail_transport(
+    provider: &ProviderHint,
+) -> Result<(ImapTransportSettings, SmtpTransportSettings), RuntimeError> {
+    OAuthProviderProfile::for_provider(provider)
+        .and_then(|profile| profile.default_mail_transport())
+        .ok_or_else(|| {
+            runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "provider does not support built-in OAuth account creation",
+            )
+        })
 }
 
 fn apply_account_patch(account: &mut AccountSettings, request: &PatchAccountMutation) {
