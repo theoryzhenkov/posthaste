@@ -16,19 +16,19 @@ use posthaste_domain::{
     AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AddToMailboxCommand,
     AppSettings, AutomationAction, AutomationRule, CachePolicy, CachedSenderAddress, CommandResult,
     ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
-    ConversationSummary, ConversationView, DomainEvent, EventFilter, GatewayError, Identity,
+    ConversationSummary, ConversationView, DomainEvent, EventFilter, Identity,
     ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
     MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
     ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SharedGateway, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxCondition,
+    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId,
+    SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
-    SyncTrigger, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
-    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
-    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+    TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
+    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
+    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
@@ -107,25 +107,25 @@ pub use sync_events::{
     stream_events, trigger_sync, EventsQuery, TriggerSyncRequest, TriggerSyncResponse,
 };
 
+#[cfg(test)]
+use account_support::apply_account_patch;
 use account_support::{
     account_overview, account_secret_ref, append_and_publish_account_event,
-    append_and_publish_config_event, apply_account_patch, apply_secret_instruction,
-    decide_secret_instruction, default_account_appearance, delete_managed_secret,
+    append_and_publish_config_event, default_account_appearance, delete_managed_secret,
     generate_account_id_seed, generate_smart_mailbox_id, internal_error,
-    normalize_account_appearance, normalize_automation_rules, normalize_email_patterns,
-    normalize_optional, store_error_to_api, validate_account_settings, validate_automation_drafts,
-    validate_automation_rules, validate_logo_image_id, ResourceChange, ResourceOperation,
+    normalize_account_appearance, normalize_automation_rules, store_error_to_api,
+    validate_account_settings, validate_automation_drafts, validate_automation_rules,
+    validate_logo_image_id, ResourceChange, ResourceOperation,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, matches_event, message_limit,
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
-use messages::live_gateway;
 use search_support::{
     combine_rules, parse_optional_search_rule, source_message_scope_rule,
     spawn_search_cache_visibility,
 };
-use support::{command_result_response, load_account};
+use support::load_account;
 
 /// Product API readiness response.
 ///

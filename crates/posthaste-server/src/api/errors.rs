@@ -174,6 +174,30 @@ fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCo
             ApiErrorCode::GatewayUnavailable,
         ),
         RuntimeErrorCode::Conflict => (StatusCode::CONFLICT, ApiErrorCode::Conflict),
+        RuntimeErrorCode::NetworkError => (StatusCode::BAD_GATEWAY, ApiErrorCode::NetworkError),
+        RuntimeErrorCode::StateMismatch => (StatusCode::CONFLICT, ApiErrorCode::StateMismatch),
+        RuntimeErrorCode::GatewayRejected => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::GatewayRejected)
+        }
+        RuntimeErrorCode::SecretUnavailable => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::SecretUnavailable)
+        }
+        RuntimeErrorCode::SecretUnsupported => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::SecretUnsupported)
+        }
+        RuntimeErrorCode::ConfigValidation => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::ConfigValidation)
+        }
+        RuntimeErrorCode::ConfigParse => (StatusCode::BAD_REQUEST, ApiErrorCode::ConfigParse),
+        RuntimeErrorCode::CannotCalculateChanges => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::CannotCalculateChanges,
+        ),
+        RuntimeErrorCode::StorageFailure => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::StorageFailure,
+        ),
+        RuntimeErrorCode::ConfigIo => (StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::ConfigIo),
         RuntimeErrorCode::TransportDisconnected | RuntimeErrorCode::Internal => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiErrorCode::InternalError,

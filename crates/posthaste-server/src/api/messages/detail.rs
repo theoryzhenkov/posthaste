@@ -53,15 +53,15 @@ pub async fn get_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<MessageDetail>, ApiError> {
-    let account_id = AccountId(source_id.clone());
-    let message_id_ref = MessageId(message_id.clone());
-    let gateway = optional_live_gateway(state.as_ref(), &account_id).await;
     let result = state
-        .service
-        .get_message_detail(&account_id, &message_id_ref, gateway.as_deref())
+        .runtime
+        .get_message_detail(
+            RuntimeCaller::api(),
+            AccountId(source_id.clone()),
+            MessageId(message_id.clone()),
+        )
         .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
+        .map_err(ApiError::from_runtime_error)?;
     let mut detail = result.detail.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
@@ -104,39 +104,17 @@ pub async fn get_message_attachment(
     Path((source_id, message_id, attachment_id)): Path<(String, String, String)>,
     Query(query): Query<GetAttachmentQuery>,
 ) -> Result<Response, ApiError> {
-    let account_id = AccountId(source_id);
-    let message_id = MessageId(message_id);
-    let gateway = optional_live_gateway(state.as_ref(), &account_id).await;
-    let result = state
-        .service
-        .get_message_detail(&account_id, &message_id, gateway.as_deref())
-        .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    let detail = result.detail.ok_or_else(|| {
-        ApiError::new(
-            StatusCode::NOT_FOUND,
-            ApiErrorCode::NotFound,
-            "message detail not available",
+    let attachment = state
+        .runtime
+        .get_message_attachment(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+            attachment_id,
         )
-    })?;
-    let attachment = detail
-        .attachments
-        .into_iter()
-        .find(|attachment| attachment.id == attachment_id)
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::NOT_FOUND,
-                ApiErrorCode::NotFound,
-                "attachment not found",
-            )
-        })?;
-    let gateway = require_live_gateway(gateway, &account_id)?;
-    let bytes = state
-        .service
-        .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
         .await
-        .map_err(ApiError::from_service_error)?;
+        .map_err(ApiError::from_runtime_error)?;
+    let bytes = attachment.bytes;
 
     let disposition_kind = if query.download.unwrap_or(false) {
         "attachment"

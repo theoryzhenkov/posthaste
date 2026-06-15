@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use posthaste_domain::{AccountId, GatewayError, ServiceError, SharedGateway, SyncMode};
+use posthaste_domain::{
+    AccountId, GatewayError, ServiceError, SharedGateway, SyncMode, SyncTrigger,
+};
 
 use crate::supervisor::AccountSupervisor;
 
@@ -20,6 +22,12 @@ pub trait LiveAccountRuntimeProvider: Send + Sync {
         account_id: &AccountId,
         mode: SyncMode,
     ) -> Result<usize, ServiceError>;
+
+    async fn trigger_account_sync(
+        &self,
+        account_id: &AccountId,
+        trigger: SyncTrigger,
+    ) -> Result<(), ServiceError>;
 }
 
 pub struct UnavailableLiveAccountRuntimeProvider;
@@ -37,6 +45,14 @@ impl LiveAccountRuntimeProvider for AccountSupervisor {
     ) -> Result<usize, ServiceError> {
         AccountSupervisor::sync_account_with_mode(self, account_id, mode).await
     }
+
+    async fn trigger_account_sync(
+        &self,
+        account_id: &AccountId,
+        trigger: SyncTrigger,
+    ) -> Result<(), ServiceError> {
+        AccountSupervisor::trigger_account_sync(self, account_id, trigger).await
+    }
 }
 
 #[async_trait]
@@ -52,6 +68,16 @@ impl LiveAccountRuntimeProvider for UnavailableLiveAccountRuntimeProvider {
         account_id: &AccountId,
         _mode: SyncMode,
     ) -> Result<usize, ServiceError> {
+        Err(ServiceError::from(GatewayError::Unavailable(
+            account_id.to_string(),
+        )))
+    }
+
+    async fn trigger_account_sync(
+        &self,
+        account_id: &AccountId,
+        _trigger: SyncTrigger,
+    ) -> Result<(), ServiceError> {
         Err(ServiceError::from(GatewayError::Unavailable(
             account_id.to_string(),
         )))

@@ -847,12 +847,27 @@ fn generate_account_id_seed(name: &str, email_patterns: &[String]) -> String {
 pub(crate) fn service_error_to_runtime_error(error: ServiceError) -> RuntimeError {
     let code = match error.kind() {
         posthaste_domain::ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
-        posthaste_domain::ServiceErrorKind::Conflict
-        | posthaste_domain::ServiceErrorKind::StateMismatch => RuntimeErrorCode::Conflict,
+        posthaste_domain::ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
+        posthaste_domain::ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
         posthaste_domain::ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
-        posthaste_domain::ServiceErrorKind::GatewayUnavailable
-        | posthaste_domain::ServiceErrorKind::NetworkError => RuntimeErrorCode::ProviderUnavailable,
-        _ => RuntimeErrorCode::Internal,
+        posthaste_domain::ServiceErrorKind::GatewayUnavailable => {
+            RuntimeErrorCode::ProviderUnavailable
+        }
+        posthaste_domain::ServiceErrorKind::NetworkError => RuntimeErrorCode::NetworkError,
+        posthaste_domain::ServiceErrorKind::CannotCalculateChanges => {
+            RuntimeErrorCode::CannotCalculateChanges
+        }
+        posthaste_domain::ServiceErrorKind::GatewayRejected => RuntimeErrorCode::GatewayRejected,
+        posthaste_domain::ServiceErrorKind::SecretUnavailable => {
+            RuntimeErrorCode::SecretUnavailable
+        }
+        posthaste_domain::ServiceErrorKind::SecretUnsupported => {
+            RuntimeErrorCode::SecretUnsupported
+        }
+        posthaste_domain::ServiceErrorKind::StorageFailure => RuntimeErrorCode::StorageFailure,
+        posthaste_domain::ServiceErrorKind::ConfigValidation => RuntimeErrorCode::ConfigValidation,
+        posthaste_domain::ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
+        posthaste_domain::ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
     };
     runtime_error(code, error.to_string())
 }

@@ -72,24 +72,17 @@ pub async fn patch_mailbox(
     Json(request): Json<PatchMailboxRequest>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
     let role = validate_patch_mailbox_role(request.role)?;
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    let events = state
-        .service
+    state
+        .runtime
         .set_mailbox_role(
-            &account_id,
-            &MailboxId(mailbox_id),
-            role.as_deref(),
-            gateway.as_ref(),
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MailboxId(mailbox_id),
+            role,
         )
         .await
-        .map_err(ApiError::from_service_error)?;
-    state.publish_events(&events);
-    state
-        .service
-        .list_mailboxes(&account_id)
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 fn validate_patch_mailbox_role(role: Option<Option<String>>) -> Result<Option<String>, ApiError> {

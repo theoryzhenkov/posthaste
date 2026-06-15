@@ -7,7 +7,10 @@ use posthaste_authority_runtime::{
     build_authority_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
 };
 use posthaste_domain::{SecretRef, SecretStore, SecretStoreError};
-use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeLifecycle};
+use posthaste_runtime_contract::{
+    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeLifecycle,
+    SecretWriteMutation,
+};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -83,6 +86,44 @@ async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
         .await
         .expect("runtime status should remain readable after shutdown");
     assert_eq!(stopped_status.lifecycle, RuntimeLifecycle::Stopped);
+}
+
+// spec: docs/runtime/L4#authority-build-order
+#[tokio::test]
+async fn authority_builder_handle_supports_account_mutations() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore));
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+
+    let created = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            CreateAccountMutation {
+                id: Some("acct-builder".to_string()),
+                name: "Builder Account".to_string(),
+                driver: Some(posthaste_domain::AccountDriver::Mock),
+                enabled: Some(false),
+                full_name: None,
+                email_patterns: Vec::new(),
+                appearance: None,
+                transport: AccountTransportMutation::default(),
+                secret: SecretWriteMutation::default(),
+            },
+        )
+        .await
+        .expect("builder handle should support account mutations");
+
+    assert_eq!(created.id.as_str(), "acct-builder");
+    assert_eq!(created.name, "Builder Account");
 }
 
 #[tokio::test]

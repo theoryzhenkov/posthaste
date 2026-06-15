@@ -113,36 +113,11 @@ pub async fn send_message(
     Json(request): Json<SendMessageRequest>,
 ) -> Result<Json<OkResponse>, ApiError> {
     validate_send_message_request(&request)?;
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
     state
-        .service
-        .send_message(&account_id, &request, gateway.as_ref())
+        .runtime
+        .send_message(RuntimeCaller::api(), AccountId(source_id), request)
         .await
-        .map_err(ApiError::from_service_error)?;
-    if let Some(sender) = &request.from {
-        if let Err(error) = state.store.remember_sender_address(&account_id, sender) {
-            ph_warn!(
-                events::SEND_SENDER_CACHE_UPDATE_FAILED,
-                source_id = %account_id,
-                sender = %sender.email,
-                error = %error,
-                "send accepted but sender address cache update failed"
-            );
-        }
-    }
-    if let Err(error) = state
-        .supervisor
-        .trigger_account_sync(&account_id, SyncTrigger::Manual)
-        .await
-    {
-        ph_warn!(
-            events::SEND_FOLLOWUP_SYNC_TRIGGER_FAILED,
-            source_id = %account_id,
-            error = %error,
-            "send accepted but follow-up sync trigger failed"
-        );
-    }
+        .map_err(ApiError::from_runtime_error)?;
     Ok(Json(OkResponse { ok: true }))
 }
 
