@@ -59,6 +59,11 @@ impl AuthorityRuntimeBuildConfig {
         self
     }
 
+    pub fn with_bootstrap_path_option(mut self, bootstrap_path: Option<PathBuf>) -> Self {
+        self.bootstrap_path = bootstrap_path;
+        self
+    }
+
     pub fn with_secret_store(mut self, secret_store: Arc<dyn SecretStore>) -> Self {
         self.secret_store = Some(secret_store);
         self
@@ -77,6 +82,39 @@ pub struct AuthorityRuntimeBuild {
     pub handle: AuthorityRuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
     pub runtime_status: RuntimeStatus,
+    /// MIGRATION(api-runtime-wrapper): exposes the existing mail service/store
+    /// graph to the Axum adapter while handlers move behind runtime methods.
+    ///
+    /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
+    pub api_bridge: AuthorityRuntimeApiMigrationBridge,
+}
+
+/// Temporary bridge for the existing Axum API adapter while route handlers move
+/// from direct service/store access to runtime-handle methods.
+///
+/// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
+#[derive(Clone)]
+pub struct AuthorityRuntimeApiMigrationBridge {
+    pub service: Arc<MailService>,
+    pub store: Arc<dyn MailStore>,
+    pub secret_store: Arc<dyn SecretStore>,
+    pub event_sender: broadcast::Sender<DomainEvent>,
+}
+
+impl AuthorityRuntimeApiMigrationBridge {
+    pub fn new(
+        service: Arc<MailService>,
+        store: Arc<dyn MailStore>,
+        secret_store: Arc<dyn SecretStore>,
+        event_sender: broadcast::Sender<DomainEvent>,
+    ) -> Self {
+        Self {
+            service,
+            store,
+            secret_store,
+            event_sender,
+        }
+    }
 }
 
 /// Build the authority runtime without binding HTTP or depending on Tauri.
@@ -131,12 +169,10 @@ pub async fn build_authority_runtime(
         account_count,
     };
 
+    let api_bridge =
+        AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender);
     let core = Arc::new(AuthorityRuntimeCore {
-        service,
-        store,
-        config: config_repo,
-        secret_store,
-        event_sender,
+        api_bridge: api_bridge.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
     });
@@ -145,20 +181,13 @@ pub async fn build_authority_runtime(
         handle: AuthorityRuntimeHandle { core },
         shutdown: RuntimeShutdownHandle { stopped },
         runtime_status,
+        api_bridge,
     })
 }
 
 struct AuthorityRuntimeCore {
     #[allow(dead_code)]
-    service: Arc<MailService>,
-    #[allow(dead_code)]
-    store: Arc<dyn MailStore>,
-    #[allow(dead_code)]
-    config: Arc<dyn ConfigRepository>,
-    #[allow(dead_code)]
-    secret_store: Arc<dyn SecretStore>,
-    #[allow(dead_code)]
-    event_sender: broadcast::Sender<DomainEvent>,
+    api_bridge: AuthorityRuntimeApiMigrationBridge,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
 }
@@ -173,6 +202,33 @@ pub struct AuthorityRuntimeHandle {
 }
 
 impl AuthorityRuntimeHandle {
+    /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
+    /// test/API parts until all router state is produced by the authority
+    /// runtime builder.
+    ///
+    /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+    pub fn from_api_bridge_for_migration(
+        api_bridge: AuthorityRuntimeApiMigrationBridge,
+        account_count: usize,
+    ) -> Self {
+        let runtime_status = RuntimeStatus {
+            lifecycle: RuntimeLifecycle::Ready,
+            store: RuntimeStoreStatus {
+                config_loaded: true,
+                state_store_open: true,
+                cache_root_ready: false,
+            },
+            account_count,
+        };
+        Self {
+            core: Arc::new(AuthorityRuntimeCore {
+                api_bridge,
+                startup_status: runtime_status,
+                stopped: Arc::new(AtomicBool::new(false)),
+            }),
+        }
+    }
+
     fn current_status(&self) -> RuntimeStatus {
         let mut status = self.core.startup_status.clone();
         if self.core.stopped.load(Ordering::SeqCst) {

@@ -82,6 +82,12 @@ impl SettingsHarness {
         ));
         Self {
             state: Arc::new(AppState {
+                runtime: AppState::runtime_handle_for_migration(
+                    service.clone(),
+                    store.clone(),
+                    secret_store.clone(),
+                    event_sender.clone(),
+                ),
                 service,
                 store,
                 secret_store,

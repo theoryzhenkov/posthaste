@@ -97,6 +97,12 @@ pub(super) fn build_state(require_auth: bool) -> Arc<AppState> {
         Duration::from_secs(60),
     ));
     Arc::new(AppState {
+        runtime: AppState::runtime_handle_for_migration(
+            service.clone(),
+            store.clone(),
+            secret_store.clone(),
+            event_sender.clone(),
+        ),
         service,
         store,
         secret_store,

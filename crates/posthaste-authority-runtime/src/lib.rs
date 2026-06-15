@@ -12,8 +12,8 @@ mod build;
 mod secret;
 
 pub use build::{
-    build_authority_runtime, AuthorityRuntimeBuild, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeBuildError, AuthorityRuntimeHandle, AuthorityRuntimeShutdownError,
-    RuntimeShutdownHandle,
+    build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuild,
+    AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError, AuthorityRuntimeHandle,
+    AuthorityRuntimeShutdownError, RuntimeShutdownHandle,
 };
 pub use secret::SystemSecretStore;

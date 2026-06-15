@@ -11,27 +11,40 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     let roots = resolve_roots();
 
-    let config_repo =
+    let settings_repo =
         TomlConfigRepository::open(&roots.config_root).expect("failed to open config directory");
 
     let runtime =
-        config::read_daemon_settings(&config_repo).expect("failed to read runtime settings");
+        config::read_daemon_settings(&settings_repo).expect("failed to read runtime settings");
+    let config_was_empty = settings_repo.is_empty();
+    drop(settings_repo);
 
     let log_guard = logging::init(&roots.state_root, &runtime.log_level);
 
-    if config_repo.is_empty() {
+    // MIGRATION(api-runtime-wrapper): authority runtime owns config/store/
+    // service/secret/event assembly; AppState temporarily exposes those parts
+    // to existing Axum handlers through api_bridge.
+    //
+    // @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#server-startup-authority-builder
+    let runtime_build = build_authority_runtime(
+        AuthorityRuntimeBuildConfig::new(
+            roots.config_root.clone(),
+            roots.state_root.clone(),
+            roots.state_root.join("cache"),
+        )
+        .with_bootstrap_path_option(roots.bootstrap_path.clone()),
+    )
+    .await
+    .expect("failed to build authority runtime");
+
+    if config_was_empty {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
-            config::import_bootstrap(bootstrap_path, &config_repo)
-                .expect("failed to import bootstrap template");
             ph_info!(
                 events::CONFIG_BOOTSTRAP_IMPORTED,
                 path = %bootstrap_path.display(),
                 "imported bootstrap template"
             );
         } else {
-            config_repo
-                .initialize_defaults()
-                .expect("failed to initialize default config");
             ph_info!(
                 events::CONFIG_DEFAULT_INITIALIZED,
                 "initialized default config"
@@ -39,21 +52,10 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         }
     }
 
-    let db_path = roots.state_root.join("mail.sqlite");
-    let database_store = Arc::new(
-        DatabaseStore::open(&db_path, &roots.state_root).expect("failed to initialize store"),
-    );
-    let store: Arc<dyn MailStore> = database_store.clone();
-
-    let config: Arc<dyn ConfigRepository> = Arc::new(config_repo);
-    let service = Arc::new(MailService::new(database_store.clone(), config.clone()));
-
-    service
-        .sync_source_projections()
-        .expect("failed to sync source projections");
-
-    let (event_sender, _) = broadcast::channel(512);
-    let secret_store: Arc<dyn SecretStore> = Arc::new(SystemSecretStore);
+    let service = runtime_build.api_bridge.service.clone();
+    let store = runtime_build.api_bridge.store.clone();
+    let secret_store = runtime_build.api_bridge.secret_store.clone();
+    let event_sender = runtime_build.api_bridge.event_sender.clone();
     let supervisor = Arc::new(AccountSupervisor::new(
         service.clone(),
         store.clone(),
@@ -90,6 +92,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let host_allowlist = auth::host_allowlist(&bind_address);
 
     let state = Arc::new(AppState {
+        runtime: runtime_build.handle.clone(),
         service,
         store,
         secret_store,
@@ -204,6 +207,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         addr,
         join_handle,
         log_guard,
+        runtime_shutdown: runtime_build.shutdown,
         auth_token,
         require_auth: runtime.require_auth,
     }
