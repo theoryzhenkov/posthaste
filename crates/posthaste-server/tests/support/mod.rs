@@ -283,6 +283,17 @@ impl Harness {
             .await
     }
 
+    /// `PATCH path` with a bearer token, JSON body, and allowlisted Host.
+    pub async fn patch_json(
+        &self,
+        token: &str,
+        path: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        self.request_json(Method::PATCH, token, path, Some(body))
+            .await
+    }
+
     async fn request_json(
         &self,
         method: Method,

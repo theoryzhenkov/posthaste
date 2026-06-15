@@ -11,13 +11,15 @@ use posthaste_domain::{
     MessageId, SecretStore, ServiceError, ServiceErrorKind, SmartMailboxId, StoreError, SyncMode,
 };
 use posthaste_runtime_contract::{
-    AccountScopeRequest, RuntimeAccountList, RuntimeAdapterError, RuntimeCaller, RuntimeCore,
-    RuntimeError, RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, PatchAccountMutation,
+    RuntimeAccountList, RuntimeAdapterError, RuntimeCaller, RuntimeCore, RuntimeError,
+    RuntimeErrorCode, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
+use crate::account_mutations::AccountMutationService;
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::bootstrap::initialize_config;
 use crate::{
@@ -183,6 +185,7 @@ pub async fn build_authority_runtime(
     let core = Arc::new(AuthorityRuntimeCore {
         api_bridge: api_bridge.clone(),
         account_reads,
+        account_mutations: None,
         live_accounts: Arc::new(UnavailableLiveAccountRuntimeProvider),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
@@ -200,6 +203,7 @@ struct AuthorityRuntimeCore {
     #[allow(dead_code)]
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     account_reads: Arc<AccountReadService>,
+    account_mutations: Option<Arc<AccountMutationService>>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
@@ -288,10 +292,50 @@ impl AuthorityRuntimeHandle {
         status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
         live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     ) -> Self {
+        Self::from_api_bridge_with_optional_mutations_for_migration(
+            api_bridge,
+            account_count,
+            status_provider,
+            live_accounts,
+            None,
+        )
+    }
+
+    pub fn from_api_bridge_with_account_supervisor_for_migration(
+        api_bridge: AuthorityRuntimeApiMigrationBridge,
+        account_count: usize,
+        account_supervisor: Arc<crate::AccountSupervisor>,
+    ) -> Self {
+        Self::from_api_bridge_with_optional_mutations_for_migration(
+            api_bridge,
+            account_count,
+            account_supervisor.clone(),
+            account_supervisor.clone(),
+            Some(account_supervisor),
+        )
+    }
+
+    fn from_api_bridge_with_optional_mutations_for_migration(
+        api_bridge: AuthorityRuntimeApiMigrationBridge,
+        account_count: usize,
+        status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
+        live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
+        account_supervisor: Option<Arc<crate::AccountSupervisor>>,
+    ) -> Self {
         let account_reads = Arc::new(AccountReadService::new(
             api_bridge.service.clone(),
             status_provider,
         ));
+        let account_mutations = account_supervisor.map(|supervisor| {
+            Arc::new(AccountMutationService::new(
+                api_bridge.service.clone(),
+                api_bridge.store.clone(),
+                api_bridge.secret_store.clone(),
+                api_bridge.event_sender.clone(),
+                supervisor,
+                account_reads.clone(),
+            ))
+        });
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
@@ -305,6 +349,7 @@ impl AuthorityRuntimeHandle {
             core: Arc::new(AuthorityRuntimeCore {
                 api_bridge,
                 account_reads,
+                account_mutations,
                 live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
@@ -318,6 +363,18 @@ impl AuthorityRuntimeHandle {
             status.lifecycle = RuntimeLifecycle::Stopped;
         }
         status
+    }
+
+    fn account_mutations(&self) -> Result<Arc<AccountMutationService>, RuntimeError> {
+        self.core.account_mutations.clone().ok_or_else(|| {
+            RuntimeError(RuntimeAdapterError {
+                code: RuntimeErrorCode::RuntimeNotReady,
+                message: "account mutation runtime is not available".to_string(),
+                retryable: false,
+                correlation_id: None,
+                details: serde_json::Value::Null,
+            })
+        })
     }
 }
 
@@ -484,6 +541,48 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .sync_account_with_mode(&account_id, mode)
             .await
             .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn create_account(
+        &self,
+        _caller: RuntimeCaller,
+        mutation: CreateAccountMutation,
+    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.account_mutations()?.create_account(mutation).await
+    }
+
+    async fn patch_account(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.account_mutations()?
+            .patch_account(account_id, mutation)
+            .await
+    }
+
+    async fn verify_account(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError> {
+        self.account_mutations()?.verify_account(account_id).await
+    }
+
+    async fn set_account_enabled(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?
+            .set_account_enabled(account_id, enabled)
+            .await
+    }
+
+    async fn reload_config(&self, _caller: RuntimeCaller) -> Result<(), RuntimeError> {
+        self.account_mutations()?.reload_config().await
     }
 }
 

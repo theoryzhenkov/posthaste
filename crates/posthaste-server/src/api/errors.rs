@@ -151,6 +151,22 @@ fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCo
         RuntimeErrorCode::InvalidDescriptor | RuntimeErrorCode::InvalidMutation => {
             (StatusCode::BAD_REQUEST, ApiErrorCode::InvalidQuery)
         }
+        RuntimeErrorCode::InvalidSecret => (StatusCode::BAD_REQUEST, ApiErrorCode::InvalidSecret),
+        RuntimeErrorCode::InvalidAccount => (StatusCode::BAD_REQUEST, ApiErrorCode::InvalidAccount),
+        RuntimeErrorCode::AccountBaseUrlRequired => (
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::AccountBaseUrlRequired,
+        ),
+        RuntimeErrorCode::AccountSecretRequired => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::AccountSecretRequired)
+        }
+        RuntimeErrorCode::AccountUsernameRequired => (
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::AccountUsernameRequired,
+        ),
+        RuntimeErrorCode::AccountSenderRequired => {
+            (StatusCode::BAD_REQUEST, ApiErrorCode::AccountSenderRequired)
+        }
         RuntimeErrorCode::Unauthorized => (StatusCode::UNAUTHORIZED, ApiErrorCode::Unauthorized),
         RuntimeErrorCode::NotFound => (StatusCode::NOT_FOUND, ApiErrorCode::NotFound),
         RuntimeErrorCode::ProviderUnavailable => (

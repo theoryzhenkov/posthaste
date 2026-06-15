@@ -8,9 +8,10 @@
 
 use async_trait::async_trait;
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, CachedSenderAddress, Identity, MailboxSummary,
-    MessageId, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode,
-    TagSummary,
+    AccountAppearance, AccountDriver, AccountId, AccountOverview, AppSettings, CachedSenderAddress,
+    Identity, ImapTransportSettings, MailboxSummary, MessageId, ProviderAuthKind, ProviderHint,
+    ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SmtpTransportSettings,
+    SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -181,6 +182,72 @@ pub enum AccountScopeRequest {
     Explicit { account_ids: Vec<AccountId> },
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountTransportMutation {
+    pub provider: Option<ProviderHint>,
+    pub auth: Option<ProviderAuthKind>,
+    pub base_url: Option<String>,
+    pub username: Option<String>,
+    pub imap: Option<ImapTransportSettings>,
+    pub smtp: Option<SmtpTransportSettings>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretWriteMode {
+    #[default]
+    Keep,
+    Replace,
+    Clear,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretWriteMutation {
+    #[serde(default)]
+    pub mode: SecretWriteMode,
+    pub password: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAccountMutation {
+    pub id: Option<String>,
+    pub name: String,
+    pub full_name: Option<String>,
+    #[serde(default)]
+    pub email_patterns: Vec<String>,
+    pub driver: Option<AccountDriver>,
+    pub enabled: Option<bool>,
+    pub appearance: Option<AccountAppearance>,
+    #[serde(default)]
+    pub transport: AccountTransportMutation,
+    #[serde(default)]
+    pub secret: SecretWriteMutation,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchAccountMutation {
+    pub name: Option<String>,
+    pub full_name: Option<String>,
+    pub email_patterns: Option<Vec<String>>,
+    pub driver: Option<AccountDriver>,
+    pub enabled: Option<bool>,
+    pub appearance: Option<AccountAppearance>,
+    pub transport: Option<AccountTransportMutation>,
+    pub secret: Option<SecretWriteMutation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountVerificationResult {
+    pub ok: bool,
+    pub identity_email: Option<String>,
+    pub push_supported: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatus {
@@ -310,6 +377,12 @@ pub enum RuntimeErrorCode {
     RuntimeNotReady,
     InvalidDescriptor,
     InvalidMutation,
+    InvalidSecret,
+    InvalidAccount,
+    AccountBaseUrlRequired,
+    AccountSecretRequired,
+    AccountUsernameRequired,
+    AccountSenderRequired,
     Unauthorized,
     NotFound,
     ProviderUnavailable,
@@ -415,4 +488,32 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         mode: SyncMode,
     ) -> Result<usize, RuntimeError>;
+
+    async fn create_account(
+        &self,
+        caller: RuntimeCaller,
+        mutation: CreateAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError>;
+
+    async fn patch_account(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError>;
+
+    async fn verify_account(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError>;
+
+    async fn set_account_enabled(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError>;
+
+    async fn reload_config(&self, caller: RuntimeCaller) -> Result<(), RuntimeError>;
 }
