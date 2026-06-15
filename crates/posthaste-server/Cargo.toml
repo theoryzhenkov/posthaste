@@ -27,11 +27,13 @@ jsonwebtoken = { workspace = true }
 keyring = { workspace = true }
 macaroon = { workspace = true }
 oauth2 = { workspace = true }
+posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-observability = { path = "../posthaste-observability" }
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }

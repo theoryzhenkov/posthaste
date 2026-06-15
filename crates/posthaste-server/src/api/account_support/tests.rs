@@ -98,6 +98,12 @@ fn test_app_state() -> TestAppState {
 
     TestAppState {
         state: AppState {
+            runtime: AppState::runtime_handle_for_migration(
+                service.clone(),
+                store.clone(),
+                secret_store_for_state.clone(),
+                event_sender.clone(),
+            ),
             service,
             store,
             secret_store: secret_store_for_state,

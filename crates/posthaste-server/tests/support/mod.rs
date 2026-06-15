@@ -28,6 +28,7 @@ use posthaste_domain::{
     MessageRecord, SecretRef, SecretStore, SecretStoreError, SourceProjectionStore, SyncBatch,
     SyncCursor, SyncObject, SyncWriteStore, ThreadId,
 };
+use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeStatus};
 use posthaste_server::supervisor::AccountSupervisor;
 use posthaste_server::token::{attenuate, mint_full_scope_token, mint_with_caveats, RootKey};
 use posthaste_server::{build_api_router, AppState};
@@ -75,6 +76,7 @@ pub struct Harness {
     db: Arc<DatabaseStore>,
     router: Router,
     root: RootKey,
+    state: Arc<AppState>,
 }
 
 impl Harness {
@@ -106,6 +108,12 @@ impl Harness {
         ));
         let root = test_root_key();
         let state = Arc::new(AppState {
+            runtime: AppState::runtime_handle_for_migration(
+                service.clone(),
+                store.clone(),
+                secret_store.clone(),
+                event_sender.clone(),
+            ),
             service,
             store,
             secret_store,
@@ -119,8 +127,22 @@ impl Harness {
             origin_allowlist: posthaste_server::auth::origin_allowlist(CORS_ORIGIN, &[]),
             host_allowlist: posthaste_server::auth::host_allowlist("127.0.0.1:3001"),
         });
-        let router = Router::new().nest("/v1", build_api_router(state));
-        Self { db, router, root }
+        let router = Router::new().nest("/v1", build_api_router(state.clone()));
+        Self {
+            db,
+            router,
+            root,
+            state,
+        }
+    }
+
+    /// Read runtime status through the API adapter state wrapper.
+    pub async fn runtime_status(&self) -> RuntimeStatus {
+        self.state
+            .runtime
+            .runtime_status(RuntimeCaller::test())
+            .await
+            .expect("runtime status should be readable")
     }
 
     /// Register a source (account id → display name) so conversation/message

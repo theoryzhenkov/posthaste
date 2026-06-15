@@ -12,6 +12,8 @@ depends:
   - path: docs/client/L2
   - path: docs/backend/L2
   - path: docs/state/mail/L2
+dependents:
+  - path: docs/eph/PLAN-L3-api-runtime-wrapper-migration
 ---
 
 # Bundled app implementation test plan
