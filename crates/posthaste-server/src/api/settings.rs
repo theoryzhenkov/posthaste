@@ -73,10 +73,11 @@ pub async fn get_settings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AppSettings>, ApiError> {
     state
-        .service
-        .get_app_settings()
+        .runtime
+        .get_app_settings(RuntimeCaller::api())
+        .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// PATCH /v1/settings

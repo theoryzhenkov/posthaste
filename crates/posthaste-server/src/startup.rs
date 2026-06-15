@@ -91,8 +91,16 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         .unwrap_or_else(|| runtime.bind_address.clone());
     let host_allowlist = auth::host_allowlist(&bind_address);
 
+    let runtime_handle = AppState::runtime_handle_with_account_runtime_provider_for_migration(
+        service.clone(),
+        store.clone(),
+        secret_store.clone(),
+        event_sender.clone(),
+        supervisor.clone(),
+    );
+
     let state = Arc::new(AppState {
-        runtime: runtime_build.handle.clone(),
+        runtime: runtime_handle,
         service,
         store,
         secret_store,

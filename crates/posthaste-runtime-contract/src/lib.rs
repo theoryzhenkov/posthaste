@@ -7,8 +7,14 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#contract-no-transport-types
 
 use async_trait::async_trait;
+use posthaste_domain::{
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, Identity, MailboxSummary,
+    MessageId, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode,
+    TagSummary,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -116,6 +122,13 @@ impl RuntimeCaller {
         }
     }
 
+    pub fn api() -> Self {
+        Self {
+            operation_source: RuntimeOperationSource::Api,
+            ..Self::system()
+        }
+    }
+
     pub fn test() -> Self {
         Self {
             operation_source: RuntimeOperationSource::Test,
@@ -151,6 +164,21 @@ pub enum RuntimeOperationSource {
     Desktop,
     Renderer,
     Test,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAccountList {
+    pub ids: Vec<AccountId>,
+    pub enabled_ids: Vec<AccountId>,
+    pub items: Vec<AccountOverview>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum AccountScopeRequest {
+    EnabledAccounts,
+    Explicit { account_ids: Vec<AccountId> },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -320,4 +348,71 @@ impl RuntimeError {
 #[async_trait]
 pub trait RuntimeCore: Send + Sync {
     async fn runtime_status(&self, caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError>;
+
+    async fn get_app_settings(&self, caller: RuntimeCaller) -> Result<AppSettings, RuntimeError>;
+
+    async fn list_accounts(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<RuntimeAccountList, RuntimeError>;
+
+    async fn get_account(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<AccountOverview, RuntimeError>;
+
+    async fn resolve_account_scope(
+        &self,
+        caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<AccountId>, RuntimeError>;
+
+    async fn list_mailboxes(
+        &self,
+        caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError>;
+
+    async fn list_smart_mailboxes(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError>;
+
+    async fn get_smart_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<SmartMailbox, RuntimeError>;
+
+    async fn list_tags(
+        &self,
+        caller: RuntimeCaller,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<TagSummary>, RuntimeError>;
+
+    async fn get_identity(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<Identity, RuntimeError>;
+
+    async fn list_sender_addresses(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<Vec<CachedSenderAddress>, RuntimeError>;
+
+    async fn get_reply_context(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<ReplyContext, RuntimeError>;
+
+    async fn sync_account(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError>;
 }

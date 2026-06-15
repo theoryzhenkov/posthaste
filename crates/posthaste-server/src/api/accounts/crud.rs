@@ -17,19 +17,12 @@ use super::*;
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AccountOverview>>, ApiError> {
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    let accounts = state
-        .service
-        .list_sources()
-        .map_err(ApiError::from_service_error)?;
-    let mut response = Vec::with_capacity(accounts.len());
-    for account in accounts {
-        response.push(account_overview(&state, &settings, account).await);
-    }
-    Ok(Json(response))
+    state
+        .runtime
+        .list_accounts(RuntimeCaller::api())
+        .await
+        .map(|accounts| Json(accounts.items))
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// GET /v1/accounts/{account_id}
@@ -51,13 +44,12 @@ pub async fn get_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
 ) -> Result<Json<AccountOverview>, ApiError> {
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    let account_id = AccountId::from(account_id.as_str());
-    let account = load_account(state.as_ref(), &account_id)?;
-    Ok(Json(account_overview(&state, &settings, account).await))
+    state
+        .runtime
+        .get_account(RuntimeCaller::api(), AccountId::from(account_id.as_str()))
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/accounts
