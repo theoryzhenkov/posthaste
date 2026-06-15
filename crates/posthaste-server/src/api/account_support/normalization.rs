@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::*;
 
 /// Trim whitespace from an optional string, converting empty/blank to `None`.
@@ -56,70 +57,6 @@ pub(crate) fn apply_account_patch(account: &mut AccountSettings, request: &Patch
             account.transport.smtp = transport.smtp.clone();
         }
     }
-}
-
-pub(crate) fn normalize_automation_rules(rules: &[AutomationRule]) -> Vec<AutomationRule> {
-    rules
-        .iter()
-        .map(|rule| AutomationRule {
-            id: rule.id.trim().to_string(),
-            name: rule.name.trim().to_string(),
-            enabled: rule.enabled,
-            triggers: rule.triggers.clone(),
-            condition: rule.condition.clone(),
-            actions: rule
-                .actions
-                .iter()
-                .map(normalize_automation_action)
-                .collect(),
-            backfill: rule.backfill,
-        })
-        .collect()
-}
-
-fn normalize_automation_action(action: &AutomationAction) -> AutomationAction {
-    match action {
-        AutomationAction::ApplyTag { tag } => AutomationAction::ApplyTag {
-            tag: tag.trim().to_string(),
-        },
-        AutomationAction::RemoveTag { tag } => AutomationAction::RemoveTag {
-            tag: tag.trim().to_string(),
-        },
-        AutomationAction::MarkRead => AutomationAction::MarkRead,
-        AutomationAction::MarkUnread => AutomationAction::MarkUnread,
-        AutomationAction::Flag => AutomationAction::Flag,
-        AutomationAction::Unflag => AutomationAction::Unflag,
-        AutomationAction::MoveToMailbox { mailbox_id } => AutomationAction::MoveToMailbox {
-            mailbox_id: MailboxId::from(mailbox_id.as_str().trim()),
-        },
-    }
-}
-
-pub(crate) fn validate_automation_drafts(
-    active_rules: &[AutomationRule],
-    draft_rules: &[AutomationRule],
-) -> Result<(), ApiError> {
-    let mut ids = std::collections::BTreeSet::new();
-    for rule in active_rules {
-        ids.insert(rule.id.trim().to_string());
-    }
-    for rule in draft_rules {
-        if rule.id.trim().is_empty() {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                ApiErrorCode::InvalidAccount,
-                "automation draft id is required",
-            ));
-        }
-        if !ids.insert(rule.id.trim().to_string()) {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                ApiErrorCode::InvalidAccount,
-                "automation rule and draft ids must be unique",
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Normalize user-owned email addresses/patterns by trimming whitespace and

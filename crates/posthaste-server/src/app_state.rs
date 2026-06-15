@@ -79,30 +79,19 @@ impl AppState {
         secret_store: Arc<dyn SecretStore>,
         event_sender: broadcast::Sender<DomainEvent>,
     ) -> AuthorityRuntimeHandle {
-        Self::runtime_handle_with_status_provider_for_migration(
+        let account_runtime_provider = Arc::new(AccountSupervisor::new(
+            service.clone(),
+            store.clone(),
+            secret_store.clone(),
+            event_sender.clone(),
+            Duration::from_secs(60),
+        ));
+        Self::runtime_handle_with_account_runtime_provider_for_migration(
             service,
             store,
             secret_store,
             event_sender,
-            Arc::new(DefaultAccountRuntimeStatusProvider),
-        )
-    }
-
-    pub fn runtime_handle_with_status_provider_for_migration(
-        service: Arc<MailService>,
-        store: Arc<dyn MailStore>,
-        secret_store: Arc<dyn SecretStore>,
-        event_sender: broadcast::Sender<DomainEvent>,
-        status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
-    ) -> AuthorityRuntimeHandle {
-        let account_count = service
-            .list_sources()
-            .expect("migration runtime handle should read configured sources")
-            .len();
-        AuthorityRuntimeHandle::from_api_bridge_with_status_provider_for_migration(
-            AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender),
-            account_count,
-            status_provider,
+            account_runtime_provider,
         )
     }
 
@@ -132,15 +121,6 @@ impl AppState {
         for event in events {
             let _ = self.event_sender.send(event.clone());
         }
-    }
-}
-
-struct DefaultAccountRuntimeStatusProvider;
-
-#[async_trait::async_trait]
-impl AccountRuntimeOverviewProvider for DefaultAccountRuntimeStatusProvider {
-    async fn runtime_overview(&self, _account_id: &AccountId) -> AccountRuntimeOverview {
-        AccountRuntimeOverview::default()
     }
 }
 

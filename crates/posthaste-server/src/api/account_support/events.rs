@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
-
 /// Typed resource kind values serialized in domain event `resources[]` payloads.
 ///
 /// @spec docs/L1-sync#event-propagation
@@ -9,8 +7,6 @@ pub(crate) const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ResourceKind {
     Account,
-    AppSettings,
-    SmartMailbox,
 }
 
 /// Typed resource operation values serialized in domain event `resources[]` payloads.
@@ -22,7 +18,6 @@ pub(crate) enum ResourceOperation {
     Created,
     Updated,
     Deleted,
-    Reset,
 }
 
 /// Declarative resource-change payload item for domain events.
@@ -49,36 +44,6 @@ impl ResourceChange {
             operation,
             id: Some(account_id.as_str().to_string()),
             account_id: Some(account_id.as_str().to_string()),
-        }
-    }
-
-    pub(crate) fn app_settings_updated() -> Self {
-        Self {
-            kind: ResourceKind::AppSettings,
-            operation: ResourceOperation::Updated,
-            id: None,
-            account_id: None,
-        }
-    }
-
-    pub(crate) fn smart_mailbox(
-        operation: ResourceOperation,
-        smart_mailbox_id: &SmartMailboxId,
-    ) -> Self {
-        Self {
-            kind: ResourceKind::SmartMailbox,
-            operation,
-            id: Some(smart_mailbox_id.as_str().to_string()),
-            account_id: None,
-        }
-    }
-
-    pub(crate) fn smart_mailbox_reset() -> Self {
-        Self {
-            kind: ResourceKind::SmartMailbox,
-            operation: ResourceOperation::Reset,
-            id: None,
-            account_id: None,
         }
     }
 }
@@ -114,31 +79,6 @@ pub(crate) fn append_and_publish_account_event(
     Ok(())
 }
 
-/// Append a global config/resource event to the event log and broadcast it.
-///
-/// @spec docs/L1-sync#event-propagation
-pub(crate) fn append_and_publish_config_event(
-    state: &Arc<AppState>,
-    topic: &str,
-    resources: Vec<ResourceChange>,
-    extra: serde_json::Value,
-) -> Result<(), posthaste_domain::StoreError> {
-    let mut payload = match extra {
-        serde_json::Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    payload.insert("resources".to_string(), json!(resources));
-    let event = state.store.append_event(
-        &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
-        topic,
-        None,
-        None,
-        serde_json::Value::Object(payload),
-    )?;
-    state.publish_events(&[event]);
-    Ok(())
-}
-
 /// Convert a store-level error into an API error.
 pub(crate) fn store_error_to_api(error: posthaste_domain::StoreError) -> ApiError {
     ApiError::from_service_error(ServiceError::from(error))
@@ -150,34 +90,5 @@ pub(crate) fn internal_error(error: String) -> ApiError {
         StatusCode::INTERNAL_SERVER_ERROR,
         ApiErrorCode::InternalError,
         error,
-    )
-}
-
-/// Generate a smart mailbox ID from a human name: `sm-{slug}-{uuid}`.
-///
-/// @spec docs/L1-api#smart-mailbox-crud
-pub(crate) fn generate_smart_mailbox_id(name: &str) -> String {
-    let slug = name
-        .trim()
-        .to_lowercase()
-        .chars()
-        .map(|char| {
-            if char.is_ascii_alphanumeric() {
-                char
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-    format!(
-        "sm-{}-{}",
-        if slug.is_empty() {
-            "mailbox"
-        } else {
-            slug.as_str()
-        },
-        Uuid::new_v4()
     )
 }
