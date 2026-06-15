@@ -117,10 +117,9 @@ impl AppState {
             .list_sources()
             .expect("migration runtime handle should read configured sources")
             .len();
-        AuthorityRuntimeHandle::from_api_bridge_with_providers_for_migration(
+        AuthorityRuntimeHandle::from_api_bridge_with_account_supervisor_for_migration(
             AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender),
             account_count,
-            account_runtime_provider.clone(),
             account_runtime_provider,
         )
     }

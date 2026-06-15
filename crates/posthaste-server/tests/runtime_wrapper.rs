@@ -259,6 +259,84 @@ async fn sender_address_route_uses_runtime_read() {
     assert_eq!(body[0]["email"], "alice@example.com");
 }
 
+// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+// spec: docs/backend/L3#account-mutations-runtime-backed
+#[tokio::test]
+async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
+    let harness = Harness::new();
+    let token = harness.full_scope();
+
+    let (create_status, created) = harness
+        .post_json(
+            &token,
+            "/v1/accounts",
+            serde_json::json!({
+                "id": "acct-runtime",
+                "name": "Runtime Account",
+                "driver": "mock",
+                "enabled": true
+            }),
+        )
+        .await;
+    assert_eq!(create_status, StatusCode::OK);
+    assert_eq!(created["id"], "acct-runtime");
+
+    let runtime_account = harness
+        .runtime_accounts()
+        .await
+        .items
+        .into_iter()
+        .find(|account| account.id.as_str() == "acct-runtime")
+        .expect("created account should be visible through runtime");
+    assert_eq!(created, serde_json::to_value(runtime_account).unwrap());
+
+    let (patch_status, patched) = harness
+        .patch_json(
+            &token,
+            "/v1/accounts/acct-runtime",
+            serde_json::json!({"name": "Runtime Account Renamed"}),
+        )
+        .await;
+    assert_eq!(patch_status, StatusCode::OK);
+    assert_eq!(patched["name"], "Runtime Account Renamed");
+
+    let (disable_status, disable_body) = harness
+        .post_json(
+            &token,
+            "/v1/accounts/acct-runtime/disable",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(disable_status, StatusCode::OK);
+    assert_eq!(disable_body["ok"], true);
+
+    let (enable_status, enable_body) = harness
+        .post_json(
+            &token,
+            "/v1/accounts/acct-runtime/enable",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(enable_status, StatusCode::OK);
+    assert_eq!(enable_body["ok"], true);
+
+    let (verify_status, verify_body) = harness
+        .post_json(
+            &token,
+            "/v1/accounts/acct-runtime/verify",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(verify_status, StatusCode::OK);
+    assert_eq!(verify_body["ok"], true);
+
+    let (reload_status, reload_body) = harness
+        .post_json(&token, "/v1/config:reload", serde_json::json!({}))
+        .await;
+    assert_eq!(reload_status, StatusCode::OK);
+    assert_eq!(reload_body["ok"], true);
+}
+
 #[test]
 fn api_route_modules_do_not_construct_new_mail_runtime_graphs() {
     let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");

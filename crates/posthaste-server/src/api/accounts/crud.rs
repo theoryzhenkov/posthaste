@@ -76,62 +76,12 @@ pub async fn create_account(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountOverview>, ApiError> {
-    let CreateAccountRequest {
-        id,
-        name,
-        full_name,
-        email_patterns,
-        driver,
-        enabled,
-        appearance,
-        transport,
-        secret,
-    } = request;
-    let email_patterns = normalize_email_patterns(&email_patterns);
-    let account_id = match id {
-        Some(id) if !id.trim().is_empty() => AccountId::from(id.trim()),
-        _ => {
-            let seed = generate_account_id_seed(&name, &email_patterns);
-            allocate_unique_account_id(state.as_ref(), &seed)?
-        }
-    };
-    if state
-        .service
-        .get_source(&account_id)
-        .map_err(ApiError::from_service_error)?
-        .is_some()
-    {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            ApiErrorCode::Conflict,
-            "account already exists",
-        ));
-    }
-
-    let timestamp = domain_now_iso8601().map_err(internal_error)?;
-    let mut account = AccountSettings {
-        id: account_id.clone(),
-        name: name.trim().to_string(),
-        full_name: normalize_optional(full_name),
-        email_patterns,
-        driver: driver.unwrap_or(AccountDriver::Jmap),
-        enabled: enabled.unwrap_or(true),
-        appearance: appearance.map(normalize_account_appearance),
-        transport: transport.into(),
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    };
-    account.transport.secret_ref =
-        decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
-    validate_account_settings(&account)?;
-    apply_secret_instruction(state.as_ref(), &mut account, None, &secret)?;
-    persist_new_account(&state, &account, EVENT_TOPIC_ACCOUNT_CREATED).await?;
-
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(account_overview(&state, &settings, account).await))
+    state
+        .runtime
+        .create_account(RuntimeCaller::api(), request.into())
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// PATCH /v1/accounts/{account_id}
@@ -160,53 +110,21 @@ pub async fn patch_account(
     Json(request): Json<PatchAccountRequest>,
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let mut account = load_account(state.as_ref(), &account_id)?;
-    let previous_image_id = account_appearance_image_id(&account);
-    apply_account_patch(&mut account, &request);
-    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
-    let existing_secret_ref = account.transport.secret_ref.clone();
-    let secret_request = request.secret.unwrap_or_default();
-    account.transport.secret_ref =
-        decide_secret_instruction(&account.id, existing_secret_ref.as_ref(), &secret_request)?
-            .resolved_secret_ref(existing_secret_ref.as_ref());
-    validate_account_settings(&account)?;
-    let defer_secret_clear = secret_request.mode == SecretWriteMode::Clear;
-    if !defer_secret_clear {
-        apply_secret_instruction(
-            state.as_ref(),
-            &mut account,
-            existing_secret_ref.as_ref(),
-            &secret_request,
-        )?;
-    }
-
-    state
-        .service
-        .save_source(&account)
-        .map_err(ApiError::from_service_error)?;
-    if defer_secret_clear {
-        apply_secret_instruction(
-            state.as_ref(),
-            &mut account,
-            existing_secret_ref.as_ref(),
-            &secret_request,
-        )?;
-    }
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
-        .map_err(store_error_to_api)?;
-    let next_image_id = account_appearance_image_id(&account);
+    let previous_image_id = load_account(state.as_ref(), &account_id)
+        .ok()
+        .and_then(|account| account_appearance_image_id(&account));
+    let account = state
+        .runtime
+        .patch_account(RuntimeCaller::api(), account_id, request.into())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let next_image_id = account_appearance_image_id_from_overview(&account);
     if previous_image_id != next_image_id {
         if let Some(previous_image_id) = previous_image_id {
             let _ = delete_account_logo_file(state.as_ref(), &previous_image_id).await;
         }
     }
-
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(account_overview(&state, &settings, account).await))
+    Ok(Json(account))
 }
 
 /// POST /v1/accounts/{account_id}/verify
@@ -231,16 +149,21 @@ pub async fn verify_account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
 ) -> Result<Json<VerificationResponse>, ApiError> {
-    let account_id = AccountId::from(account_id.as_str());
-    let account = load_account(state.as_ref(), &account_id)?;
     let result = state
-        .supervisor
-        .verify_account(&account)
+        .runtime
+        .verify_account(RuntimeCaller::api(), AccountId::from(account_id.as_str()))
         .await
-        .map_err(ApiError::from_service_error)?;
+        .map_err(ApiError::from_runtime_error)?;
     Ok(Json(VerificationResponse {
         ok: result.ok,
-        identity_email: result.identity.map(|identity| identity.email),
+        identity_email: result.identity_email,
         push_supported: result.push_supported,
     }))
+}
+
+fn account_appearance_image_id_from_overview(account: &AccountOverview) -> Option<String> {
+    match &account.appearance {
+        AccountAppearance::Image { image_id, .. } => Some(image_id.clone()),
+        AccountAppearance::Initials { .. } => None,
+    }
 }

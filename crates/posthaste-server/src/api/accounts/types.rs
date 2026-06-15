@@ -118,3 +118,66 @@ pub struct PatchAccountRequest {
     pub transport: Option<AccountTransportRequest>,
     pub secret: Option<SecretWriteRequest>,
 }
+
+impl From<AccountTransportRequest> for AccountTransportMutation {
+    fn from(request: AccountTransportRequest) -> Self {
+        Self {
+            provider: request.provider,
+            auth: request.auth,
+            base_url: request.base_url,
+            username: request.username,
+            imap: request.imap,
+            smtp: request.smtp,
+        }
+    }
+}
+
+impl From<SecretWriteMode> for RuntimeSecretWriteMode {
+    fn from(mode: SecretWriteMode) -> Self {
+        match mode {
+            SecretWriteMode::Keep => Self::Keep,
+            SecretWriteMode::Replace => Self::Replace,
+            SecretWriteMode::Clear => Self::Clear,
+        }
+    }
+}
+
+impl From<SecretWriteRequest> for SecretWriteMutation {
+    fn from(request: SecretWriteRequest) -> Self {
+        Self {
+            mode: request.mode.into(),
+            password: request.password,
+        }
+    }
+}
+
+impl From<CreateAccountRequest> for CreateAccountMutation {
+    fn from(request: CreateAccountRequest) -> Self {
+        Self {
+            id: request.id,
+            name: request.name,
+            full_name: request.full_name,
+            email_patterns: request.email_patterns,
+            driver: request.driver,
+            enabled: request.enabled,
+            appearance: request.appearance,
+            transport: request.transport.into(),
+            secret: request.secret.into(),
+        }
+    }
+}
+
+impl From<PatchAccountRequest> for PatchAccountMutation {
+    fn from(request: PatchAccountRequest) -> Self {
+        Self {
+            name: request.name,
+            full_name: request.full_name,
+            email_patterns: request.email_patterns,
+            driver: request.driver,
+            enabled: request.enabled,
+            appearance: request.appearance,
+            transport: request.transport.map(Into::into),
+            secret: request.secret.map(Into::into),
+        }
+    }
+}

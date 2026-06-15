@@ -67,53 +67,11 @@ pub async fn disable_account(
 pub async fn reload_config(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<OkResponse>, ApiError> {
-    let diff = state
-        .service
-        .reload_config()
-        .map_err(ApiError::from_service_error)?;
-
-    // Apply diff to supervisor
-    for id in &diff.removed_sources {
-        state.supervisor.remove_account(id).await;
-    }
-    for id in diff.added_sources.iter().chain(diff.changed_sources.iter()) {
-        let source = state
-            .service
-            .get_source(id)
-            .map_err(ApiError::from_service_error)?;
-        if let Some(source) = source {
-            state.supervisor.start_account(&source).await;
-        }
-    }
-
-    let mut resources = vec![ResourceChange::config_reloaded()];
-    resources.extend(
-        diff.added_sources
-            .iter()
-            .map(|id| ResourceChange::account(ResourceOperation::Created, id)),
-    );
-    resources.extend(
-        diff.changed_sources
-            .iter()
-            .map(|id| ResourceChange::account(ResourceOperation::Updated, id)),
-    );
-    resources.extend(
-        diff.removed_sources
-            .iter()
-            .map(|id| ResourceChange::account(ResourceOperation::Deleted, id)),
-    );
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_CONFIG_RELOADED,
-        resources,
-        json!({
-            "addedSourceCount": diff.added_sources.len(),
-            "changedSourceCount": diff.changed_sources.len(),
-            "removedSourceCount": diff.removed_sources.len(),
-        }),
-    )
-    .map_err(store_error_to_api)?;
-
+    state
+        .runtime
+        .reload_config(RuntimeCaller::api())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
     Ok(Json(OkResponse { ok: true }))
 }
 
@@ -125,16 +83,14 @@ pub(super) async fn set_account_enabled(
     account_id: String,
     enabled: bool,
 ) -> Result<Json<OkResponse>, ApiError> {
-    let account_id = AccountId::from(account_id.as_str());
-    let mut account = load_account(state.as_ref(), &account_id)?;
-    account.enabled = enabled;
-    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
     state
-        .service
-        .save_source(&account)
-        .map_err(ApiError::from_service_error)?;
-    state.supervisor.start_account(&account).await;
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
-        .map_err(store_error_to_api)?;
+        .runtime
+        .set_account_enabled(
+            RuntimeCaller::api(),
+            AccountId::from(account_id.as_str()),
+            enabled,
+        )
+        .await
+        .map_err(ApiError::from_runtime_error)?;
     Ok(Json(OkResponse { ok: true }))
 }
