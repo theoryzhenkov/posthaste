@@ -25,20 +25,17 @@ pub async fn set_keywords(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<SetKeywordsCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    command_result_response(
-        state.as_ref(),
-        state
-            .service
-            .set_keywords(
-                &account_id,
-                &MessageId(message_id),
-                &command,
-                gateway.as_ref(),
-            )
-            .await,
-    )
+    state
+        .runtime
+        .set_message_keywords(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+            command,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/add-to-mailbox
@@ -66,20 +63,17 @@ pub async fn add_to_mailbox(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<AddToMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    command_result_response(
-        state.as_ref(),
-        state
-            .service
-            .add_to_mailbox(
-                &account_id,
-                &MessageId(message_id),
-                &command,
-                gateway.as_ref(),
-            )
-            .await,
-    )
+    state
+        .runtime
+        .add_message_to_mailbox(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+            command,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/remove-from-mailbox
@@ -107,20 +101,17 @@ pub async fn remove_from_mailbox(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<RemoveFromMailboxCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    command_result_response(
-        state.as_ref(),
-        state
-            .service
-            .remove_from_mailbox(
-                &account_id,
-                &MessageId(message_id),
-                &command,
-                gateway.as_ref(),
-            )
-            .await,
-    )
+    state
+        .runtime
+        .remove_message_from_mailbox(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+            command,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/replace-mailboxes
@@ -148,20 +139,17 @@ pub async fn replace_mailboxes(
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<ReplaceMailboxesCommand>,
 ) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    command_result_response(
-        state.as_ref(),
-        state
-            .service
-            .replace_mailboxes(
-                &account_id,
-                &MessageId(message_id),
-                &command,
-                gateway.as_ref(),
-            )
-            .await,
-    )
+    state
+        .runtime
+        .replace_message_mailboxes(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+            command,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/sources/{sid}/commands/messages/{mid}/destroy
@@ -187,13 +175,14 @@ pub async fn destroy_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
 ) -> Result<Json<CommandResult>, ApiError> {
-    let account_id = AccountId(source_id);
-    let gateway = live_gateway(state.as_ref(), &account_id).await?;
-    command_result_response(
-        state.as_ref(),
-        state
-            .service
-            .destroy_message(&account_id, &MessageId(message_id), gateway.as_ref())
-            .await,
-    )
+    state
+        .runtime
+        .destroy_message(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }

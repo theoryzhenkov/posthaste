@@ -8,10 +8,11 @@
 
 use async_trait::async_trait;
 use posthaste_domain::{
-    AccountAppearance, AccountDriver, AccountId, AccountOverview, AppSettings, CachedSenderAddress,
-    Identity, ImapTransportSettings, MailboxSummary, MessageId, ProviderAuthKind, ProviderHint,
-    ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SmtpTransportSettings,
-    SyncMode, TagSummary,
+    AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
+    CachedSenderAddress, CommandResult, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
+    MessageId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -256,6 +257,14 @@ pub struct RuntimeStatus {
     pub account_count: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAttachmentBytes {
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+    pub filename: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeLifecycle {
@@ -387,6 +396,16 @@ pub enum RuntimeErrorCode {
     NotFound,
     ProviderUnavailable,
     Conflict,
+    NetworkError,
+    StateMismatch,
+    CannotCalculateChanges,
+    GatewayRejected,
+    SecretUnavailable,
+    SecretUnsupported,
+    StorageFailure,
+    ConfigValidation,
+    ConfigIo,
+    ConfigParse,
     TransportDisconnected,
     Internal,
 }
@@ -481,6 +500,75 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError>;
+
+    async fn send_message(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError>;
+
+    async fn set_message_keywords(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: SetKeywordsCommand,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn add_message_to_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: AddToMailboxCommand,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn remove_message_from_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: RemoveFromMailboxCommand,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn replace_message_mailboxes(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: ReplaceMailboxesCommand,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn destroy_message(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn set_mailbox_role(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        role: Option<String>,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError>;
+
+    async fn get_message_detail(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandResult, RuntimeError>;
+
+    async fn get_message_attachment(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+        attachment_id: String,
+    ) -> Result<RuntimeAttachmentBytes, RuntimeError>;
 
     async fn sync_account(
         &self,

@@ -18,12 +18,3 @@ pub(super) fn load_account(
         .map_err(ApiError::from_service_error)?
         .ok_or_else(account_not_found)
 }
-
-pub(super) fn command_result_response(
-    state: &AppState,
-    result: Result<CommandResult, ServiceError>,
-) -> Result<Json<CommandResult>, ApiError> {
-    let result = result.map_err(ApiError::from_service_error)?;
-    state.publish_events(&result.events);
-    Ok(Json(result))
-}
