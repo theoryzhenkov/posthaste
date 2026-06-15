@@ -1,10 +1,37 @@
 use super::*;
 
 pub struct AppState {
+    /// Target runtime boundary for `/v1` mail behavior.
+    ///
+    /// MIGRATION(api-runtime-wrapper): existing handlers still use the legacy
+    /// fields below while methods move onto `AuthorityRuntimeHandle`.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+    pub runtime: AuthorityRuntimeHandle,
+    /// MIGRATION(api-runtime-wrapper): temporary direct service access for
+    /// handlers that have not yet moved behind the runtime handle.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub service: Arc<MailService>,
+    /// MIGRATION(api-runtime-wrapper): temporary direct store access for
+    /// handlers and test harnesses not yet moved behind runtime read methods.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub store: Arc<dyn MailStore>,
+    /// MIGRATION(api-runtime-wrapper): temporary direct secret-store access for
+    /// account/OAuth handlers until runtime account methods own it.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub secret_store: Arc<dyn SecretStore>,
+    /// MIGRATION(api-runtime-wrapper): supervisor stays server-owned until its
+    /// OAuth/push/provider wiring is extracted into the authority runtime.
+    ///
+    /// @spec docs/backend/L3#supervisor-server-owned-temporary
     pub supervisor: Arc<AccountSupervisor>,
+    /// MIGRATION(api-runtime-wrapper): temporary direct event bus access for
+    /// `/v1/events` until it consumes runtime event methods.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub event_sender: broadcast::Sender<DomainEvent>,
     pub account_logo_root: PathBuf,
     pub oauth_flows: Arc<OAuthFlowStore>,
@@ -41,6 +68,27 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// MIGRATION(api-runtime-wrapper): build a runtime handle around existing
+    /// test/API parts while route handlers are incrementally moved behind the
+    /// authority runtime.
+    ///
+    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
+    pub fn runtime_handle_for_migration(
+        service: Arc<MailService>,
+        store: Arc<dyn MailStore>,
+        secret_store: Arc<dyn SecretStore>,
+        event_sender: broadcast::Sender<DomainEvent>,
+    ) -> AuthorityRuntimeHandle {
+        let account_count = service
+            .list_sources()
+            .expect("migration runtime handle should read configured sources")
+            .len();
+        AuthorityRuntimeHandle::from_api_bridge_for_migration(
+            AuthorityRuntimeApiMigrationBridge::new(service, store, secret_store, event_sender),
+            account_count,
+        )
+    }
+
     /// Broadcast domain events to all connected SSE clients.
     ///
     /// @spec docs/L1-api#sse-event-stream
@@ -58,6 +106,10 @@ pub struct ServerHandle {
     pub addr: SocketAddr,
     pub join_handle: tokio::task::JoinHandle<()>,
     pub log_guard: WorkerGuard,
+    /// Owns graceful runtime shutdown for the server process.
+    ///
+    /// @spec docs/runtime/L2#runtime-shutdown-handle
+    pub runtime_shutdown: RuntimeShutdownHandle,
     /// Per-process bearer token, exposed so the embedded host can inject it
     /// into the webview as `window.__POSTHASTE_TOKEN__`.
     ///
