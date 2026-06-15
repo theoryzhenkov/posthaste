@@ -32,8 +32,9 @@ use posthaste_domain::{
 };
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError,
-    RuntimeErrorCode,
+    AccountScopeRequest, AccountTransportMutation, CreateAccountMutation, PatchAccountMutation,
+    RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
+    SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
