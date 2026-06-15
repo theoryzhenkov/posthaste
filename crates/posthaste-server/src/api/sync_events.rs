@@ -107,42 +107,12 @@ pub async fn stream_events(
         mailbox_id: query.mailbox_id.map(MailboxId),
         after_seq: query.after_seq,
     };
-    let receiver = state.event_sender.subscribe();
-    let backlog = if filter.after_seq.is_some() {
-        state
-            .service
-            .list_events(&filter)
-            .map_err(ApiError::from_service_error)?
-    } else {
-        Vec::new()
-    };
-    let replayed_through = backlog.last().map(|event| event.seq).or(filter.after_seq);
-    let backlog_filter = filter.clone();
-    let backlog_stream = tokio_stream::iter(
-        backlog
-            .into_iter()
-            .filter(move |event| matches_event(event, &backlog_filter))
-            .map(event_to_sse),
-    );
-    let live_filter = filter.clone();
-    let live_stream = BroadcastStream::new(receiver).filter_map(move |message| {
-        let live_filter = live_filter.clone();
-        match message {
-            Ok(event)
-                if is_live_event_after_backlog(&event, replayed_through)
-                    && matches_event(&event, &live_filter) =>
-            {
-                Some(event_to_sse(event))
-            }
-            _ => None,
-        }
-    });
+    let subscription = state
+        .runtime
+        .subscribe_events(RuntimeCaller::api(), filter)
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let backlog_stream = tokio_stream::iter(subscription.replay.into_iter().map(event_to_sse));
+    let live_stream = subscription.live.map(event_to_sse);
     Ok(Sse::new(backlog_stream.chain(live_stream)).keep_alive(KeepAlive::default()))
-}
-
-pub(super) fn is_live_event_after_backlog(
-    event: &DomainEvent,
-    replayed_through: Option<i64>,
-) -> bool {
-    replayed_through.is_none_or(|seq| event.seq > seq)
 }
