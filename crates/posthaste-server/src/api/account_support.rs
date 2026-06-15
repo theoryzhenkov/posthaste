@@ -1,6 +1,4 @@
 use super::*;
-use uuid::Uuid;
-
 mod appearance;
 mod events;
 mod normalization;
@@ -13,15 +11,10 @@ pub(super) use appearance::{
     default_account_appearance, normalize_account_appearance, validate_account_appearance,
     validate_logo_image_id,
 };
-pub(super) use events::{
-    append_and_publish_account_event, append_and_publish_config_event, generate_smart_mailbox_id,
-    internal_error, store_error_to_api, ResourceChange, ResourceOperation,
-};
+pub(super) use events::{append_and_publish_account_event, internal_error, store_error_to_api};
 #[cfg(test)]
 pub(super) use normalization::apply_account_patch;
-pub(super) use normalization::{
-    normalize_automation_rules, normalize_optional, validate_automation_drafts,
-};
+pub(super) use normalization::normalize_optional;
 pub(super) use overview::account_overview;
 pub(super) use secrets::delete_managed_secret;
 #[cfg(test)]
@@ -34,7 +27,7 @@ pub(super) use secrets::{
 pub(super) use overview::secret_status;
 #[cfg(test)]
 pub(super) use secrets::validate_secret_request;
-pub(super) use validation::{validate_account_settings, validate_automation_rules};
+pub(super) use validation::validate_account_settings;
 
 #[cfg(test)]
 mod tests;

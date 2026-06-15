@@ -2,15 +2,20 @@ use std::sync::Arc;
 
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId,
-    AccountOverview, AccountSettings, AccountTransportSettings, DomainEvent, ImapTransportSettings,
-    MailService, MailStore, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SecretStore,
-    ServiceError, SmtpTransportSettings, StoreError, EVENT_TOPIC_ACCOUNT_CREATED,
-    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
+    AccountOverview, AccountSettings, AccountTransportSettings, AutomationAction, AutomationRule,
+    CachePolicy, DomainEvent, ImapTransportSettings, MailService, MailStore, MailboxId,
+    MessageSortField, ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SecretStore,
+    ServiceError, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmtpTransportSettings,
+    SortDirection, StoreError, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
+    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
+    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 use posthaste_runtime_contract::{
-    AccountTransportMutation, AccountVerificationResult, CreateAccountMutation,
-    PatchAccountMutation, RuntimeAdapterError, RuntimeError, RuntimeErrorCode, SecretWriteMode,
-    SecretWriteMutation,
+    AccountTransportMutation, AccountVerificationResult, AutomationRulePreviewMutation,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
+    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAdapterError,
+    RuntimeError, RuntimeErrorCode, SecretWriteMode, SecretWriteMutation,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -48,6 +53,200 @@ impl AccountMutationService {
             supervisor,
             reads,
         }
+    }
+
+    pub fn patch_app_settings(
+        &self,
+        request: PatchAppSettingsMutation,
+    ) -> Result<posthaste_domain::AppSettings, RuntimeError> {
+        let mut settings = self
+            .service
+            .get_app_settings()
+            .map_err(service_error_to_runtime_error)?;
+        if let Some(default_account_id) = &request.default_account_id {
+            if let Some(default_account_id) = default_account_id {
+                let account_id = AccountId::from(default_account_id.as_str());
+                if self
+                    .service
+                    .get_source(&account_id)
+                    .map_err(service_error_to_runtime_error)?
+                    .is_none()
+                {
+                    return Err(runtime_error(
+                        RuntimeErrorCode::InvalidAccount,
+                        "default account must reference an existing account",
+                    ));
+                }
+                settings.default_account_id = Some(account_id);
+            } else {
+                settings.default_account_id = None;
+            }
+        }
+        if let Some(automation_rules) = &request.automation_rules {
+            settings.automation_rules = normalize_automation_rules(automation_rules);
+        }
+        if let Some(automation_drafts) = &request.automation_drafts {
+            settings.automation_drafts = normalize_automation_rules(automation_drafts);
+        }
+        if let Some(cache_policy) = &request.cache_policy {
+            settings.cache_policy = normalize_cache_policy(cache_policy.clone());
+        }
+        validate_automation_rules(&settings.automation_rules)?;
+        validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
+
+        let mut changed = Vec::new();
+        if request.default_account_id.is_some() {
+            changed.push("defaultAccount");
+        }
+        if request.automation_rules.is_some() {
+            changed.push("automationRules");
+        }
+        if request.automation_drafts.is_some() {
+            changed.push("automationDrafts");
+        }
+        if request.cache_policy.is_some() {
+            changed.push("cachePolicy");
+        }
+
+        self.service
+            .put_app_settings(&settings)
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_config_event(
+            EVENT_TOPIC_SETTINGS_UPDATED,
+            vec![ResourceChange::app_settings_updated()],
+            json!({
+                "scope": "app",
+                "changed": changed,
+            }),
+        )?;
+        if request.automation_rules.is_some() {
+            self.service
+                .ensure_automation_backfills_for_current_rules()
+                .map_err(service_error_to_runtime_error)?;
+        }
+        Ok(settings)
+    }
+
+    pub fn preview_automation_rule(
+        &self,
+        request: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
+        let (_, total) = self
+            .service
+            .count_messages_by_rule(&request.condition)
+            .map_err(service_error_to_runtime_error)?;
+        let page = self
+            .service
+            .query_message_page_by_rule(
+                &request.condition,
+                request.limit,
+                None,
+                MessageSortField::Date,
+                SortDirection::Desc,
+            )
+            .map_err(service_error_to_runtime_error)?;
+        Ok(AutomationRulePreviewResult {
+            total,
+            items: page.items,
+        })
+    }
+
+    pub fn create_smart_mailbox(
+        &self,
+        request: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        let timestamp = domain_now_iso8601()
+            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
+        let smart_mailbox = SmartMailbox {
+            id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
+            name: request.name,
+            position: request.position.unwrap_or(0),
+            kind: SmartMailboxKind::User,
+            default_key: None,
+            parent_id: None,
+            rule: request.rule,
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+        };
+        self.service
+            .save_smart_mailbox(&smart_mailbox)
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_config_event(
+            EVENT_TOPIC_SMART_MAILBOX_CREATED,
+            vec![ResourceChange::smart_mailbox(
+                ResourceOperation::Created,
+                &smart_mailbox.id,
+            )],
+            json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+        )?;
+        Ok(smart_mailbox)
+    }
+
+    pub fn patch_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+        request: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        let mut smart_mailbox = self
+            .service
+            .get_smart_mailbox(&smart_mailbox_id)
+            .map_err(service_error_to_runtime_error)?;
+        if let Some(name) = request.name {
+            smart_mailbox.name = name;
+        }
+        if let Some(position) = request.position {
+            smart_mailbox.position = position;
+        }
+        if let Some(rule) = request.rule {
+            smart_mailbox.rule = rule;
+        }
+        smart_mailbox.updated_at = domain_now_iso8601()
+            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
+        self.service
+            .save_smart_mailbox(&smart_mailbox)
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_config_event(
+            EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+            vec![ResourceChange::smart_mailbox(
+                ResourceOperation::Updated,
+                &smart_mailbox.id,
+            )],
+            json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+        )?;
+        Ok(smart_mailbox)
+    }
+
+    pub fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        self.service
+            .delete_smart_mailbox(&smart_mailbox_id)
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_config_event(
+            EVENT_TOPIC_SMART_MAILBOX_DELETED,
+            vec![ResourceChange::smart_mailbox(
+                ResourceOperation::Deleted,
+                &smart_mailbox_id,
+            )],
+            json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
+        )
+    }
+
+    pub fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+        self.service
+            .reset_default_smart_mailboxes()
+            .map_err(service_error_to_runtime_error)?;
+        self.append_and_publish_config_event(
+            EVENT_TOPIC_SMART_MAILBOX_RESET,
+            vec![ResourceChange::smart_mailbox_reset()],
+            json!({ "scope": "smartMailboxes" }),
+        )?;
+        self.reads
+            .list_smart_mailboxes()
+            .map_err(service_error_to_runtime_error)
     }
 
     pub async fn create_account(
@@ -534,6 +733,48 @@ fn normalize_email_patterns(patterns: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
+    policy.hard_cap_bytes = policy.hard_cap_bytes.max(policy.soft_cap_bytes);
+    policy
+}
+
+fn normalize_automation_rules(rules: &[AutomationRule]) -> Vec<AutomationRule> {
+    rules
+        .iter()
+        .map(|rule| AutomationRule {
+            id: rule.id.trim().to_string(),
+            name: rule.name.trim().to_string(),
+            enabled: rule.enabled,
+            triggers: rule.triggers.clone(),
+            condition: rule.condition.clone(),
+            actions: rule
+                .actions
+                .iter()
+                .map(normalize_automation_action)
+                .collect(),
+            backfill: rule.backfill,
+        })
+        .collect()
+}
+
+fn normalize_automation_action(action: &AutomationAction) -> AutomationAction {
+    match action {
+        AutomationAction::ApplyTag { tag } => AutomationAction::ApplyTag {
+            tag: tag.trim().to_string(),
+        },
+        AutomationAction::RemoveTag { tag } => AutomationAction::RemoveTag {
+            tag: tag.trim().to_string(),
+        },
+        AutomationAction::MarkRead => AutomationAction::MarkRead,
+        AutomationAction::MarkUnread => AutomationAction::MarkUnread,
+        AutomationAction::Flag => AutomationAction::Flag,
+        AutomationAction::Unflag => AutomationAction::Unflag,
+        AutomationAction::MoveToMailbox { mailbox_id } => AutomationAction::MoveToMailbox {
+            mailbox_id: MailboxId::from(mailbox_id.as_str().trim()),
+        },
+    }
+}
+
 fn normalize_account_appearance(appearance: AccountAppearance) -> AccountAppearance {
     match appearance {
         AccountAppearance::Initials {
@@ -579,6 +820,89 @@ fn normalize_initials(value: &str) -> String {
     } else {
         normalized.chars().take(4).collect()
     }
+}
+
+fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), RuntimeError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for rule in rules {
+        if rule.id.trim().is_empty() {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule id is required",
+            ));
+        }
+        if !ids.insert(rule.id.trim().to_string()) {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule ids must be unique",
+            ));
+        }
+        if rule.name.trim().is_empty() {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule name is required",
+            ));
+        }
+        if rule.triggers.is_empty() {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule must include at least one trigger",
+            ));
+        }
+        if rule.actions.is_empty() {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule must include at least one action",
+            ));
+        }
+        for action in &rule.actions {
+            match action {
+                AutomationAction::ApplyTag { tag } | AutomationAction::RemoveTag { tag }
+                    if tag.trim().is_empty() || tag.starts_with('$') =>
+                {
+                    return Err(runtime_error(
+                        RuntimeErrorCode::InvalidAccount,
+                        "automation tag must be a non-system keyword",
+                    ));
+                }
+                AutomationAction::MoveToMailbox { mailbox_id }
+                    if mailbox_id.as_str().trim().is_empty() =>
+                {
+                    return Err(runtime_error(
+                        RuntimeErrorCode::InvalidAccount,
+                        "automation target mailbox id is required",
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_automation_drafts(
+    active_rules: &[AutomationRule],
+    draft_rules: &[AutomationRule],
+) -> Result<(), RuntimeError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for rule in active_rules {
+        ids.insert(rule.id.trim().to_string());
+    }
+    for rule in draft_rules {
+        if rule.id.trim().is_empty() {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation draft id is required",
+            ));
+        }
+        if !ids.insert(rule.id.trim().to_string()) {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidAccount,
+                "automation rule and draft ids must be unique",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeError> {
@@ -857,7 +1181,9 @@ fn account_secret_ref(account_id: &AccountId) -> SecretRef {
 #[serde(rename_all = "camelCase")]
 enum ResourceKind {
     Account,
+    AppSettings,
     Config,
+    SmartMailbox,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -867,6 +1193,7 @@ enum ResourceOperation {
     Updated,
     Deleted,
     Reloaded,
+    Reset,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -896,6 +1223,33 @@ impl ResourceChange {
             account_id: None,
         }
     }
+
+    fn app_settings_updated() -> Self {
+        Self {
+            kind: ResourceKind::AppSettings,
+            operation: ResourceOperation::Updated,
+            id: None,
+            account_id: None,
+        }
+    }
+
+    fn smart_mailbox(operation: ResourceOperation, smart_mailbox_id: &SmartMailboxId) -> Self {
+        Self {
+            kind: ResourceKind::SmartMailbox,
+            operation,
+            id: Some(smart_mailbox_id.as_str().to_string()),
+            account_id: None,
+        }
+    }
+
+    fn smart_mailbox_reset() -> Self {
+        Self {
+            kind: ResourceKind::SmartMailbox,
+            operation: ResourceOperation::Reset,
+            id: None,
+            account_id: None,
+        }
+    }
 }
 
 fn account_operation_from_topic(topic: &str) -> ResourceOperation {
@@ -903,6 +1257,32 @@ fn account_operation_from_topic(topic: &str) -> ResourceOperation {
         EVENT_TOPIC_ACCOUNT_CREATED => ResourceOperation::Created,
         _ => ResourceOperation::Updated,
     }
+}
+
+fn generate_smart_mailbox_id(name: &str) -> String {
+    let slug = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|char| {
+            if char.is_ascii_alphanumeric() {
+                char
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    format!(
+        "sm-{}-{}",
+        if slug.is_empty() {
+            "mailbox"
+        } else {
+            slug.as_str()
+        },
+        uuid::Uuid::new_v4()
+    )
 }
 
 fn generate_account_id_seed(name: &str, email_patterns: &[String]) -> String {

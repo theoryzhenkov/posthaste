@@ -340,13 +340,15 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 // spec: docs/backend/L3#message-mutations-runtime-backed
 #[test]
-fn message_mutation_routes_do_not_call_legacy_state_directly() {
+fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
     for relative in [
         "message_commands.rs",
         "messages/compose.rs",
         "messages/detail.rs",
         "mailboxes.rs",
+        "settings.rs",
+        "smart_mailboxes/crud.rs",
     ] {
         let path = server_dir.join(relative);
         let source = fs::read_to_string(&path).expect("route source should be readable");

@@ -507,6 +507,22 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .map_err(Self::service_error_to_runtime_error)
     }
 
+    async fn patch_app_settings(
+        &self,
+        _caller: RuntimeCaller,
+        mutation: posthaste_runtime_contract::PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError> {
+        self.account_mutations()?.patch_app_settings(mutation)
+    }
+
+    async fn preview_automation_rule(
+        &self,
+        _caller: RuntimeCaller,
+        mutation: posthaste_runtime_contract::AutomationRulePreviewMutation,
+    ) -> Result<posthaste_runtime_contract::AutomationRulePreviewResult, RuntimeError> {
+        self.account_mutations()?.preview_automation_rule(mutation)
+    }
+
     async fn list_accounts(
         &self,
         _caller: RuntimeCaller,
@@ -583,6 +599,40 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .account_reads
             .get_smart_mailbox(&smart_mailbox_id)
             .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn create_smart_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        mutation: posthaste_runtime_contract::CreateSmartMailboxMutation,
+    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.account_mutations()?.create_smart_mailbox(mutation)
+    }
+
+    async fn patch_smart_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: posthaste_runtime_contract::PatchSmartMailboxMutation,
+    ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.account_mutations()?
+            .patch_smart_mailbox(smart_mailbox_id, mutation)
+    }
+
+    async fn delete_smart_mailbox(
+        &self,
+        _caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?
+            .delete_smart_mailbox(smart_mailbox_id)
+    }
+
+    async fn reset_default_smart_mailboxes(
+        &self,
+        _caller: RuntimeCaller,
+    ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+        self.account_mutations()?.reset_default_smart_mailboxes()
     }
 
     async fn list_tags(

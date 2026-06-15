@@ -50,11 +50,6 @@ fn automation_rule_preview_limit(limit: Option<usize>) -> Result<usize, ApiError
     Ok(limit)
 }
 
-fn normalize_cache_policy(mut policy: CachePolicy) -> CachePolicy {
-    policy.hard_cap_bytes = policy.hard_cap_bytes.max(policy.soft_cap_bytes);
-    policy
-}
-
 /// GET /v1/settings
 ///
 /// @spec docs/L1-api#settings
@@ -102,73 +97,20 @@ pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PatchSettingsRequest>,
 ) -> Result<Json<AppSettings>, ApiError> {
-    let mut settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    if let Some(default_account_id) = &request.default_account_id {
-        if let Some(default_account_id) = default_account_id {
-            let account = state
-                .service
-                .get_source(&AccountId::from(default_account_id.as_str()))
-                .map_err(ApiError::from_service_error)?;
-            if account.is_none() {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    ApiErrorCode::InvalidAccount,
-                    "default account must reference an existing account",
-                ));
-            }
-            settings.default_account_id = Some(AccountId::from(default_account_id.as_str()));
-        } else {
-            settings.default_account_id = None;
-        }
-    }
-    if let Some(automation_rules) = &request.automation_rules {
-        settings.automation_rules = normalize_automation_rules(automation_rules);
-    }
-    if let Some(automation_drafts) = &request.automation_drafts {
-        settings.automation_drafts = normalize_automation_rules(automation_drafts);
-    }
-    if let Some(cache_policy) = &request.cache_policy {
-        settings.cache_policy = normalize_cache_policy(cache_policy.clone());
-    }
-    validate_automation_rules(&settings.automation_rules)?;
-    validate_automation_drafts(&settings.automation_rules, &settings.automation_drafts)?;
-    let mut changed = Vec::new();
-    if request.default_account_id.is_some() {
-        changed.push("defaultAccount");
-    }
-    if request.automation_rules.is_some() {
-        changed.push("automationRules");
-    }
-    if request.automation_drafts.is_some() {
-        changed.push("automationDrafts");
-    }
-    if request.cache_policy.is_some() {
-        changed.push("cachePolicy");
-    }
     state
-        .service
-        .put_app_settings(&settings)
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_SETTINGS_UPDATED,
-        vec![ResourceChange::app_settings_updated()],
-        json!({
-            "scope": "app",
-            "changed": changed,
-        }),
-    )
-    .map_err(store_error_to_api)?;
-    if request.automation_rules.is_some() {
-        state
-            .service
-            .ensure_automation_backfills_for_current_rules()
-            .map_err(ApiError::from_service_error)?;
-    }
-    Ok(Json(settings))
+        .runtime
+        .patch_app_settings(
+            RuntimeCaller::api(),
+            PatchAppSettingsMutation {
+                default_account_id: request.default_account_id,
+                cache_policy: request.cache_policy,
+                automation_rules: request.automation_rules,
+                automation_drafts: request.automation_drafts,
+            },
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/automation-rules:preview
@@ -194,22 +136,21 @@ pub async fn preview_automation_rule(
     Json(request): Json<PreviewAutomationRuleRequest>,
 ) -> Result<Json<AutomationRulePreviewResponse>, ApiError> {
     let limit = automation_rule_preview_limit(request.limit)?;
-    let (_, total) = state
-        .service
-        .count_messages_by_rule(&request.condition)
-        .map_err(ApiError::from_service_error)?;
-    let page = state
-        .service
-        .query_message_page_by_rule(
-            &request.condition,
-            limit,
-            None,
-            MessageSortField::Date,
-            SortDirection::Desc,
+    state
+        .runtime
+        .preview_automation_rule(
+            RuntimeCaller::api(),
+            AutomationRulePreviewMutation {
+                condition: request.condition,
+                limit,
+            },
         )
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(AutomationRulePreviewResponse {
-        total,
-        items: page.items,
-    }))
+        .await
+        .map(|preview| {
+            Json(AutomationRulePreviewResponse {
+                total: preview.total,
+                items: preview.items,
+            })
+        })
+        .map_err(ApiError::from_runtime_error)
 }
