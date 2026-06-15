@@ -30,7 +30,11 @@ pub async fn upload_account_logo(
     bytes: Bytes,
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let mut account = load_account(state.as_ref(), &account_id)?;
+    let account = state
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
 
     if bytes.is_empty() {
         return Err(ApiError::new(
@@ -65,35 +69,37 @@ pub async fn upload_account_logo(
         .await
         .map_err(|err| internal_error(format!("failed to write account logo: {err}")))?;
 
-    let previous_image_id = match &account.appearance {
-        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
-        _ => None,
+    let previous_image_id = account_appearance_image_id_from_overview(&account);
+    let (initials, color_hue) = account_appearance_fallback_parts_from_overview(&account);
+    let account = match state
+        .runtime
+        .patch_account(
+            RuntimeCaller::api(),
+            account_id.clone(),
+            PatchAccountMutation {
+                appearance: Some(AccountAppearance::Image {
+                    image_id: image_id.clone(),
+                    initials,
+                    color_hue,
+                }),
+                ..PatchAccountMutation::default()
+            },
+        )
+        .await
+    {
+        Ok(account) => account,
+        Err(error) => {
+            let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
+            return Err(ApiError::from_runtime_error(error));
+        }
     };
-    let (initials, color_hue) = account_appearance_fallback_parts(&account);
-    account.appearance = Some(AccountAppearance::Image {
-        image_id: image_id.clone(),
-        initials,
-        color_hue,
-    });
-    account.updated_at = domain_now_iso8601().map_err(internal_error)?;
-    validate_account_settings(&account)?;
-    if let Err(error) = state.service.save_source(&account) {
-        let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
-        return Err(ApiError::from_service_error(error));
-    }
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
-        .map_err(store_error_to_api)?;
     if let Some(previous_image_id) = previous_image_id {
         if previous_image_id != image_id {
             let _ = delete_account_logo_file(state.as_ref(), &previous_image_id).await;
         }
     }
 
-    let settings = state
-        .service
-        .get_app_settings()
-        .map_err(ApiError::from_service_error)?;
-    Ok(Json(account_overview(&state, &settings, account).await))
+    Ok(Json(account))
 }
 
 /// GET /v1/account-assets/logos/{image_id}
@@ -166,19 +172,17 @@ pub async fn delete_account(
     Path(account_id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let account = load_account(state.as_ref(), &account_id)?;
-    let logo_image_id = match &account.appearance {
-        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
-        _ => None,
-    };
-    delete_managed_secret(state.as_ref(), account.transport.secret_ref.as_ref())?;
-    state.supervisor.remove_account(&account_id).await;
+    let account = state
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let logo_image_id = account_appearance_image_id_from_overview(&account);
     state
-        .service
-        .delete_source(&account_id)
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_DELETED)
-        .map_err(store_error_to_api)?;
+        .runtime
+        .delete_account(RuntimeCaller::api(), account_id)
+        .await
+        .map_err(ApiError::from_runtime_error)?;
     if let Some(image_id) = logo_image_id {
         let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
     }
@@ -203,6 +207,27 @@ pub(super) fn account_logo_extension(content_type: &str) -> Result<&'static str,
             ApiErrorCode::InvalidAccountLogo,
             "account logo must be a PNG, JPEG, WebP, or GIF image",
         )),
+    }
+}
+
+fn account_appearance_fallback_parts_from_overview(account: &AccountOverview) -> (String, u16) {
+    match &account.appearance {
+        AccountAppearance::Initials {
+            initials,
+            color_hue,
+        } => (initials.clone(), *color_hue),
+        AccountAppearance::Image {
+            initials,
+            color_hue,
+            ..
+        } => (initials.clone(), *color_hue),
+    }
+}
+
+fn account_appearance_image_id_from_overview(account: &AccountOverview) -> Option<String> {
+    match &account.appearance {
+        AccountAppearance::Image { image_id, .. } => Some(image_id.clone()),
+        AccountAppearance::Initials { .. } => None,
     }
 }
 

@@ -1034,6 +1034,14 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .await
     }
 
+    async fn delete_account(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?.delete_account(account_id).await
+    }
+
     async fn verify_account(
         &self,
         _caller: RuntimeCaller,

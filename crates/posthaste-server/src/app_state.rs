@@ -19,17 +19,17 @@ pub struct AppState {
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub store: Arc<dyn MailStore>,
     /// MIGRATION(api-runtime-wrapper): temporary direct secret-store access for
-    /// account/OAuth handlers until runtime account methods own it.
+    /// test harnesses and any remaining legacy adapter-only cleanup.
     ///
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub secret_store: Arc<dyn SecretStore>,
-    /// MIGRATION(api-runtime-wrapper): supervisor stays server-owned until its
-    /// OAuth/push/provider wiring is extracted into the authority runtime.
+    /// MIGRATION(api-runtime-wrapper): temporary direct supervisor access for
+    /// remaining search/cache visibility helpers and test harnesses.
     ///
     /// @spec docs/backend/L3#supervisor-server-owned-temporary
     pub supervisor: Arc<AccountSupervisor>,
     /// MIGRATION(api-runtime-wrapper): temporary direct event bus access for
-    /// `/v1/events` until it consumes runtime event methods.
+    /// test harnesses and remaining legacy adapter-only helpers.
     ///
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub event_sender: broadcast::Sender<DomainEvent>,

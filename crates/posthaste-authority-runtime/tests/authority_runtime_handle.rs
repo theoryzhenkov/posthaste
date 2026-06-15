@@ -12,7 +12,7 @@ use posthaste_authority_runtime::{
 use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, ProviderAuthKind,
     ProviderHint, SecretRef, SecretStore, SecretStoreError, SmtpTransportSettings,
-    TransportSecurity, EVENT_TOPIC_MESSAGE_ARRIVED,
+    TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeLifecycle,
@@ -161,6 +161,98 @@ async fn authority_builder_handle_supports_account_mutations() {
 
     assert_eq!(created.id.as_str(), "acct-builder");
     assert_eq!(created.name, "Builder Account");
+}
+
+// spec: docs/backend/L3#account-assets-runtime-backed
+// spec: docs/runtime/L4#account-resource-linkage-runtime-owned
+#[tokio::test]
+async fn delete_account_removes_secret_config_and_publishes_event_through_runtime() {
+    let root = temp_root();
+    let secret_store = Arc::new(TestSecretStore::default());
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(secret_store.clone());
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let created = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            CreateAccountMutation {
+                id: Some("delete-me".to_string()),
+                name: "Delete Me".to_string(),
+                full_name: None,
+                email_patterns: vec!["delete-me@example.com".to_string()],
+                driver: Some(AccountDriver::ImapSmtp),
+                enabled: Some(false),
+                appearance: None,
+                transport: AccountTransportMutation {
+                    provider: Some(ProviderHint::Generic),
+                    auth: Some(ProviderAuthKind::Password),
+                    base_url: None,
+                    username: Some("delete-me@example.com".to_string()),
+                    imap: Some(ImapTransportSettings {
+                        host: "imap.example.com".to_string(),
+                        port: 993,
+                        security: TransportSecurity::Tls,
+                    }),
+                    smtp: Some(SmtpTransportSettings {
+                        host: "smtp.example.com".to_string(),
+                        port: 465,
+                        security: TransportSecurity::Tls,
+                    }),
+                },
+                secret: SecretWriteMutation {
+                    mode: SecretWriteMode::Replace,
+                    password: Some("secret".to_string()),
+                },
+            },
+        )
+        .await
+        .expect("account should be created");
+    let secret_ref = build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .expect("created account should exist")
+        .transport
+        .secret_ref
+        .expect("created account should have a secret");
+    assert!(secret_store.value(&secret_ref).is_some());
+
+    build
+        .handle
+        .delete_account(RuntimeCaller::test(), created.id.clone())
+        .await
+        .expect("runtime should delete account");
+
+    assert!(secret_store.value(&secret_ref).is_none());
+    assert!(build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .is_none());
+    let events = build
+        .handle
+        .replay_events(
+            RuntimeCaller::test(),
+            EventFilter {
+                account_id: Some(created.id.clone()),
+                topic: Some(EVENT_TOPIC_ACCOUNT_DELETED.to_string()),
+                mailbox_id: None,
+                after_seq: Some(0),
+            },
+        )
+        .await
+        .expect("runtime should replay delete events");
+    assert_eq!(events.len(), 1);
 }
 
 // spec: docs/backend/L3#account-mutations-runtime-backed

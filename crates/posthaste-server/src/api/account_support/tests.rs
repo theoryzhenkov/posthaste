@@ -8,6 +8,7 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{ConfigRepository, MailService, MailStore, SecretStore, SecretStoreError};
 use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 use crate::oauth::OAuthFlowStore;
 use crate::supervisor::AccountSupervisor;
