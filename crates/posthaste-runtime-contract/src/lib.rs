@@ -10,10 +10,11 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    CachedSenderAddress, CommandResult, DomainEvent, EventFilter, Identity, ImapTransportSettings,
-    MailboxId, MailboxSummary, MessageId, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox,
-    SmartMailboxId, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
+    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, EventFilter,
+    Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId, MessageSummary,
+    ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+    SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -242,6 +243,46 @@ pub struct PatchAccountMutation {
     pub secret: Option<SecretWriteMutation>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchAppSettingsMutation {
+    #[serde(default)]
+    pub default_account_id: Option<Option<String>>,
+    pub cache_policy: Option<CachePolicy>,
+    pub automation_rules: Option<Vec<AutomationRule>>,
+    pub automation_drafts: Option<Vec<AutomationRule>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRulePreviewMutation {
+    pub condition: SmartMailboxRule,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationRulePreviewResult {
+    pub total: i64,
+    pub items: Vec<MessageSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSmartMailboxMutation {
+    pub name: String,
+    pub position: Option<i64>,
+    pub rule: SmartMailboxRule,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchSmartMailboxMutation {
+    pub name: Option<String>,
+    pub position: Option<i64>,
+    pub rule: Option<SmartMailboxRule>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountVerificationResult {
@@ -453,6 +494,18 @@ pub trait RuntimeCore: Send + Sync {
 
     async fn get_app_settings(&self, caller: RuntimeCaller) -> Result<AppSettings, RuntimeError>;
 
+    async fn patch_app_settings(
+        &self,
+        caller: RuntimeCaller,
+        mutation: PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError>;
+
+    async fn preview_automation_rule(
+        &self,
+        caller: RuntimeCaller,
+        mutation: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError>;
+
     async fn list_accounts(
         &self,
         caller: RuntimeCaller,
@@ -486,6 +539,30 @@ pub trait RuntimeCore: Send + Sync {
         caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<SmartMailbox, RuntimeError>;
+
+    async fn create_smart_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        mutation: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError>;
+
+    async fn patch_smart_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError>;
+
+    async fn delete_smart_mailbox(
+        &self,
+        caller: RuntimeCaller,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError>;
+
+    async fn reset_default_smart_mailboxes(
+        &self,
+        caller: RuntimeCaller,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError>;
 
     async fn list_tags(
         &self,

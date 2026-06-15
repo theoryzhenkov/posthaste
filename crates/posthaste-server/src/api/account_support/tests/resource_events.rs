@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::account_support::events::{ResourceChange, ResourceOperation};
 
 #[test]
 fn resource_change_serializes_wire_compatible_json() {
@@ -14,24 +15,6 @@ fn resource_change_serializes_wire_compatible_json() {
             "operation": "updated",
             "id": "primary",
             "accountId": "primary",
-        }),
-    );
-
-    assert_eq!(
-        serde_json::to_value(ResourceChange::app_settings_updated())
-            .expect("resource change should serialize"),
-        json!({
-            "kind": "appSettings",
-            "operation": "updated",
-        }),
-    );
-
-    assert_eq!(
-        serde_json::to_value(ResourceChange::smart_mailbox_reset())
-            .expect("resource change should serialize"),
-        json!({
-            "kind": "smartMailbox",
-            "operation": "reset",
         }),
     );
 }

@@ -15,28 +15,27 @@ use axum::Json;
 use posthaste_domain::AccountTransportSettings;
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
-    AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings,
-    AutomationAction, AutomationRule, CachePolicy, CachedSenderAddress, CommandResult,
-    ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
-    ConversationSummary, ConversationView, DomainEvent, EventFilter, Identity,
-    ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary, MessageAttachment,
-    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary,
-    ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxCondition,
-    SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxId,
-    SmartMailboxKind, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
+    AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings, AutomationRule,
+    CachePolicy, CachedSenderAddress, CommandResult, ConversationCursor, ConversationId,
+    ConversationPage, ConversationSortField, ConversationSummary, ConversationView, DomainEvent,
+    EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary,
+    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
+    MessageSummary, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
+    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
+    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
     TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
-    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
-    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+    EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, AccountTransportMutation, CreateAccountMutation, PatchAccountMutation,
-    RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
-    SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
+    AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
+    CreateAccountMutation, CreateSmartMailboxMutation, PatchAccountMutation,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller,
+    RuntimeCore, RuntimeError, RuntimeErrorCode, SecretWriteMode as RuntimeSecretWriteMode,
+    SecretWriteMutation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -112,11 +111,9 @@ pub use sync_events::{
 #[cfg(test)]
 use account_support::apply_account_patch;
 use account_support::{
-    account_overview, append_and_publish_account_event, append_and_publish_config_event,
-    default_account_appearance, delete_managed_secret, generate_smart_mailbox_id, internal_error,
-    normalize_account_appearance, normalize_automation_rules, store_error_to_api,
-    validate_account_settings, validate_automation_drafts, validate_automation_rules,
-    validate_logo_image_id, ResourceChange, ResourceOperation,
+    account_overview, append_and_publish_account_event, default_account_appearance,
+    delete_managed_secret, internal_error, normalize_account_appearance, store_error_to_api,
+    validate_account_settings, validate_logo_image_id,
 };
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, message_limit,

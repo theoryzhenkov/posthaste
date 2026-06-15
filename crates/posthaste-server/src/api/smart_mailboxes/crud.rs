@@ -46,33 +46,19 @@ pub async fn create_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateSmartMailboxRequest>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
-    let timestamp = domain_now_iso8601().map_err(internal_error)?;
-    let smart_mailbox = SmartMailbox {
-        id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
-        name: request.name,
-        position: request.position.unwrap_or(0),
-        kind: SmartMailboxKind::User,
-        default_key: None,
-        parent_id: None,
-        rule: request.rule,
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    };
     state
-        .service
-        .save_smart_mailbox(&smart_mailbox)
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_SMART_MAILBOX_CREATED,
-        vec![ResourceChange::smart_mailbox(
-            ResourceOperation::Created,
-            &smart_mailbox.id,
-        )],
-        json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
-    )
-    .map_err(store_error_to_api)?;
-    Ok(Json(smart_mailbox))
+        .runtime
+        .create_smart_mailbox(
+            RuntimeCaller::api(),
+            CreateSmartMailboxMutation {
+                name: request.name,
+                position: request.position,
+                rule: request.rule,
+            },
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// GET /v1/smart-mailboxes/{id}
@@ -126,36 +112,20 @@ pub async fn patch_smart_mailbox(
     Path(smart_mailbox_id): Path<String>,
     Json(request): Json<PatchSmartMailboxRequest>,
 ) -> Result<Json<SmartMailbox>, ApiError> {
-    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
-    let mut smart_mailbox = state
-        .service
-        .get_smart_mailbox(&smart_mailbox_id)
-        .map_err(ApiError::from_service_error)?;
-    if let Some(name) = request.name {
-        smart_mailbox.name = name;
-    }
-    if let Some(position) = request.position {
-        smart_mailbox.position = position;
-    }
-    if let Some(rule) = request.rule {
-        smart_mailbox.rule = rule;
-    }
-    smart_mailbox.updated_at = domain_now_iso8601().map_err(internal_error)?;
     state
-        .service
-        .save_smart_mailbox(&smart_mailbox)
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_SMART_MAILBOX_UPDATED,
-        vec![ResourceChange::smart_mailbox(
-            ResourceOperation::Updated,
-            &smart_mailbox.id,
-        )],
-        json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
-    )
-    .map_err(store_error_to_api)?;
-    Ok(Json(smart_mailbox))
+        .runtime
+        .patch_smart_mailbox(
+            RuntimeCaller::api(),
+            SmartMailboxId::from(smart_mailbox_id),
+            PatchSmartMailboxMutation {
+                name: request.name,
+                position: request.position,
+                rule: request.rule,
+            },
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// DELETE /v1/smart-mailboxes/{id}
@@ -177,22 +147,12 @@ pub async fn delete_smart_mailbox(
     State(state): State<Arc<AppState>>,
     Path(smart_mailbox_id): Path<String>,
 ) -> Result<Json<OkResponse>, ApiError> {
-    let smart_mailbox_id = SmartMailboxId::from(smart_mailbox_id);
     state
-        .service
-        .delete_smart_mailbox(&smart_mailbox_id)
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_SMART_MAILBOX_DELETED,
-        vec![ResourceChange::smart_mailbox(
-            ResourceOperation::Deleted,
-            &smart_mailbox_id,
-        )],
-        json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
-    )
-    .map_err(store_error_to_api)?;
-    Ok(Json(OkResponse { ok: true }))
+        .runtime
+        .delete_smart_mailbox(RuntimeCaller::api(), SmartMailboxId::from(smart_mailbox_id))
+        .await
+        .map(|()| Json(OkResponse { ok: true }))
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// POST /v1/smart-mailboxes:reset-defaults
@@ -217,19 +177,9 @@ pub async fn reset_default_smart_mailboxes(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SmartMailboxSummary>>, ApiError> {
     state
-        .service
-        .reset_default_smart_mailboxes()
-        .map_err(ApiError::from_service_error)?;
-    append_and_publish_config_event(
-        &state,
-        EVENT_TOPIC_SMART_MAILBOX_RESET,
-        vec![ResourceChange::smart_mailbox_reset()],
-        json!({ "scope": "smartMailboxes" }),
-    )
-    .map_err(store_error_to_api)?;
-    state
-        .service
-        .list_smart_mailboxes()
+        .runtime
+        .reset_default_smart_mailboxes(RuntimeCaller::api())
+        .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
