@@ -1,12 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import { patchSettings } from '../../api/client'
 import type { AppSettings, SmartMailbox } from '../../api/types'
 import {
   removeSmartMailboxLinkedRules,
   rewriteSmartMailboxLinkedRules,
 } from '../../automationRules'
 import { queryKeys } from '../../queryKeys'
+import { patchRuntimeSettings } from '../../runtime/adapter'
 
 export async function rewriteLinkedSmartMailboxAutomation(input: {
   queryClient: QueryClient
@@ -31,7 +31,10 @@ export async function rewriteLinkedSmartMailboxAutomation(input: {
   ) {
     return
   }
-  const savedSettings = await patchSettings({ automationRules, automationDrafts })
+  const savedSettings = await patchRuntimeSettings({
+    automationRules,
+    automationDrafts,
+  })
   queryClient.setQueryData(queryKeys.settings, savedSettings)
 }
 
@@ -58,6 +61,9 @@ export async function removeLinkedSmartMailboxAutomation(input: {
   ) {
     return
   }
-  const savedSettings = await patchSettings({ automationRules, automationDrafts })
+  const savedSettings = await patchRuntimeSettings({
+    automationRules,
+    automationDrafts,
+  })
   queryClient.setQueryData(queryKeys.settings, savedSettings)
 }

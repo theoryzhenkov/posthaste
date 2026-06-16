@@ -121,6 +121,16 @@ export function createFakeRuntimeAdapter(
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
     },
+    createSmartMailbox() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no smart mailbox result'),
+      )
+    },
+    deleteSmartMailbox() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no smart mailbox delete result'),
+      )
+    },
     fetchAccounts() {
       accountCalls += 1
       return resolveQueued(
@@ -177,14 +187,35 @@ export function createFakeRuntimeAdapter(
         'resource blob result',
       )
     },
+    fetchSettings() {
+      return Promise.reject(new Error('fake runtime adapter has no settings'))
+    },
     fetchSenderAddresses() {
       return Promise.resolve([])
+    },
+    fetchSmartMailbox() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no smart mailbox result'),
+      )
     },
     fetchSmartMailboxes() {
       smartMailboxCalls += 1
       return resolveQueued(
         queues.smartMailboxes,
         input?.defaultSmartMailboxes ?? defaultSmartMailboxes,
+      )
+    },
+    patchMailbox() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no mailbox patch result'),
+      )
+    },
+    patchSettings() {
+      return Promise.reject(new Error('fake runtime adapter has no settings'))
+    },
+    previewAutomationRule() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no automation preview result'),
       )
     },
     read(request) {
@@ -201,6 +232,9 @@ export function createFakeRuntimeAdapter(
         input?.defaultMessageCommandResult ?? defaultMessageCommandResult,
       )
     },
+    resetDefaultSmartMailboxes() {
+      return Promise.resolve([])
+    },
     sendMessage() {
       return Promise.reject(
         new Error('fake runtime adapter has no send message result'),
@@ -209,6 +243,11 @@ export function createFakeRuntimeAdapter(
     triggerSync(request) {
       calls.syncCalls.push(request)
       return resolveQueuedOptional(queues.syncs, undefined, 'sync result')
+    },
+    updateSmartMailbox() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no smart mailbox result'),
+      )
     },
   }
 }

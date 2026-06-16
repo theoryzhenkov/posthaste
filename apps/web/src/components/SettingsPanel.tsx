@@ -8,15 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import {
-  deleteSmartMailbox,
-  fetchAccount,
-  fetchSettings,
-  fetchSmartMailbox,
-  resetDefaultSmartMailboxes,
-  updateSmartMailbox,
-  patchSettings,
-} from '../api/client'
+import { fetchAccount } from '../api/client'
 import type {
   AccountOverview,
   AppSettings,
@@ -29,7 +21,15 @@ import {
 } from '../domainCache'
 import { cn } from '../lib/utils'
 import { queryKeys } from '../queryKeys'
-import { fetchRuntimeSmartMailboxes } from '../runtime/adapter'
+import {
+  deleteRuntimeSmartMailbox,
+  fetchRuntimeSettings,
+  fetchRuntimeSmartMailbox,
+  fetchRuntimeSmartMailboxes,
+  patchRuntimeSettings,
+  resetRuntimeDefaultSmartMailboxes,
+  updateRuntimeSmartMailbox,
+} from '../runtime/adapter'
 import {
   accountSettingsSurface,
   newAccountSettingsSurface,
@@ -109,7 +109,7 @@ export function SettingsPanel({
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
-    queryFn: fetchSettings,
+    queryFn: fetchRuntimeSettings,
   })
   const smartMailboxListQuery = useQuery({
     queryKey: queryKeys.smartMailboxes,
@@ -142,7 +142,7 @@ export function SettingsPanel({
       : effectiveSmartMailboxTarget
   const smartMailboxQuery = useQuery({
     queryKey: queryKeys.smartMailbox(editingSmartMailboxId),
-    queryFn: () => fetchSmartMailbox(editingSmartMailboxId!),
+    queryFn: () => fetchRuntimeSmartMailbox(editingSmartMailboxId!),
     enabled: editingSmartMailboxId !== null,
   })
   const editingSmartMailbox =
@@ -179,7 +179,7 @@ export function SettingsPanel({
 
   const defaultMutation = useMutation({
     mutationFn: (accountId: string | null) =>
-      patchSettings({ defaultAccountId: accountId }),
+      patchRuntimeSettings({ defaultAccountId: accountId }),
     onSuccess: async () => {
       invalidateAccountReadModels(queryClient)
     },
@@ -264,19 +264,19 @@ export function SettingsPanel({
             settings: currentSettings(),
             smartMailboxId: mailboxId,
           })
-          await deleteSmartMailbox(mailboxId)
+          await deleteRuntimeSmartMailbox(mailboxId)
           await invalidateSmartMailboxQueries()
           onNavigate(settingsCategorySurface('mailboxes'))
         }}
         onReorderSmartMailbox={(mailbox: SmartMailboxSummary, position) => {
           void runSmartMailboxAction(`reorder:${mailbox.id}`, async () => {
-            await updateSmartMailbox(mailbox.id, { position })
+            await updateRuntimeSmartMailbox(mailbox.id, { position })
             await invalidateSmartMailboxQueries(mailbox.id)
           })
         }}
         onResetSmartMailboxes={() => {
           void runSmartMailboxAction('reset-defaults', async () => {
-            await resetDefaultSmartMailboxes()
+            await resetRuntimeDefaultSmartMailboxes()
             await invalidateSmartMailboxQueries()
             onNavigate(settingsCategorySurface('mailboxes'))
           })
