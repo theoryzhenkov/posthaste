@@ -1,7 +1,9 @@
 import type {
+  ConversationView,
   Mailbox,
   MessageCommand,
   MessageCommandResult,
+  MessageDetail,
   MessagePage,
   MessageSortField,
   ReadRequest,
@@ -40,7 +42,9 @@ export interface RuntimeMessagePageRequest {
 
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
+  fetchConversation(conversationId: string): Promise<ConversationView>
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
+  fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
   fetchSmartMailboxes(): Promise<SmartMailboxSummary[]>
   read(request: ReadRequest): Promise<ReadResponse>
