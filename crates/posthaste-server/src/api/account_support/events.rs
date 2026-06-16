@@ -85,12 +85,6 @@ pub(crate) fn append_and_publish_account_event(
     Ok(())
 }
 
-/// Convert a store-level error into an API error.
-#[cfg(test)]
-pub(crate) fn store_error_to_api(error: posthaste_domain::StoreError) -> ApiError {
-    ApiError::from_service_error(ServiceError::from(error))
-}
-
 /// Construct a 500 Internal Server Error from a message string.
 pub(crate) fn internal_error(error: String) -> ApiError {
     ApiError::new(

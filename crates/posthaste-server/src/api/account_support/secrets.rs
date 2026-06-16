@@ -186,22 +186,3 @@ pub(crate) fn account_secret_ref(account_id: &AccountId) -> SecretRef {
         key: format!("account:{}", account_id.as_str()),
     }
 }
-
-/// Delete an OS-managed secret from the keyring. No-ops for env secrets.
-///
-/// @spec docs/L1-api#account-crud-lifecycle
-pub(crate) fn delete_managed_secret(
-    state: &AppState,
-    secret_ref: Option<&SecretRef>,
-) -> Result<(), ApiError> {
-    if let Some(secret_ref) = secret_ref {
-        if matches!(secret_ref.kind, SecretKind::Os) {
-            state
-                .secret_store
-                .delete(secret_ref)
-                .map_err(ServiceError::from)
-                .map_err(ApiError::from)?;
-        }
-    }
-    Ok(())
-}

@@ -40,7 +40,7 @@ use utoipa::OpenApi;
         crate::api::accounts::lifecycle::disable_account,
         crate::api::accounts::logos::upload_account_logo,
         crate::api::accounts::logos::get_account_logo,
-        crate::api::accounts::logos::delete_account,
+        crate::api::accounts::crud::delete_account,
         crate::api::accounts::lifecycle::reload_config,
         crate::api::mailboxes::list_mailboxes,
         crate::api::mailboxes::patch_mailbox,

@@ -342,8 +342,14 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
 #[test]
 fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
-    let source = fs::read_to_string(server_dir.join("accounts/logos.rs"))
-        .expect("account logo route source should be readable");
+    let source = ["accounts/logos.rs", "accounts/crud.rs"]
+        .into_iter()
+        .map(|relative| {
+            fs::read_to_string(server_dir.join(relative))
+                .expect("account route source should be readable")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     for forbidden in [
         "state.service.save_source",
         "state.service.delete_source",

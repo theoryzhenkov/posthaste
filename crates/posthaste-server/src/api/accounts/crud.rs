@@ -130,6 +130,47 @@ pub async fn patch_account(
     Ok(Json(account))
 }
 
+/// DELETE /v1/accounts/{account_id}
+///
+/// Removes the managed OS keyring secret, stops the supervisor runtime,
+/// deletes the config file, and emits an `account.deleted` event.
+///
+/// @spec docs/L1-api#account-crud-lifecycle
+#[utoipa::path(
+    delete,
+    path = "/v1/accounts/{account_id}",
+    tag = "accounts",
+    summary = "Delete account",
+    description = "Removes the managed keyring secret, stops the runtime, deletes config, and \
+                   emits an account.deleted event.",
+    params(("account_id" = String, Path, description = "Account identifier")),
+    responses(
+        (status = 200, description = "Account deleted", body = OkResponse),
+        (status = 404, description = "Account not found", body = ApiErrorBody)
+    )
+)]
+pub async fn delete_account(
+    State(state): State<Arc<AppState>>,
+    Path(account_id): Path<String>,
+) -> Result<Json<OkResponse>, ApiError> {
+    let account_id = AccountId::from(account_id.as_str());
+    let account = state
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let logo_image_id = account_appearance_image_id_from_overview(&account);
+    state
+        .runtime
+        .delete_account(RuntimeCaller::api(), account_id)
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    if let Some(image_id) = logo_image_id {
+        let _ = delete_account_logo_file(state.as_ref(), &image_id).await;
+    }
+    Ok(Json(OkResponse { ok: true }))
+}
+
 /// POST /v1/accounts/{account_id}/verify
 ///
 /// Attempts JMAP session discovery and reports identity and push support.
