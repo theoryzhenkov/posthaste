@@ -113,8 +113,7 @@ use account_support::apply_account_patch;
 #[cfg(test)]
 #[allow(unused_imports)]
 use account_support::{
-    append_and_publish_account_event, default_account_appearance, normalize_account_appearance,
-    store_error_to_api, validate_account_settings,
+    append_and_publish_account_event, normalize_account_appearance, validate_account_settings,
 };
 use account_support::{internal_error, validate_logo_image_id};
 use cursor_support::{
