@@ -7,7 +7,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { createSmartMailbox, updateSmartMailbox } from '../../api/client'
 import type {
   AccountOverview,
   AppSettings,
@@ -16,6 +15,10 @@ import type {
   SmartMailboxSummary,
   UpdateSmartMailboxInput,
 } from '../../api/types'
+import {
+  createRuntimeSmartMailbox,
+  updateRuntimeSmartMailbox,
+} from '../../runtime/adapter'
 import { Button } from '../ui/button'
 import { SmartMailboxAutomationFields } from './AutomationActionsEditor'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
@@ -91,7 +94,7 @@ export function SmartMailboxEditor({
           position: currentForm.position,
           rule: currentForm.rule,
         }
-        return createSmartMailbox(payload)
+        return createRuntimeSmartMailbox(payload)
       }
 
       const payload: UpdateSmartMailboxInput = {
@@ -99,7 +102,7 @@ export function SmartMailboxEditor({
         position: currentForm.position,
         rule: currentForm.rule,
       }
-      return updateSmartMailbox(editorTarget, payload)
+      return updateRuntimeSmartMailbox(editorTarget, payload)
     },
     onSuccess: async (smartMailbox) => {
       setErrorMessage(null)

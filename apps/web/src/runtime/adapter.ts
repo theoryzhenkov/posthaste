@@ -1,19 +1,26 @@
 import type {
   AccountOverview,
+  AppSettings,
+  AutomationRulePreviewInput,
+  AutomationRulePreviewResponse,
   CachedSenderAddress,
   ConversationPage,
   ConversationView,
+  CreateSmartMailboxInput,
   Mailbox,
   MessageCommandResult,
   MessageDetail,
   MessagePage,
   OkResponse,
+  PatchMailboxInput,
   ReadRequest,
   ReplyContext,
   ReadResponse,
   SendMessageInput,
+  SmartMailbox,
   SmartMailboxSummary,
   Identity,
+  UpdateSmartMailboxInput,
 } from '../api/types'
 import {
   injectedRuntimeMode,
@@ -46,6 +53,8 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
       )
       return () => undefined
     },
+    createSmartMailbox: () => reject(),
+    deleteSmartMailbox: () => reject(),
     fetchAccounts: () => reject(),
     fetchConversation: () => reject(),
     fetchConversationPage: () => reject(),
@@ -56,11 +65,18 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     fetchReplyContext: () => reject(),
     fetchResourceBlob: () => reject(),
     fetchSenderAddresses: () => reject(),
+    fetchSettings: () => reject(),
+    fetchSmartMailbox: () => reject(),
     fetchSmartMailboxes: () => reject(),
+    patchMailbox: () => reject(),
+    patchSettings: () => reject(),
+    previewAutomationRule: () => reject(),
     read: () => reject(),
+    resetDefaultSmartMailboxes: () => reject(),
     runMessageCommand: () => reject(),
     sendMessage: () => reject(),
     triggerSync: () => reject(),
+    updateSmartMailbox: () => reject(),
   }
 }
 
@@ -100,6 +116,20 @@ export function runtimeRead(request: ReadRequest): Promise<ReadResponse> {
   return activeRuntimeAdapter.read(request)
 }
 
+/** Create a saved smart mailbox through the active runtime adapter. */
+export function createRuntimeSmartMailbox(
+  input: CreateSmartMailboxInput,
+): Promise<SmartMailbox> {
+  return activeRuntimeAdapter.createSmartMailbox(input)
+}
+
+/** Delete a saved smart mailbox through the active runtime adapter. */
+export function deleteRuntimeSmartMailbox(
+  smartMailboxId: string,
+): Promise<OkResponse> {
+  return activeRuntimeAdapter.deleteSmartMailbox(smartMailboxId)
+}
+
 /** Fetch accounts through the active runtime adapter. */
 export function fetchRuntimeAccounts(): Promise<AccountOverview[]> {
   return activeRuntimeAdapter.fetchAccounts()
@@ -129,14 +159,49 @@ export function fetchRuntimeMailboxes(accountId: string): Promise<Mailbox[]> {
   return activeRuntimeAdapter.fetchMailboxes(accountId)
 }
 
+/** Fetch app settings through the active runtime adapter. */
+export function fetchRuntimeSettings(): Promise<AppSettings> {
+  return activeRuntimeAdapter.fetchSettings()
+}
+
 /** Fetch cached sender addresses through the active runtime adapter. */
 export function fetchRuntimeSenderAddresses(): Promise<CachedSenderAddress[]> {
   return activeRuntimeAdapter.fetchSenderAddresses()
 }
 
+/** Fetch a saved smart mailbox through the active runtime adapter. */
+export function fetchRuntimeSmartMailbox(
+  smartMailboxId: string,
+): Promise<SmartMailbox> {
+  return activeRuntimeAdapter.fetchSmartMailbox(smartMailboxId)
+}
+
 /** Fetch saved smart mailboxes through the active runtime adapter. */
 export function fetchRuntimeSmartMailboxes(): Promise<SmartMailboxSummary[]> {
   return activeRuntimeAdapter.fetchSmartMailboxes()
+}
+
+/** Patch a source mailbox through the active runtime adapter. */
+export function patchRuntimeMailbox(
+  accountId: string,
+  mailboxId: string,
+  input: PatchMailboxInput,
+): Promise<Mailbox[]> {
+  return activeRuntimeAdapter.patchMailbox(accountId, mailboxId, input)
+}
+
+/** Patch app settings through the active runtime adapter. */
+export function patchRuntimeSettings(
+  input: Partial<AppSettings>,
+): Promise<AppSettings> {
+  return activeRuntimeAdapter.patchSettings(input)
+}
+
+/** Preview an automation rule through the active runtime adapter. */
+export function previewRuntimeAutomationRule(
+  input: AutomationRulePreviewInput,
+): Promise<AutomationRulePreviewResponse> {
+  return activeRuntimeAdapter.previewAutomationRule(input)
 }
 
 /** Fetch full message detail through the active runtime adapter. */
@@ -176,12 +241,27 @@ export function runRuntimeMessageCommand(
   return activeRuntimeAdapter.runMessageCommand(request)
 }
 
+/** Reset default smart mailboxes through the active runtime adapter. */
+export function resetRuntimeDefaultSmartMailboxes(): Promise<
+  SmartMailboxSummary[]
+> {
+  return activeRuntimeAdapter.resetDefaultSmartMailboxes()
+}
+
 /** Send a composed message through the active runtime adapter. */
 export function sendRuntimeMessage(request: {
   sourceId: string
   input: SendMessageInput
 }): Promise<OkResponse> {
   return activeRuntimeAdapter.sendMessage(request)
+}
+
+/** Update a saved smart mailbox through the active runtime adapter. */
+export function updateRuntimeSmartMailbox(
+  smartMailboxId: string,
+  input: UpdateSmartMailboxInput,
+): Promise<SmartMailbox> {
+  return activeRuntimeAdapter.updateSmartMailbox(smartMailboxId, input)
 }
 
 /** Trigger account sync through the active runtime adapter. */
