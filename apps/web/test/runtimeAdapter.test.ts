@@ -92,9 +92,13 @@ describe('runtime adapter facade', () => {
   })
 
   it('fails closed for native mode until the native adapter exists', async () => {
-    await expect(
-      runtimeAdapterForMode('native').fetchSmartMailboxes(),
-    ).rejects.toThrow('runtime adapter mode native is not implemented')
+    const nativeAdapter = runtimeAdapterForMode('native')
+    await expect(nativeAdapter.fetchSmartMailboxes()).rejects.toThrow(
+      'runtime adapter mode native is not implemented',
+    )
+    expect(() => nativeAdapter.fetchOAuthRedirectUri()).toThrow(
+      'runtime adapter mode native is not implemented',
+    )
   })
 
   it('dispatches message commands through a fake adapter override without a backend', async () => {

@@ -11,8 +11,14 @@ const migratedHttpSymbols = new Set([
   'buildAccountLogoUrl',
   'buildEventsUrl',
   'buildMessageAttachmentUrl',
+  'buildOAuthRedirectUri',
+  'createAccount',
   'createSmartMailbox',
+  'deleteAccount',
   'deleteSmartMailbox',
+  'disableAccount',
+  'enableAccount',
+  'fetchAccount',
   'fetchAccounts',
   'fetchConversation',
   'fetchConversations',
@@ -34,8 +40,12 @@ const migratedHttpSymbols = new Set([
   'read',
   'resetDefaultSmartMailboxes',
   'sendMessage',
+  'startProviderOAuth',
   'triggerSync',
+  'updateAccount',
   'updateSmartMailbox',
+  'uploadAccountLogo',
+  'verifyAccount',
 ])
 
 interface Violation {

@@ -2,10 +2,13 @@ import { useMutation } from '@tanstack/react-query'
 import { Cloud, Mail, Settings2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
-import { buildOAuthRedirectUri, startProviderOAuth } from '../../../api/client'
 import type { ProviderKind } from '../../../api/types'
 import { providerOAuthClientCredentials } from '../../../config/oauthProviders'
 import { openExternalUrl } from '../../../desktop'
+import {
+  fetchRuntimeOAuthRedirectUri,
+  startRuntimeProviderOAuth,
+} from '../../../runtime/accounts'
 import { Button } from '../../ui/button'
 import { SettingsPageHeader } from '../shared'
 
@@ -36,11 +39,11 @@ export function AccountSetupChoice({ onManual }: { onManual: () => void }) {
           `${providerLabel(provider)} OAuth client ID is not configured`,
         )
       }
-      const session = await startProviderOAuth({
+      const session = await startRuntimeProviderOAuth({
         provider,
         clientId,
         clientSecret: credentials?.clientSecret,
-        redirectUri: buildOAuthRedirectUri(),
+        redirectUri: fetchRuntimeOAuthRedirectUri(),
       })
       try {
         await openExternalUrl(session.authorizationUrl)

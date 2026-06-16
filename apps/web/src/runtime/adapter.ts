@@ -53,8 +53,13 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
       )
       return () => undefined
     },
+    createAccount: () => reject(),
     createSmartMailbox: () => reject(),
+    deleteAccount: () => reject(),
     deleteSmartMailbox: () => reject(),
+    disableAccount: () => reject(),
+    enableAccount: () => reject(),
+    fetchAccount: () => reject(),
     fetchAccounts: () => reject(),
     fetchConversation: () => reject(),
     fetchConversationPage: () => reject(),
@@ -62,6 +67,9 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     fetchMailboxes: () => reject(),
     fetchMessage: () => reject(),
     fetchMessagePage: () => reject(),
+    fetchOAuthRedirectUri: () => {
+      throw new Error(`runtime adapter mode ${mode} is not implemented`)
+    },
     fetchReplyContext: () => reject(),
     fetchResourceBlob: () => reject(),
     fetchSenderAddresses: () => reject(),
@@ -75,8 +83,12 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     resetDefaultSmartMailboxes: () => reject(),
     runMessageCommand: () => reject(),
     sendMessage: () => reject(),
+    startProviderOAuth: () => reject(),
     triggerSync: () => reject(),
+    updateAccount: () => reject(),
     updateSmartMailbox: () => reject(),
+    uploadAccountLogo: () => reject(),
+    verifyAccount: () => reject(),
   }
 }
 
