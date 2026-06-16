@@ -1385,7 +1385,7 @@
           "smart-mailboxes"
         ],
         "summary": "List smart mailbox conversations",
-        "description": "Returns a paginated page of conversation summaries matching a smart mailbox rule, optionally narrowed by a search query.",
+        "description": "Returns a paginated page of conversation-grouped rows matching a smart mailbox query, optionally narrowed by a search query.",
         "operationId": "list_smart_mailbox_conversations",
         "parameters": [
           {
@@ -1524,7 +1524,7 @@
           "smart-mailboxes"
         ],
         "summary": "List smart mailbox messages",
-        "description": "Returns a paginated page of message summaries matching a smart mailbox rule, optionally narrowed by a search query.",
+        "description": "Returns a paginated page of message summaries matching a smart mailbox query, optionally narrowed by a search query.",
         "operationId": "list_smart_mailbox_messages",
         "parameters": [
           {
@@ -4523,7 +4523,6 @@
       },
       "ProviderKind": {
         "type": "string",
-        "description": "Provider family independent of the account driver/protocol.\n\n`AccountDriver` selects the runtime protocol. `ProviderKind` selects the\nvendor/family policy applied within that protocol.\n\n@spec docs/L0-providers#driver-model",
         "enum": [
           "generic",
           "gmail",
@@ -4872,6 +4871,26 @@
           }
         }
       },
+      "SendMessageAttachment": {
+        "type": "object",
+        "description": "File attachment payload for an outgoing compose request.\n\nThe frontend sends base64 content to the daemon; the provider adapter uploads\nor embeds the bytes using the transport-native attachment path before send.\n\n@spec docs/L1-compose#attachment-handling",
+        "required": [
+          "filename",
+          "mimeType",
+          "contentBase64"
+        ],
+        "properties": {
+          "contentBase64": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          }
+        }
+      },
       "SendMessageRequest": {
         "type": "object",
         "description": "Request payload for sending a new email via `EmailSubmission/set`.\n\n@spec docs/L1-jmap#methods-used",
@@ -4883,6 +4902,12 @@
           "body"
         ],
         "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendMessageAttachment"
+            }
+          },
           "bcc": {
             "type": "array",
             "items": {
@@ -5039,6 +5064,7 @@
           "sourceName",
           "messageId",
           "threadId",
+          "conversationId",
           "mailboxId",
           "mailboxName",
           "mailboxRole",
