@@ -1,13 +1,19 @@
 import type {
   AccountOverview,
+  CachedSenderAddress,
+  ConversationPage,
   ConversationView,
   Mailbox,
   MessageCommandResult,
   MessageDetail,
   MessagePage,
+  OkResponse,
   ReadRequest,
+  ReplyContext,
   ReadResponse,
+  SendMessageInput,
   SmartMailboxSummary,
+  Identity,
 } from '../api/types'
 import {
   injectedRuntimeMode,
@@ -17,10 +23,12 @@ import {
 import { httpRuntimeAdapter } from './httpAdapter'
 import type {
   RuntimeAdapter,
+  RuntimeConversationPageRequest,
   RuntimeEventHandlers,
   RuntimeEventSubscriptionRequest,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
+  RuntimeReplyContextRequest,
   RuntimeResourceDescriptor,
   RuntimeResourceFetchOptions,
   RuntimeTriggerSyncRequest,
@@ -40,13 +48,18 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     },
     fetchAccounts: () => reject(),
     fetchConversation: () => reject(),
+    fetchConversationPage: () => reject(),
+    fetchIdentity: () => reject(),
     fetchMailboxes: () => reject(),
     fetchMessage: () => reject(),
     fetchMessagePage: () => reject(),
+    fetchReplyContext: () => reject(),
     fetchResourceBlob: () => reject(),
+    fetchSenderAddresses: () => reject(),
     fetchSmartMailboxes: () => reject(),
     read: () => reject(),
     runMessageCommand: () => reject(),
+    sendMessage: () => reject(),
     triggerSync: () => reject(),
   }
 }
@@ -99,9 +112,26 @@ export function fetchRuntimeConversation(
   return activeRuntimeAdapter.fetchConversation(conversationId)
 }
 
+/** Fetch a conversation page through the active runtime adapter. */
+export function fetchRuntimeConversationPage(
+  request?: RuntimeConversationPageRequest,
+): Promise<ConversationPage> {
+  return activeRuntimeAdapter.fetchConversationPage(request)
+}
+
+/** Fetch sender identity through the active runtime adapter. */
+export function fetchRuntimeIdentity(sourceId: string): Promise<Identity> {
+  return activeRuntimeAdapter.fetchIdentity(sourceId)
+}
+
 /** Fetch source mailboxes through the active runtime adapter. */
 export function fetchRuntimeMailboxes(accountId: string): Promise<Mailbox[]> {
   return activeRuntimeAdapter.fetchMailboxes(accountId)
+}
+
+/** Fetch cached sender addresses through the active runtime adapter. */
+export function fetchRuntimeSenderAddresses(): Promise<CachedSenderAddress[]> {
+  return activeRuntimeAdapter.fetchSenderAddresses()
 }
 
 /** Fetch saved smart mailboxes through the active runtime adapter. */
@@ -124,6 +154,13 @@ export function fetchRuntimeMessagePage(
   return activeRuntimeAdapter.fetchMessagePage(request)
 }
 
+/** Fetch reply context through the active runtime adapter. */
+export function fetchRuntimeReplyContext(
+  request: RuntimeReplyContextRequest,
+): Promise<ReplyContext> {
+  return activeRuntimeAdapter.fetchReplyContext(request)
+}
+
 /** Fetch runtime-owned resource bytes through the active runtime adapter. */
 export function fetchRuntimeResourceBlob(
   descriptor: RuntimeResourceDescriptor,
@@ -137,6 +174,14 @@ export function runRuntimeMessageCommand(
   request: RuntimeMessageCommandRequest,
 ): Promise<MessageCommandResult> {
   return activeRuntimeAdapter.runMessageCommand(request)
+}
+
+/** Send a composed message through the active runtime adapter. */
+export function sendRuntimeMessage(request: {
+  sourceId: string
+  input: SendMessageInput
+}): Promise<OkResponse> {
+  return activeRuntimeAdapter.sendMessage(request)
 }
 
 /** Trigger account sync through the active runtime adapter. */
