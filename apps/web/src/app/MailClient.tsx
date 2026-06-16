@@ -18,10 +18,7 @@ import { useEmailActions } from '@/hooks/useEmailActions'
 import { useGlobalMailShortcuts } from '@/hooks/useGlobalMailShortcuts'
 import { useMailboxRole } from '@/hooks/useMailboxRole'
 import { useMailLayoutPersistence } from '@/hooks/useMailLayoutPersistence'
-import {
-  closeWebSurface,
-  useEffectiveSurface,
-} from '@/hooks/useSurfaceRouting'
+import { closeWebSurface, useEffectiveSurface } from '@/hooks/useSurfaceRouting'
 import {
   appReadinessStateFromAccountsQuery,
   LAB_READINESS_STATES,
@@ -301,4 +298,3 @@ function useSyncSourceMutation() {
     },
   })
 }
-
