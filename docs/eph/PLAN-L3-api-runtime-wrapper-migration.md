@@ -1,8 +1,8 @@
 ---
 scope: L3
 summary: "Temporary API runtime-wrapper migration controls for moving /v1 from AppState-owned services to the authority runtime handle"
-modified: 2026-06-15
-reviewed: 2026-06-15
+modified: 2026-06-16
+reviewed: 2026-06-16
 lifecycle: ephemeral
 type: PLAN
 depends:
@@ -21,10 +21,9 @@ The industry pattern is branch by abstraction / strangler-fig migration: introdu
 
 ## 2. Approved temporary exception
 
-`posthaste-server::AppState` may temporarily contain both:
+`posthaste-server::AppState` contains the `AuthorityRuntimeHandle` target runtime boundary plus HTTP-adapter-owned state. Legacy direct fields such as `MailService`, `MailStore`, `SecretStore`, `AccountSupervisor`, and `event_sender` must not be exposed through route state.
 
-- an `AuthorityRuntimeHandle`, which is the target runtime boundary; and
-- legacy direct fields such as `MailService`, `MailStore`, `SecretStore`, `AccountSupervisor`, and `event_sender`, which existing handlers still use.
+`AuthorityRuntimeBuild::api_bridge` may temporarily expose those handles inside `posthaste-authority-runtime` and compatibility test harnesses while the internal runtime implementation finishes shedding migration seams.
 
 This exception exists only to avoid changing endpoint behavior while the API adapter is extracted.
 
@@ -43,7 +42,7 @@ New mail-state behavior must be added behind `RuntimeCore` or `AuthorityRuntimeH
 
 The migration should accumulate tests or checks that make the wrapper hard to forget:
 
-- API router construction has a runtime handle available in `AppState`.
+- API router construction has a runtime handle available in `AppState` without legacy service/store/supervisor fields.
 - Server startup uses the authority runtime builder for config/store/service/event assembly instead of building that graph directly in `posthaste-server`.
 - Existing API/auth/contract tests keep passing through the wrapper.
 - When a runtime read/mutation/view method exists, new handler tests assert the handler calls the runtime path or shared helper below the handle.
@@ -53,12 +52,12 @@ The migration should accumulate tests or checks that make the wrapper hard to fo
 
 Delete the wrapper and this ephemeral plan when all are true:
 
-1. `AppState` no longer exposes `service`, `store`, `secret_store`, `supervisor`, or `event_sender` to route handlers for mail behavior.
+1. `AppState` does not expose `service`, `store`, `secret_store`, `supervisor`, or `event_sender` to route handlers for mail behavior.
 2. `/v1` reads use runtime read methods or shared projection helpers owned below the handle.
 3. `/v1/events` consumes runtime event history/bus through the handle.
 4. message command routes use named mutation/runtime command paths or shared mutation helpers below the handle.
 5. account lifecycle and OAuth-specific HTTP routes keep HTTP concerns in `posthaste-server` while delegating runtime behavior to the handle.
-6. API tests build router state around the runtime handle without constructing a second service/store/supervisor graph.
+6. API tests build router state around the runtime handle; harness-owned service/store/supervisor handles are isolated from route state when needed for fixture seeding.
 7. a guard check prevents reintroducing direct route-module service/store construction.
 
 ## 6. Migration tag
@@ -76,7 +75,7 @@ Each tag should link to this file or to an assertion below.
 | ID | Sev. | Assertion |
 | --- | --- | --- |
 | appstate-has-runtime-handle | MUST | `posthaste-server::AppState` carries an `AuthorityRuntimeHandle` during the wrapper migration. |
-| legacy-fields-temporary | MUST | Direct `AppState` service/store/supervisor fields are documented as temporary migration fields. |
+| legacy-fields-temporary | MUST | Direct service/store/supervisor handles are temporary migration internals of `api_bridge` or test harnesses, not `AppState` route fields. |
 | server-startup-authority-builder | MUST | Server startup uses `posthaste-authority-runtime` to assemble config, store, service, secret store, and event channel before API adapter state is built. |
 | no-new-route-service-graphs | MUST | New mail-state route behavior is not implemented by constructing a separate `MailService`, `DatabaseStore`, provider gateway, or supervisor graph in route modules. |
 | wrapper-fitness-tests | MUST | Tests verify router/API state has a runtime handle and existing API/auth behavior still passes through the wrapper. |

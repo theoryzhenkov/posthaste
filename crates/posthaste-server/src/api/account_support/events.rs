@@ -66,12 +66,13 @@ fn account_operation_from_topic(topic: &str) -> ResourceOperation {
 /// @spec docs/L1-sync#event-propagation
 #[cfg(test)]
 pub(crate) fn append_and_publish_account_event(
-    state: &Arc<AppState>,
+    store: &dyn posthaste_domain::MailStore,
+    event_sender: &tokio::sync::broadcast::Sender<DomainEvent>,
     account_id: &AccountId,
     topic: &str,
 ) -> Result<(), posthaste_domain::StoreError> {
     let operation = account_operation_from_topic(topic);
-    let event = state.store.append_event(
+    let event = store.append_event(
         account_id,
         topic,
         None,
@@ -81,7 +82,7 @@ pub(crate) fn append_and_publish_account_event(
             "resources": [ResourceChange::account(operation, account_id)],
         }),
     )?;
-    state.publish_events(&[event]);
+    let _ = event_sender.send(event);
     Ok(())
 }
 
