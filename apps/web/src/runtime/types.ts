@@ -1,8 +1,12 @@
 import type {
+  Mailbox,
   MessageCommand,
   MessageCommandResult,
   MessagePage,
   MessageSortField,
+  ReadRequest,
+  ReadResponse,
+  SmartMailboxSummary,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -36,7 +40,10 @@ export interface RuntimeMessagePageRequest {
 
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
+  fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
+  fetchSmartMailboxes(): Promise<SmartMailboxSummary[]>
+  read(request: ReadRequest): Promise<ReadResponse>
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
   ): Promise<MessageCommandResult>

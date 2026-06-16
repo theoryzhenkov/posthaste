@@ -9,10 +9,13 @@ import type {
 import { messagePageClient } from '../src/messagePageClient'
 import type { OperationContext } from '../src/observability'
 import {
+  fetchRuntimeMailboxes,
   fetchRuntimeMessagePage,
+  fetchRuntimeSmartMailboxes,
   getRuntimeAdapter,
   resetRuntimeAdapterForTesting,
   runRuntimeMessageCommand,
+  runtimeRead,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
@@ -89,6 +92,24 @@ describe('runtime adapter facade', () => {
     expect(fake.messagePageCalls).toEqual([request])
   })
 
+  it('dispatches navigation reads through a fake adapter override without a backend', async () => {
+    const fake = createFakeRuntimeAdapter()
+    const readResponse = { results: {} }
+    fake.queueReadResponse(readResponse)
+    fake.queueMailboxes([])
+    fake.queueSmartMailboxes([])
+    setRuntimeAdapterForTesting(fake)
+
+    const readRequest = { calls: [{ id: 'accounts', op: 'Account/list' as const }] }
+
+    expect(await runtimeRead(readRequest)).toBe(readResponse)
+    expect(await fetchRuntimeMailboxes('primary')).toEqual([])
+    expect(await fetchRuntimeSmartMailboxes()).toEqual([])
+    expect(fake.readCalls).toEqual([readRequest])
+    expect(fake.mailboxCalls).toEqual(['primary'])
+    expect(fake.smartMailboxCalls).toBe(1)
+  })
+
   it('keeps messagePageClient as a compatibility wrapper over the runtime adapter', async () => {
     const fake = createFakeRuntimeAdapter()
     fake.queueMessagePage(emptyPage)
@@ -132,6 +153,22 @@ describe('runtime adapter facade', () => {
       expect(commandSpy).toHaveBeenCalledWith('m1', command, 'primary')
     } finally {
       commandSpy.mockRestore()
+    }
+  })
+
+  it('wraps existing HTTP read calls by default', async () => {
+    const readSpy = spyOn(apiClient, 'read').mockResolvedValue({ results: {} })
+
+    try {
+      const request = {
+        calls: [{ id: 'accounts', op: 'Account/list' as const }],
+      }
+      const result = await runtimeRead(request)
+
+      expect(result).toEqual({ results: {} })
+      expect(readSpy).toHaveBeenCalledWith(request)
+    } finally {
+      readSpy.mockRestore()
     }
   })
 

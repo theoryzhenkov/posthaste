@@ -1,4 +1,11 @@
-import type { MessageCommandResult, MessagePage } from '../api/types'
+import type {
+  Mailbox,
+  MessageCommandResult,
+  MessagePage,
+  ReadRequest,
+  ReadResponse,
+  SmartMailboxSummary,
+} from '../api/types'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import type {
@@ -12,6 +19,21 @@ let activeRuntimeAdapter: RuntimeAdapter = httpRuntimeAdapter
 /** Current renderer runtime adapter. Seeded to the HTTP bridge for compatibility. */
 export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntimeAdapter
+}
+
+/** Execute a typed read call through the active runtime adapter. */
+export function runtimeRead(request: ReadRequest): Promise<ReadResponse> {
+  return activeRuntimeAdapter.read(request)
+}
+
+/** Fetch source mailboxes through the active runtime adapter. */
+export function fetchRuntimeMailboxes(accountId: string): Promise<Mailbox[]> {
+  return activeRuntimeAdapter.fetchMailboxes(accountId)
+}
+
+/** Fetch saved smart mailboxes through the active runtime adapter. */
+export function fetchRuntimeSmartMailboxes(): Promise<SmartMailboxSummary[]> {
+  return activeRuntimeAdapter.fetchSmartMailboxes()
 }
 
 /** Fetch a message page through the active runtime adapter. */
