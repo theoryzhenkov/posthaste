@@ -1,6 +1,8 @@
 import type {
+  ConversationView,
   Mailbox,
   MessageCommandResult,
+  MessageDetail,
   MessagePage,
   ReadRequest,
   ReadResponse,
@@ -26,6 +28,13 @@ export function runtimeRead(request: ReadRequest): Promise<ReadResponse> {
   return activeRuntimeAdapter.read(request)
 }
 
+/** Fetch a conversation view through the active runtime adapter. */
+export function fetchRuntimeConversation(
+  conversationId: string,
+): Promise<ConversationView> {
+  return activeRuntimeAdapter.fetchConversation(conversationId)
+}
+
 /** Fetch source mailboxes through the active runtime adapter. */
 export function fetchRuntimeMailboxes(accountId: string): Promise<Mailbox[]> {
   return activeRuntimeAdapter.fetchMailboxes(accountId)
@@ -34,6 +43,14 @@ export function fetchRuntimeMailboxes(accountId: string): Promise<Mailbox[]> {
 /** Fetch saved smart mailboxes through the active runtime adapter. */
 export function fetchRuntimeSmartMailboxes(): Promise<SmartMailboxSummary[]> {
   return activeRuntimeAdapter.fetchSmartMailboxes()
+}
+
+/** Fetch full message detail through the active runtime adapter. */
+export function fetchRuntimeMessage(
+  messageId: string,
+  sourceId: string,
+): Promise<MessageDetail> {
+  return activeRuntimeAdapter.fetchMessage(messageId, sourceId)
 }
 
 /** Fetch a message page through the active runtime adapter. */

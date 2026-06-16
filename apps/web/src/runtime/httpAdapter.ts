@@ -1,5 +1,7 @@
 import {
+  fetchConversation,
   fetchMailboxes,
+  fetchMessage,
   fetchSearchMessages,
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
@@ -21,8 +23,14 @@ function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  fetchConversation(conversationId) {
+    return fetchConversation(conversationId)
+  },
   fetchMailboxes(accountId) {
     return fetchMailboxes(accountId)
+  },
+  fetchMessage(messageId, sourceId) {
+    return fetchMessage(messageId, sourceId)
   },
   fetchMessagePage(req) {
     const input = {
