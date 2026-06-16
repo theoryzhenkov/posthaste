@@ -45,6 +45,7 @@ pub enum SmartMailboxField {
     SourceName,
     MessageId,
     ThreadId,
+    ConversationId,
     MailboxId,
     MailboxName,
     MailboxRole,

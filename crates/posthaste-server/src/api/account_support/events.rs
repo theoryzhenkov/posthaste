@@ -3,6 +3,7 @@ use super::*;
 /// Typed resource kind values serialized in domain event `resources[]` payloads.
 ///
 /// @spec docs/L1-sync#event-propagation
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ResourceKind {
@@ -12,6 +13,7 @@ pub(crate) enum ResourceKind {
 /// Typed resource operation values serialized in domain event `resources[]` payloads.
 ///
 /// @spec docs/L1-sync#event-propagation
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ResourceOperation {
@@ -26,6 +28,7 @@ pub(crate) enum ResourceOperation {
 /// `{ kind, operation, id?, accountId? }`.
 ///
 /// @spec docs/L1-sync#event-propagation
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ResourceChange {
@@ -37,6 +40,7 @@ pub(crate) struct ResourceChange {
     account_id: Option<String>,
 }
 
+#[cfg(test)]
 impl ResourceChange {
     pub(crate) fn account(operation: ResourceOperation, account_id: &AccountId) -> Self {
         Self {
@@ -48,6 +52,7 @@ impl ResourceChange {
     }
 }
 
+#[cfg(test)]
 fn account_operation_from_topic(topic: &str) -> ResourceOperation {
     match topic {
         EVENT_TOPIC_ACCOUNT_CREATED => ResourceOperation::Created,
@@ -59,6 +64,7 @@ fn account_operation_from_topic(topic: &str) -> ResourceOperation {
 /// Append an account lifecycle event to the event log and broadcast it.
 ///
 /// @spec docs/L1-sync#event-propagation
+#[cfg(test)]
 pub(crate) fn append_and_publish_account_event(
     state: &Arc<AppState>,
     account_id: &AccountId,
@@ -80,6 +86,7 @@ pub(crate) fn append_and_publish_account_event(
 }
 
 /// Convert a store-level error into an API error.
+#[cfg(test)]
 pub(crate) fn store_error_to_api(error: posthaste_domain::StoreError) -> ApiError {
     ApiError::from_service_error(ServiceError::from(error))
 }

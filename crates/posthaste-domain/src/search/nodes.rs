@@ -63,6 +63,18 @@ fn parse_prefixed(
                 negated,
             )])
         }
+        _ if matches!(
+            normalized_prefix.as_str(),
+            "conversation" | "conversationid" | "conv"
+        ) =>
+        {
+            Ok(vec![condition_node(
+                SmartMailboxField::ConversationId,
+                SmartMailboxOperator::Equals,
+                SmartMailboxValue::String(value.to_string()),
+                negated,
+            )])
+        }
         _ if normalized_prefix == "before" => Ok(vec![condition_node(
             SmartMailboxField::ReceivedAt,
             SmartMailboxOperator::Before,

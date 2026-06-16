@@ -10,9 +10,7 @@ use super::*;
 /// @spec docs/L0-accounts#the-invariant
 pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError> {
     connection
-        .execute_batch(
-            sql::SCHEMA_SQL,
-        )
+        .execute_batch(sql::SCHEMA_SQL)
         .map_err(sql_to_store_error)?;
     ensure_column(
         connection,

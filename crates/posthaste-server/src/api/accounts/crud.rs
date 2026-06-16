@@ -110,9 +110,12 @@ pub async fn patch_account(
     Json(request): Json<PatchAccountRequest>,
 ) -> Result<Json<AccountOverview>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let previous_image_id = load_account(state.as_ref(), &account_id)
+    let previous_image_id = state
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
         .ok()
-        .and_then(|account| account_appearance_image_id(&account));
+        .and_then(|account| account_appearance_image_id_from_overview(&account));
     let account = state
         .runtime
         .patch_account(RuntimeCaller::api(), account_id, request.into())

@@ -13,6 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 #[cfg(test)]
 use posthaste_domain::AccountTransportSettings;
+#[allow(unused_imports)]
 use posthaste_domain::{
     now_iso8601 as domain_now_iso8601, AccountAppearance, AccountConnectionOverview, AccountDriver,
     AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings, AutomationRule,
@@ -32,10 +33,10 @@ use posthaste_domain::{
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
-    CreateAccountMutation, CreateSmartMailboxMutation, PatchAccountMutation,
-    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller,
-    RuntimeCore, RuntimeError, RuntimeErrorCode, SecretWriteMode as RuntimeSecretWriteMode,
-    SecretWriteMutation,
+    CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,
+    MailQueryRequest, PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation,
+    RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
+    SearchVisibilityRequest, SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -110,20 +111,24 @@ pub use sync_events::{
 
 #[cfg(test)]
 use account_support::apply_account_patch;
+#[cfg(test)]
+#[allow(unused_imports)]
 use account_support::{
-    account_overview, append_and_publish_account_event, default_account_appearance,
-    delete_managed_secret, internal_error, normalize_account_appearance, store_error_to_api,
-    validate_account_settings, validate_logo_image_id,
+    append_and_publish_account_event, default_account_appearance, normalize_account_appearance,
+    store_error_to_api, validate_account_settings,
 };
+use account_support::{internal_error, validate_logo_image_id};
 use cursor_support::{
     conversation_limit, conversation_page_response, event_to_sse, message_limit,
     message_page_response, parse_conversation_cursor, parse_message_cursor,
 };
 use search_support::{
-    combine_rules, parse_optional_search_rule, source_message_scope_rule,
-    spawn_search_cache_visibility,
+    account_query, expect_conversation_page, expect_message_page, join_query, mailbox_query,
+    optional_user_query, smart_mailbox_query, visibility_for_search,
 };
-use support::load_account;
+#[cfg(test)]
+use search_support::{parse_optional_search_rule, source_message_scope_rule};
+use support::ensure_account_exists;
 
 /// Product API readiness response.
 ///

@@ -59,6 +59,9 @@ fn compile_smart_mailbox_condition(
         SmartMailboxField::SourceName => compile_text_field("a.name", condition, params)?,
         SmartMailboxField::MessageId => compile_simple_field("m.id", condition, params)?,
         SmartMailboxField::ThreadId => compile_simple_field("m.thread_id", condition, params)?,
+        SmartMailboxField::ConversationId => {
+            compile_simple_field("m.conversation_id", condition, params)?
+        }
         SmartMailboxField::FromName => compile_text_field("m.from_name", condition, params)?,
         SmartMailboxField::FromEmail => compile_text_field("m.from_email", condition, params)?,
         SmartMailboxField::Subject => compile_text_field("m.subject", condition, params)?,

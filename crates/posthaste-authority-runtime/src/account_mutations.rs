@@ -1265,6 +1265,7 @@ impl ResourceChange {
 fn account_operation_from_topic(topic: &str) -> ResourceOperation {
     match topic {
         EVENT_TOPIC_ACCOUNT_CREATED => ResourceOperation::Created,
+        EVENT_TOPIC_ACCOUNT_DELETED => ResourceOperation::Deleted,
         _ => ResourceOperation::Updated,
     }
 }
