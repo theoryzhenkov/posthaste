@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import { performMessageCommand } from '../../api/client'
 import type { MessageCommand } from '../../api/types'
+import { runRuntimeMessageCommand } from '../../runtime/adapter'
 import {
   invalidateMessageMutationReadModels,
   invalidateMessageScopeReadModels,
@@ -87,12 +87,20 @@ export async function runOperationInternal(input: {
       destroy ||
       commands.some((command) => command.kind === 'replaceMailboxes')
     ) {
-      const result = applyMailboxPatch(queryClient, selection, after.mailboxIds, {
-        destroy,
-      })
+      const result = applyMailboxPatch(
+        queryClient,
+        selection,
+        after.mailboxIds,
+        {
+          destroy,
+        },
+      )
       snapshots.push(...result.snapshots)
     }
-    if (!destroy && commands.some((command) => command.kind === 'setKeywords')) {
+    if (
+      !destroy &&
+      commands.some((command) => command.kind === 'setKeywords')
+    ) {
       const result = applyKeywordPatch(queryClient, selection, {
         next: deriveKeywordState(after.keywords),
         previous: deriveKeywordState(before.keywords),
@@ -108,11 +116,11 @@ export async function runOperationInternal(input: {
         ? [{ kind: 'destroy' } as MessageCommand]
         : diffMutableState(before, after)
       for (const command of commands) {
-        const result = await performMessageCommand(
-          target.messageId,
+        const result = await runRuntimeMessageCommand({
           command,
-          target.sourceId,
-        )
+          messageId: target.messageId,
+          sourceId: target.sourceId,
+        })
         recordLocalMutationEvents(result.events)
         if (!destroy && result.detail && target.conversationId) {
           mergeMessageDetail(queryClient, result.detail, target.conversationId)
