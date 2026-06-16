@@ -19,12 +19,46 @@ pub async fn get_conversation(
     State(state): State<Arc<AppState>>,
     Path(conversation_id): Path<String>,
 ) -> Result<Json<ConversationView>, ApiError> {
-    state
+    let conversation_id = ConversationId::from(conversation_id);
+    let page = state
         .runtime
-        .get_conversation(RuntimeCaller::api(), ConversationId::from(conversation_id))
+        .query_mail_page(
+            RuntimeCaller::api(),
+            MailQueryRequest {
+                query: format!("conversation:{}", conversation_id.as_str()),
+                presentation: MailPresentationRequest::Messages {
+                    limit: None,
+                    cursor: None,
+                    sort_field: MessageSortField::Date,
+                    sort_direction: SortDirection::Asc,
+                },
+                visibility: None,
+            },
+        )
         .await
-        .map(Json)
         .map_err(ApiError::from_runtime_error)
+        .and_then(expect_message_page)?;
+    if page.items.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            ApiErrorCode::NotFound,
+            "conversation not found",
+        ));
+    }
+    let subject = page
+        .items
+        .last()
+        .and_then(|message| message.subject.clone())
+        .or_else(|| {
+            page.items
+                .iter()
+                .find_map(|message| message.subject.clone())
+        });
+    Ok(Json(ConversationView {
+        id: conversation_id,
+        subject,
+        messages: page.items,
+    }))
 }
 
 /// GET /v1/sources/{source_id}/messages/{id}

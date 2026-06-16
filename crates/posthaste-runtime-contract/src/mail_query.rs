@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum MailPresentationRequest {
     Messages {
-        limit: usize,
+        limit: Option<usize>,
         cursor: Option<MessageCursor>,
         sort_field: MessageSortField,
         sort_direction: SortDirection,

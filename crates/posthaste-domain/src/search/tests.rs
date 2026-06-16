@@ -172,6 +172,15 @@ fn test_parse_id_and_thread_filters() {
 }
 
 #[test]
+fn test_parse_conversation_filter() {
+    let rule = parse_query("conversation:conv-1").unwrap();
+    let SmartMailboxRuleNode::Condition(condition) = &rule.root.nodes[0] else {
+        panic!("expected ConversationId condition");
+    };
+    assert_eq!(condition.field, SmartMailboxField::ConversationId);
+}
+
+#[test]
 fn test_rejects_empty_prefixed_value() {
     let error = parse_query("from:").unwrap_err();
     assert!(error.contains("empty value"));

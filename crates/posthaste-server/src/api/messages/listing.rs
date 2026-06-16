@@ -54,7 +54,7 @@ pub async fn list_source_messages(
             MailQueryRequest {
                 query: query_text,
                 presentation: MailPresentationRequest::Messages {
-                    limit,
+                    limit: Some(limit),
                     cursor,
                     sort_field,
                     sort_direction,
@@ -122,7 +122,7 @@ pub async fn search_messages(
             MailQueryRequest {
                 query: query.q,
                 presentation: MailPresentationRequest::Messages {
-                    limit,
+                    limit: Some(limit),
                     cursor,
                     sort_field,
                     sort_direction,
