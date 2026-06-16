@@ -19,6 +19,7 @@ import {
   getRuntimeAdapter,
   resetRuntimeAdapterForTesting,
   runRuntimeMessageCommand,
+  runtimeAdapterForMode,
   runtimeRead,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
@@ -83,6 +84,17 @@ afterEach(() => {
 describe('runtime adapter facade', () => {
   it('defaults to the HTTP runtime adapter', () => {
     expect(getRuntimeAdapter()).toBe(httpRuntimeAdapter)
+  })
+
+  it('selects the HTTP runtime adapter for loopback mode', () => {
+    expect(runtimeAdapterForMode(undefined)).toBe(httpRuntimeAdapter)
+    expect(runtimeAdapterForMode('loopback')).toBe(httpRuntimeAdapter)
+  })
+
+  it('fails closed for native mode until the native adapter exists', async () => {
+    await expect(
+      runtimeAdapterForMode('native').fetchSmartMailboxes(),
+    ).rejects.toThrow('runtime adapter mode native is not implemented')
   })
 
   it('dispatches message commands through a fake adapter override without a backend', async () => {

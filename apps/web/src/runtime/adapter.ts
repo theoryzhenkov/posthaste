@@ -8,6 +8,10 @@ import type {
   ReadResponse,
   SmartMailboxSummary,
 } from '../api/types'
+import {
+  injectedRuntimeMode,
+  type InjectedRuntimeMode,
+} from '../connection/injected'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import type {
@@ -18,7 +22,38 @@ import type {
   RuntimeResourceFetchOptions,
 } from './types'
 
-let activeRuntimeAdapter: RuntimeAdapter = httpRuntimeAdapter
+function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
+  const reject = <T>(): Promise<T> =>
+    Promise.reject(new Error(`runtime adapter mode ${mode} is not implemented`))
+  return {
+    fetchConversation: () => reject(),
+    fetchMailboxes: () => reject(),
+    fetchMessage: () => reject(),
+    fetchMessagePage: () => reject(),
+    fetchResourceBlob: () => reject(),
+    fetchSmartMailboxes: () => reject(),
+    read: () => reject(),
+    runMessageCommand: () => reject(),
+  }
+}
+
+export function runtimeAdapterForMode(
+  mode: InjectedRuntimeMode | undefined,
+): RuntimeAdapter {
+  switch (mode) {
+    case undefined:
+    case 'loopback':
+      return httpRuntimeAdapter
+    case 'native':
+      return unsupportedRuntimeAdapter(mode)
+  }
+}
+
+function defaultRuntimeAdapter(): RuntimeAdapter {
+  return runtimeAdapterForMode(injectedRuntimeMode())
+}
+
+let activeRuntimeAdapter: RuntimeAdapter = defaultRuntimeAdapter()
 
 /** Current renderer runtime adapter. Seeded to the HTTP bridge for compatibility. */
 export function getRuntimeAdapter(): RuntimeAdapter {
