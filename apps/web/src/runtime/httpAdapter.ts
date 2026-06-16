@@ -26,6 +26,8 @@ import {
   triggerSync,
 } from '../api/client'
 
+import type { DomainEvent } from '../api/types'
+
 import type {
   RuntimeAdapter,
   RuntimeEventHandlers,
@@ -89,11 +91,14 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
         if (!event.data) {
           return
         }
+        let payload: DomainEvent
         try {
-          handlers.onEvent(JSON.parse(event.data))
+          payload = JSON.parse(event.data) as DomainEvent
         } catch (error) {
           handleMalformedFrame(handlers, event.data, error)
+          return
         }
+        handlers.onEvent(payload)
       },
       onerror(error) {
         if (error instanceof FatalStreamError) {
