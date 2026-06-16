@@ -7,16 +7,26 @@
 import { useMutation } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
-import { createAccount, updateAccount, verifyAccount } from '../../api/client'
 import type { AccountOverview, VerificationResponse } from '../../api/types'
+import {
+  createRuntimeAccount,
+  updateRuntimeAccount,
+  verifyRuntimeAccount,
+} from '../../runtime/accounts'
 import { AccountMark } from '../AccountMark'
 import { Button } from '../ui/button'
-import { AccountActions, type AccountCommandAction } from './account-editor/AccountActions'
+import {
+  AccountActions,
+  type AccountCommandAction,
+} from './account-editor/AccountActions'
 import { AccountAppearanceFields } from './account-editor/AccountAppearanceFields'
 import { AccountHeaderMeta } from './account-editor/AccountHeaderMeta'
 import { ConnectionEditor } from './account-editor/ConnectionEditor'
 import { DangerSection } from './account-editor/DangerSection'
-import { accountFieldsSignature, appearanceFromForm } from './account-editor/state'
+import {
+  accountFieldsSignature,
+  appearanceFromForm,
+} from './account-editor/state'
 import {
   buildAccountEditorModel,
   type ExistingAccountEditorModel,
@@ -75,8 +85,8 @@ export function AccountEditor({
   const saveMutation = useMutation({
     mutationFn: async (currentForm: AccountFormState) => {
       return editorModel.kind === 'new'
-        ? createAccount(buildCreateAccountPayload(currentForm))
-        : updateAccount(
+        ? createRuntimeAccount(buildCreateAccountPayload(currentForm))
+        : updateRuntimeAccount(
             editorModel.account.id,
             buildUpdateAccountPayload(currentForm, editorModel),
           )
@@ -98,7 +108,7 @@ export function AccountEditor({
   })
 
   const verifyMutation = useMutation({
-    mutationFn: (accountId: string) => verifyAccount(accountId),
+    mutationFn: (accountId: string) => verifyRuntimeAccount(accountId),
     onSuccess: async (result) => {
       setVerification(result)
       setErrorMessage(null)
@@ -251,7 +261,9 @@ function IdentitySection({
         <Field
           label="Account name"
           value={form.name}
-          onChange={(value) => onChange((current) => ({ ...current, name: value }))}
+          onChange={(value) =>
+            onChange((current) => ({ ...current, name: value }))
+          }
         />
         <Field
           label="Full name"

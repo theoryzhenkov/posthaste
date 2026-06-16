@@ -6,6 +6,7 @@ import type {
   CachedSenderAddress,
   ConversationPage,
   ConversationView,
+  CreateAccountInput,
   DomainEvent,
   CreateSmartMailboxInput,
   Mailbox,
@@ -22,9 +23,13 @@ import type {
   SendMessageInput,
   SmartMailbox,
   SmartMailboxSummary,
+  StartOAuthResponse,
+  StartProviderOAuthInput,
   SyncMode,
   Identity,
+  UpdateAccountInput,
   UpdateSmartMailboxInput,
+  VerificationResponse,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -120,8 +125,13 @@ export interface RuntimeAdapter {
     request: RuntimeEventSubscriptionRequest,
     handlers: RuntimeEventHandlers,
   ): RuntimeUnsubscribe
+  createAccount(input: CreateAccountInput): Promise<AccountOverview>
   createSmartMailbox(input: CreateSmartMailboxInput): Promise<SmartMailbox>
+  deleteAccount(accountId: string): Promise<OkResponse>
   deleteSmartMailbox(smartMailboxId: string): Promise<OkResponse>
+  disableAccount(accountId: string): Promise<OkResponse>
+  enableAccount(accountId: string): Promise<OkResponse>
+  fetchAccount(accountId: string): Promise<AccountOverview>
   fetchAccounts(): Promise<AccountOverview[]>
   fetchConversation(conversationId: string): Promise<ConversationView>
   fetchConversationPage(
@@ -131,6 +141,7 @@ export interface RuntimeAdapter {
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
+  fetchOAuthRedirectUri(): string
   fetchSettings(): Promise<AppSettings>
   fetchReplyContext(request: RuntimeReplyContextRequest): Promise<ReplyContext>
   fetchResourceBlob(
@@ -155,6 +166,15 @@ export interface RuntimeAdapter {
     request: RuntimeMessageCommandRequest,
   ): Promise<MessageCommandResult>
   sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
+  startProviderOAuth(
+    input: StartProviderOAuthInput,
+  ): Promise<StartOAuthResponse>
+  updateAccount(
+    accountId: string,
+    input: UpdateAccountInput,
+  ): Promise<AccountOverview>
+  uploadAccountLogo(accountId: string, file: File): Promise<AccountOverview>
+  verifyAccount(accountId: string): Promise<VerificationResponse>
   updateSmartMailbox(
     smartMailboxId: string,
     input: UpdateSmartMailboxInput,

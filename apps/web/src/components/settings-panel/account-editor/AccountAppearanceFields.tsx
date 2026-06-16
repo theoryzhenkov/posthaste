@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import { useMutation } from '@tanstack/react-query'
 
-import { updateAccount } from '../../../api/client'
 import type { AccountOverview } from '../../../api/types'
+import { updateRuntimeAccount } from '../../../runtime/accounts'
 import { AccountMark } from '../../AccountMark'
 import { buildAccountAppearanceInput } from '../helpers'
 import { FeedbackBanner, Field } from '../shared'
@@ -31,7 +37,7 @@ export function AccountAppearanceFields({
   )
   const saveAppearanceMutation = useMutation({
     mutationFn: () =>
-      updateAccount(accountId!, {
+      updateRuntimeAccount(accountId!, {
         appearance: buildAccountAppearanceInput(form),
       }),
     onSuccess: async (account) => {

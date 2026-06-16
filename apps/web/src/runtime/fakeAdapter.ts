@@ -1,29 +1,21 @@
-import type {
-  AccountOverview,
-  ConversationView,
-  Mailbox,
-  MessageCommandResult,
-  MessageDetail,
-  MessagePage,
-  ReadResponse,
-  SmartMailboxSummary,
-} from '../api/types'
-
-import type { RuntimeEventHandlers, RuntimeTriggerSyncResult } from './types'
+import type { RuntimeEventHandlers } from './types'
+import { createFakeQueueControls } from './fakeAdapterQueues'
 import {
+  createFakeCallRecords,
+  createFakeQueues,
   defaultAccounts,
   defaultMailboxes,
   defaultMessageCommandResult,
   defaultMessagePage,
   defaultReadResponse,
   defaultSmartMailboxes,
-  queueReject,
-  queueResolve,
+  resetFakeCallRecords,
+  resetFakeQueues,
   resolveQueued,
   resolveQueuedOptional,
+  unsupported,
   type FakeRuntimeAdapter,
   type FakeRuntimeAdapterOptions,
-  type QueuedOutcome,
 } from './fakeAdapterSupport'
 
 export type { FakeRuntimeAdapter } from './fakeAdapterSupport'
@@ -32,8 +24,8 @@ export type { FakeRuntimeAdapter } from './fakeAdapterSupport'
 export function createFakeRuntimeAdapter(
   input?: FakeRuntimeAdapterOptions,
 ): FakeRuntimeAdapter {
-  const calls = createCallRecords()
-  const queues = createQueues()
+  const calls = createFakeCallRecords()
+  const queues = createFakeQueues()
   const eventHandlers = new Set<RuntimeEventHandlers>()
   let accountCalls = 0
   let smartMailboxCalls = 0
@@ -49,86 +41,60 @@ export function createFakeRuntimeAdapter(
     emitDomainEvent(event) {
       for (const handlers of eventHandlers) handlers.onEvent(event)
     },
-    queueAccounts(accounts) {
-      queueResolve(queues.accounts, accounts)
-    },
-    queueAccountsError(error) {
-      queueReject(queues.accounts, error)
-    },
-    queueConversation(conversation) {
-      queueResolve(queues.conversations, conversation)
-    },
-    queueConversationError(error) {
-      queueReject(queues.conversations, error)
-    },
-    queueMailboxes(mailboxes) {
-      queueResolve(queues.mailboxes, mailboxes)
-    },
-    queueMailboxesError(error) {
-      queueReject(queues.mailboxes, error)
-    },
-    queueMessage(message) {
-      queueResolve(queues.messages, message)
-    },
-    queueMessageError(error) {
-      queueReject(queues.messages, error)
-    },
-    queueMessageCommandResult(result) {
-      queueResolve(queues.messageCommands, result)
-    },
-    queueMessageCommandError(error) {
-      queueReject(queues.messageCommands, error)
-    },
-    queueMessagePage(page) {
-      queueResolve(queues.messagePages, page)
-    },
-    queueMessagePageError(error) {
-      queueReject(queues.messagePages, error)
-    },
-    queueResourceBlob(blob) {
-      queueResolve(queues.resources, blob)
-    },
-    queueResourceError(error) {
-      queueReject(queues.resources, error)
-    },
-    queueReadResponse(response) {
-      queueResolve(queues.reads, response)
-    },
-    queueReadError(error) {
-      queueReject(queues.reads, error)
-    },
-    queueSmartMailboxes(mailboxes) {
-      queueResolve(queues.smartMailboxes, mailboxes)
-    },
-    queueSmartMailboxesError(error) {
-      queueReject(queues.smartMailboxes, error)
-    },
-    queueSyncResult(result) {
-      queueResolve(queues.syncs, result)
-    },
-    queueSyncError(error) {
-      queueReject(queues.syncs, error)
-    },
+    ...createFakeQueueControls(queues),
     reset() {
       accountCalls = 0
       smartMailboxCalls = 0
       eventHandlers.clear()
-      resetCallRecords(calls)
-      resetQueues(queues)
+      resetFakeCallRecords(calls)
+      resetFakeQueues(queues)
     },
     subscribeEvents(request, handlers) {
       calls.eventSubscriptionCalls.push({ request })
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
     },
+    createAccount(accountInput) {
+      calls.accountCreateCalls.push(accountInput)
+      return resolveQueuedOptional(
+        queues.accountResults,
+        input?.defaultAccount,
+        'account result',
+      )
+    },
     createSmartMailbox() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no smart mailbox result'),
+      return unsupported('smart mailbox result')
+    },
+    deleteAccount(accountId) {
+      calls.accountCommandCalls.push({ kind: 'delete', accountId })
+      return resolveQueued(
+        queues.accountOkResults,
+        input?.defaultAccountOk ?? { ok: true },
       )
     },
     deleteSmartMailbox() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no smart mailbox delete result'),
+      return unsupported('smart mailbox delete result')
+    },
+    disableAccount(accountId) {
+      calls.accountCommandCalls.push({ kind: 'disable', accountId })
+      return resolveQueued(
+        queues.accountOkResults,
+        input?.defaultAccountOk ?? { ok: true },
+      )
+    },
+    enableAccount(accountId) {
+      calls.accountCommandCalls.push({ kind: 'enable', accountId })
+      return resolveQueued(
+        queues.accountOkResults,
+        input?.defaultAccountOk ?? { ok: true },
+      )
+    },
+    fetchAccount(accountId) {
+      calls.accountDetailCalls.push(accountId)
+      return resolveQueuedOptional(
+        queues.accountResults,
+        input?.defaultAccount,
+        'account result',
       )
     },
     fetchAccounts() {
@@ -150,7 +116,7 @@ export function createFakeRuntimeAdapter(
       return Promise.resolve({ items: [], nextCursor: null })
     },
     fetchIdentity() {
-      return Promise.reject(new Error('fake runtime adapter has no identity'))
+      return unsupported('identity')
     },
     fetchMailboxes(accountId) {
       calls.mailboxCalls.push(accountId)
@@ -174,10 +140,11 @@ export function createFakeRuntimeAdapter(
         input?.defaultMessagePage ?? defaultMessagePage,
       )
     },
+    fetchOAuthRedirectUri() {
+      return 'http://localhost:3001/v1/oauth/callback'
+    },
     fetchReplyContext() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no reply context'),
-      )
+      return unsupported('reply context')
     },
     fetchResourceBlob(descriptor) {
       calls.resourceCalls.push({ descriptor })
@@ -188,15 +155,13 @@ export function createFakeRuntimeAdapter(
       )
     },
     fetchSettings() {
-      return Promise.reject(new Error('fake runtime adapter has no settings'))
+      return unsupported('settings')
     },
     fetchSenderAddresses() {
       return Promise.resolve([])
     },
     fetchSmartMailbox() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no smart mailbox result'),
-      )
+      return unsupported('smart mailbox result')
     },
     fetchSmartMailboxes() {
       smartMailboxCalls += 1
@@ -206,17 +171,13 @@ export function createFakeRuntimeAdapter(
       )
     },
     patchMailbox() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no mailbox patch result'),
-      )
+      return unsupported('mailbox patch result')
     },
     patchSettings() {
-      return Promise.reject(new Error('fake runtime adapter has no settings'))
+      return unsupported('settings')
     },
     previewAutomationRule() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no automation preview result'),
-      )
+      return unsupported('automation preview result')
     },
     read(request) {
       calls.readCalls.push(request)
@@ -236,55 +197,46 @@ export function createFakeRuntimeAdapter(
       return Promise.resolve([])
     },
     sendMessage() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no send message result'),
+      return unsupported('send message result')
+    },
+    startProviderOAuth(oauthInput) {
+      calls.oauthStartCalls.push(oauthInput)
+      return resolveQueuedOptional(
+        queues.oauthStartResponses,
+        input?.defaultOAuthStartResponse,
+        'oauth start result',
       )
     },
     triggerSync(request) {
       calls.syncCalls.push(request)
       return resolveQueuedOptional(queues.syncs, undefined, 'sync result')
     },
+    updateAccount(accountId, accountInput) {
+      calls.accountUpdateCalls.push({ accountId, input: accountInput })
+      return resolveQueuedOptional(
+        queues.accountResults,
+        input?.defaultAccount,
+        'account result',
+      )
+    },
     updateSmartMailbox() {
-      return Promise.reject(
-        new Error('fake runtime adapter has no smart mailbox result'),
+      return unsupported('smart mailbox result')
+    },
+    uploadAccountLogo(accountId, file) {
+      calls.accountLogoUploadCalls.push({ accountId, file })
+      return resolveQueuedOptional(
+        queues.accountResults,
+        input?.defaultAccount,
+        'account logo result',
+      )
+    },
+    verifyAccount(accountId) {
+      calls.accountVerificationCalls.push(accountId)
+      return resolveQueuedOptional(
+        queues.verificationResponses,
+        input?.defaultVerificationResponse,
+        'account verification result',
       )
     },
   }
-}
-
-function createCallRecords() {
-  return {
-    conversationCalls: [] as string[],
-    eventSubscriptionCalls: [] as FakeRuntimeAdapter['eventSubscriptionCalls'],
-    mailboxCalls: [] as string[],
-    messageCalls: [] as FakeRuntimeAdapter['messageCalls'],
-    messageCommandCalls: [] as FakeRuntimeAdapter['messageCommandCalls'],
-    messagePageCalls: [] as FakeRuntimeAdapter['messagePageCalls'],
-    readCalls: [] as FakeRuntimeAdapter['readCalls'],
-    resourceCalls: [] as FakeRuntimeAdapter['resourceCalls'],
-    syncCalls: [] as FakeRuntimeAdapter['syncCalls'],
-  }
-}
-
-function resetCallRecords(records: ReturnType<typeof createCallRecords>): void {
-  for (const value of Object.values(records)) value.length = 0
-}
-
-function createQueues() {
-  return {
-    accounts: [] as QueuedOutcome<AccountOverview[]>[],
-    conversations: [] as QueuedOutcome<ConversationView>[],
-    mailboxes: [] as QueuedOutcome<Mailbox[]>[],
-    messages: [] as QueuedOutcome<MessageDetail>[],
-    messageCommands: [] as QueuedOutcome<MessageCommandResult>[],
-    messagePages: [] as QueuedOutcome<MessagePage>[],
-    reads: [] as QueuedOutcome<ReadResponse>[],
-    resources: [] as QueuedOutcome<Blob>[],
-    smartMailboxes: [] as QueuedOutcome<SmartMailboxSummary[]>[],
-    syncs: [] as QueuedOutcome<RuntimeTriggerSyncResult>[],
-  }
-}
-
-function resetQueues(queues: ReturnType<typeof createQueues>): void {
-  for (const value of Object.values(queues)) value.length = 0
 }
