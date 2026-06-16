@@ -8,6 +8,7 @@ use futures_util::StreamExt;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
+    AuthorityRuntimeHandle,
 };
 use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, ProviderAuthKind,
@@ -15,8 +16,8 @@ use posthaste_domain::{
     TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use posthaste_runtime_contract::{
-    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeLifecycle,
-    SecretWriteMode, SecretWriteMutation,
+    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeErrorCode,
+    RuntimeLifecycle, SecretWriteMode, SecretWriteMutation,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -80,6 +81,20 @@ fn secret_key(secret_ref: &SecretRef) -> String {
     format!("{:?}:{}", secret_ref.kind, secret_ref.key)
 }
 
+fn mock_account_mutation(account_id: &str) -> CreateAccountMutation {
+    CreateAccountMutation {
+        id: Some(account_id.to_string()),
+        name: account_id.to_string(),
+        driver: Some(AccountDriver::Mock),
+        enabled: Some(false),
+        full_name: None,
+        email_patterns: Vec::new(),
+        appearance: None,
+        transport: AccountTransportMutation::default(),
+        secret: SecretWriteMutation::default(),
+    }
+}
+
 // spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 // spec: docs/runtime/L2#runtime-builder-transport-free
 // spec: docs/backend/L2#runtime-build-before-adapters
@@ -123,6 +138,107 @@ async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
         .await
         .expect("runtime status should remain readable after shutdown");
     assert_eq!(stopped_status.lifecycle, RuntimeLifecycle::Stopped);
+}
+
+// spec: docs/runtime/L4#authority-build-order
+#[tokio::test]
+async fn stopped_runtime_rejects_reads_but_keeps_status_readable() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let handle = build.handle.clone();
+
+    build
+        .shutdown
+        .shutdown()
+        .await
+        .expect("shutdown should succeed");
+
+    let status = handle
+        .runtime_status(RuntimeCaller::test())
+        .await
+        .expect("runtime status should remain readable after shutdown");
+    assert_eq!(status.lifecycle, RuntimeLifecycle::Stopped);
+    let error = handle
+        .list_accounts(RuntimeCaller::test())
+        .await
+        .expect_err("reads should be rejected after shutdown");
+    assert_eq!(error.envelope().code, RuntimeErrorCode::RuntimeNotReady);
+    assert_eq!(error.envelope().message, "runtime is stopped");
+    assert_eq!(error.envelope().details["lifecycle"], "stopped");
+}
+
+// spec: docs/runtime/L4#authority-build-order
+#[tokio::test]
+async fn stopped_runtime_rejects_mutations_before_mutation_service_lookup() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let handle = build.handle.clone();
+
+    build
+        .shutdown
+        .shutdown()
+        .await
+        .expect("shutdown should succeed");
+
+    let error = handle
+        .create_account(RuntimeCaller::test(), mock_account_mutation("after-stop"))
+        .await
+        .expect_err("mutations should be rejected after shutdown");
+    assert_eq!(error.envelope().code, RuntimeErrorCode::RuntimeNotReady);
+    assert_eq!(error.envelope().message, "runtime is stopped");
+}
+
+// spec: docs/runtime/L4#authority-build-order
+#[tokio::test]
+async fn active_migration_handle_without_mutations_reports_missing_mutation_service() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let handle = AuthorityRuntimeHandle::from_api_bridge_for_migration(
+        build.api_bridge.clone(),
+        build.runtime_status.account_count,
+    );
+
+    let status = handle
+        .runtime_status(RuntimeCaller::test())
+        .await
+        .expect("migration handle should report status");
+    assert_eq!(status.lifecycle, RuntimeLifecycle::Ready);
+    let error = handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("missing-mutations"),
+        )
+        .await
+        .expect_err("active migration handle should report missing mutation service");
+    assert_eq!(error.envelope().code, RuntimeErrorCode::RuntimeNotReady);
+    assert_eq!(
+        error.envelope().message,
+        "account mutation runtime is not available"
+    );
 }
 
 // spec: docs/runtime/L4#authority-build-order
