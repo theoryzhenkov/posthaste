@@ -422,6 +422,31 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
 }
 
 #[test]
+fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime_build =
+        fs::read_to_string(server_dir.join("../posthaste-authority-runtime/src/build.rs"))
+            .expect("authority runtime build source should be readable");
+    let core_start = runtime_build
+        .find("struct AuthorityRuntimeCore")
+        .expect("authority runtime core struct should exist");
+    let core_end = runtime_build[core_start..]
+        .find("/// Cloneable authority runtime handle")
+        .expect("runtime handle section should follow core struct")
+        + core_start;
+    let core_struct = &runtime_build[core_start..core_end];
+
+    assert!(
+        !core_struct.contains("api_bridge"),
+        "AuthorityRuntimeCore should own explicit runtime dependencies, not api_bridge"
+    );
+    assert!(
+        !runtime_build.contains("self.core.api_bridge"),
+        "runtime methods should not use api_bridge as an internal dependency bag"
+    );
+}
+
+#[test]
 fn runtime_contract_exposes_single_mail_query_entry_point() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let contract = fs::read_to_string(server_dir.join("../posthaste-runtime-contract/src/lib.rs"))

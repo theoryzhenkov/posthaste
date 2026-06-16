@@ -105,15 +105,17 @@ pub struct AuthorityRuntimeBuild {
     pub shutdown: RuntimeShutdownHandle,
     pub runtime_status: RuntimeStatus,
     pub account_supervisor: Arc<AccountSupervisor>,
+    /// Runtime-owned secret store exposed for host-owned auth-token setup.
+    pub secret_store: Arc<dyn SecretStore>,
     /// MIGRATION(api-runtime-wrapper): exposes the existing mail service/store
-    /// graph to the Axum adapter while handlers move behind runtime methods.
+    /// graph for compatibility harnesses and migration handle constructors.
     ///
     /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub api_bridge: AuthorityRuntimeApiMigrationBridge,
 }
 
-/// Temporary bridge for the existing Axum API adapter while route handlers move
-/// from direct service/store access to runtime-handle methods.
+/// Temporary bridge for compatibility harnesses and migration handle constructors
+/// while direct service/store access is retired from API route state.
 ///
 /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
 #[derive(Clone)]
@@ -225,7 +227,9 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
     ));
     let core = Arc::new(AuthorityRuntimeCore {
-        api_bridge: api_bridge.clone(),
+        service: service.clone(),
+        store: store.clone(),
+        event_sender: event_sender.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
         mail_queries,
@@ -239,13 +243,15 @@ pub async fn build_authority_runtime(
         shutdown: RuntimeShutdownHandle { stopped },
         runtime_status,
         account_supervisor,
+        secret_store,
         api_bridge,
     })
 }
 
 struct AuthorityRuntimeCore {
-    #[allow(dead_code)]
-    api_bridge: AuthorityRuntimeApiMigrationBridge,
+    service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
+    event_sender: broadcast::Sender<DomainEvent>,
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
     mail_queries: Arc<MailQueryService>,
@@ -371,7 +377,9 @@ impl AuthorityRuntimeHandle {
         };
         Self {
             core: Arc::new(AuthorityRuntimeCore {
-                api_bridge,
+                service: api_bridge.service.clone(),
+                store: api_bridge.store.clone(),
+                event_sender: api_bridge.event_sender.clone(),
                 account_reads,
                 account_mutations,
                 mail_queries,
@@ -436,7 +444,7 @@ impl AuthorityRuntimeHandle {
 
     fn publish_events(&self, events: &[DomainEvent]) {
         for event in events {
-            let _ = self.core.api_bridge.event_sender.send(event.clone());
+            let _ = self.core.event_sender.send(event.clone());
         }
     }
 
@@ -665,7 +673,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         Ok(self
             .core
-            .api_bridge
             .service
             .fetch_identity(&account_id, gateway.as_ref())
             .await?)
@@ -677,7 +684,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<Vec<posthaste_domain::CachedSenderAddress>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .api_bridge
             .store
             .list_sender_address_cache()
             .map_err(Self::store_error_to_runtime_error)
@@ -693,7 +699,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         Ok(self
             .core
-            .api_bridge
             .service
             .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
             .await?)
@@ -717,17 +722,11 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         self.core
-            .api_bridge
             .service
             .send_message(&account_id, &request, gateway.as_ref())
             .await?;
         if let Some(sender) = &request.from {
-            if let Err(error) = self
-                .core
-                .api_bridge
-                .store
-                .remember_sender_address(&account_id, sender)
-            {
+            if let Err(error) = self.core.store.remember_sender_address(&account_id, sender) {
                 tracing::warn!(
                     source_id = %account_id,
                     sender = %sender.email,
@@ -762,7 +761,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
-            .api_bridge
             .service
             .set_keywords(&account_id, &message_id, &command, gateway.as_ref())
             .await?;
@@ -781,7 +779,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
-            .api_bridge
             .service
             .add_to_mailbox(&account_id, &message_id, &command, gateway.as_ref())
             .await?;
@@ -800,7 +797,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
-            .api_bridge
             .service
             .remove_from_mailbox(&account_id, &message_id, &command, gateway.as_ref())
             .await?;
@@ -819,7 +815,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
-            .api_bridge
             .service
             .replace_mailboxes(&account_id, &message_id, &command, gateway.as_ref())
             .await?;
@@ -837,7 +832,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
-            .api_bridge
             .service
             .destroy_message(&account_id, &message_id, gateway.as_ref())
             .await?;
@@ -856,12 +850,11 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let events = self
             .core
-            .api_bridge
             .service
             .set_mailbox_role(&account_id, &mailbox_id, role.as_deref(), gateway.as_ref())
             .await?;
         self.publish_events(&events);
-        Ok(self.core.api_bridge.service.list_mailboxes(&account_id)?)
+        Ok(self.core.service.list_mailboxes(&account_id)?)
     }
 
     async fn get_message_detail(
@@ -874,7 +867,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.optional_gateway(&account_id).await;
         let result = self
             .core
-            .api_bridge
             .service
             .get_message_detail(&account_id, &message_id, gateway.as_deref())
             .await?;
@@ -893,7 +885,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let gateway = self.optional_gateway(&account_id).await;
         let result = self
             .core
-            .api_bridge
             .service
             .get_message_detail(&account_id, &message_id, gateway.as_deref())
             .await?;
@@ -914,7 +905,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         })?;
         let bytes = self
             .core
-            .api_bridge
             .service
             .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
             .await?;
@@ -945,7 +935,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         filter: EventFilter,
     ) -> Result<Vec<DomainEvent>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.api_bridge.service.list_events(&filter)?)
+        Ok(self.core.service.list_events(&filter)?)
     }
 
     async fn subscribe_events(
@@ -954,7 +944,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         filter: EventFilter,
     ) -> Result<RuntimeEventSubscription, RuntimeError> {
         self.ensure_runtime_active()?;
-        let receiver = self.core.api_bridge.event_sender.subscribe();
+        let receiver = self.core.event_sender.subscribe();
         let replay = if filter.after_seq.is_some() {
             self.replay_events(RuntimeCaller::system(), filter.clone())
                 .await?
