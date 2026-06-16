@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 
-import { fetchMailboxes } from '../../../api/client'
 import type { AccountOverview } from '../../../api/types'
 import { mailboxRoleAccent, renderMailboxRoleIcon } from '../../../mailboxRoles'
 import { queryKeys } from '../../../queryKeys'
+import { fetchRuntimeMailboxes } from '../../../runtime/adapter'
 import { SettingsList } from '../shared'
 import { MailboxListRow } from './MailboxListRow'
 
@@ -16,7 +16,7 @@ export function SourceMailboxListSection({
 }) {
   const mailboxesQuery = useQuery({
     queryKey: queryKeys.mailboxes(account.id),
-    queryFn: () => fetchMailboxes(account.id),
+    queryFn: () => fetchRuntimeMailboxes(account.id),
   })
   const mailboxes = mailboxesQuery.data ?? []
 
