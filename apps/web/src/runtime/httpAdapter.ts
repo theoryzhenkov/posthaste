@@ -1,8 +1,11 @@
 import {
+  fetchMailboxes,
   fetchSearchMessages,
   fetchSmartMailboxMessages,
+  fetchSmartMailboxes,
   fetchSourceMessages,
   performMessageCommand,
+  read,
 } from '../api/client'
 
 import type { RuntimeAdapter, RuntimeMessagePageRequest } from './types'
@@ -18,6 +21,9 @@ function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  fetchMailboxes(accountId) {
+    return fetchMailboxes(accountId)
+  },
   fetchMessagePage(req) {
     const input = {
       q: req.query,
@@ -44,6 +50,12 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
         }
         return fetchSearchMessages(req.query, input)
     }
+  },
+  fetchSmartMailboxes() {
+    return fetchSmartMailboxes()
+  },
+  read(request) {
+    return read(request)
   },
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)
