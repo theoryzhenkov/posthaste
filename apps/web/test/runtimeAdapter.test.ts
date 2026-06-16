@@ -189,6 +189,19 @@ describe('runtime adapter facade', () => {
     expect(getRuntimeAdapter()).toBe(httpRuntimeAdapter)
   })
 
+  it('restores the previous adapter from an override cleanup', () => {
+    const firstFake = createFakeRuntimeAdapter()
+    const secondFake = createFakeRuntimeAdapter()
+    const restoreFirst = setRuntimeAdapterForTesting(firstFake)
+    const restoreSecond = setRuntimeAdapterForTesting(secondFake)
+
+    expect(getRuntimeAdapter()).toBe(secondFake)
+    restoreSecond()
+    expect(getRuntimeAdapter()).toBe(firstFake)
+    restoreFirst()
+    expect(getRuntimeAdapter()).toBe(httpRuntimeAdapter)
+  })
+
   it('wraps existing HTTP message command behavior by default', async () => {
     const commandSpy = spyOn(
       apiClient,
