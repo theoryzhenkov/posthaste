@@ -7,6 +7,8 @@ const sourceRoot = join(root, 'src')
 const allowedHttpBridge = 'src/runtime/httpAdapter.ts'
 
 const migratedHttpSymbols = new Set([
+  'buildAccountLogoUrl',
+  'buildMessageAttachmentUrl',
   'fetchConversation',
   'fetchMailboxes',
   'fetchMessage',
@@ -51,15 +53,23 @@ function importedNames(importList: string): string[] {
     .filter(Boolean)
 }
 
+function isApiClientModule(modulePath: string): boolean {
+  return /(?:^|\/)api\/client(?:\/|$)/.test(modulePath)
+}
+
 function importViolations(source: string): Violation[] {
   const violations: Violation[] = []
   const namedImportPattern =
-    /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]*api\/client)['"]/g
+    /import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]*api\/client(?:\/[^'"]*)?)['"]/g
+  const namespaceImportPattern =
+    /import\s+\*\s+as\s+\w+\s+from\s*['"]([^'"]*api\/client(?:\/[^'"]*)?)['"]/g
+  const defaultImportPattern =
+    /import\s+\w+\s+from\s*['"]([^'"]*api\/client(?:\/[^'"]*)?)['"]/g
 
   for (const match of source.matchAll(namedImportPattern)) {
     const importList = match[1] ?? ''
     const modulePath = match[2] ?? ''
-    if (!modulePath.endsWith('api/client')) {
+    if (!isApiClientModule(modulePath)) {
       continue
     }
     for (const symbol of importedNames(importList)) {
@@ -70,12 +80,26 @@ function importViolations(source: string): Violation[] {
     }
   }
 
+  for (const match of source.matchAll(namespaceImportPattern)) {
+    violations.push({
+      line: lineNumberAt(source, match.index ?? 0),
+      symbol: 'api/client namespace import',
+    })
+  }
+
+  for (const match of source.matchAll(defaultImportPattern)) {
+    violations.push({
+      line: lineNumberAt(source, match.index ?? 0),
+      symbol: 'api/client default import',
+    })
+  }
+
   return violations
 }
 
 for (const file of visit(sourceRoot)) {
   const rel = relative(root, file).replaceAll('\\', '/')
-  if (rel === allowedHttpBridge) {
+  if (rel === allowedHttpBridge || rel.startsWith('src/api/client')) {
     continue
   }
 

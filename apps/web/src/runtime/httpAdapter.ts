@@ -1,4 +1,7 @@
 import {
+  authHeaders,
+  buildAccountLogoUrl,
+  buildMessageAttachmentUrl,
   fetchConversation,
   fetchMailboxes,
   fetchMessage,
@@ -10,7 +13,11 @@ import {
   read,
 } from '../api/client'
 
-import type { RuntimeAdapter, RuntimeMessagePageRequest } from './types'
+import type {
+  RuntimeAdapter,
+  RuntimeMessagePageRequest,
+  RuntimeResourceDescriptor,
+} from './types'
 
 /**
  * Default runtime adapter during migration.
@@ -22,6 +29,19 @@ function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
   return sort === 'relevance' ? undefined : sort
 }
 
+function resourceUrl(resource: RuntimeResourceDescriptor): string {
+  switch (resource.kind) {
+    case 'account-logo':
+      return buildAccountLogoUrl(resource.imageId)
+    case 'message-attachment':
+      return buildMessageAttachmentUrl(
+        resource.sourceId,
+        resource.messageId,
+        resource.attachmentId,
+      )
+  }
+}
+
 export const httpRuntimeAdapter: RuntimeAdapter = {
   fetchConversation(conversationId) {
     return fetchConversation(conversationId)
@@ -31,6 +51,16 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   fetchMessage(messageId, sourceId) {
     return fetchMessage(messageId, sourceId)
+  },
+  async fetchResourceBlob(descriptor, options) {
+    const response = await fetch(resourceUrl(descriptor), {
+      headers: authHeaders(),
+      signal: options?.signal,
+    })
+    if (!response.ok) {
+      throw new Error(`resource fetch failed with ${response.status}`)
+    }
+    return response.blob()
   },
   fetchMessagePage(req) {
     const input = {

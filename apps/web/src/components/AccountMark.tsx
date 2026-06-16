@@ -1,6 +1,5 @@
-import { buildAccountLogoUrl } from '../api/client'
-import { useAuthedBlobUrl } from '../hooks/useAuthedBlobUrl'
 import type { AccountAppearance } from '../api/types'
+import { useRuntimeResourceObjectUrl } from '../hooks/useRuntimeResourceObjectUrl'
 import { cn } from '../lib/utils'
 
 interface AccountMarkProps {
@@ -22,9 +21,11 @@ export function AccountMark({ appearance, className }: AccountMarkProps) {
   // Authorization header on an <img src>, so fetch the bytes ourselves and use
   // the resulting object URL. Until it resolves (or if it fails) we show the
   // letter avatar, which is also the non-image fallback.
-  const logoUrl =
-    appearance.kind === 'image' ? buildAccountLogoUrl(appearance.imageId) : null
-  const { objectUrl } = useAuthedBlobUrl(logoUrl)
+  const logoResource =
+    appearance.kind === 'image'
+      ? { kind: 'account-logo' as const, imageId: appearance.imageId }
+      : null
+  const { objectUrl } = useRuntimeResourceObjectUrl(logoResource)
 
   return (
     <span
