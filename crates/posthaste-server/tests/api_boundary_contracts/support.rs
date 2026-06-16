@@ -52,6 +52,7 @@ impl SecretStore for TestSecretStore {
 
 pub(super) struct ApiHarness {
     pub(super) state: Arc<AppState>,
+    service: Arc<MailService>,
     store: Arc<DatabaseStore>,
 }
 
@@ -83,17 +84,13 @@ impl ApiHarness {
         ));
         Self {
             state: Arc::new(AppState {
-                runtime: AppState::runtime_handle_for_migration(
+                runtime: AppState::runtime_handle_with_account_runtime_provider_for_migration(
                     service.clone(),
                     store.clone(),
                     secret_store.clone(),
                     event_sender.clone(),
+                    supervisor.clone(),
                 ),
-                service,
-                store,
-                secret_store,
-                supervisor,
-                event_sender,
                 account_logo_root: state_root.join("account-assets/logos"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
                 auth_token: "test-token".to_string(),
@@ -102,13 +99,13 @@ impl ApiHarness {
                 origin_allowlist: Vec::new(),
                 host_allowlist: Vec::new(),
             }),
+            service,
             store: database_store,
         }
     }
 
     pub(super) fn save_account(&self, id: &str) {
-        self.state
-            .service
+        self.service
             .save_source(&AccountSettings {
                 id: AccountId::from(id),
                 name: id.to_string(),

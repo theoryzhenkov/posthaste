@@ -1,17 +1,12 @@
 use super::*;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{ConfigRepository, MailService, MailStore, SecretStore, SecretStoreError};
 use posthaste_store::DatabaseStore;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use uuid::Uuid;
-
-use crate::oauth::OAuthFlowStore;
-use crate::supervisor::AccountSupervisor;
 
 fn expect_decision<'a>(
     result: Result<SecretInstructionDecision<'a>, ApiError>,
@@ -69,7 +64,9 @@ fn test_account(secret_ref: Option<SecretRef>) -> AccountSettings {
 }
 
 struct TestAppState {
-    state: AppState,
+    service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
+    event_sender: broadcast::Sender<DomainEvent>,
     secret_store: Arc<RecordingSecretStore>,
     _root: TestRoot,
 }
@@ -87,37 +84,11 @@ fn test_app_state() -> TestAppState {
     let store: Arc<dyn MailStore> = database_store.clone();
     let service = Arc::new(MailService::new(database_store, config));
     let secret_store = Arc::new(RecordingSecretStore::default());
-    let secret_store_for_state: Arc<dyn SecretStore> = secret_store.clone();
     let (event_sender, _) = broadcast::channel(1);
-    let supervisor = Arc::new(AccountSupervisor::new(
-        service.clone(),
-        store.clone(),
-        secret_store_for_state.clone(),
-        event_sender.clone(),
-        Duration::from_secs(60),
-    ));
-
     TestAppState {
-        state: AppState {
-            runtime: AppState::runtime_handle_for_migration(
-                service.clone(),
-                store.clone(),
-                secret_store_for_state.clone(),
-                event_sender.clone(),
-            ),
-            service,
-            store,
-            secret_store: secret_store_for_state,
-            supervisor,
-            event_sender,
-            account_logo_root: root.0.join("account-assets").join("logos"),
-            oauth_flows: Arc::new(OAuthFlowStore::default()),
-            auth_token: "test-token".to_string(),
-            macaroon_root_key: crate::token::RootKey::from_test_bytes([0u8; 32]),
-            require_auth: false,
-            origin_allowlist: Vec::new(),
-            host_allowlist: Vec::new(),
-        },
+        service,
+        store,
+        event_sender,
         secret_store,
         _root: root,
     }

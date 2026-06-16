@@ -365,6 +365,27 @@ fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
 }
 
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+#[test]
+fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let source = fs::read_to_string(server_dir.join("app_state.rs"))
+        .expect("app state source should be readable");
+    for forbidden in [
+        "pub service:",
+        "pub store:",
+        "pub secret_store:",
+        "pub supervisor:",
+        "pub event_sender:",
+        "fn publish_events",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "AppState should expose the runtime handle and HTTP adapter state instead of {forbidden}"
+        );
+    }
+}
+
+// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 // spec: docs/backend/L3#message-mutations-runtime-backed
 #[test]
 fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
@@ -386,7 +407,9 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
             "optional_live_gateway(state.as_ref()",
             "state.service",
             "state.store",
+            "state.secret_store",
             "state.supervisor",
+            "state.event_sender",
             "state.publish_events",
         ] {
             assert!(

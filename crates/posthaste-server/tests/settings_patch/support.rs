@@ -52,6 +52,8 @@ impl SecretStore for TestSecretStore {
 pub(super) struct SettingsHarness {
     pub(super) state: Arc<AppState>,
     pub(super) config_root: PathBuf,
+    pub(super) service: Arc<MailService>,
+    event_sender: broadcast::Sender<DomainEvent>,
 }
 
 impl SettingsHarness {
@@ -82,17 +84,13 @@ impl SettingsHarness {
         ));
         Self {
             state: Arc::new(AppState {
-                runtime: AppState::runtime_handle_for_migration(
+                runtime: AppState::runtime_handle_with_account_runtime_provider_for_migration(
                     service.clone(),
                     store.clone(),
                     secret_store.clone(),
                     event_sender.clone(),
+                    supervisor.clone(),
                 ),
-                service,
-                store,
-                secret_store,
-                supervisor,
-                event_sender,
                 account_logo_root: state_root.join("account-assets/logos"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
                 auth_token: "test-token".to_string(),
@@ -102,12 +100,13 @@ impl SettingsHarness {
                 host_allowlist: Vec::new(),
             }),
             config_root,
+            service,
+            event_sender,
         }
     }
 
     pub(super) fn save_account(&self, id: &str, name: &str) {
-        self.state
-            .service
+        self.service
             .save_source(&AccountSettings {
                 id: AccountId::from(id),
                 name: name.to_string(),
@@ -121,6 +120,10 @@ impl SettingsHarness {
                 updated_at: RFC3339_EPOCH.to_string(),
             })
             .expect("account should save");
+    }
+
+    pub(super) fn subscribe_events(&self) -> broadcast::Receiver<DomainEvent> {
+        self.event_sender.subscribe()
     }
 
     pub(super) fn app_toml(&self) -> toml::Value {

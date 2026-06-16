@@ -152,7 +152,7 @@ fn apply_secret_instruction_replaces_env_ref_with_managed_os_ref() {
     let expected_ref = account_secret_ref(&account.id);
 
     apply_secret_instruction(
-        &test_state.state,
+        test_state.secret_store.as_ref(),
         &mut account,
         previous_ref.as_ref(),
         &request,

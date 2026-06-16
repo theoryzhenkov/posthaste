@@ -6,7 +6,7 @@ use super::*;
 /// @spec docs/L1-api#secret-management
 #[cfg(test)]
 pub(crate) fn apply_secret_instruction(
-    state: &AppState,
+    secret_store: &dyn posthaste_domain::SecretStore,
     account: &mut AccountSettings,
     previous_secret_ref: Option<&SecretRef>,
     secret: &SecretWriteRequest,
@@ -18,21 +18,18 @@ pub(crate) fn apply_secret_instruction(
         SecretStoreInstruction::Save {
             secret_ref,
             password,
-        } => state
-            .secret_store
+        } => secret_store
             .save(secret_ref, password)
             .map_err(ServiceError::from)
             .map_err(ApiError::from)?,
         SecretStoreInstruction::Update {
             secret_ref,
             password,
-        } => state
-            .secret_store
+        } => secret_store
             .update(secret_ref, password)
             .map_err(ServiceError::from)
             .map_err(ApiError::from)?,
-        SecretStoreInstruction::Delete { secret_ref } => state
-            .secret_store
+        SecretStoreInstruction::Delete { secret_ref } => secret_store
             .delete(secret_ref)
             .map_err(ServiceError::from)
             .map_err(ApiError::from)?,
