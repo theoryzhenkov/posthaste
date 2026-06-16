@@ -1,11 +1,6 @@
 import { useMutation, type QueryClient } from '@tanstack/react-query'
 
-import {
-  deleteAccount,
-  disableAccount,
-  enableAccount,
-  triggerSync,
-} from '../../api/client'
+import { deleteAccount, disableAccount, enableAccount } from '../../api/client'
 import type { AccountOverview } from '../../api/types'
 import {
   invalidateAccountReadModels,
@@ -15,6 +10,7 @@ import {
   settingsCategorySurface,
   type SettingsSurfaceDescriptor,
 } from '../../surfaces'
+import { triggerRuntimeSync } from '../../runtime/adapter'
 
 export function useAccountCommandMutation(input: {
   accounts: AccountOverview[]
@@ -41,9 +37,12 @@ export function useAccountCommandMutation(input: {
         case 'delete':
           return deleteAccount(account.id)
         case 'sync':
-          return triggerSync(account.id)
+          return triggerRuntimeSync({ sourceId: account.id })
         case 'repairMetadata':
-          return triggerSync({ sourceId: account.id, mode: 'fullMetadata' })
+          return triggerRuntimeSync({
+            sourceId: account.id,
+            mode: 'fullMetadata',
+          })
       }
     },
     onMutate: () => input.setAccountCommandError(null),

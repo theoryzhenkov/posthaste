@@ -1,4 +1,5 @@
 import type {
+  AccountOverview,
   ConversationView,
   Mailbox,
   MessageCommandResult,
@@ -22,6 +23,8 @@ import type {
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
   RuntimeResourceFetchOptions,
+  RuntimeTriggerSyncRequest,
+  RuntimeTriggerSyncResult,
   RuntimeUnsubscribe,
 } from './types'
 
@@ -29,7 +32,13 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
   const reject = <T>(): Promise<T> =>
     Promise.reject(new Error(`runtime adapter mode ${mode} is not implemented`))
   return {
-    subscribeEvents: () => () => undefined,
+    subscribeEvents: (_request, handlers) => {
+      handlers.onPermanentError?.(
+        new Error(`runtime adapter mode ${mode} is not implemented`),
+      )
+      return () => undefined
+    },
+    fetchAccounts: () => reject(),
     fetchConversation: () => reject(),
     fetchMailboxes: () => reject(),
     fetchMessage: () => reject(),
@@ -38,6 +47,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     fetchSmartMailboxes: () => reject(),
     read: () => reject(),
     runMessageCommand: () => reject(),
+    triggerSync: () => reject(),
   }
 }
 
@@ -75,6 +85,11 @@ export function subscribeRuntimeEvents(
 /** Execute a typed read call through the active runtime adapter. */
 export function runtimeRead(request: ReadRequest): Promise<ReadResponse> {
   return activeRuntimeAdapter.read(request)
+}
+
+/** Fetch accounts through the active runtime adapter. */
+export function fetchRuntimeAccounts(): Promise<AccountOverview[]> {
+  return activeRuntimeAdapter.fetchAccounts()
 }
 
 /** Fetch a conversation view through the active runtime adapter. */
@@ -122,6 +137,13 @@ export function runRuntimeMessageCommand(
   request: RuntimeMessageCommandRequest,
 ): Promise<MessageCommandResult> {
   return activeRuntimeAdapter.runMessageCommand(request)
+}
+
+/** Trigger account sync through the active runtime adapter. */
+export function triggerRuntimeSync(
+  request: RuntimeTriggerSyncRequest,
+): Promise<RuntimeTriggerSyncResult> {
+  return activeRuntimeAdapter.triggerSync(request)
 }
 
 /** Test-only: override the active adapter without starting a backend. */

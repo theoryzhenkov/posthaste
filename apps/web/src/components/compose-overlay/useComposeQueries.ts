@@ -2,7 +2,6 @@ import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import {
-  fetchAccounts,
   fetchConversations,
   fetchIdentity,
   fetchReplyContext,
@@ -12,6 +11,7 @@ import type { Recipient } from '@/api/types'
 import { buildRecipientSuggestionOptions } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
 import { queryKeys } from '@/queryKeys'
+import { fetchRuntimeAccounts } from '@/runtime/adapter'
 
 import { accountFromOptions, wildcardMatchesEmail } from '../composeFormHelpers'
 
@@ -22,7 +22,7 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   })
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchAccounts,
+    queryFn: fetchRuntimeAccounts,
   })
   const senderAddressQuery = useQuery({
     queryKey: queryKeys.senderAddresses,
