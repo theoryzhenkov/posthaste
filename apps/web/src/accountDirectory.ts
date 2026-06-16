@@ -8,9 +8,9 @@
  */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAccounts } from './api/client'
 import type { AccountOverview, MessageSummary } from './api/types'
 import { queryKeys } from './queryKeys'
+import { fetchRuntimeAccounts } from './runtime/adapter'
 
 export interface AccountDirectory {
   accounts: AccountOverview[]
@@ -37,7 +37,7 @@ export function createAccountDirectory(
 export function useAccountDirectory(): AccountDirectory {
   const { data: accounts = [] } = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchAccounts,
+    queryFn: fetchRuntimeAccounts,
     enabled: false,
   })
 

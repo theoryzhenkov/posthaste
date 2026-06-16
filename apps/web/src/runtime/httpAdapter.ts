@@ -8,6 +8,7 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  fetchAccounts,
   fetchConversation,
   fetchMailboxes,
   fetchMessage,
@@ -17,6 +18,7 @@ import {
   fetchSourceMessages,
   performMessageCommand,
   read,
+  triggerSync,
 } from '../api/client'
 
 import type {
@@ -103,6 +105,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     })
     return () => controller.abort()
   },
+  fetchAccounts() {
+    return fetchAccounts()
+  },
   fetchConversation(conversationId) {
     return fetchConversation(conversationId)
   },
@@ -157,5 +162,8 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)
+  },
+  triggerSync(request) {
+    return triggerSync(request)
   },
 }

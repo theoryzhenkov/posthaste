@@ -1,4 +1,5 @@
 import type {
+  AccountOverview,
   ConversationView,
   DomainEvent,
   Mailbox,
@@ -17,6 +18,8 @@ import type {
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
+  RuntimeTriggerSyncRequest,
+  RuntimeTriggerSyncResult,
 } from './types'
 
 type EventSubscriptionCall = { request: RuntimeEventSubscriptionRequest }
@@ -27,6 +30,7 @@ type QueuedOutcome<T> =
   | { kind: 'resolve'; value: T }
   | { kind: 'reject'; error: Error }
 
+const defaultAccounts: AccountOverview[] = []
 const defaultReadResponse: ReadResponse = { results: {} }
 const defaultMailboxes: Mailbox[] = []
 const defaultSmartMailboxes: SmartMailboxSummary[] = []
@@ -51,12 +55,8 @@ function queueReject<T>(queue: QueuedOutcome<T>[], error: Error): void {
 
 function resolveQueued<T>(queue: QueuedOutcome<T>[], fallback: T): Promise<T> {
   const next = queue.shift()
-  if (!next) {
-    return Promise.resolve(fallback)
-  }
-  if (next.kind === 'reject') {
-    return Promise.reject(next.error)
-  }
+  if (!next) return Promise.resolve(fallback)
+  if (next.kind === 'reject') return Promise.reject(next.error)
   return Promise.resolve(next.value)
 }
 
@@ -66,19 +66,14 @@ function resolveQueuedOptional<T>(
   label: string,
 ): Promise<T> {
   const next = queue.shift()
-  if (next?.kind === 'reject') {
-    return Promise.reject(next.error)
-  }
-  if (next?.kind === 'resolve') {
-    return Promise.resolve(next.value)
-  }
-  if (fallback !== undefined) {
-    return Promise.resolve(fallback)
-  }
+  if (next?.kind === 'reject') return Promise.reject(next.error)
+  if (next?.kind === 'resolve') return Promise.resolve(next.value)
+  if (fallback !== undefined) return Promise.resolve(fallback)
   return Promise.reject(new Error(`fake runtime adapter has no ${label}`))
 }
 
 export interface FakeRuntimeAdapter extends RuntimeAdapter {
+  readonly accountCalls: number
   readonly conversationCalls: string[]
   readonly eventSubscriptionCalls: EventSubscriptionCall[]
   readonly mailboxCalls: string[]
@@ -88,7 +83,10 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly readCalls: ReadRequest[]
   readonly resourceCalls: ResourceCall[]
   readonly smartMailboxCalls: number
+  readonly syncCalls: RuntimeTriggerSyncRequest[]
   emitDomainEvent(event: DomainEvent): void
+  queueAccounts(accounts: AccountOverview[]): void
+  queueAccountsError(error: Error): void
   queueConversation(conversation: ConversationView): void
   queueConversationError(error: Error): void
   queueMailboxes(mailboxes: Mailbox[]): void
@@ -105,11 +103,14 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueReadError(error: Error): void
   queueSmartMailboxes(mailboxes: SmartMailboxSummary[]): void
   queueSmartMailboxesError(error: Error): void
+  queueSyncResult(result: RuntimeTriggerSyncResult): void
+  queueSyncError(error: Error): void
   reset(): void
 }
 
 /** Fake runtime adapter for renderer tests. Does not start or contact a backend. */
 export function createFakeRuntimeAdapter(input?: {
+  defaultAccounts?: AccountOverview[]
   defaultConversation?: ConversationView
   defaultMailboxes?: Mailbox[]
   defaultMessage?: MessageDetail
@@ -127,6 +128,8 @@ export function createFakeRuntimeAdapter(input?: {
   const messagePageCalls: RuntimeMessagePageRequest[] = []
   const readCalls: ReadRequest[] = []
   const resourceCalls: ResourceCall[] = []
+  const syncCalls: RuntimeTriggerSyncRequest[] = []
+  const queuedAccounts: QueuedOutcome<AccountOverview[]>[] = []
   const queuedConversations: QueuedOutcome<ConversationView>[] = []
   const queuedMailboxes: QueuedOutcome<Mailbox[]>[] = []
   const queuedMessages: QueuedOutcome<MessageDetail>[] = []
@@ -135,9 +138,14 @@ export function createFakeRuntimeAdapter(input?: {
   const queuedReads: QueuedOutcome<ReadResponse>[] = []
   const queuedResources: QueuedOutcome<Blob>[] = []
   const queuedSmartMailboxes: QueuedOutcome<SmartMailboxSummary[]>[] = []
+  const queuedSyncs: QueuedOutcome<RuntimeTriggerSyncResult>[] = []
+  let accountCalls = 0
   let smartMailboxCalls = 0
 
   return {
+    get accountCalls() {
+      return accountCalls
+    },
     conversationCalls,
     eventSubscriptionCalls,
     mailboxCalls,
@@ -146,13 +154,18 @@ export function createFakeRuntimeAdapter(input?: {
     messagePageCalls,
     readCalls,
     resourceCalls,
+    syncCalls,
     get smartMailboxCalls() {
       return smartMailboxCalls
     },
     emitDomainEvent(event) {
-      for (const handlers of eventHandlers) {
-        handlers.onEvent(event)
-      }
+      for (const handlers of eventHandlers) handlers.onEvent(event)
+    },
+    queueAccounts(accounts) {
+      queueResolve(queuedAccounts, accounts)
+    },
+    queueAccountsError(error) {
+      queueReject(queuedAccounts, error)
     },
     queueConversation(conversation) {
       queueResolve(queuedConversations, conversation)
@@ -202,7 +215,14 @@ export function createFakeRuntimeAdapter(input?: {
     queueSmartMailboxesError(error) {
       queueReject(queuedSmartMailboxes, error)
     },
+    queueSyncResult(result) {
+      queueResolve(queuedSyncs, result)
+    },
+    queueSyncError(error) {
+      queueReject(queuedSyncs, error)
+    },
     reset() {
+      accountCalls = 0
       conversationCalls.length = 0
       eventHandlers.clear()
       eventSubscriptionCalls.length = 0
@@ -212,6 +232,9 @@ export function createFakeRuntimeAdapter(input?: {
       messagePageCalls.length = 0
       readCalls.length = 0
       resourceCalls.length = 0
+      smartMailboxCalls = 0
+      syncCalls.length = 0
+      queuedAccounts.length = 0
       queuedConversations.length = 0
       queuedMailboxes.length = 0
       queuedMessages.length = 0
@@ -220,12 +243,19 @@ export function createFakeRuntimeAdapter(input?: {
       queuedReads.length = 0
       queuedResources.length = 0
       queuedSmartMailboxes.length = 0
-      smartMailboxCalls = 0
+      queuedSyncs.length = 0
     },
     subscribeEvents(request, handlers) {
       eventSubscriptionCalls.push({ request })
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
+    },
+    fetchAccounts() {
+      accountCalls += 1
+      return resolveQueued(
+        queuedAccounts,
+        input?.defaultAccounts ?? defaultAccounts,
+      )
     },
     fetchConversation(conversationId) {
       conversationCalls.push(conversationId)
@@ -285,6 +315,10 @@ export function createFakeRuntimeAdapter(input?: {
         queuedMessageCommands,
         input?.defaultMessageCommandResult ?? defaultMessageCommandResult,
       )
+    },
+    triggerSync(request) {
+      syncCalls.push(request)
+      return resolveQueuedOptional(queuedSyncs, undefined, 'sync result')
     },
   }
 }

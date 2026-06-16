@@ -1,4 +1,5 @@
 import type {
+  AccountOverview,
   ConversationView,
   DomainEvent,
   Mailbox,
@@ -10,6 +11,7 @@ import type {
   ReadRequest,
   ReadResponse,
   SmartMailboxSummary,
+  SyncMode,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -58,6 +60,17 @@ export interface RuntimeEventSubscriptionRequest {
   afterSeq?: number | null
 }
 
+export interface RuntimeTriggerSyncRequest {
+  sourceId: string
+  mode?: SyncMode
+}
+
+export interface RuntimeTriggerSyncResult {
+  ok: boolean
+  eventCount: number
+  mode: SyncMode
+}
+
 export interface RuntimeEventHandlers {
   onEvent(event: DomainEvent): void
   onMalformedFrame?(input: { raw: string; error: unknown }): void
@@ -74,6 +87,7 @@ export interface RuntimeAdapter {
     request: RuntimeEventSubscriptionRequest,
     handlers: RuntimeEventHandlers,
   ): RuntimeUnsubscribe
+  fetchAccounts(): Promise<AccountOverview[]>
   fetchConversation(conversationId: string): Promise<ConversationView>
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
@@ -87,4 +101,7 @@ export interface RuntimeAdapter {
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
   ): Promise<MessageCommandResult>
+  triggerSync(
+    request: RuntimeTriggerSyncRequest,
+  ): Promise<RuntimeTriggerSyncResult>
 }

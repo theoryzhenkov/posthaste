@@ -1,16 +1,17 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
 
-import { fetchAccounts } from '@/api/client'
-import type { MessageDetail, MessageSummary } from '@/api/types'
+import type {
+  AccountOverview,
+  MessageDetail,
+  MessageSummary,
+} from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import type { useEmailActions } from '@/hooks/useEmailActions'
 import { openFocusedSurface } from '@/hooks/useSurfaceRouting'
 import type { MailSelection } from '@/mailState'
-import {
-  normalizeValidAppliedSearchQuery,
-} from '@/searchQuery'
+import { normalizeValidAppliedSearchQuery } from '@/searchQuery'
 import {
   accountSettingsSurface,
   messageSurfaceFromSelection,
@@ -26,7 +27,7 @@ export function useMailClientHandlers(input: {
   actions: ReturnType<typeof useEmailActions>
   effectiveSurface: SurfaceDescriptor | null
   effectiveView: SidebarSelection | null
-  enabledAccounts: Awaited<ReturnType<typeof fetchAccounts>>
+  enabledAccounts: AccountOverview[]
   selectedMessage: MailSelection | null
   selectedMessageData: MessageDetail | undefined
   setIsCommandPaletteOpen: (open: boolean) => void
