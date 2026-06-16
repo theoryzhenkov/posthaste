@@ -9,9 +9,9 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, ConversationId,
-    ConversationView, DomainEvent, EventFilter, MailService, MailStore, MailboxId, MailboxSummary,
-    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
+    AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
+    EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
     ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
     SyncTrigger,
 };
@@ -723,18 +723,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
         self.core.mail_queries.query_mail_page(request).await
-    }
-
-    async fn get_conversation(
-        &self,
-        _caller: RuntimeCaller,
-        conversation_id: ConversationId,
-    ) -> Result<ConversationView, RuntimeError> {
-        self.core
-            .api_bridge
-            .service
-            .get_conversation(&conversation_id)
-            .map_err(Self::service_error_to_runtime_error)
     }
 
     async fn send_message(

@@ -13,6 +13,17 @@ impl SmartMailboxStore for DatabaseStore {
         query_messages_by_rule(&connection, rule)
     }
 
+    /// Evaluates a smart mailbox rule and returns all matching messages with explicit ordering.
+    fn query_messages_by_rule_sorted(
+        &self,
+        rule: &SmartMailboxRule,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<Vec<MessageSummary>, StoreError> {
+        let connection = self.read_connection()?;
+        query_messages_by_rule_sorted(&connection, rule, sort_field, sort_direction)
+    }
+
     /// Evaluates a smart mailbox rule and returns a paginated message view.
     ///
     /// @spec docs/L1-api#cursor-pagination

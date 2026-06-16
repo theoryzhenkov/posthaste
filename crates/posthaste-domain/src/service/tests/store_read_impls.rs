@@ -61,6 +61,19 @@ impl SmartMailboxStore for TestStore {
         Ok(Vec::new())
     }
 
+    fn query_messages_by_rule_sorted(
+        &self,
+        _rule: &SmartMailboxRule,
+        _sort_field: MessageSortField,
+        _sort_direction: SortDirection,
+    ) -> Result<Vec<MessageSummary>, StoreError> {
+        Ok(self
+            .rule_page
+            .lock()
+            .expect("rule page lock poisoned")
+            .clone())
+    }
+
     fn query_message_page_by_rule(
         &self,
         _rule: &SmartMailboxRule,

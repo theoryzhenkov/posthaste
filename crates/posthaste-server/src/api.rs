@@ -30,7 +30,6 @@ use posthaste_domain::{
     TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
 };
-use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
     CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,

@@ -393,6 +393,30 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
 }
 
 #[test]
+fn runtime_contract_exposes_single_mail_query_entry_point() {
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let contract = fs::read_to_string(server_dir.join("../posthaste-runtime-contract/src/lib.rs"))
+        .expect("runtime contract source should be readable");
+    assert!(
+        contract.contains("async fn query_mail_page"),
+        "mail-list/search reads should use the generalized query entry point"
+    );
+    for forbidden in [
+        "list_smart_mailbox_message_page",
+        "list_smart_mailbox_conversations",
+        "query_message_page_by_rule",
+        "query_conversations_by_rule",
+        "record_search_cache_visibility",
+        "async fn get_conversation",
+    ] {
+        assert!(
+            !contract.contains(forbidden),
+            "runtime contract should not expose route-shaped mail query method {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn api_route_modules_do_not_construct_new_mail_runtime_graphs() {
     let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
     let mut violations = Vec::new();

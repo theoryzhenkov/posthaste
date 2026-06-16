@@ -161,6 +161,34 @@ pub(crate) fn query_message_page(
     })
 }
 
+/// Queries all messages matching a smart mailbox rule with explicit ordering.
+pub(crate) fn query_messages_by_rule_sorted(
+    connection: &Connection,
+    rule: &SmartMailboxRule,
+    sort_field: MessageSortField,
+    sort_direction: SortDirection,
+) -> Result<Vec<MessageSummary>, StoreError> {
+    let mut params = Vec::new();
+    let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
+    let sort_key = message_sort_key_expr(sort_field);
+    let dir = match sort_direction {
+        SortDirection::Desc => "DESC",
+        SortDirection::Asc => "ASC",
+    };
+    let sql = format!(
+        "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+                m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
+                m.is_read, m.is_flagged
+         FROM message m
+         JOIN source_projection a ON a.source_id = m.account_id
+         WHERE ({where_clause})
+         ORDER BY {sort_key} {dir}, m.account_id {dir}, m.id {dir}"
+    );
+    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let rows = load_message_summary_rows(&mut statement, params_from_iter(params))?;
+    hydrate_message_summaries(connection, rows)
+}
+
 /// Queries messages matching a smart mailbox rule with seek pagination.
 ///
 /// @spec docs/L1-api#cursor-pagination
