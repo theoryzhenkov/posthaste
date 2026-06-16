@@ -20,7 +20,7 @@ use crate::support::{
 async fn patch_settings_publishes_settings_updated_resource_event() {
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
 
     let _ = expect_settings_ok(
         patch_settings(
@@ -49,7 +49,7 @@ async fn patch_settings_publishes_settings_updated_resource_event() {
 async fn patch_account_appearance_publishes_account_updated_resource_event() {
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
 
     let _ = expect_api_ok(
         patch_account(
@@ -86,7 +86,7 @@ async fn smart_mailbox_mutations_publish_resource_events() {
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
 
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
     let created = expect_api_ok(
         create_smart_mailbox(
             State(harness.state.clone()),
@@ -105,7 +105,7 @@ async fn smart_mailbox_mutations_publish_resource_events() {
     assert_eq!(event.payload["smartMailboxId"], created.id.as_str());
     assert_eq!(event.payload["resources"][0]["operation"], "created");
 
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
     let _ = expect_api_ok(
         patch_smart_mailbox(
             State(harness.state.clone()),
@@ -123,7 +123,7 @@ async fn smart_mailbox_mutations_publish_resource_events() {
     assert_eq!(event.topic, EVENT_TOPIC_SMART_MAILBOX_UPDATED);
     assert_eq!(event.payload["resources"][0]["operation"], "updated");
 
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
     let _ = expect_api_ok(
         delete_smart_mailbox(
             State(harness.state.clone()),
@@ -150,7 +150,7 @@ enabled = true
 "#,
     )
     .expect("source config should write");
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
 
     let _ = expect_api_ok(
         reload_config(State(harness.state.clone())).await,
@@ -171,7 +171,7 @@ enabled = true
 #[tokio::test]
 async fn reset_default_smart_mailboxes_publishes_resource_event() {
     let harness = SettingsHarness::new();
-    let receiver = harness.state.event_sender.subscribe();
+    let receiver = harness.subscribe_events();
 
     let _ = expect_api_ok(
         reset_default_smart_mailboxes(State(harness.state.clone())).await,

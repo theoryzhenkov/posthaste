@@ -22,12 +22,16 @@ fn resource_change_serializes_wire_compatible_json() {
 #[test]
 fn account_events_include_declarative_resource_payload() {
     let test = test_app_state();
-    let state = Arc::new(test.state);
     let account_id = AccountId::from("primary");
-    append_and_publish_account_event(&state, &account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
-        .expect("account event should append");
+    append_and_publish_account_event(
+        test.store.as_ref(),
+        &test.event_sender,
+        &account_id,
+        EVENT_TOPIC_ACCOUNT_UPDATED,
+    )
+    .expect("account event should append");
 
-    let events = state
+    let events = test
         .service
         .list_events(&EventFilter {
             account_id: Some(account_id.clone()),

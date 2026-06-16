@@ -21,9 +21,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     let log_guard = logging::init(&roots.state_root, &runtime.log_level);
 
-    // MIGRATION(api-runtime-wrapper): authority runtime owns config/store/
-    // service/secret/event assembly; AppState temporarily exposes those parts
-    // to existing Axum handlers through api_bridge.
+    // Authority runtime owns config/store/service/secret/event assembly; the
+    // Axum adapter keeps only HTTP-owned state plus the runtime handle.
     //
     // @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#server-startup-authority-builder
     let runtime_build = build_authority_runtime(
@@ -53,11 +52,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         }
     }
 
-    let service = runtime_build.api_bridge.service.clone();
-    let store = runtime_build.api_bridge.store.clone();
     let secret_store = runtime_build.api_bridge.secret_store.clone();
-    let event_sender = runtime_build.api_bridge.event_sender.clone();
-    let supervisor = runtime_build.account_supervisor.clone();
 
     // Per-process bearer token for the loopback trust model: a full-scope
     // macaroon (no caveats) minted from the per-install root key. Replaces the
@@ -81,11 +76,6 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
 
     let state = Arc::new(AppState {
         runtime: runtime_build.handle.clone(),
-        service,
-        store,
-        secret_store,
-        supervisor,
-        event_sender,
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
         oauth_flows: Arc::new(OAuthFlowStore::default()),
         auth_token: auth_token.clone(),

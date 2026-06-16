@@ -3,36 +3,8 @@ use super::*;
 pub struct AppState {
     /// Target runtime boundary for `/v1` mail behavior.
     ///
-    /// MIGRATION(api-runtime-wrapper): existing handlers still use the legacy
-    /// fields below while methods move onto `AuthorityRuntimeHandle`.
-    ///
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
     pub runtime: AuthorityRuntimeHandle,
-    /// MIGRATION(api-runtime-wrapper): temporary direct service access for
-    /// handlers that have not yet moved behind the runtime handle.
-    ///
-    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
-    pub service: Arc<MailService>,
-    /// MIGRATION(api-runtime-wrapper): temporary direct store access for
-    /// handlers and test harnesses not yet moved behind runtime read methods.
-    ///
-    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
-    pub store: Arc<dyn MailStore>,
-    /// MIGRATION(api-runtime-wrapper): temporary direct secret-store access for
-    /// test harnesses and any remaining legacy adapter-only cleanup.
-    ///
-    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
-    pub secret_store: Arc<dyn SecretStore>,
-    /// MIGRATION(api-runtime-wrapper): temporary direct supervisor access for
-    /// remaining search/cache visibility helpers and test harnesses.
-    ///
-    /// @spec docs/backend/L3#supervisor-server-owned-temporary
-    pub supervisor: Arc<AccountSupervisor>,
-    /// MIGRATION(api-runtime-wrapper): temporary direct event bus access for
-    /// test harnesses and remaining legacy adapter-only helpers.
-    ///
-    /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
-    pub event_sender: broadcast::Sender<DomainEvent>,
     pub account_logo_root: PathBuf,
     pub oauth_flows: Arc<OAuthFlowStore>,
     /// Per-process bearer token enforced by the auth middleware when
@@ -69,8 +41,7 @@ pub struct AppState {
 
 impl AppState {
     /// MIGRATION(api-runtime-wrapper): build a runtime handle around existing
-    /// test/API parts while route handlers are incrementally moved behind the
-    /// authority runtime.
+    /// test harness parts while the authority-runtime bridge is retired.
     ///
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
     pub fn runtime_handle_for_migration(
@@ -111,16 +82,6 @@ impl AppState {
             account_count,
             account_runtime_provider,
         )
-    }
-
-    /// Broadcast domain events to all connected SSE clients.
-    ///
-    /// @spec docs/L1-api#sse-event-stream
-    /// @spec docs/L1-sync#event-propagation
-    pub fn publish_events(&self, events: &[DomainEvent]) {
-        for event in events {
-            let _ = self.event_sender.send(event.clone());
-        }
     }
 }
 

@@ -78,6 +78,9 @@ pub struct Harness {
     router: Router,
     root: RootKey,
     state: Arc<AppState>,
+    service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
+    supervisor: Arc<AccountSupervisor>,
 }
 
 impl Harness {
@@ -116,11 +119,6 @@ impl Harness {
                 event_sender.clone(),
                 supervisor.clone(),
             ),
-            service,
-            store,
-            secret_store,
-            supervisor,
-            event_sender,
             account_logo_root: state_root.join("account-assets/logos"),
             oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
             auth_token: mint_full_scope_token(&root),
@@ -135,6 +133,9 @@ impl Harness {
             router,
             root,
             state,
+            service,
+            store,
+            supervisor,
         }
     }
 
@@ -167,8 +168,7 @@ impl Harness {
 
     /// Persist a configured account through the service.
     pub fn remember_sender_address(&self, account: &str, name: Option<&str>, email: &str) {
-        self.state
-            .store
+        self.store
             .remember_sender_address(
                 &AccountId::from(account),
                 &Recipient {
@@ -180,8 +180,7 @@ impl Harness {
     }
 
     pub fn save_account(&self, id: &str, name: &str, enabled: bool) {
-        self.state
-            .service
+        self.service
             .save_source(&AccountSettings {
                 id: AccountId::from(id),
                 name: name.to_string(),
@@ -199,14 +198,12 @@ impl Harness {
 
     pub async fn start_account_runtime(&self, id: &str) {
         let account = self
-            .state
             .service
             .get_source(&AccountId::from(id))
             .expect("account lookup should succeed")
             .expect("account should exist");
-        self.state.supervisor.start_account(&account).await;
-        self.state
-            .supervisor
+        self.supervisor.start_account(&account).await;
+        self.supervisor
             .sync_account(&account.id)
             .await
             .expect("mock account runtime should sync");

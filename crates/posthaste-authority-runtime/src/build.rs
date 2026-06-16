@@ -12,7 +12,8 @@ use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
-    ServiceError, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode, SyncTrigger,
+    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
+    SyncTrigger,
 };
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
@@ -537,7 +538,20 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         std::collections::BTreeMap<AccountId, Vec<posthaste_domain::MailboxSummary>>,
         RuntimeError,
     > {
-        Ok(self.core.account_reads.list_mailboxes(scope)?)
+        self.core
+            .account_reads
+            .list_mailboxes(scope)
+            .map_err(|error| {
+                if error.kind() == ServiceErrorKind::NotFound {
+                    RuntimeError::with_details(
+                        RuntimeErrorCode::NotFound,
+                        "account not found",
+                        serde_json::json!({}),
+                    )
+                } else {
+                    error.into()
+                }
+            })
     }
 
     async fn list_smart_mailboxes(

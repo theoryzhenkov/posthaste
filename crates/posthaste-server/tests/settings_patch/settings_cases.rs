@@ -12,7 +12,6 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
     harness
-        .state
         .service
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
@@ -41,7 +40,6 @@ async fn patch_settings_automation_rules_preserves_default_account_and_writes_ap
     );
     assert_eq!(settings.automation_rules.len(), 1);
     let backfill_job = harness
-        .state
         .service
         .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
         .expect("backfill job should load")
@@ -60,7 +58,6 @@ async fn patch_settings_can_clear_default_account_without_replacing_rules() {
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
     harness
-        .state
         .service
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
@@ -134,7 +131,6 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
     harness
-        .state
         .service
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
@@ -164,7 +160,6 @@ async fn patch_settings_persists_incomplete_automation_drafts_without_enqueuing_
     assert_eq!(settings.automation_rules.len(), 0);
     assert_eq!(settings.automation_drafts.len(), 1);
     assert!(harness
-        .state
         .service
         .automation_backfill_job_for_current_rules(&AccountId::from("primary"))
         .expect("backfill job should load")
@@ -195,7 +190,6 @@ async fn patch_settings_rejects_default_account_that_does_not_exist() {
     assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         harness
-            .state
             .service
             .get_app_settings()
             .expect("settings should load"),
@@ -208,7 +202,6 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
     let harness = SettingsHarness::new();
     harness.save_account("primary", "Primary");
     harness
-        .state
         .service
         .put_app_settings(&AppSettings {
             default_account_id: Some(AccountId::from("primary")),
@@ -235,7 +228,6 @@ async fn patch_settings_rejects_invalid_automation_rules_without_persisting() {
     assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         harness
-            .state
             .service
             .get_app_settings()
             .expect("settings should load"),
