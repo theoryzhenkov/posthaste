@@ -19,7 +19,11 @@ const TOKEN = 'embedded-token-abc'
 beforeAll(async () => {
   const { setInjectedRuntimeForTesting } =
     await import('../src/connection/injected')
-  setInjectedRuntimeForTesting({ port: PORT, token: TOKEN })
+  setInjectedRuntimeForTesting({
+    port: PORT,
+    runtimeMode: 'loopback',
+    token: TOKEN,
+  })
 })
 
 beforeEach(async () => {
@@ -53,6 +57,11 @@ describe('embedded resolution matches the legacy frozen consts', () => {
     expect(resolution.connection.baseUrl).toBe(`http://127.0.0.1:${PORT}/v1`)
     expect(resolution.connection.token).toBe(TOKEN)
     expect(resolution.connection.hostHeader).toBeUndefined()
+  })
+
+  it('exposes injected runtime mode for adapter selection', async () => {
+    const { injectedRuntimeMode } = await import('../src/connection/injected')
+    expect(injectedRuntimeMode()).toBe('loopback')
   })
 
   it('seeds the runtime holder synchronously to the embedded default', async () => {
