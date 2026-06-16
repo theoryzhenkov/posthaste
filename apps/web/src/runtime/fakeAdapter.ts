@@ -13,9 +13,11 @@ import type {
   RuntimeAdapter,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
+  RuntimeResourceDescriptor,
 } from './types'
 
 type MessageDetailCall = { messageId: string; sourceId: string }
+type ResourceCall = { descriptor: RuntimeResourceDescriptor }
 
 type QueuedOutcome<T> =
   | { kind: 'resolve'; value: T }
@@ -79,6 +81,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
   readonly messagePageCalls: RuntimeMessagePageRequest[]
   readonly readCalls: ReadRequest[]
+  readonly resourceCalls: ResourceCall[]
   readonly smartMailboxCalls: number
   queueConversation(conversation: ConversationView): void
   queueConversationError(error: Error): void
@@ -90,6 +93,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueMessageCommandError(error: Error): void
   queueMessagePage(page: MessagePage): void
   queueMessagePageError(error: Error): void
+  queueResourceBlob(blob: Blob): void
+  queueResourceError(error: Error): void
   queueReadResponse(response: ReadResponse): void
   queueReadError(error: Error): void
   queueSmartMailboxes(mailboxes: SmartMailboxSummary[]): void
@@ -113,12 +118,14 @@ export function createFakeRuntimeAdapter(input?: {
   const messageCommandCalls: RuntimeMessageCommandRequest[] = []
   const messagePageCalls: RuntimeMessagePageRequest[] = []
   const readCalls: ReadRequest[] = []
+  const resourceCalls: ResourceCall[] = []
   const queuedConversations: QueuedOutcome<ConversationView>[] = []
   const queuedMailboxes: QueuedOutcome<Mailbox[]>[] = []
   const queuedMessages: QueuedOutcome<MessageDetail>[] = []
   const queuedMessageCommands: QueuedOutcome<MessageCommandResult>[] = []
   const queuedMessagePages: QueuedOutcome<MessagePage>[] = []
   const queuedReads: QueuedOutcome<ReadResponse>[] = []
+  const queuedResources: QueuedOutcome<Blob>[] = []
   const queuedSmartMailboxes: QueuedOutcome<SmartMailboxSummary[]>[] = []
   let smartMailboxCalls = 0
 
@@ -129,6 +136,7 @@ export function createFakeRuntimeAdapter(input?: {
     messageCommandCalls,
     messagePageCalls,
     readCalls,
+    resourceCalls,
     get smartMailboxCalls() {
       return smartMailboxCalls
     },
@@ -162,6 +170,12 @@ export function createFakeRuntimeAdapter(input?: {
     queueMessagePageError(error) {
       queueReject(queuedMessagePages, error)
     },
+    queueResourceBlob(blob) {
+      queueResolve(queuedResources, blob)
+    },
+    queueResourceError(error) {
+      queueReject(queuedResources, error)
+    },
     queueReadResponse(response) {
       queueResolve(queuedReads, response)
     },
@@ -181,12 +195,14 @@ export function createFakeRuntimeAdapter(input?: {
       messageCommandCalls.length = 0
       messagePageCalls.length = 0
       readCalls.length = 0
+      resourceCalls.length = 0
       queuedConversations.length = 0
       queuedMailboxes.length = 0
       queuedMessages.length = 0
       queuedMessageCommands.length = 0
       queuedMessagePages.length = 0
       queuedReads.length = 0
+      queuedResources.length = 0
       queuedSmartMailboxes.length = 0
       smartMailboxCalls = 0
     },
@@ -218,6 +234,14 @@ export function createFakeRuntimeAdapter(input?: {
       return resolveQueued(
         queuedMessagePages,
         input?.defaultMessagePage ?? defaultMessagePage,
+      )
+    },
+    fetchResourceBlob(descriptor) {
+      resourceCalls.push({ descriptor })
+      return resolveQueuedOptional(
+        queuedResources,
+        undefined,
+        'resource blob result',
       )
     },
     fetchSmartMailboxes() {

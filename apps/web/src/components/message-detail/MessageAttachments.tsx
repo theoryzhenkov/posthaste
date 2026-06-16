@@ -1,12 +1,11 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { Download, Ellipsis, Eye, FileText } from 'lucide-react'
 
-import { buildMessageAttachmentUrl } from '@/api/client'
 import type { MessageAttachment } from '@/api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '@/attachments'
 import { openFocusedSurface } from '@/hooks/useSurfaceRouting'
 import { cn } from '@/lib/utils'
-import { downloadAuthedResource } from '@/lib/downloadAuthedResource'
+import { downloadRuntimeResource } from '@/lib/downloadRuntimeResource'
 import { attachmentSurface } from '@/surfaces'
 
 import { Button } from '../ui/button'
@@ -87,7 +86,11 @@ function AttachmentRow({
       onKeyDown={canPreview ? handleKeyDown : undefined}
       role={canPreview ? 'button' : undefined}
       tabIndex={canPreview ? 0 : undefined}
-      title={canPreview ? `Preview ${attachment.filename ?? 'attachment'}` : undefined}
+      title={
+        canPreview
+          ? `Preview ${attachment.filename ?? 'attachment'}`
+          : undefined
+      }
     >
       <AttachmentMeta attachment={attachment} />
       <AttachmentActions
@@ -155,8 +158,13 @@ function AttachmentActions({
         aria-label={`Download ${attachment.filename ?? 'attachment'}`}
         onClick={(event: MouseEvent) => {
           event.stopPropagation()
-          void downloadAuthedResource(
-            buildMessageAttachmentUrl(sourceId, messageId, attachment.id),
+          void downloadRuntimeResource(
+            {
+              kind: 'message-attachment',
+              sourceId,
+              messageId,
+              attachmentId: attachment.id,
+            },
             attachment.filename ?? 'attachment',
           ).catch(() => {
             // already logged in the helper; nothing to surface here
