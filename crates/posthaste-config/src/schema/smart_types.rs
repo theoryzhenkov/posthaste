@@ -82,6 +82,7 @@ pub enum FieldToml {
     SourceName,
     MessageId,
     ThreadId,
+    ConversationId,
     MailboxId,
     MailboxName,
     MailboxRole,

@@ -12,6 +12,7 @@ mod account_reads;
 mod bootstrap;
 mod build;
 mod live_accounts;
+mod mail_queries;
 pub mod oauth;
 mod push;
 mod secret;

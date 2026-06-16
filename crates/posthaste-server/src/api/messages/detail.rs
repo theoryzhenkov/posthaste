@@ -20,10 +20,11 @@ pub async fn get_conversation(
     Path(conversation_id): Path<String>,
 ) -> Result<Json<ConversationView>, ApiError> {
     state
-        .service
-        .get_conversation(&ConversationId::from(conversation_id))
+        .runtime
+        .get_conversation(RuntimeCaller::api(), ConversationId::from(conversation_id))
+        .await
         .map(Json)
-        .map_err(ApiError::from_service_error)
+        .map_err(ApiError::from_runtime_error)
 }
 
 /// GET /v1/sources/{source_id}/messages/{id}

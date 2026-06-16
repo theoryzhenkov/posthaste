@@ -1,6 +1,30 @@
 use super::*;
 
 impl MailService {
+    /// Find a saved query by id, default key, or case-insensitive name.
+    pub fn find_smart_mailbox(&self, selector: &str) -> Result<Option<SmartMailbox>, ServiceError> {
+        let selector = selector.trim();
+        if selector.is_empty() {
+            return Ok(None);
+        }
+        let id = SmartMailboxId::from(selector);
+        if let Some(mailbox) = self.config.get_smart_mailbox(&id)? {
+            return Ok(Some(mailbox));
+        }
+        let normalized = selector.to_ascii_lowercase();
+        Ok(self
+            .config
+            .list_smart_mailboxes()?
+            .into_iter()
+            .find(|mailbox| {
+                mailbox.name.eq_ignore_ascii_case(selector)
+                    || mailbox
+                        .default_key
+                        .as_deref()
+                        .is_some_and(|key| key.eq_ignore_ascii_case(&normalized))
+            }))
+    }
+
     /// List smart mailboxes with live unread/total counts from the store.
     ///
     /// @spec docs/L1-api#smart-mailboxes

@@ -8,13 +8,21 @@ fn account_not_found() -> ApiError {
     )
 }
 
-pub(super) fn load_account(
+pub(super) async fn ensure_account_exists(
     state: &AppState,
     account_id: &AccountId,
-) -> Result<AccountSettings, ApiError> {
+) -> Result<(), ApiError> {
     state
-        .service
-        .get_source(account_id)
-        .map_err(ApiError::from_service_error)?
-        .ok_or_else(account_not_found)
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
+        .map(|_| ())
+        .map_err(ApiError::from_runtime_error)
+        .or_else(|error| {
+            if error.body.code == ApiErrorCode::NotFound {
+                Err(account_not_found())
+            } else {
+                Err(error)
+            }
+        })
 }

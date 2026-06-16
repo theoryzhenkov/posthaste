@@ -367,9 +367,11 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
         "message_commands.rs",
         "messages/compose.rs",
         "messages/detail.rs",
+        "messages/listing.rs",
         "mailboxes.rs",
         "settings.rs",
         "smart_mailboxes/crud.rs",
+        "smart_mailboxes/listings.rs",
     ] {
         let path = server_dir.join(relative);
         let source = fs::read_to_string(&path).expect("route source should be readable");

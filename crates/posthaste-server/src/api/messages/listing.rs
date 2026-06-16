@@ -30,44 +30,41 @@ pub async fn list_source_messages(
     let limit = message_limit(query.limit)?;
     let cursor = parse_message_cursor(query.cursor.as_deref())?;
     let account_id = AccountId::from(source_id.as_str());
-    load_account(state.as_ref(), &account_id)?;
+    ensure_account_exists(state.as_ref(), &account_id).await?;
     validate_source_message_cursor(&account_id, cursor.as_ref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
-    if let Some(search_rule) = parse_optional_search_rule(query.q.as_deref())? {
-        let scoped_rule = source_message_scope_rule(account_id.as_str(), mailbox_id.as_ref());
-        let result_rule = combine_rules(vec![scoped_rule.clone(), search_rule]);
-        let page = state
-            .service
-            .query_message_page_by_rule(
-                &result_rule,
-                limit,
-                cursor.as_ref(),
-                sort_field,
-                sort_direction,
-            )
-            .map_err(ApiError::from_service_error)?;
-        let operation_id = observability::operation_id_from_headers(&headers);
-        spawn_search_cache_visibility(
-            Arc::clone(&state),
-            page.clone(),
-            scoped_rule,
-            result_rule,
-            operation_id,
-        );
-        return Ok(Json(message_page_response(page)));
-    }
+    let base_query = mailbox_id
+        .as_ref()
+        .map(|mailbox_id| mailbox_query(&account_id, mailbox_id))
+        .unwrap_or_else(|| account_query(&account_id));
+    let query_text = join_query([
+        Some(base_query.clone()),
+        optional_user_query(query.q.as_deref()),
+    ]);
+    let visibility = visibility_for_search(
+        base_query,
+        query.q.as_deref(),
+        observability::operation_id_from_headers(&headers),
+    );
     let page = state
-        .service
-        .list_message_page(
-            &account_id,
-            mailbox_id.as_ref(),
-            limit,
-            cursor.as_ref(),
-            sort_field,
-            sort_direction,
+        .runtime
+        .query_mail_page(
+            RuntimeCaller::api(),
+            MailQueryRequest {
+                query: query_text,
+                presentation: MailPresentationRequest::Messages {
+                    limit,
+                    cursor,
+                    sort_field,
+                    sort_direction,
+                },
+                visibility,
+            },
         )
-        .map_err(ApiError::from_service_error)?;
+        .await
+        .map_err(ApiError::from_runtime_error)
+        .and_then(expect_message_page)?;
     Ok(Json(message_page_response(page)))
 }
 
@@ -111,19 +108,33 @@ pub async fn search_messages(
     let cursor = parse_message_cursor(query.cursor.as_deref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
-    let rule = parse_optional_search_rule(Some(query.q.as_str()))?.ok_or_else(|| {
-        ApiError::new(
+    if query.q.trim().is_empty() {
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             ApiErrorCode::InvalidQuery,
             "search query must not be empty",
-        )
-    })?;
+        ));
+    }
     state
-        .service
-        .query_message_page_by_rule(&rule, limit, cursor.as_ref(), sort_field, sort_direction)
+        .runtime
+        .query_mail_page(
+            RuntimeCaller::api(),
+            MailQueryRequest {
+                query: query.q,
+                presentation: MailPresentationRequest::Messages {
+                    limit,
+                    cursor,
+                    sort_field,
+                    sort_direction,
+                },
+                visibility: None,
+            },
+        )
+        .await
+        .map_err(ApiError::from_runtime_error)
+        .and_then(expect_message_page)
         .map(message_page_response)
         .map(Json)
-        .map_err(ApiError::from_service_error)
 }
 
 /// GET /v1/views/conversations
@@ -151,58 +162,32 @@ pub async fn list_conversations(
     let cursor = parse_conversation_cursor(query.cursor.as_deref())?;
     let sort_field = query.sort.unwrap_or_default();
     let sort_direction = query.sort_dir.unwrap_or_default();
-
-    // When a search query is provided, parse it into a rule. If the request also
-    // carries a `sourceId` (optionally `mailboxId`) filter, AND a scope rule into
-    // it so the search is restricted to that account — exactly as the non-search
-    // branch restricts via `list_conversations`.
-    //
-    // SECURITY: this scope rule is what makes the route safe to map as a Filter on
-    // `sourceId`. An account-scoped capability token is required by the auth layer
-    // to carry a matching `?sourceId`; without this, the search branch would
-    // return cross-account results and the token's `account` caveat would be
-    // meaningless. Do not drop it.
-    if let Some(q) = &query.q {
-        if !q.trim().is_empty() {
-            let search_rule = parse_optional_search_rule(Some(q))?.expect("non-empty query");
-            let rule = match query.source_id.as_deref() {
-                Some(source_id) => {
-                    let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
-                    combine_rules(vec![
-                        source_message_scope_rule(source_id, mailbox_id.as_ref()),
-                        search_rule,
-                    ])
-                }
-                None => search_rule,
-            };
-            return state
-                .service
-                .query_conversations_by_rule(
-                    &rule,
-                    limit,
-                    cursor.as_ref(),
-                    sort_field,
-                    sort_direction,
-                )
-                .map(conversation_page_response)
-                .map(Json)
-                .map_err(ApiError::from_service_error);
-        }
-    }
-
     let source_id = query.source_id.as_deref().map(AccountId::from);
     let mailbox_id = query.mailbox_id.as_deref().map(MailboxId::from);
+    let base_query = match (source_id.as_ref(), mailbox_id.as_ref()) {
+        (Some(account_id), Some(mailbox_id)) => Some(mailbox_query(account_id, mailbox_id)),
+        (Some(account_id), None) => Some(account_query(account_id)),
+        (None, _) => None,
+    };
+    let query_text = join_query([base_query, optional_user_query(query.q.as_deref())]);
     state
-        .service
-        .list_conversations(
-            source_id.as_ref(),
-            mailbox_id.as_ref(),
-            limit,
-            cursor.as_ref(),
-            sort_field,
-            sort_direction,
+        .runtime
+        .query_mail_page(
+            RuntimeCaller::api(),
+            MailQueryRequest {
+                query: query_text,
+                presentation: MailPresentationRequest::CollapsedByConversation {
+                    limit,
+                    cursor,
+                    sort_field,
+                    sort_direction,
+                },
+                visibility: None,
+            },
         )
+        .await
+        .map_err(ApiError::from_runtime_error)
+        .and_then(expect_conversation_page)
         .map(conversation_page_response)
         .map(Json)
-        .map_err(ApiError::from_service_error)
 }
