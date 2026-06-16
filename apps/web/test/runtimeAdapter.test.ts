@@ -115,7 +115,9 @@ describe('runtime adapter facade', () => {
     expect(await fetchRuntimeConversation('c1')).toBe(conversation)
     expect(await fetchRuntimeMessage('m1', 'primary')).toBe(detail)
     expect(fake.conversationCalls).toEqual(['c1'])
-    expect(fake.messageCalls).toEqual([{ messageId: 'm1', sourceId: 'primary' }])
+    expect(fake.messageCalls).toEqual([
+      { messageId: 'm1', sourceId: 'primary' },
+    ])
   })
 
   it('dispatches message page reads through a fake adapter override without a backend', async () => {
@@ -124,7 +126,11 @@ describe('runtime adapter facade', () => {
     setRuntimeAdapterForTesting(fake)
 
     const request = {
-      scope: { kind: 'source-mailbox' as const, sourceId: 'primary', mailboxId: 'inbox' },
+      scope: {
+        kind: 'source-mailbox' as const,
+        sourceId: 'primary',
+        mailboxId: 'inbox',
+      },
       cursor: null,
       limit: 25,
       operation,
@@ -145,7 +151,9 @@ describe('runtime adapter facade', () => {
     fake.queueSmartMailboxes([])
     setRuntimeAdapterForTesting(fake)
 
-    const readRequest = { calls: [{ id: 'accounts', op: 'Account/list' as const }] }
+    const readRequest = {
+      calls: [{ id: 'accounts', op: 'Account/list' as const }],
+    }
 
     expect(await runtimeRead(readRequest)).toBe(readResponse)
     expect(await fetchRuntimeMailboxes('primary')).toEqual([])
@@ -206,7 +214,9 @@ describe('runtime adapter facade', () => {
       apiClient,
       'fetchConversation',
     ).mockResolvedValue(conversation)
-    const messageSpy = spyOn(apiClient, 'fetchMessage').mockResolvedValue(detail)
+    const messageSpy = spyOn(apiClient, 'fetchMessage').mockResolvedValue(
+      detail,
+    )
 
     try {
       expect(await fetchRuntimeConversation('c1')).toBe(conversation)

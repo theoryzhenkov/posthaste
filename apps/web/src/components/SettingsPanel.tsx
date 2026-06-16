@@ -40,8 +40,14 @@ import {
   type SettingsSurfaceDescriptor,
 } from '../surfaces'
 import { SettingsPanelContent } from './settings-panel/SettingsPanelContent'
-import { SettingsRail, type SettingsCategory } from './settings-panel/SettingsRail'
-import { accountEditorKey, smartMailboxEditorKey } from './settings-panel/editorKeys'
+import {
+  SettingsRail,
+  type SettingsCategory,
+} from './settings-panel/SettingsRail'
+import {
+  accountEditorKey,
+  smartMailboxEditorKey,
+} from './settings-panel/editorKeys'
 import { settingsPanelReadiness } from './settings-panel/readiness'
 import {
   removeLinkedSmartMailboxAutomation,
@@ -244,10 +250,14 @@ export function SettingsPanel({
           invalidateAccountReadModels(queryClient)
         }}
         onBackToAccounts={() => onNavigate(settingsCategorySurface('accounts'))}
-        onBackToMailboxes={() => onNavigate(settingsCategorySurface('mailboxes'))}
+        onBackToMailboxes={() =>
+          onNavigate(settingsCategorySurface('mailboxes'))
+        }
         onCreateAccount={() => onNavigate(newAccountSettingsSurface())}
         onCreateMailbox={() => onNavigate(newSmartMailboxSettingsSurface())}
-        onDefaultAccountChange={(accountId) => defaultMutation.mutate(accountId)}
+        onDefaultAccountChange={(accountId) =>
+          defaultMutation.mutate(accountId)
+        }
         onDeletedSmartMailbox={async (mailboxId) => {
           await removeLinkedSmartMailboxAutomation({
             queryClient,
@@ -284,7 +294,9 @@ export function SettingsPanel({
           })
           onNavigate(smartMailboxSettingsSurface(mailbox.id))
         }}
-        onSelectAccount={(accountId) => onNavigate(accountSettingsSurface(accountId))}
+        onSelectAccount={(accountId) =>
+          onNavigate(accountSettingsSurface(accountId))
+        }
         onSelectSmartMailbox={(mailboxId) =>
           onNavigate(smartMailboxSettingsSurface(mailboxId))
         }
@@ -298,4 +310,3 @@ export function SettingsPanel({
     </section>
   )
 }
-

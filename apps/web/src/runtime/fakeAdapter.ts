@@ -43,10 +43,7 @@ function queueReject<T>(queue: QueuedOutcome<T>[], error: Error): void {
   queue.push({ kind: 'reject', error })
 }
 
-function resolveQueued<T>(
-  queue: QueuedOutcome<T>[],
-  fallback: T,
-): Promise<T> {
+function resolveQueued<T>(queue: QueuedOutcome<T>[], fallback: T): Promise<T> {
   const next = queue.shift()
   if (!next) {
     return Promise.resolve(fallback)
