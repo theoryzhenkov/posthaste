@@ -17,6 +17,6 @@ pub use types::{
     StartProviderOAuthRequest,
 };
 
-use logos::{account_appearance_image_id, delete_account_logo_file};
+use logos::delete_account_logo_file;
 #[cfg(test)]
 pub(super) use oauth_support::{oauth_account_settings, oauth_provider_mail_transport};

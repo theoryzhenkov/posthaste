@@ -6,15 +6,20 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#runtime-contract-crate-first
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#contract-no-transport-types
 
+mod mail_query;
+
+pub use mail_query::*;
+
 use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, EventFilter,
-    Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId, MessageSummary,
-    ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
+    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, ConversationId,
+    ConversationView, DomainEvent, EventFilter, Identity, ImapTransportSettings, MailboxId,
+    MailboxSummary, MessageId, MessageSummary, ProviderAuthKind, ProviderHint,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
+    SmtpTransportSettings, SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -587,6 +592,18 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError>;
+
+    async fn query_mail_page(
+        &self,
+        caller: RuntimeCaller,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError>;
+
+    async fn get_conversation(
+        &self,
+        caller: RuntimeCaller,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError>;
 
     async fn send_message(
         &self,

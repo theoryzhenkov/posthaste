@@ -231,31 +231,6 @@ fn account_appearance_image_id_from_overview(account: &AccountOverview) -> Optio
     }
 }
 
-pub(super) fn account_appearance_fallback_parts(account: &AccountSettings) -> (String, u16) {
-    let appearance = account
-        .appearance
-        .clone()
-        .unwrap_or_else(|| default_account_appearance(account));
-    match normalize_account_appearance(appearance) {
-        AccountAppearance::Initials {
-            initials,
-            color_hue,
-        } => (initials, color_hue),
-        AccountAppearance::Image {
-            initials,
-            color_hue,
-            ..
-        } => (initials, color_hue),
-    }
-}
-
-pub(super) fn account_appearance_image_id(account: &AccountSettings) -> Option<String> {
-    match &account.appearance {
-        Some(AccountAppearance::Image { image_id, .. }) => Some(image_id.clone()),
-        _ => None,
-    }
-}
-
 pub(super) async fn delete_account_logo_file(
     state: &AppState,
     image_id: &str,

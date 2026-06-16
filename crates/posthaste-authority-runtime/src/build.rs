@@ -9,17 +9,17 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
-    EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
+    AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, ConversationId,
+    ConversationView, DomainEvent, EventFilter, MailService, MailStore, MailboxId, MailboxSummary,
+    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
     ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
     SyncTrigger,
 };
 use posthaste_runtime_contract::{
-    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, PatchAccountMutation,
-    RuntimeAccountList, RuntimeAdapterError, RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore,
-    RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeLifecycle, RuntimeStatus,
-    RuntimeStoreStatus,
+    AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
+    MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAdapterError,
+    RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
+    RuntimeEventSubscription, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
@@ -28,6 +28,7 @@ use tokio::sync::broadcast;
 use crate::account_mutations::AccountMutationService;
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::bootstrap::initialize_config;
+use crate::mail_queries::MailQueryService;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
@@ -219,10 +220,15 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
         account_reads.clone(),
     ));
+    let mail_queries = Arc::new(MailQueryService::new(
+        api_bridge.service.clone(),
+        account_supervisor.clone(),
+    ));
     let core = Arc::new(AuthorityRuntimeCore {
         api_bridge: api_bridge.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
+        mail_queries,
         live_accounts: account_supervisor.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
@@ -242,6 +248,7 @@ struct AuthorityRuntimeCore {
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
+    mail_queries: Arc<MailQueryService>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
@@ -362,6 +369,15 @@ impl AuthorityRuntimeHandle {
             api_bridge.service.clone(),
             status_provider,
         ));
+        let query_supervisor = account_supervisor.clone().unwrap_or_else(|| {
+            Arc::new(crate::AccountSupervisor::new(
+                api_bridge.service.clone(),
+                api_bridge.store.clone(),
+                api_bridge.secret_store.clone(),
+                api_bridge.event_sender.clone(),
+                Duration::from_secs(60),
+            ))
+        });
         let account_mutations = account_supervisor.map(|supervisor| {
             Arc::new(AccountMutationService::new(
                 api_bridge.service.clone(),
@@ -372,6 +388,10 @@ impl AuthorityRuntimeHandle {
                 account_reads.clone(),
             ))
         });
+        let mail_queries = Arc::new(MailQueryService::new(
+            api_bridge.service.clone(),
+            query_supervisor,
+        ));
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
@@ -386,6 +406,7 @@ impl AuthorityRuntimeHandle {
                 api_bridge,
                 account_reads,
                 account_mutations,
+                mail_queries,
                 live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
@@ -693,6 +714,26 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .service
             .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
             .await
+            .map_err(Self::service_error_to_runtime_error)
+    }
+
+    async fn query_mail_page(
+        &self,
+        _caller: RuntimeCaller,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        self.core.mail_queries.query_mail_page(request).await
+    }
+
+    async fn get_conversation(
+        &self,
+        _caller: RuntimeCaller,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.core
+            .api_bridge
+            .service
+            .get_conversation(&conversation_id)
             .map_err(Self::service_error_to_runtime_error)
     }
 

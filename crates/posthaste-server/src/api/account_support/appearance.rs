@@ -1,6 +1,7 @@
 use super::*;
 
 /// Deterministic default visual identity for accounts without customization.
+#[cfg(test)]
 pub(crate) fn default_account_appearance(account: &AccountSettings) -> AccountAppearance {
     AccountAppearance::Initials {
         initials: derive_account_initials(account),
@@ -9,6 +10,7 @@ pub(crate) fn default_account_appearance(account: &AccountSettings) -> AccountAp
 }
 
 /// Normalize user-supplied appearance strings while preserving the selected mode.
+#[cfg(test)]
 pub(crate) fn normalize_account_appearance(appearance: AccountAppearance) -> AccountAppearance {
     match appearance {
         AccountAppearance::Initials {
@@ -30,6 +32,7 @@ pub(crate) fn normalize_account_appearance(appearance: AccountAppearance) -> Acc
     }
 }
 
+#[cfg(test)]
 pub(crate) fn validate_account_appearance(appearance: &AccountAppearance) -> Result<(), ApiError> {
     let (initials, color_hue, image_id) = match appearance {
         AccountAppearance::Initials {
@@ -77,6 +80,7 @@ pub(crate) fn validate_logo_image_id(image_id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn derive_account_initials(account: &AccountSettings) -> String {
     let label = if account.name.trim().is_empty() {
         account.full_name.as_deref().unwrap_or("Account")
@@ -86,6 +90,7 @@ fn derive_account_initials(account: &AccountSettings) -> String {
     normalize_initials(label)
 }
 
+#[cfg(test)]
 fn normalize_initials(value: &str) -> String {
     let words: Vec<&str> = value
         .split_whitespace()
@@ -112,6 +117,7 @@ fn normalize_initials(value: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn account_color_hue(account: &AccountSettings) -> u16 {
     let seed = format!("{}:{}", account.id.as_str(), account.name);
     let hash = seed.bytes().fold(0_u32, |acc, byte| {

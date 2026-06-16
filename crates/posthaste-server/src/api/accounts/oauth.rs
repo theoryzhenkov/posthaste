@@ -87,15 +87,22 @@ pub async fn start_account_oauth(
     Json(request): Json<StartOAuthRequest>,
 ) -> Result<Json<StartOAuthResponse>, ApiError> {
     let account_id = AccountId::from(account_id.as_str());
-    let account = load_account(state.as_ref(), &account_id)?;
-    let profile =
-        OAuthProviderProfile::for_provider(&account.transport.provider).ok_or_else(|| {
-            ApiError::new(
-                StatusCode::BAD_REQUEST,
-                ApiErrorCode::InvalidAccount,
-                "account provider does not support built-in OAuth",
-            )
-        })?;
+    let account = state
+        .runtime
+        .get_account(RuntimeCaller::api(), account_id.clone())
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    let provider = match &account.connection {
+        AccountConnectionOverview::ManualCredentials { provider, .. }
+        | AccountConnectionOverview::ManagedOAuth { provider, .. } => provider,
+    };
+    let profile = OAuthProviderProfile::for_provider(&provider).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::InvalidAccount,
+            "account provider does not support built-in OAuth",
+        )
+    })?;
     let (client_id, client_secret, redirect_uri) = validate_oauth_start_request(
         request.client_id.as_str(),
         request.client_secret.as_deref(),
