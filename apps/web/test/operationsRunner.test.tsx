@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { ReactNode } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -7,7 +7,6 @@ import {
   type InfiniteData,
 } from '@tanstack/react-query'
 
-import * as apiClient from '../src/api/client'
 import { OperationsProvider } from '../src/components/OperationsProvider'
 import { moveToMailboxOp } from '../src/operations'
 import { useOperations } from '../src/operationsContext'
@@ -17,19 +16,20 @@ import type {
   MessagePage,
   MessageSummary,
 } from '../src/api/types'
+import {
+  resetRuntimeAdapterForTesting,
+  setRuntimeAdapterForTesting,
+} from '../src/runtime/adapter'
+import {
+  createFakeRuntimeAdapter,
+  type FakeRuntimeAdapter,
+} from '../src/runtime/fakeAdapter'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
 
-// Record every command the runner sends. Spied per-file so the real client is
-// restored for other suites.
-let commandCalls: Array<{
-  messageId: string
-  command: { kind: string; mailboxIds?: string[] }
-}> = []
-let commandSpy: ReturnType<typeof spyOn>
-
 const okResult: MessageCommandResult = { detail: null, events: [] }
+let runtimeAdapter: FakeRuntimeAdapter
 
 function messageSummary(
   overrides: Partial<MessageSummary> = {},
@@ -82,16 +82,10 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 beforeEach(() => {
-  commandCalls = []
-  commandSpy = spyOn(apiClient, 'performMessageCommand').mockImplementation(
-    (async (messageId: string, command: { kind: string }) => {
-      commandCalls.push({
-        command: command as { kind: string; mailboxIds?: string[] },
-        messageId,
-      })
-      return okResult
-    }) as typeof apiClient.performMessageCommand,
-  )
+  runtimeAdapter = createFakeRuntimeAdapter({
+    defaultMessageCommandResult: okResult,
+  })
+  setRuntimeAdapterForTesting(runtimeAdapter)
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { gcTime: Number.POSITIVE_INFINITY, retry: false },
@@ -100,7 +94,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  commandSpy.mockRestore()
+  resetRuntimeAdapterForTesting()
   queryClient.clear()
 })
 
@@ -125,9 +119,12 @@ describe('operation runner', () => {
       )
     })
 
-    await waitFor(() => expect(commandCalls.length).toBe(1))
-    expect(commandCalls[0]).toEqual({
+    await waitFor(() =>
+      expect(runtimeAdapter.messageCommandCalls.length).toBe(1),
+    )
+    expect(runtimeAdapter.messageCommandCalls[0]).toEqual({
       messageId: 'm1',
+      sourceId: 'primary',
       command: { kind: 'replaceMailboxes', mailboxIds: ['trash'] },
     })
     await waitFor(() => expect(result.current.canUndo).toBe(true))
@@ -136,10 +133,13 @@ describe('operation runner', () => {
       result.current.undo()
     })
 
-    await waitFor(() => expect(commandCalls.length).toBe(2))
+    await waitFor(() =>
+      expect(runtimeAdapter.messageCommandCalls.length).toBe(2),
+    )
     // Undo restores the mailbox the message actually came from.
-    expect(commandCalls[1]).toEqual({
+    expect(runtimeAdapter.messageCommandCalls[1]).toEqual({
       messageId: 'm1',
+      sourceId: 'primary',
       command: { kind: 'replaceMailboxes', mailboxIds: ['inbox'] },
     })
     await waitFor(() => expect(result.current.canRedo).toBe(true))
@@ -179,7 +179,9 @@ describe('operation runner', () => {
         ),
       )
     })
-    await waitFor(() => expect(commandCalls.length).toBe(2))
+    await waitFor(() =>
+      expect(runtimeAdapter.messageCommandCalls.length).toBe(2),
+    )
 
     // Fire both undos in the same tick: the synchronous pop must select
     // distinct entries (m2 then m1), not undo m2 twice.
@@ -188,15 +190,19 @@ describe('operation runner', () => {
       result.current.undo()
     })
 
-    await waitFor(() => expect(commandCalls.length).toBe(4))
-    const undoCommands = commandCalls.slice(2)
+    await waitFor(() =>
+      expect(runtimeAdapter.messageCommandCalls.length).toBe(4),
+    )
+    const undoCommands = runtimeAdapter.messageCommandCalls.slice(2)
     expect(undoCommands).toEqual([
       {
         messageId: 'm2',
+        sourceId: 'primary',
         command: { kind: 'replaceMailboxes', mailboxIds: ['archive'] },
       },
       {
         messageId: 'm1',
+        sourceId: 'primary',
         command: { kind: 'replaceMailboxes', mailboxIds: ['inbox'] },
       },
     ])
