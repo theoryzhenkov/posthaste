@@ -2,11 +2,12 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Download, FileText } from 'lucide-react'
 
-import { buildMessageAttachmentUrl, fetchMessage } from '@/api/client'
+import { buildMessageAttachmentUrl } from '@/api/client'
 import { useAuthedBlobUrl } from '@/hooks/useAuthedBlobUrl'
 import type { MessageAttachment } from '@/api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '@/attachments'
 import { mailKeys } from '@/mailState'
+import { fetchRuntimeMessage } from '@/runtime/adapter'
 import type { AttachmentSurfaceDescriptor } from '@/surfaces'
 import { Button } from './ui/button'
 import { ProgressBar } from './ui/progress'
@@ -64,7 +65,7 @@ export function AttachmentSurface({
   const { attachmentId, messageId, sourceId } = surface.params
   const messageQuery = useQuery({
     queryKey: mailKeys.message(sourceId, messageId),
-    queryFn: () => fetchMessage(messageId, sourceId),
+    queryFn: () => fetchRuntimeMessage(messageId, sourceId),
   })
   const attachment =
     messageQuery.data?.attachments.find(

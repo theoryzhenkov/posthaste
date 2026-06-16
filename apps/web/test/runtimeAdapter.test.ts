@@ -2,14 +2,18 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 
 import * as apiClient from '../src/api/client'
 import type {
+  ConversationView,
   MessageCommand,
   MessageCommandResult,
+  MessageDetail,
   MessagePage,
 } from '../src/api/types'
 import { messagePageClient } from '../src/messagePageClient'
 import type { OperationContext } from '../src/observability'
 import {
+  fetchRuntimeConversation,
   fetchRuntimeMailboxes,
+  fetchRuntimeMessage,
   fetchRuntimeMessagePage,
   fetchRuntimeSmartMailboxes,
   getRuntimeAdapter,
@@ -43,6 +47,35 @@ const operation: OperationContext = {
   sessionId: 'session_1',
 }
 
+const detail: MessageDetail = {
+  id: 'm1',
+  sourceId: 'primary',
+  sourceName: 'Primary',
+  sourceThreadId: 't1',
+  conversationId: 'c1',
+  subject: 'Subject',
+  fromName: 'Sender',
+  fromEmail: 'sender@example.com',
+  to: [],
+  preview: 'preview',
+  receivedAt: '2026-04-28T12:00:00Z',
+  hasAttachment: false,
+  isRead: false,
+  isFlagged: false,
+  mailboxIds: ['inbox'],
+  keywords: [],
+  bodyHtml: null,
+  bodyText: null,
+  rawMessage: null,
+  attachments: [],
+}
+
+const conversation: ConversationView = {
+  id: 'c1',
+  subject: 'Subject',
+  messages: [detail],
+}
+
 afterEach(() => {
   resetRuntimeAdapterForTesting()
 })
@@ -71,6 +104,18 @@ describe('runtime adapter facade', () => {
         sourceId: 'primary',
       },
     ])
+  })
+
+  it('dispatches message detail reads through a fake adapter override without a backend', async () => {
+    const fake = createFakeRuntimeAdapter()
+    fake.queueConversation(conversation)
+    fake.queueMessage(detail)
+    setRuntimeAdapterForTesting(fake)
+
+    expect(await fetchRuntimeConversation('c1')).toBe(conversation)
+    expect(await fetchRuntimeMessage('m1', 'primary')).toBe(detail)
+    expect(fake.conversationCalls).toEqual(['c1'])
+    expect(fake.messageCalls).toEqual([{ messageId: 'm1', sourceId: 'primary' }])
   })
 
   it('dispatches message page reads through a fake adapter override without a backend', async () => {
@@ -153,6 +198,24 @@ describe('runtime adapter facade', () => {
       expect(commandSpy).toHaveBeenCalledWith('m1', command, 'primary')
     } finally {
       commandSpy.mockRestore()
+    }
+  })
+
+  it('wraps existing HTTP message detail reads by default', async () => {
+    const conversationSpy = spyOn(
+      apiClient,
+      'fetchConversation',
+    ).mockResolvedValue(conversation)
+    const messageSpy = spyOn(apiClient, 'fetchMessage').mockResolvedValue(detail)
+
+    try {
+      expect(await fetchRuntimeConversation('c1')).toBe(conversation)
+      expect(await fetchRuntimeMessage('m1', 'primary')).toBe(detail)
+      expect(conversationSpy).toHaveBeenCalledWith('c1')
+      expect(messageSpy).toHaveBeenCalledWith('m1', 'primary')
+    } finally {
+      conversationSpy.mockRestore()
+      messageSpy.mockRestore()
     }
   })
 
