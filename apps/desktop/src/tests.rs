@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn backend_init_script_injects_loopback_runtime_mode() {
+    let script = backend_init_script(
+        &BackendInjection {
+            port: 4815,
+            auth_token: "token-1".to_string(),
+        },
+        "main",
+    );
+
+    assert!(script.contains("__POSTHASTE_RUNTIME_MODE__"));
+    assert!(script.contains("'loopback'"));
+    assert!(script.contains("__POSTHASTE_PORT__"));
+    assert!(script.contains("__POSTHASTE_TOKEN__"));
+}
+
+#[test]
 fn external_web_urls_are_only_non_loopback_http() {
     let external = |s: &str| is_external_web_url(&url::Url::parse(s).unwrap());
     // Outbound email links open in the browser.
