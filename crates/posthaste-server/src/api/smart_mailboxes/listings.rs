@@ -48,7 +48,7 @@ pub async fn list_smart_mailbox_messages(
             MailQueryRequest {
                 query: query_text,
                 presentation: MailPresentationRequest::Messages {
-                    limit,
+                    limit: Some(limit),
                     cursor,
                     sort_field,
                     sort_direction,

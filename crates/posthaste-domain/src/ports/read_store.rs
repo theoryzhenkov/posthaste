@@ -111,6 +111,14 @@ pub trait SmartMailboxStore: Send + Sync {
         rule: &SmartMailboxRule,
     ) -> Result<Vec<MessageSummary>, StoreError>;
 
+    /// Query messages matching a smart mailbox rule with explicit ordering.
+    fn query_messages_by_rule_sorted(
+        &self,
+        rule: &SmartMailboxRule,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<Vec<MessageSummary>, StoreError>;
+
     /// Query messages matching a smart mailbox rule with seek pagination.
     ///
     /// @spec docs/L1-api#cursor-pagination

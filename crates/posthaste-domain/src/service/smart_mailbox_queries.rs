@@ -111,6 +111,20 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Messages matching an explicit smart mailbox rule with explicit ordering.
+    ///
+    /// @spec docs/L1-search#execution-pipeline
+    pub fn query_messages_by_rule_sorted(
+        &self,
+        rule: &SmartMailboxRule,
+        sort_field: MessageSortField,
+        sort_direction: SortDirection,
+    ) -> Result<Vec<MessageSummary>, ServiceError> {
+        self.smart_mailboxes
+            .query_messages_by_rule_sorted(rule, sort_field, sort_direction)
+            .map_err(Into::into)
+    }
+
     /// Paginated messages matching an explicit smart mailbox rule.
     ///
     /// @spec docs/L1-search#execution-pipeline

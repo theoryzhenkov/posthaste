@@ -72,6 +72,7 @@ use crate::query::{
 use crate::smart_mailboxes::{
     count_smart_mailbox_messages, query_conversations, query_conversations_by_rule,
     query_message_page, query_message_page_by_rule, query_messages_by_rule,
+    query_messages_by_rule_sorted,
 };
 
 #[cfg(test)]

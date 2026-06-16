@@ -19,7 +19,7 @@ use support::{message, Harness};
 async fn account_scoped_conversation_search_excludes_other_accounts() {
     let harness = Harness::new();
     harness.seed_source("acct-a", "Account A");
-    harness.seed_source("acct-b", "Account B");
+    harness.seed_source("acct-b", "acct-a display collision");
     harness.seed_messages(
         "acct-a",
         "inbox",
@@ -70,7 +70,7 @@ async fn account_scoped_conversation_search_excludes_other_accounts() {
 async fn full_scope_conversation_search_sees_all_accounts() {
     let harness = Harness::new();
     harness.seed_source("acct-a", "Account A");
-    harness.seed_source("acct-b", "Account B");
+    harness.seed_source("acct-b", "acct-a display collision");
     harness.seed_messages(
         "acct-a",
         "inbox",

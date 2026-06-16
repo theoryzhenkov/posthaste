@@ -77,14 +77,24 @@ impl MailQueryService {
     fn query_messages(
         &self,
         query: &str,
-        limit: usize,
+        limit: Option<usize>,
         cursor: Option<&MessageCursor>,
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<MessagePage, RuntimeError> {
         let rule = rules::compile(&self.service, query)?;
+        if let Some(limit) = limit {
+            return self
+                .service
+                .query_message_page_by_rule(&rule, limit, cursor, sort_field, sort_direction)
+                .map_err(service_error_to_runtime_error);
+        }
         self.service
-            .query_message_page_by_rule(&rule, limit, cursor, sort_field, sort_direction)
+            .query_messages_by_rule_sorted(&rule, sort_field, sort_direction)
+            .map(|items| MessagePage {
+                items,
+                next_cursor: None,
+            })
             .map_err(service_error_to_runtime_error)
     }
 

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn parse_optional_search_rule(
     query: Option<&str>,
 ) -> Result<Option<SmartMailboxRule>, ApiError> {
@@ -12,7 +13,7 @@ pub(super) fn parse_optional_search_rule(
 }
 
 pub(super) fn account_query(account_id: &AccountId) -> String {
-    prefixed_query("source", account_id.as_str())
+    prefixed_query("in", format!("{}/", account_id.as_str()))
 }
 
 pub(super) fn mailbox_query(account_id: &AccountId, mailbox_id: &MailboxId) -> String {
@@ -77,11 +78,7 @@ pub(super) fn expect_conversation_page(page: MailQueryPage) -> Result<Conversati
 
 fn prefixed_query(prefix: &str, value: impl AsRef<str>) -> String {
     let value = value.as_ref();
-    if value.chars().any(char::is_whitespace) {
-        format!("{prefix}:\"{value}\"")
-    } else {
-        format!("{prefix}:{value}")
-    }
+    format!("{prefix}:\"{value}\"")
 }
 
 #[cfg(test)]
