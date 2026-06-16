@@ -1,13 +1,24 @@
-import type { MessageCommandResult } from '../api/types'
+import type { MessageCommandResult, MessagePage } from '../api/types'
 
 import { httpRuntimeAdapter } from './httpAdapter'
-import type { RuntimeAdapter, RuntimeMessageCommandRequest } from './types'
+import type {
+  RuntimeAdapter,
+  RuntimeMessageCommandRequest,
+  RuntimeMessagePageRequest,
+} from './types'
 
 let activeRuntimeAdapter: RuntimeAdapter = httpRuntimeAdapter
 
 /** Current renderer runtime adapter. Seeded to the HTTP bridge for compatibility. */
 export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntimeAdapter
+}
+
+/** Fetch a message page through the active runtime adapter. */
+export function fetchRuntimeMessagePage(
+  request: RuntimeMessagePageRequest,
+): Promise<MessagePage> {
+  return activeRuntimeAdapter.fetchMessagePage(request)
 }
 
 /** Dispatch a message command through the active runtime adapter. */
