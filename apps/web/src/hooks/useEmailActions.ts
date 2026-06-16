@@ -14,7 +14,6 @@
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
-import { fetchMailboxes } from '../api/client'
 import type {
   KnownMailboxRole,
   Mailbox,
@@ -35,6 +34,7 @@ import {
 } from '../operations'
 import { useOperations } from '../operationsContext'
 import { queryKeys } from '../queryKeys'
+import { fetchRuntimeMailboxes } from '../runtime/adapter'
 import type { SourceMessageRef } from '../api/types'
 
 /** Message reference augmented with optional keyword fields for optimistic patching. */
@@ -148,7 +148,7 @@ async function resolveRoleMailboxId(
   const mailboxes =
     queryClient.getQueryData<Mailbox[]>(queryKeys.mailboxes(sourceId)) ??
     (await queryClient.ensureQueryData({
-      queryFn: () => fetchMailboxes(sourceId),
+      queryFn: () => fetchRuntimeMailboxes(sourceId),
       queryKey: queryKeys.mailboxes(sourceId),
     }))
   return requiredMailboxByRole(mailboxes, sourceId, role).id

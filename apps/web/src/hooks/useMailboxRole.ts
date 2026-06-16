@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { fetchMailboxes } from '../api/client'
 import { queryKeys } from '../queryKeys'
+import { fetchRuntimeMailboxes } from '../runtime/adapter'
 
 /**
  * Resolve a mailbox's role from the per-account mailbox read model
@@ -19,7 +19,7 @@ export function useMailboxRole(
 ): string | null {
   const { data: mailboxes } = useQuery({
     queryKey: queryKeys.mailboxes(sourceId),
-    queryFn: () => fetchMailboxes(sourceId!),
+    queryFn: () => fetchRuntimeMailboxes(sourceId!),
     enabled: sourceId !== null,
   })
   return useMemo(
