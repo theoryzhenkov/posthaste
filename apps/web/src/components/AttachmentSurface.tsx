@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Download, FileText } from 'lucide-react'
 
-import { buildMessageAttachmentUrl } from '@/api/client'
-import { useAuthedBlobUrl } from '@/hooks/useAuthedBlobUrl'
+import { useRuntimeResourceObjectUrl } from '@/hooks/useRuntimeResourceObjectUrl'
 import type { MessageAttachment } from '@/api/types'
 import { canPreviewAttachment, formatAttachmentSize } from '@/attachments'
 import { mailKeys } from '@/mailState'
@@ -77,14 +76,19 @@ export function AttachmentSurface({
   // directly, so we hold the blob and point both at its object URL. The
   // `download` attribute supplies the filename, so we don't need the server's
   // `?download=1` content-disposition variant.
-  const attachmentUrl = attachment
-    ? buildMessageAttachmentUrl(sourceId, messageId, attachment.id)
+  const attachmentResource = attachment
+    ? {
+        kind: 'message-attachment' as const,
+        sourceId,
+        messageId,
+        attachmentId: attachment.id,
+      }
     : null
   const {
     objectUrl,
     isLoading: isBlobLoading,
     error: blobError,
-  } = useAuthedBlobUrl(attachmentUrl)
+  } = useRuntimeResourceObjectUrl(attachmentResource)
 
   if (messageQuery.isLoading) {
     return (

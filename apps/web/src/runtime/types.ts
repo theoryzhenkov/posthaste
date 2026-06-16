@@ -40,12 +40,29 @@ export interface RuntimeMessagePageRequest {
   operation: OperationContext
 }
 
+export type RuntimeResourceDescriptor =
+  | { kind: 'account-logo'; imageId: string }
+  | {
+      kind: 'message-attachment'
+      sourceId: string
+      messageId: string
+      attachmentId: string
+    }
+
+export interface RuntimeResourceFetchOptions {
+  signal?: AbortSignal
+}
+
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
   fetchConversation(conversationId: string): Promise<ConversationView>
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
+  fetchResourceBlob(
+    descriptor: RuntimeResourceDescriptor,
+    options?: RuntimeResourceFetchOptions,
+  ): Promise<Blob>
   fetchSmartMailboxes(): Promise<SmartMailboxSummary[]>
   read(request: ReadRequest): Promise<ReadResponse>
   runMessageCommand(

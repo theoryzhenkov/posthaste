@@ -14,6 +14,8 @@ import type {
   RuntimeAdapter,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
+  RuntimeResourceDescriptor,
+  RuntimeResourceFetchOptions,
 } from './types'
 
 let activeRuntimeAdapter: RuntimeAdapter = httpRuntimeAdapter
@@ -58,6 +60,14 @@ export function fetchRuntimeMessagePage(
   request: RuntimeMessagePageRequest,
 ): Promise<MessagePage> {
   return activeRuntimeAdapter.fetchMessagePage(request)
+}
+
+/** Fetch runtime-owned resource bytes through the active runtime adapter. */
+export function fetchRuntimeResourceBlob(
+  descriptor: RuntimeResourceDescriptor,
+  options?: RuntimeResourceFetchOptions,
+): Promise<Blob> {
+  return activeRuntimeAdapter.fetchResourceBlob(descriptor, options)
 }
 
 /** Dispatch a message command through the active runtime adapter. */
