@@ -390,6 +390,22 @@ impl AuthorityRuntimeHandle {
         status
     }
 
+    fn ensure_runtime_active(&self) -> Result<(), RuntimeError> {
+        let lifecycle = self.current_status().lifecycle;
+        if matches!(
+            lifecycle,
+            RuntimeLifecycle::Ready | RuntimeLifecycle::Degraded
+        ) {
+            return Ok(());
+        }
+        let message = format!("runtime is {}", runtime_lifecycle_label(&lifecycle));
+        Err(RuntimeError::with_details(
+            RuntimeErrorCode::RuntimeNotReady,
+            message,
+            serde_json::json!({ "lifecycle": lifecycle }),
+        ))
+    }
+
     fn account_mutations(&self) -> Result<Arc<AccountMutationService>, RuntimeError> {
         self.core.account_mutations.clone().ok_or_else(|| {
             RuntimeError::runtime_not_ready("account mutation runtime is not available")
@@ -401,6 +417,7 @@ impl AuthorityRuntimeHandle {
         profile: &OAuthProviderProfile,
         exchange: OAuthExchangeResult,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .create_oauth_account_from_exchange(profile, exchange)
             .await
@@ -411,6 +428,7 @@ impl AuthorityRuntimeHandle {
         account_id: AccountId,
         token_set: OAuthTokenSet,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .persist_oauth_token_set(account_id, token_set)
             .await
@@ -477,6 +495,16 @@ impl AuthorityRuntimeHandle {
     }
 }
 
+fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
+    match lifecycle {
+        RuntimeLifecycle::Starting => "starting",
+        RuntimeLifecycle::Ready => "ready",
+        RuntimeLifecycle::Degraded => "degraded",
+        RuntimeLifecycle::Stopping => "stopping",
+        RuntimeLifecycle::Stopped => "stopped",
+    }
+}
+
 #[async_trait]
 impl RuntimeCore for AuthorityRuntimeHandle {
     async fn runtime_status(&self, _caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError> {
@@ -484,6 +512,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     }
 
     async fn get_app_settings(&self, _caller: RuntimeCaller) -> Result<AppSettings, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.account_reads.app_settings()?)
     }
 
@@ -492,6 +521,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         mutation: posthaste_runtime_contract::PatchAppSettingsMutation,
     ) -> Result<AppSettings, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.patch_app_settings(mutation)
     }
 
@@ -500,6 +530,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         mutation: posthaste_runtime_contract::AutomationRulePreviewMutation,
     ) -> Result<posthaste_runtime_contract::AutomationRulePreviewResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.preview_automation_rule(mutation)
     }
 
@@ -507,6 +538,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         &self,
         _caller: RuntimeCaller,
     ) -> Result<RuntimeAccountList, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.account_reads.list_accounts().await?)
     }
 
@@ -515,6 +547,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.core
             .account_reads
             .get_account(account_id)
@@ -527,6 +560,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
     ) -> Result<Vec<AccountId>, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.account_reads.resolve_account_scope(scope)?)
     }
 
@@ -538,6 +572,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         std::collections::BTreeMap<AccountId, Vec<posthaste_domain::MailboxSummary>>,
         RuntimeError,
     > {
+        self.ensure_runtime_active()?;
         self.core
             .account_reads
             .list_mailboxes(scope)
@@ -558,6 +593,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         &self,
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.account_reads.list_smart_mailboxes()?)
     }
 
@@ -566,6 +602,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self
             .core
             .account_reads
@@ -577,6 +614,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         mutation: posthaste_runtime_contract::CreateSmartMailboxMutation,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.create_smart_mailbox(mutation)
     }
 
@@ -586,6 +624,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         smart_mailbox_id: SmartMailboxId,
         mutation: posthaste_runtime_contract::PatchSmartMailboxMutation,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .patch_smart_mailbox(smart_mailbox_id, mutation)
     }
@@ -595,6 +634,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .delete_smart_mailbox(smart_mailbox_id)
     }
@@ -603,6 +643,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         &self,
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.reset_default_smart_mailboxes()
     }
 
@@ -611,6 +652,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
     ) -> Result<Vec<posthaste_domain::TagSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.account_reads.list_tags(scope)?)
     }
 
@@ -619,6 +661,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<posthaste_domain::Identity, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         Ok(self
             .core
@@ -632,6 +675,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         &self,
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::CachedSenderAddress>, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.core
             .api_bridge
             .store
@@ -645,6 +689,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<posthaste_domain::ReplyContext, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         Ok(self
             .core
@@ -659,6 +704,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.core.mail_queries.query_mail_page(request).await
     }
 
@@ -668,6 +714,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         self.core
             .api_bridge
@@ -711,6 +758,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: SetKeywordsCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
@@ -729,6 +777,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: AddToMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
@@ -747,6 +796,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: RemoveFromMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
@@ -765,6 +815,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: ReplaceMailboxesCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
@@ -782,6 +833,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
@@ -800,6 +852,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mailbox_id: MailboxId,
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let events = self
             .core
@@ -817,6 +870,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.optional_gateway(&account_id).await;
         let result = self
             .core
@@ -835,6 +889,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         attachment_id: String,
     ) -> Result<RuntimeAttachmentBytes, RuntimeError> {
+        self.ensure_runtime_active()?;
         let gateway = self.optional_gateway(&account_id).await;
         let result = self
             .core
@@ -876,6 +931,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self
             .core
             .live_accounts
@@ -888,6 +944,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         filter: EventFilter,
     ) -> Result<Vec<DomainEvent>, RuntimeError> {
+        self.ensure_runtime_active()?;
         Ok(self.core.api_bridge.service.list_events(&filter)?)
     }
 
@@ -896,6 +953,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         filter: EventFilter,
     ) -> Result<RuntimeEventSubscription, RuntimeError> {
+        self.ensure_runtime_active()?;
         let receiver = self.core.api_bridge.event_sender.subscribe();
         let replay = if filter.after_seq.is_some() {
             self.replay_events(RuntimeCaller::system(), filter.clone())
@@ -916,6 +974,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         mutation: CreateAccountMutation,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.create_account(mutation).await
     }
 
@@ -925,6 +984,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         mutation: PatchAccountMutation,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .patch_account(account_id, mutation)
             .await
@@ -935,6 +995,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.delete_account(account_id).await
     }
 
@@ -943,6 +1004,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<AccountVerificationResult, RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.verify_account(account_id).await
     }
 
@@ -952,12 +1014,14 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         enabled: bool,
     ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?
             .set_account_enabled(account_id, enabled)
             .await
     }
 
     async fn reload_config(&self, _caller: RuntimeCaller) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
         self.account_mutations()?.reload_config().await
     }
 }
