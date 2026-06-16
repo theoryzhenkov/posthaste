@@ -1,5 +1,6 @@
 import type {
   ConversationView,
+  DomainEvent,
   Mailbox,
   MessageCommandResult,
   MessageDetail,
@@ -11,11 +12,14 @@ import type {
 
 import type {
   RuntimeAdapter,
+  RuntimeEventHandlers,
+  RuntimeEventSubscriptionRequest,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
 } from './types'
 
+type EventSubscriptionCall = { request: RuntimeEventSubscriptionRequest }
 type MessageDetailCall = { messageId: string; sourceId: string }
 type ResourceCall = { descriptor: RuntimeResourceDescriptor }
 
@@ -76,6 +80,7 @@ function resolveQueuedOptional<T>(
 
 export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly conversationCalls: string[]
+  readonly eventSubscriptionCalls: EventSubscriptionCall[]
   readonly mailboxCalls: string[]
   readonly messageCalls: MessageDetailCall[]
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
@@ -83,6 +88,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly readCalls: ReadRequest[]
   readonly resourceCalls: ResourceCall[]
   readonly smartMailboxCalls: number
+  emitDomainEvent(event: DomainEvent): void
   queueConversation(conversation: ConversationView): void
   queueConversationError(error: Error): void
   queueMailboxes(mailboxes: Mailbox[]): void
@@ -113,6 +119,8 @@ export function createFakeRuntimeAdapter(input?: {
   defaultSmartMailboxes?: SmartMailboxSummary[]
 }): FakeRuntimeAdapter {
   const conversationCalls: string[] = []
+  const eventSubscriptionCalls: EventSubscriptionCall[] = []
+  const eventHandlers = new Set<RuntimeEventHandlers>()
   const mailboxCalls: string[] = []
   const messageCalls: MessageDetailCall[] = []
   const messageCommandCalls: RuntimeMessageCommandRequest[] = []
@@ -131,6 +139,7 @@ export function createFakeRuntimeAdapter(input?: {
 
   return {
     conversationCalls,
+    eventSubscriptionCalls,
     mailboxCalls,
     messageCalls,
     messageCommandCalls,
@@ -139,6 +148,11 @@ export function createFakeRuntimeAdapter(input?: {
     resourceCalls,
     get smartMailboxCalls() {
       return smartMailboxCalls
+    },
+    emitDomainEvent(event) {
+      for (const handlers of eventHandlers) {
+        handlers.onEvent(event)
+      }
     },
     queueConversation(conversation) {
       queueResolve(queuedConversations, conversation)
@@ -190,6 +204,8 @@ export function createFakeRuntimeAdapter(input?: {
     },
     reset() {
       conversationCalls.length = 0
+      eventHandlers.clear()
+      eventSubscriptionCalls.length = 0
       mailboxCalls.length = 0
       messageCalls.length = 0
       messageCommandCalls.length = 0
@@ -205,6 +221,11 @@ export function createFakeRuntimeAdapter(input?: {
       queuedResources.length = 0
       queuedSmartMailboxes.length = 0
       smartMailboxCalls = 0
+    },
+    subscribeEvents(request, handlers) {
+      eventSubscriptionCalls.push({ request })
+      eventHandlers.add(handlers)
+      return () => eventHandlers.delete(handlers)
     },
     fetchConversation(conversationId) {
       conversationCalls.push(conversationId)

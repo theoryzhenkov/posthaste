@@ -1,5 +1,6 @@
 import type {
   ConversationView,
+  DomainEvent,
   Mailbox,
   MessageCommand,
   MessageCommandResult,
@@ -53,8 +54,26 @@ export interface RuntimeResourceFetchOptions {
   signal?: AbortSignal
 }
 
+export interface RuntimeEventSubscriptionRequest {
+  afterSeq?: number | null
+}
+
+export interface RuntimeEventHandlers {
+  onEvent(event: DomainEvent): void
+  onMalformedFrame?(input: { raw: string; error: unknown }): void
+  onPermanentError?(error: unknown): void
+  onTransientError?(error: unknown): void
+  onClosed?(error: unknown): void
+}
+
+export type RuntimeUnsubscribe = () => void
+
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
+  subscribeEvents(
+    request: RuntimeEventSubscriptionRequest,
+    handlers: RuntimeEventHandlers,
+  ): RuntimeUnsubscribe
   fetchConversation(conversationId: string): Promise<ConversationView>
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>

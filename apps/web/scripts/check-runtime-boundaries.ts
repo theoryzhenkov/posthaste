@@ -7,7 +7,9 @@ const sourceRoot = join(root, 'src')
 const allowedHttpBridge = 'src/runtime/httpAdapter.ts'
 
 const migratedHttpSymbols = new Set([
+  'authHeaders',
   'buildAccountLogoUrl',
+  'buildEventsUrl',
   'buildMessageAttachmentUrl',
   'fetchConversation',
   'fetchMailboxes',
