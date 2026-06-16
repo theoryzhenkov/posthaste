@@ -71,8 +71,11 @@ export function runRuntimeMessageCommand(
 export function setRuntimeAdapterForTesting(
   adapter: RuntimeAdapter,
 ): () => void {
+  const previous = activeRuntimeAdapter
   activeRuntimeAdapter = adapter
-  return resetRuntimeAdapterForTesting
+  return () => {
+    activeRuntimeAdapter = previous
+  }
 }
 
 /** Test-only: restore the production-compatible HTTP adapter. */
