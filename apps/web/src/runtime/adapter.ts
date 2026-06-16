@@ -16,16 +16,20 @@ import {
 import { httpRuntimeAdapter } from './httpAdapter'
 import type {
   RuntimeAdapter,
+  RuntimeEventHandlers,
+  RuntimeEventSubscriptionRequest,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
   RuntimeResourceFetchOptions,
+  RuntimeUnsubscribe,
 } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
   const reject = <T>(): Promise<T> =>
     Promise.reject(new Error(`runtime adapter mode ${mode} is not implemented`))
   return {
+    subscribeEvents: () => () => undefined,
     fetchConversation: () => reject(),
     fetchMailboxes: () => reject(),
     fetchMessage: () => reject(),
@@ -58,6 +62,14 @@ let activeRuntimeAdapter: RuntimeAdapter = defaultRuntimeAdapter()
 /** Current renderer runtime adapter. Seeded to the HTTP bridge for compatibility. */
 export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntimeAdapter
+}
+
+/** Subscribe to runtime domain events through the active runtime adapter. */
+export function subscribeRuntimeEvents(
+  request: RuntimeEventSubscriptionRequest,
+  handlers: RuntimeEventHandlers,
+): RuntimeUnsubscribe {
+  return activeRuntimeAdapter.subscribeEvents(request, handlers)
 }
 
 /** Execute a typed read call through the active runtime adapter. */

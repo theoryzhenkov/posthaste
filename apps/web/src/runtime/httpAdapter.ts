@@ -1,6 +1,12 @@
 import {
+  EventStreamContentType,
+  fetchEventSource,
+} from '@microsoft/fetch-event-source'
+
+import {
   authHeaders,
   buildAccountLogoUrl,
+  buildEventsUrl,
   buildMessageAttachmentUrl,
   fetchConversation,
   fetchMailboxes,
@@ -15,6 +21,7 @@ import {
 
 import type {
   RuntimeAdapter,
+  RuntimeEventHandlers,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
 } from './types'
@@ -29,6 +36,8 @@ function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
   return sort === 'relevance' ? undefined : sort
 }
 
+class FatalStreamError extends Error {}
+
 function resourceUrl(resource: RuntimeResourceDescriptor): string {
   switch (resource.kind) {
     case 'account-logo':
@@ -42,7 +51,58 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
   }
 }
 
+function handleMalformedFrame(
+  handlers: RuntimeEventHandlers,
+  raw: string,
+  error: unknown,
+): void {
+  handlers.onMalformedFrame?.({ raw, error })
+}
+
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  subscribeEvents(request, handlers) {
+    const controller = new AbortController()
+    void fetchEventSource(buildEventsUrl({ afterSeq: request.afterSeq }), {
+      headers: authHeaders(),
+      signal: controller.signal,
+      openWhenHidden: true,
+      async onopen(response) {
+        const contentType = response.headers.get('content-type') ?? ''
+        if (response.ok && contentType.startsWith(EventStreamContentType)) {
+          return
+        }
+        if (response.status >= 400 && response.status < 500) {
+          throw new FatalStreamError(
+            `event stream rejected with ${response.status}`,
+          )
+        }
+        throw new Error(`event stream returned ${response.status}`)
+      },
+      onmessage(event) {
+        if (!event.data) {
+          return
+        }
+        try {
+          handlers.onEvent(JSON.parse(event.data))
+        } catch (error) {
+          handleMalformedFrame(handlers, event.data, error)
+        }
+      },
+      onerror(error) {
+        if (error instanceof FatalStreamError) {
+          handlers.onPermanentError?.(error)
+          throw error
+        }
+        handlers.onTransientError?.(error)
+      },
+    }).catch((error) => {
+      if (controller.signal.aborted || error instanceof FatalStreamError) {
+        return
+      }
+      handlers.onClosed?.(error)
+    })
+    return () => controller.abort()
+  },
   fetchConversation(conversationId) {
     return fetchConversation(conversationId)
   },
