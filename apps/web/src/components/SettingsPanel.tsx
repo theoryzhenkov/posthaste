@@ -13,12 +13,15 @@ import {
   fetchAccount,
   fetchSettings,
   fetchSmartMailbox,
-  fetchSmartMailboxes,
   resetDefaultSmartMailboxes,
   updateSmartMailbox,
   patchSettings,
 } from '../api/client'
-import type { AccountOverview, AppSettings, SmartMailboxSummary } from '../api/types'
+import type {
+  AccountOverview,
+  AppSettings,
+  SmartMailboxSummary,
+} from '../api/types'
 import {
   applyAccountMutationResult,
   invalidateAccountReadModels,
@@ -26,6 +29,7 @@ import {
 } from '../domainCache'
 import { cn } from '../lib/utils'
 import { queryKeys } from '../queryKeys'
+import { fetchRuntimeSmartMailboxes } from '../runtime/adapter'
 import {
   accountSettingsSurface,
   newAccountSettingsSurface,
@@ -103,7 +107,7 @@ export function SettingsPanel({
   })
   const smartMailboxListQuery = useQuery({
     queryKey: queryKeys.smartMailboxes,
-    queryFn: fetchSmartMailboxes,
+    queryFn: fetchRuntimeSmartMailboxes,
   })
 
   const effectiveEditorTarget = editorTarget
