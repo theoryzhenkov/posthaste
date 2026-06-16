@@ -1,9 +1,13 @@
 import type {
   AccountOverview,
+  AppSettings,
+  AutomationRulePreviewInput,
+  AutomationRulePreviewResponse,
   CachedSenderAddress,
   ConversationPage,
   ConversationView,
   DomainEvent,
+  CreateSmartMailboxInput,
   Mailbox,
   MessageCommand,
   MessageCommandResult,
@@ -11,13 +15,16 @@ import type {
   MessagePage,
   MessageSortField,
   OkResponse,
+  PatchMailboxInput,
   ReadRequest,
   ReplyContext,
   ReadResponse,
   SendMessageInput,
+  SmartMailbox,
   SmartMailboxSummary,
   SyncMode,
   Identity,
+  UpdateSmartMailboxInput,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -113,6 +120,8 @@ export interface RuntimeAdapter {
     request: RuntimeEventSubscriptionRequest,
     handlers: RuntimeEventHandlers,
   ): RuntimeUnsubscribe
+  createSmartMailbox(input: CreateSmartMailboxInput): Promise<SmartMailbox>
+  deleteSmartMailbox(smartMailboxId: string): Promise<OkResponse>
   fetchAccounts(): Promise<AccountOverview[]>
   fetchConversation(conversationId: string): Promise<ConversationView>
   fetchConversationPage(
@@ -122,18 +131,34 @@ export interface RuntimeAdapter {
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
+  fetchSettings(): Promise<AppSettings>
   fetchReplyContext(request: RuntimeReplyContextRequest): Promise<ReplyContext>
   fetchResourceBlob(
     descriptor: RuntimeResourceDescriptor,
     options?: RuntimeResourceFetchOptions,
   ): Promise<Blob>
   fetchSenderAddresses(): Promise<CachedSenderAddress[]>
+  fetchSmartMailbox(smartMailboxId: string): Promise<SmartMailbox>
   fetchSmartMailboxes(): Promise<SmartMailboxSummary[]>
+  patchMailbox(
+    accountId: string,
+    mailboxId: string,
+    input: PatchMailboxInput,
+  ): Promise<Mailbox[]>
+  patchSettings(input: Partial<AppSettings>): Promise<AppSettings>
+  previewAutomationRule(
+    input: AutomationRulePreviewInput,
+  ): Promise<AutomationRulePreviewResponse>
   read(request: ReadRequest): Promise<ReadResponse>
+  resetDefaultSmartMailboxes(): Promise<SmartMailboxSummary[]>
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
   ): Promise<MessageCommandResult>
   sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
+  updateSmartMailbox(
+    smartMailboxId: string,
+    input: UpdateSmartMailboxInput,
+  ): Promise<SmartMailbox>
   triggerSync(
     request: RuntimeTriggerSyncRequest,
   ): Promise<RuntimeTriggerSyncResult>

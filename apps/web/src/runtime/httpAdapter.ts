@@ -8,6 +8,8 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  createSmartMailbox,
+  deleteSmartMailbox,
   fetchAccounts,
   fetchConversation,
   fetchConversations,
@@ -17,13 +19,20 @@ import {
   fetchReplyContext,
   fetchSearchMessages,
   fetchSenderAddresses,
+  fetchSettings,
+  fetchSmartMailbox,
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
+  patchMailbox,
+  patchSettings,
   performMessageCommand,
+  previewAutomationRule,
   read,
+  resetDefaultSmartMailboxes,
   sendMessage,
   triggerSync,
+  updateSmartMailbox,
 } from '../api/client'
 
 import type { DomainEvent } from '../api/types'
@@ -115,6 +124,12 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     })
     return () => controller.abort()
   },
+  createSmartMailbox(input) {
+    return createSmartMailbox(input)
+  },
+  deleteSmartMailbox(smartMailboxId) {
+    return deleteSmartMailbox(smartMailboxId)
+  },
   fetchAccounts() {
     return fetchAccounts()
   },
@@ -176,8 +191,23 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   fetchSenderAddresses() {
     return fetchSenderAddresses()
   },
+  fetchSettings() {
+    return fetchSettings()
+  },
+  fetchSmartMailbox(smartMailboxId) {
+    return fetchSmartMailbox(smartMailboxId)
+  },
   fetchSmartMailboxes() {
     return fetchSmartMailboxes()
+  },
+  patchMailbox(accountId, mailboxId, input) {
+    return patchMailbox(accountId, mailboxId, input)
+  },
+  patchSettings(input) {
+    return patchSettings(input)
+  },
+  previewAutomationRule(input) {
+    return previewAutomationRule(input)
   },
   read(request) {
     return read(request)
@@ -185,10 +215,16 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)
   },
+  resetDefaultSmartMailboxes() {
+    return resetDefaultSmartMailboxes()
+  },
   sendMessage({ sourceId, input }) {
     return sendMessage(sourceId, input)
   },
   triggerSync(request) {
     return triggerSync(request)
+  },
+  updateSmartMailbox(smartMailboxId, input) {
+    return updateSmartMailbox(smartMailboxId, input)
   },
 }
