@@ -1,5 +1,7 @@
 import type {
   AccountOverview,
+  CachedSenderAddress,
+  ConversationPage,
   ConversationView,
   DomainEvent,
   Mailbox,
@@ -8,10 +10,14 @@ import type {
   MessageDetail,
   MessagePage,
   MessageSortField,
+  OkResponse,
   ReadRequest,
+  ReplyContext,
   ReadResponse,
+  SendMessageInput,
   SmartMailboxSummary,
   SyncMode,
+  Identity,
 } from '../api/types'
 import type { OperationContext } from '../observability'
 
@@ -71,6 +77,26 @@ export interface RuntimeTriggerSyncResult {
   mode: SyncMode
 }
 
+export interface RuntimeConversationPageRequest {
+  sourceId?: string | null
+  mailboxId?: string | null
+  limit?: number
+  cursor?: string | null
+  sort?: string
+  sortDir?: string
+  q?: string
+}
+
+export interface RuntimeReplyContextRequest {
+  sourceId: string
+  messageId: string
+}
+
+export interface RuntimeSendMessageRequest {
+  sourceId: string
+  input: SendMessageInput
+}
+
 export interface RuntimeEventHandlers {
   onEvent(event: DomainEvent): void
   onMalformedFrame?(input: { raw: string; error: unknown }): void
@@ -89,18 +115,25 @@ export interface RuntimeAdapter {
   ): RuntimeUnsubscribe
   fetchAccounts(): Promise<AccountOverview[]>
   fetchConversation(conversationId: string): Promise<ConversationView>
+  fetchConversationPage(
+    request?: RuntimeConversationPageRequest,
+  ): Promise<ConversationPage>
+  fetchIdentity(sourceId: string): Promise<Identity>
   fetchMailboxes(accountId: string): Promise<Mailbox[]>
   fetchMessage(messageId: string, sourceId: string): Promise<MessageDetail>
   fetchMessagePage(request: RuntimeMessagePageRequest): Promise<MessagePage>
+  fetchReplyContext(request: RuntimeReplyContextRequest): Promise<ReplyContext>
   fetchResourceBlob(
     descriptor: RuntimeResourceDescriptor,
     options?: RuntimeResourceFetchOptions,
   ): Promise<Blob>
+  fetchSenderAddresses(): Promise<CachedSenderAddress[]>
   fetchSmartMailboxes(): Promise<SmartMailboxSummary[]>
   read(request: ReadRequest): Promise<ReadResponse>
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
   ): Promise<MessageCommandResult>
+  sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
   triggerSync(
     request: RuntimeTriggerSyncRequest,
   ): Promise<RuntimeTriggerSyncResult>

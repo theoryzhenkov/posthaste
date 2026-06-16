@@ -1,24 +1,24 @@
 import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import {
-  fetchConversations,
-  fetchIdentity,
-  fetchReplyContext,
-  fetchSenderAddresses,
-} from '@/api/client'
 import type { Recipient } from '@/api/types'
 import { buildRecipientSuggestionOptions } from '@/composeAddressSuggestions'
 import type { ComposeIntent } from '@/composeIntent'
 import { queryKeys } from '@/queryKeys'
-import { fetchRuntimeAccounts } from '@/runtime/adapter'
+import {
+  fetchRuntimeAccounts,
+  fetchRuntimeConversationPage,
+  fetchRuntimeIdentity,
+  fetchRuntimeReplyContext,
+  fetchRuntimeSenderAddresses,
+} from '@/runtime/adapter'
 
 import { accountFromOptions, wildcardMatchesEmail } from '../composeFormHelpers'
 
 export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const identityQuery = useQuery({
     queryKey: ['identity', intent.sourceId],
-    queryFn: () => fetchIdentity(intent.sourceId),
+    queryFn: () => fetchRuntimeIdentity(intent.sourceId),
   })
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
@@ -26,12 +26,16 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   })
   const senderAddressQuery = useQuery({
     queryKey: queryKeys.senderAddresses,
-    queryFn: fetchSenderAddresses,
+    queryFn: fetchRuntimeSenderAddresses,
   })
   const recipientSuggestionQuery = useQuery({
     queryKey: queryKeys.composeRecipientSuggestions,
     queryFn: () =>
-      fetchConversations({ limit: 75, sort: 'date', sortDir: 'desc' }),
+      fetchRuntimeConversationPage({
+        limit: 75,
+        sort: 'date',
+        sortDir: 'desc',
+      }),
   })
   const isMessageBasedCompose = intent.kind !== 'new'
   const requiresMessageContext = intent.kind === 'reply'
@@ -40,10 +44,10 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       ? ['reply-context', intent.sourceId, intent.messageId]
       : ['reply-context', null],
     queryFn: () =>
-      fetchReplyContext(
-        intent.sourceId,
-        isMessageBasedCompose ? intent.messageId : '',
-      ),
+      fetchRuntimeReplyContext({
+        sourceId: intent.sourceId,
+        messageId: isMessageBasedCompose ? intent.messageId : '',
+      }),
     enabled: requiresMessageContext,
   })
   const composeKey = isMessageBasedCompose

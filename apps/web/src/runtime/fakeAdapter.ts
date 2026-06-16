@@ -1,144 +1,40 @@
 import type {
   AccountOverview,
   ConversationView,
-  DomainEvent,
   Mailbox,
   MessageCommandResult,
   MessageDetail,
   MessagePage,
-  ReadRequest,
   ReadResponse,
   SmartMailboxSummary,
 } from '../api/types'
 
-import type {
-  RuntimeAdapter,
-  RuntimeEventHandlers,
-  RuntimeEventSubscriptionRequest,
-  RuntimeMessageCommandRequest,
-  RuntimeMessagePageRequest,
-  RuntimeResourceDescriptor,
-  RuntimeTriggerSyncRequest,
-  RuntimeTriggerSyncResult,
-} from './types'
+import type { RuntimeEventHandlers, RuntimeTriggerSyncResult } from './types'
+import {
+  defaultAccounts,
+  defaultMailboxes,
+  defaultMessageCommandResult,
+  defaultMessagePage,
+  defaultReadResponse,
+  defaultSmartMailboxes,
+  queueReject,
+  queueResolve,
+  resolveQueued,
+  resolveQueuedOptional,
+  type FakeRuntimeAdapter,
+  type FakeRuntimeAdapterOptions,
+  type QueuedOutcome,
+} from './fakeAdapterSupport'
 
-type EventSubscriptionCall = { request: RuntimeEventSubscriptionRequest }
-type MessageDetailCall = { messageId: string; sourceId: string }
-type ResourceCall = { descriptor: RuntimeResourceDescriptor }
-
-type QueuedOutcome<T> =
-  | { kind: 'resolve'; value: T }
-  | { kind: 'reject'; error: Error }
-
-const defaultAccounts: AccountOverview[] = []
-const defaultReadResponse: ReadResponse = { results: {} }
-const defaultMailboxes: Mailbox[] = []
-const defaultSmartMailboxes: SmartMailboxSummary[] = []
-
-const defaultMessagePage: MessagePage = {
-  items: [],
-  nextCursor: null,
-}
-
-const defaultMessageCommandResult: MessageCommandResult = {
-  detail: null,
-  events: [],
-}
-
-function queueResolve<T>(queue: QueuedOutcome<T>[], value: T): void {
-  queue.push({ kind: 'resolve', value })
-}
-
-function queueReject<T>(queue: QueuedOutcome<T>[], error: Error): void {
-  queue.push({ kind: 'reject', error })
-}
-
-function resolveQueued<T>(queue: QueuedOutcome<T>[], fallback: T): Promise<T> {
-  const next = queue.shift()
-  if (!next) return Promise.resolve(fallback)
-  if (next.kind === 'reject') return Promise.reject(next.error)
-  return Promise.resolve(next.value)
-}
-
-function resolveQueuedOptional<T>(
-  queue: QueuedOutcome<T>[],
-  fallback: T | undefined,
-  label: string,
-): Promise<T> {
-  const next = queue.shift()
-  if (next?.kind === 'reject') return Promise.reject(next.error)
-  if (next?.kind === 'resolve') return Promise.resolve(next.value)
-  if (fallback !== undefined) return Promise.resolve(fallback)
-  return Promise.reject(new Error(`fake runtime adapter has no ${label}`))
-}
-
-export interface FakeRuntimeAdapter extends RuntimeAdapter {
-  readonly accountCalls: number
-  readonly conversationCalls: string[]
-  readonly eventSubscriptionCalls: EventSubscriptionCall[]
-  readonly mailboxCalls: string[]
-  readonly messageCalls: MessageDetailCall[]
-  readonly messageCommandCalls: RuntimeMessageCommandRequest[]
-  readonly messagePageCalls: RuntimeMessagePageRequest[]
-  readonly readCalls: ReadRequest[]
-  readonly resourceCalls: ResourceCall[]
-  readonly smartMailboxCalls: number
-  readonly syncCalls: RuntimeTriggerSyncRequest[]
-  emitDomainEvent(event: DomainEvent): void
-  queueAccounts(accounts: AccountOverview[]): void
-  queueAccountsError(error: Error): void
-  queueConversation(conversation: ConversationView): void
-  queueConversationError(error: Error): void
-  queueMailboxes(mailboxes: Mailbox[]): void
-  queueMailboxesError(error: Error): void
-  queueMessage(message: MessageDetail): void
-  queueMessageError(error: Error): void
-  queueMessageCommandResult(result: MessageCommandResult): void
-  queueMessageCommandError(error: Error): void
-  queueMessagePage(page: MessagePage): void
-  queueMessagePageError(error: Error): void
-  queueResourceBlob(blob: Blob): void
-  queueResourceError(error: Error): void
-  queueReadResponse(response: ReadResponse): void
-  queueReadError(error: Error): void
-  queueSmartMailboxes(mailboxes: SmartMailboxSummary[]): void
-  queueSmartMailboxesError(error: Error): void
-  queueSyncResult(result: RuntimeTriggerSyncResult): void
-  queueSyncError(error: Error): void
-  reset(): void
-}
+export type { FakeRuntimeAdapter } from './fakeAdapterSupport'
 
 /** Fake runtime adapter for renderer tests. Does not start or contact a backend. */
-export function createFakeRuntimeAdapter(input?: {
-  defaultAccounts?: AccountOverview[]
-  defaultConversation?: ConversationView
-  defaultMailboxes?: Mailbox[]
-  defaultMessage?: MessageDetail
-  defaultMessageCommandResult?: MessageCommandResult
-  defaultMessagePage?: MessagePage
-  defaultReadResponse?: ReadResponse
-  defaultSmartMailboxes?: SmartMailboxSummary[]
-}): FakeRuntimeAdapter {
-  const conversationCalls: string[] = []
-  const eventSubscriptionCalls: EventSubscriptionCall[] = []
+export function createFakeRuntimeAdapter(
+  input?: FakeRuntimeAdapterOptions,
+): FakeRuntimeAdapter {
+  const calls = createCallRecords()
+  const queues = createQueues()
   const eventHandlers = new Set<RuntimeEventHandlers>()
-  const mailboxCalls: string[] = []
-  const messageCalls: MessageDetailCall[] = []
-  const messageCommandCalls: RuntimeMessageCommandRequest[] = []
-  const messagePageCalls: RuntimeMessagePageRequest[] = []
-  const readCalls: ReadRequest[] = []
-  const resourceCalls: ResourceCall[] = []
-  const syncCalls: RuntimeTriggerSyncRequest[] = []
-  const queuedAccounts: QueuedOutcome<AccountOverview[]>[] = []
-  const queuedConversations: QueuedOutcome<ConversationView>[] = []
-  const queuedMailboxes: QueuedOutcome<Mailbox[]>[] = []
-  const queuedMessages: QueuedOutcome<MessageDetail>[] = []
-  const queuedMessageCommands: QueuedOutcome<MessageCommandResult>[] = []
-  const queuedMessagePages: QueuedOutcome<MessagePage>[] = []
-  const queuedReads: QueuedOutcome<ReadResponse>[] = []
-  const queuedResources: QueuedOutcome<Blob>[] = []
-  const queuedSmartMailboxes: QueuedOutcome<SmartMailboxSummary[]>[] = []
-  const queuedSyncs: QueuedOutcome<RuntimeTriggerSyncResult>[] = []
   let accountCalls = 0
   let smartMailboxCalls = 0
 
@@ -146,15 +42,7 @@ export function createFakeRuntimeAdapter(input?: {
     get accountCalls() {
       return accountCalls
     },
-    conversationCalls,
-    eventSubscriptionCalls,
-    mailboxCalls,
-    messageCalls,
-    messageCommandCalls,
-    messagePageCalls,
-    readCalls,
-    resourceCalls,
-    syncCalls,
+    ...calls,
     get smartMailboxCalls() {
       return smartMailboxCalls
     },
@@ -162,163 +50,202 @@ export function createFakeRuntimeAdapter(input?: {
       for (const handlers of eventHandlers) handlers.onEvent(event)
     },
     queueAccounts(accounts) {
-      queueResolve(queuedAccounts, accounts)
+      queueResolve(queues.accounts, accounts)
     },
     queueAccountsError(error) {
-      queueReject(queuedAccounts, error)
+      queueReject(queues.accounts, error)
     },
     queueConversation(conversation) {
-      queueResolve(queuedConversations, conversation)
+      queueResolve(queues.conversations, conversation)
     },
     queueConversationError(error) {
-      queueReject(queuedConversations, error)
+      queueReject(queues.conversations, error)
     },
     queueMailboxes(mailboxes) {
-      queueResolve(queuedMailboxes, mailboxes)
+      queueResolve(queues.mailboxes, mailboxes)
     },
     queueMailboxesError(error) {
-      queueReject(queuedMailboxes, error)
+      queueReject(queues.mailboxes, error)
     },
     queueMessage(message) {
-      queueResolve(queuedMessages, message)
+      queueResolve(queues.messages, message)
     },
     queueMessageError(error) {
-      queueReject(queuedMessages, error)
+      queueReject(queues.messages, error)
     },
     queueMessageCommandResult(result) {
-      queueResolve(queuedMessageCommands, result)
+      queueResolve(queues.messageCommands, result)
     },
     queueMessageCommandError(error) {
-      queueReject(queuedMessageCommands, error)
+      queueReject(queues.messageCommands, error)
     },
     queueMessagePage(page) {
-      queueResolve(queuedMessagePages, page)
+      queueResolve(queues.messagePages, page)
     },
     queueMessagePageError(error) {
-      queueReject(queuedMessagePages, error)
+      queueReject(queues.messagePages, error)
     },
     queueResourceBlob(blob) {
-      queueResolve(queuedResources, blob)
+      queueResolve(queues.resources, blob)
     },
     queueResourceError(error) {
-      queueReject(queuedResources, error)
+      queueReject(queues.resources, error)
     },
     queueReadResponse(response) {
-      queueResolve(queuedReads, response)
+      queueResolve(queues.reads, response)
     },
     queueReadError(error) {
-      queueReject(queuedReads, error)
+      queueReject(queues.reads, error)
     },
     queueSmartMailboxes(mailboxes) {
-      queueResolve(queuedSmartMailboxes, mailboxes)
+      queueResolve(queues.smartMailboxes, mailboxes)
     },
     queueSmartMailboxesError(error) {
-      queueReject(queuedSmartMailboxes, error)
+      queueReject(queues.smartMailboxes, error)
     },
     queueSyncResult(result) {
-      queueResolve(queuedSyncs, result)
+      queueResolve(queues.syncs, result)
     },
     queueSyncError(error) {
-      queueReject(queuedSyncs, error)
+      queueReject(queues.syncs, error)
     },
     reset() {
       accountCalls = 0
-      conversationCalls.length = 0
-      eventHandlers.clear()
-      eventSubscriptionCalls.length = 0
-      mailboxCalls.length = 0
-      messageCalls.length = 0
-      messageCommandCalls.length = 0
-      messagePageCalls.length = 0
-      readCalls.length = 0
-      resourceCalls.length = 0
       smartMailboxCalls = 0
-      syncCalls.length = 0
-      queuedAccounts.length = 0
-      queuedConversations.length = 0
-      queuedMailboxes.length = 0
-      queuedMessages.length = 0
-      queuedMessageCommands.length = 0
-      queuedMessagePages.length = 0
-      queuedReads.length = 0
-      queuedResources.length = 0
-      queuedSmartMailboxes.length = 0
-      queuedSyncs.length = 0
+      eventHandlers.clear()
+      resetCallRecords(calls)
+      resetQueues(queues)
     },
     subscribeEvents(request, handlers) {
-      eventSubscriptionCalls.push({ request })
+      calls.eventSubscriptionCalls.push({ request })
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
     },
     fetchAccounts() {
       accountCalls += 1
       return resolveQueued(
-        queuedAccounts,
+        queues.accounts,
         input?.defaultAccounts ?? defaultAccounts,
       )
     },
     fetchConversation(conversationId) {
-      conversationCalls.push(conversationId)
+      calls.conversationCalls.push(conversationId)
       return resolveQueuedOptional(
-        queuedConversations,
+        queues.conversations,
         input?.defaultConversation,
         'conversation result',
       )
     },
+    fetchConversationPage() {
+      return Promise.resolve({ items: [], nextCursor: null })
+    },
+    fetchIdentity() {
+      return Promise.reject(new Error('fake runtime adapter has no identity'))
+    },
     fetchMailboxes(accountId) {
-      mailboxCalls.push(accountId)
+      calls.mailboxCalls.push(accountId)
       return resolveQueued(
-        queuedMailboxes,
+        queues.mailboxes,
         input?.defaultMailboxes ?? defaultMailboxes,
       )
     },
     fetchMessage(messageId, sourceId) {
-      messageCalls.push({ messageId, sourceId })
+      calls.messageCalls.push({ messageId, sourceId })
       return resolveQueuedOptional(
-        queuedMessages,
+        queues.messages,
         input?.defaultMessage,
         'message result',
       )
     },
     fetchMessagePage(request) {
-      messagePageCalls.push({ ...request })
+      calls.messagePageCalls.push({ ...request })
       return resolveQueued(
-        queuedMessagePages,
+        queues.messagePages,
         input?.defaultMessagePage ?? defaultMessagePage,
       )
     },
+    fetchReplyContext() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no reply context'),
+      )
+    },
     fetchResourceBlob(descriptor) {
-      resourceCalls.push({ descriptor })
+      calls.resourceCalls.push({ descriptor })
       return resolveQueuedOptional(
-        queuedResources,
+        queues.resources,
         undefined,
         'resource blob result',
       )
     },
+    fetchSenderAddresses() {
+      return Promise.resolve([])
+    },
     fetchSmartMailboxes() {
       smartMailboxCalls += 1
       return resolveQueued(
-        queuedSmartMailboxes,
+        queues.smartMailboxes,
         input?.defaultSmartMailboxes ?? defaultSmartMailboxes,
       )
     },
     read(request) {
-      readCalls.push(request)
+      calls.readCalls.push(request)
       return resolveQueued(
-        queuedReads,
+        queues.reads,
         input?.defaultReadResponse ?? defaultReadResponse,
       )
     },
     runMessageCommand(request) {
-      messageCommandCalls.push({ ...request })
+      calls.messageCommandCalls.push({ ...request })
       return resolveQueued(
-        queuedMessageCommands,
+        queues.messageCommands,
         input?.defaultMessageCommandResult ?? defaultMessageCommandResult,
       )
     },
+    sendMessage() {
+      return Promise.reject(
+        new Error('fake runtime adapter has no send message result'),
+      )
+    },
     triggerSync(request) {
-      syncCalls.push(request)
-      return resolveQueuedOptional(queuedSyncs, undefined, 'sync result')
+      calls.syncCalls.push(request)
+      return resolveQueuedOptional(queues.syncs, undefined, 'sync result')
     },
   }
+}
+
+function createCallRecords() {
+  return {
+    conversationCalls: [] as string[],
+    eventSubscriptionCalls: [] as FakeRuntimeAdapter['eventSubscriptionCalls'],
+    mailboxCalls: [] as string[],
+    messageCalls: [] as FakeRuntimeAdapter['messageCalls'],
+    messageCommandCalls: [] as FakeRuntimeAdapter['messageCommandCalls'],
+    messagePageCalls: [] as FakeRuntimeAdapter['messagePageCalls'],
+    readCalls: [] as FakeRuntimeAdapter['readCalls'],
+    resourceCalls: [] as FakeRuntimeAdapter['resourceCalls'],
+    syncCalls: [] as FakeRuntimeAdapter['syncCalls'],
+  }
+}
+
+function resetCallRecords(records: ReturnType<typeof createCallRecords>): void {
+  for (const value of Object.values(records)) value.length = 0
+}
+
+function createQueues() {
+  return {
+    accounts: [] as QueuedOutcome<AccountOverview[]>[],
+    conversations: [] as QueuedOutcome<ConversationView>[],
+    mailboxes: [] as QueuedOutcome<Mailbox[]>[],
+    messages: [] as QueuedOutcome<MessageDetail>[],
+    messageCommands: [] as QueuedOutcome<MessageCommandResult>[],
+    messagePages: [] as QueuedOutcome<MessagePage>[],
+    reads: [] as QueuedOutcome<ReadResponse>[],
+    resources: [] as QueuedOutcome<Blob>[],
+    smartMailboxes: [] as QueuedOutcome<SmartMailboxSummary[]>[],
+    syncs: [] as QueuedOutcome<RuntimeTriggerSyncResult>[],
+  }
+}
+
+function resetQueues(queues: ReturnType<typeof createQueues>): void {
+  for (const value of Object.values(queues)) value.length = 0
 }
