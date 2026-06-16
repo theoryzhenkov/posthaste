@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { fetchAccounts } from '@/api/client'
 import type { MessageSummary } from '@/api/types'
 import type { SurfaceDescriptor } from '@/surfaces'
 import { queryKeys } from '@/queryKeys'
@@ -13,6 +12,7 @@ import {
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
+import { fetchRuntimeAccounts } from '@/runtime/adapter'
 import { AttachmentSurface } from './AttachmentSurface'
 import { ComposeOverlay } from './ComposeOverlay'
 import { MessageDetail } from './MessageDetail'
@@ -37,7 +37,7 @@ export function FocusedSurface({
   const selectedMessage = surface.kind === 'message' ? surface.params : null
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchAccounts,
+    queryFn: fetchRuntimeAccounts,
     enabled: surface.kind === 'settings',
   })
   const actions = useEmailActions()

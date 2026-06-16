@@ -4,7 +4,6 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { shouldForceAccountSettings } from '@/accountSetup'
-import { fetchAccounts, triggerSync } from '@/api/client'
 import type { TagSummary } from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
 import {
@@ -28,7 +27,11 @@ import { mailKeys, type MailSelection } from '@/mailState'
 import { useOperations } from '@/operationsContext'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
-import { fetchRuntimeMessage } from '@/runtime/adapter'
+import {
+  fetchRuntimeAccounts,
+  fetchRuntimeMessage,
+  triggerRuntimeSync,
+} from '@/runtime/adapter'
 import { prepareServerSearchQuery } from '@/searchQuery'
 import { type SurfaceDescriptor } from '@/surfaces'
 import { MailClientView } from './MailClientView'
@@ -77,7 +80,7 @@ export function MailClient({
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchAccounts,
+    queryFn: fetchRuntimeAccounts,
     enabled: false,
   })
   const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
@@ -287,9 +290,8 @@ function useDesktopCloseRequest(
 
 function useSyncSourceMutation() {
   return useMutation({
-    mutationFn: triggerSync,
-    onSuccess: async (_result, input) => {
-      const sourceId = typeof input === 'string' ? input : input.sourceId
+    mutationFn: (sourceId: string) => triggerRuntimeSync({ sourceId }),
+    onSuccess: async (_result, sourceId) => {
       await invalidateSyncStartedReadModels(queryClient, sourceId)
       toast('Sync started')
     },

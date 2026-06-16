@@ -11,6 +11,7 @@ const migratedHttpSymbols = new Set([
   'buildAccountLogoUrl',
   'buildEventsUrl',
   'buildMessageAttachmentUrl',
+  'fetchAccounts',
   'fetchConversation',
   'fetchMailboxes',
   'fetchMessage',
@@ -20,6 +21,7 @@ const migratedHttpSymbols = new Set([
   'fetchSourceMessages',
   'performMessageCommand',
   'read',
+  'triggerSync',
 ])
 
 interface Violation {
