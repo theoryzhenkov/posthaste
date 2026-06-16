@@ -12,12 +12,10 @@ mod validation;
 
 pub(super) use appearance::validate_logo_image_id;
 #[cfg(test)]
-pub(super) use appearance::{
-    default_account_appearance, normalize_account_appearance, validate_account_appearance,
-};
-pub(super) use events::internal_error;
+pub(super) use appearance::{normalize_account_appearance, validate_account_appearance};
 #[cfg(test)]
-pub(super) use events::{append_and_publish_account_event, store_error_to_api};
+pub(super) use events::append_and_publish_account_event;
+pub(super) use events::internal_error;
 #[cfg(test)]
 pub(super) use normalization::apply_account_patch;
 pub(super) use normalization::normalize_optional;
