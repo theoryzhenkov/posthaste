@@ -7,7 +7,6 @@ import {
 } from '@tanstack/react-query'
 
 import { createAccountDirectory } from './accountDirectory'
-import { fetchMailboxes, fetchSmartMailboxes, read } from './api/client'
 import type {
   AccountAppearance,
   AccountOverview,
@@ -17,6 +16,11 @@ import type {
   TagSummary,
 } from './api/types'
 import { queryKeys } from './queryKeys'
+import {
+  fetchRuntimeMailboxes,
+  fetchRuntimeSmartMailboxes,
+  runtimeRead,
+} from './runtime/adapter'
 
 export interface MailboxNavigationSource {
   id: string
@@ -53,7 +57,7 @@ export function useMailNavigationReadBootstrap() {
   return useQuery({
     queryKey: queryKeys.mailNavigationRead,
     queryFn: async () => {
-      const response = await read({
+      const response = await runtimeRead({
         calls: [
           { id: 'accounts', op: 'Account/list' },
           {
@@ -142,7 +146,7 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
   const mailboxQueries = useQueries({
     queries: enabledAccounts.map((account) => ({
       queryKey: queryKeys.mailboxes(account.id),
-      queryFn: () => fetchMailboxes(account.id),
+      queryFn: () => fetchRuntimeMailboxes(account.id),
       enabled: bootstrapQuery.isSuccess,
       staleTime: 30_000,
     })),
@@ -150,7 +154,7 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
 
   const smartMailboxesQuery = useQuery({
     queryKey: queryKeys.smartMailboxes,
-    queryFn: fetchSmartMailboxes,
+    queryFn: fetchRuntimeSmartMailboxes,
     enabled: bootstrapQuery.isSuccess,
     staleTime: 30_000,
   })
