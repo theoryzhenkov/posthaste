@@ -10,14 +10,19 @@ import {
   buildMessageAttachmentUrl,
   fetchAccounts,
   fetchConversation,
+  fetchConversations,
+  fetchIdentity,
   fetchMailboxes,
   fetchMessage,
+  fetchReplyContext,
   fetchSearchMessages,
+  fetchSenderAddresses,
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
   performMessageCommand,
   read,
+  sendMessage,
   triggerSync,
 } from '../api/client'
 
@@ -111,6 +116,12 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   fetchConversation(conversationId) {
     return fetchConversation(conversationId)
   },
+  fetchConversationPage(request) {
+    return fetchConversations(request)
+  },
+  fetchIdentity(sourceId) {
+    return fetchIdentity(sourceId)
+  },
   fetchMailboxes(accountId) {
     return fetchMailboxes(accountId)
   },
@@ -154,6 +165,12 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
         return fetchSearchMessages(req.query, input)
     }
   },
+  fetchReplyContext({ sourceId, messageId }) {
+    return fetchReplyContext(sourceId, messageId)
+  },
+  fetchSenderAddresses() {
+    return fetchSenderAddresses()
+  },
   fetchSmartMailboxes() {
     return fetchSmartMailboxes()
   },
@@ -162,6 +179,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)
+  },
+  sendMessage({ sourceId, input }) {
+    return sendMessage(sourceId, input)
   },
   triggerSync(request) {
     return triggerSync(request)

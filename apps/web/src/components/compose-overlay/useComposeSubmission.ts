@@ -2,10 +2,10 @@ import { useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { sendMessage } from '@/api/client'
 import type { Recipient, ReplyContext, SendMessageInput } from '@/api/types'
 import type { ComposeIntent } from '@/composeIntent'
 import { invalidateComposeSendReadModels } from '@/domainCache'
+import { sendRuntimeMessage } from '@/runtime/adapter'
 
 import {
   buildSendInput,
@@ -39,7 +39,7 @@ export function useComposeSubmission({
   const queryClient = useQueryClient()
   const sendMutation = useMutation({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
-      sendMessage(variables.sourceId, variables.input),
+      sendRuntimeMessage(variables),
     onSuccess: async (_result, variables) => {
       await invalidateComposeSendReadModels(queryClient, variables.sourceId)
       toast('Message sent')
