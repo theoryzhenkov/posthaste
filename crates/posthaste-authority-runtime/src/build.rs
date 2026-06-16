@@ -12,14 +12,13 @@ use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
-    SyncTrigger,
+    ServiceError, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode, SyncTrigger,
 };
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
-    MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAdapterError,
-    RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
-    RuntimeEventSubscription, RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes,
+    RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode, RuntimeEventSubscription,
+    RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
@@ -265,39 +264,7 @@ pub struct AuthorityRuntimeHandle {
 
 impl AuthorityRuntimeHandle {
     fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
-        RuntimeError(RuntimeAdapterError {
-            code: RuntimeErrorCode::Internal,
-            message: error.to_string(),
-            retryable: false,
-            correlation_id: None,
-            details: serde_json::Value::Null,
-        })
-    }
-
-    fn service_error_to_runtime_error(error: ServiceError) -> RuntimeError {
-        let code = match error.kind() {
-            ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
-            ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
-            ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
-            ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
-            ServiceErrorKind::GatewayUnavailable => RuntimeErrorCode::ProviderUnavailable,
-            ServiceErrorKind::NetworkError => RuntimeErrorCode::NetworkError,
-            ServiceErrorKind::CannotCalculateChanges => RuntimeErrorCode::CannotCalculateChanges,
-            ServiceErrorKind::GatewayRejected => RuntimeErrorCode::GatewayRejected,
-            ServiceErrorKind::SecretUnavailable => RuntimeErrorCode::SecretUnavailable,
-            ServiceErrorKind::SecretUnsupported => RuntimeErrorCode::SecretUnsupported,
-            ServiceErrorKind::StorageFailure => RuntimeErrorCode::StorageFailure,
-            ServiceErrorKind::ConfigValidation => RuntimeErrorCode::ConfigValidation,
-            ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
-            ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
-        };
-        RuntimeError(RuntimeAdapterError {
-            code,
-            message: error.to_string(),
-            retryable: false,
-            correlation_id: None,
-            details: serde_json::Value::Null,
-        })
+        RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
     }
 
     /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
@@ -424,13 +391,7 @@ impl AuthorityRuntimeHandle {
 
     fn account_mutations(&self) -> Result<Arc<AccountMutationService>, RuntimeError> {
         self.core.account_mutations.clone().ok_or_else(|| {
-            RuntimeError(RuntimeAdapterError {
-                code: RuntimeErrorCode::RuntimeNotReady,
-                message: "account mutation runtime is not available".to_string(),
-                retryable: false,
-                correlation_id: None,
-                details: serde_json::Value::Null,
-            })
+            RuntimeError::runtime_not_ready("account mutation runtime is not available")
         })
     }
 
@@ -522,10 +483,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     }
 
     async fn get_app_settings(&self, _caller: RuntimeCaller) -> Result<AppSettings, RuntimeError> {
-        self.core
-            .account_reads
-            .app_settings()
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.app_settings()?)
     }
 
     async fn patch_app_settings(
@@ -548,11 +506,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         &self,
         _caller: RuntimeCaller,
     ) -> Result<RuntimeAccountList, RuntimeError> {
-        self.core
-            .account_reads
-            .list_accounts()
-            .await
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.list_accounts().await?)
     }
 
     async fn get_account(
@@ -563,17 +517,8 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         self.core
             .account_reads
             .get_account(account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?
-            .ok_or_else(|| {
-                RuntimeError(RuntimeAdapterError {
-                    code: RuntimeErrorCode::NotFound,
-                    message: "account not found".to_string(),
-                    retryable: false,
-                    correlation_id: None,
-                    details: serde_json::Value::Null,
-                })
-            })
+            .await?
+            .ok_or_else(|| RuntimeError::not_found("account not found"))
     }
 
     async fn resolve_account_scope(
@@ -581,10 +526,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
     ) -> Result<Vec<AccountId>, RuntimeError> {
-        self.core
-            .account_reads
-            .resolve_account_scope(scope)
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.resolve_account_scope(scope)?)
     }
 
     async fn list_mailboxes(
@@ -595,20 +537,14 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         std::collections::BTreeMap<AccountId, Vec<posthaste_domain::MailboxSummary>>,
         RuntimeError,
     > {
-        self.core
-            .account_reads
-            .list_mailboxes(scope)
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.list_mailboxes(scope)?)
     }
 
     async fn list_smart_mailboxes(
         &self,
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
-        self.core
-            .account_reads
-            .list_smart_mailboxes()
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.list_smart_mailboxes()?)
     }
 
     async fn get_smart_mailbox(
@@ -616,10 +552,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
-        self.core
+        Ok(self
+            .core
             .account_reads
-            .get_smart_mailbox(&smart_mailbox_id)
-            .map_err(Self::service_error_to_runtime_error)
+            .get_smart_mailbox(&smart_mailbox_id)?)
     }
 
     async fn create_smart_mailbox(
@@ -661,10 +597,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         scope: AccountScopeRequest,
     ) -> Result<Vec<posthaste_domain::TagSummary>, RuntimeError> {
-        self.core
-            .account_reads
-            .list_tags(scope)
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.account_reads.list_tags(scope)?)
     }
 
     async fn get_identity(
@@ -672,18 +605,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<posthaste_domain::Identity, RuntimeError> {
-        let gateway = self
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
+        Ok(self
             .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
-        self.core
             .api_bridge
             .service
             .fetch_identity(&account_id, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)
+            .await?)
     }
 
     async fn list_sender_addresses(
@@ -703,18 +631,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<posthaste_domain::ReplyContext, RuntimeError> {
-        let gateway = self
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
+        Ok(self
             .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
-        self.core
             .api_bridge
             .service
             .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)
+            .await?)
     }
 
     async fn query_mail_page(
@@ -731,18 +654,12 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         self.core
             .api_bridge
             .service
             .send_message(&account_id, &request, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         if let Some(sender) = &request.from {
             if let Err(error) = self
                 .core
@@ -780,19 +697,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: SetKeywordsCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .api_bridge
             .service
             .set_keywords(&account_id, &message_id, &command, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -804,19 +715,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: AddToMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .api_bridge
             .service
             .add_to_mailbox(&account_id, &message_id, &command, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -828,19 +733,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: RemoveFromMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .api_bridge
             .service
             .remove_from_mailbox(&account_id, &message_id, &command, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -852,19 +751,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
         command: ReplaceMailboxesCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .api_bridge
             .service
             .replace_mailboxes(&account_id, &message_id, &command, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -875,19 +768,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .api_bridge
             .service
             .destroy_message(&account_id, &message_id, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -899,25 +786,15 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mailbox_id: MailboxId,
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
-        let gateway = self
-            .core
-            .live_accounts
-            .gateway(&account_id)
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let events = self
             .core
             .api_bridge
             .service
             .set_mailbox_role(&account_id, &mailbox_id, role.as_deref(), gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&events);
-        self.core
-            .api_bridge
-            .service
-            .list_mailboxes(&account_id)
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.api_bridge.service.list_mailboxes(&account_id)?)
     }
 
     async fn get_message_detail(
@@ -932,8 +809,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .api_bridge
             .service
             .get_message_detail(&account_id, &message_id, gateway.as_deref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
         Ok(result)
     }
@@ -951,47 +827,28 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .api_bridge
             .service
             .get_message_detail(&account_id, &message_id, gateway.as_deref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         self.publish_events(&result.events);
-        let detail = result.detail.ok_or_else(|| {
-            RuntimeError(RuntimeAdapterError {
-                code: RuntimeErrorCode::NotFound,
-                message: "message detail not available".to_string(),
-                retryable: false,
-                correlation_id: None,
-                details: serde_json::Value::Null,
-            })
-        })?;
+        let detail = result
+            .detail
+            .ok_or_else(|| RuntimeError::not_found("message detail not available"))?;
         let attachment = detail
             .attachments
             .into_iter()
             .find(|attachment| attachment.id == attachment_id)
-            .ok_or_else(|| {
-                RuntimeError(RuntimeAdapterError {
-                    code: RuntimeErrorCode::NotFound,
-                    message: "attachment not found".to_string(),
-                    retryable: false,
-                    correlation_id: None,
-                    details: serde_json::Value::Null,
-                })
-            })?;
+            .ok_or_else(|| RuntimeError::not_found("attachment not found"))?;
         let gateway = gateway.ok_or_else(|| {
-            RuntimeError(RuntimeAdapterError {
-                code: RuntimeErrorCode::ProviderUnavailable,
-                message: format!("gateway unavailable for account {account_id}"),
-                retryable: true,
-                correlation_id: None,
-                details: serde_json::Value::Null,
-            })
+            RuntimeError::retryable(
+                RuntimeErrorCode::ProviderUnavailable,
+                format!("gateway unavailable for account {account_id}"),
+            )
         })?;
         let bytes = self
             .core
             .api_bridge
             .service
             .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
-            .await
-            .map_err(Self::service_error_to_runtime_error)?;
+            .await?;
         Ok(RuntimeAttachmentBytes {
             bytes,
             mime_type: attachment.mime_type,
@@ -1005,11 +862,11 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
-        self.core
+        Ok(self
+            .core
             .live_accounts
             .sync_account_with_mode(&account_id, mode)
-            .await
-            .map_err(Self::service_error_to_runtime_error)
+            .await?)
     }
 
     async fn replay_events(
@@ -1017,11 +874,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         filter: EventFilter,
     ) -> Result<Vec<DomainEvent>, RuntimeError> {
-        self.core
-            .api_bridge
-            .service
-            .list_events(&filter)
-            .map_err(Self::service_error_to_runtime_error)
+        Ok(self.core.api_bridge.service.list_events(&filter)?)
     }
 
     async fn subscribe_events(

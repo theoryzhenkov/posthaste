@@ -14,8 +14,8 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountTransportMutation, AccountVerificationResult, AutomationRulePreviewMutation,
     AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation,
-    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAdapterError,
-    RuntimeError, RuntimeErrorCode, SecretWriteMode, SecretWriteMutation,
+    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeError,
+    RuntimeErrorCode, SecretWriteMode, SecretWriteMutation,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -59,21 +59,12 @@ impl AccountMutationService {
         &self,
         request: PatchAppSettingsMutation,
     ) -> Result<posthaste_domain::AppSettings, RuntimeError> {
-        let mut settings = self
-            .service
-            .get_app_settings()
-            .map_err(service_error_to_runtime_error)?;
+        let mut settings = self.service.get_app_settings()?;
         if let Some(default_account_id) = &request.default_account_id {
             if let Some(default_account_id) = default_account_id {
                 let account_id = AccountId::from(default_account_id.as_str());
-                if self
-                    .service
-                    .get_source(&account_id)
-                    .map_err(service_error_to_runtime_error)?
-                    .is_none()
-                {
-                    return Err(runtime_error(
-                        RuntimeErrorCode::InvalidAccount,
+                if self.service.get_source(&account_id)?.is_none() {
+                    return Err(RuntimeError::invalid_account(
                         "default account must reference an existing account",
                     ));
                 }
@@ -108,21 +99,21 @@ impl AccountMutationService {
             changed.push("cachePolicy");
         }
 
-        self.service
-            .put_app_settings(&settings)
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_config_event(
+        self.service.put_app_settings(&settings)?;
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_SETTINGS_UPDATED,
-            vec![ResourceChange::app_settings_updated()],
-            json!({
-                "scope": "app",
-                "changed": changed,
-            }),
+            config_event_payload(
+                vec![ResourceChange::app_settings_updated()],
+                json!({
+                    "scope": "app",
+                    "changed": changed,
+                }),
+            ),
         )?;
         if request.automation_rules.is_some() {
             self.service
-                .ensure_automation_backfills_for_current_rules()
-                .map_err(service_error_to_runtime_error)?;
+                .ensure_automation_backfills_for_current_rules()?;
         }
         Ok(settings)
     }
@@ -131,20 +122,14 @@ impl AccountMutationService {
         &self,
         request: AutomationRulePreviewMutation,
     ) -> Result<AutomationRulePreviewResult, RuntimeError> {
-        let (_, total) = self
-            .service
-            .count_messages_by_rule(&request.condition)
-            .map_err(service_error_to_runtime_error)?;
-        let page = self
-            .service
-            .query_message_page_by_rule(
-                &request.condition,
-                request.limit,
-                None,
-                MessageSortField::Date,
-                SortDirection::Desc,
-            )
-            .map_err(service_error_to_runtime_error)?;
+        let (_, total) = self.service.count_messages_by_rule(&request.condition)?;
+        let page = self.service.query_message_page_by_rule(
+            &request.condition,
+            request.limit,
+            None,
+            MessageSortField::Date,
+            SortDirection::Desc,
+        )?;
         Ok(AutomationRulePreviewResult {
             total,
             items: page.items,
@@ -156,7 +141,7 @@ impl AccountMutationService {
         request: CreateSmartMailboxMutation,
     ) -> Result<SmartMailbox, RuntimeError> {
         let timestamp = domain_now_iso8601()
-            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
         let smart_mailbox = SmartMailbox {
             id: SmartMailboxId::from(generate_smart_mailbox_id(&request.name)),
             name: request.name,
@@ -168,16 +153,17 @@ impl AccountMutationService {
             created_at: timestamp.clone(),
             updated_at: timestamp,
         };
-        self.service
-            .save_smart_mailbox(&smart_mailbox)
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_config_event(
+        self.service.save_smart_mailbox(&smart_mailbox)?;
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_SMART_MAILBOX_CREATED,
-            vec![ResourceChange::smart_mailbox(
-                ResourceOperation::Created,
-                &smart_mailbox.id,
-            )],
-            json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+            config_event_payload(
+                vec![ResourceChange::smart_mailbox(
+                    ResourceOperation::Created,
+                    &smart_mailbox.id,
+                )],
+                json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+            ),
         )?;
         Ok(smart_mailbox)
     }
@@ -187,10 +173,7 @@ impl AccountMutationService {
         smart_mailbox_id: SmartMailboxId,
         request: PatchSmartMailboxMutation,
     ) -> Result<SmartMailbox, RuntimeError> {
-        let mut smart_mailbox = self
-            .service
-            .get_smart_mailbox(&smart_mailbox_id)
-            .map_err(service_error_to_runtime_error)?;
+        let mut smart_mailbox = self.service.get_smart_mailbox(&smart_mailbox_id)?;
         if let Some(name) = request.name {
             smart_mailbox.name = name;
         }
@@ -201,17 +184,18 @@ impl AccountMutationService {
             smart_mailbox.rule = rule;
         }
         smart_mailbox.updated_at = domain_now_iso8601()
-            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
-        self.service
-            .save_smart_mailbox(&smart_mailbox)
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_config_event(
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
+        self.service.save_smart_mailbox(&smart_mailbox)?;
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_SMART_MAILBOX_UPDATED,
-            vec![ResourceChange::smart_mailbox(
-                ResourceOperation::Updated,
-                &smart_mailbox.id,
-            )],
-            json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+            config_event_payload(
+                vec![ResourceChange::smart_mailbox(
+                    ResourceOperation::Updated,
+                    &smart_mailbox.id,
+                )],
+                json!({ "smartMailboxId": smart_mailbox.id.as_str() }),
+            ),
         )?;
         Ok(smart_mailbox)
     }
@@ -220,33 +204,33 @@ impl AccountMutationService {
         &self,
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<(), RuntimeError> {
-        self.service
-            .delete_smart_mailbox(&smart_mailbox_id)
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_config_event(
+        self.service.delete_smart_mailbox(&smart_mailbox_id)?;
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_SMART_MAILBOX_DELETED,
-            vec![ResourceChange::smart_mailbox(
-                ResourceOperation::Deleted,
-                &smart_mailbox_id,
-            )],
-            json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
+            config_event_payload(
+                vec![ResourceChange::smart_mailbox(
+                    ResourceOperation::Deleted,
+                    &smart_mailbox_id,
+                )],
+                json!({ "smartMailboxId": smart_mailbox_id.as_str() }),
+            ),
         )
     }
 
     pub fn reset_default_smart_mailboxes(
         &self,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
-        self.service
-            .reset_default_smart_mailboxes()
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_config_event(
+        self.service.reset_default_smart_mailboxes()?;
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_SMART_MAILBOX_RESET,
-            vec![ResourceChange::smart_mailbox_reset()],
-            json!({ "scope": "smartMailboxes" }),
+            config_event_payload(
+                vec![ResourceChange::smart_mailbox_reset()],
+                json!({ "scope": "smartMailboxes" }),
+            ),
         )?;
-        self.reads
-            .list_smart_mailboxes()
-            .map_err(service_error_to_runtime_error)
+        Ok(self.reads.list_smart_mailboxes()?)
     }
 
     pub async fn create_account(
@@ -272,20 +256,12 @@ impl AccountMutationService {
                 self.allocate_unique_account_id(&seed)?
             }
         };
-        if self
-            .service
-            .get_source(&account_id)
-            .map_err(service_error_to_runtime_error)?
-            .is_some()
-        {
-            return Err(runtime_error(
-                RuntimeErrorCode::Conflict,
-                "account already exists",
-            ));
+        if self.service.get_source(&account_id)?.is_some() {
+            return Err(RuntimeError::conflict("account already exists"));
         }
 
         let timestamp = domain_now_iso8601()
-            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
         let mut account = AccountSettings {
             id: account_id,
             name: name.trim().to_string(),
@@ -314,7 +290,7 @@ impl AccountMutationService {
         let mut account = self.load_account(&account_id)?;
         apply_account_patch(&mut account, &request);
         account.updated_at = domain_now_iso8601()
-            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
         let existing_secret_ref = account.transport.secret_ref.clone();
         let secret_request = request.secret.unwrap_or_default();
         account.transport.secret_ref =
@@ -330,9 +306,7 @@ impl AccountMutationService {
             )?;
         }
 
-        self.service
-            .save_source(&account)
-            .map_err(service_error_to_runtime_error)?;
+        self.service.save_source(&account)?;
         if defer_secret_clear {
             self.apply_secret_instruction(
                 &mut account,
@@ -341,7 +315,11 @@ impl AccountMutationService {
             )?;
         }
         self.supervisor.start_account(&account).await;
-        self.append_and_publish_account_event(&account_id, EVENT_TOPIC_ACCOUNT_UPDATED)?;
+        self.append_and_publish_event(
+            &account_id,
+            EVENT_TOPIC_ACCOUNT_UPDATED,
+            account_event_payload(EVENT_TOPIC_ACCOUNT_UPDATED, &account_id),
+        )?;
         self.read_account_overview(account_id).await
     }
 
@@ -351,11 +329,7 @@ impl AccountMutationService {
         exchange: OAuthExchangeResult,
     ) -> Result<AccountOverview, RuntimeError> {
         let identity_email = exchange.identity_email.trim().to_string();
-        let encoded = exchange
-            .token_set
-            .encode()
-            .map_err(ServiceError::from)
-            .map_err(service_error_to_runtime_error)?;
+        let encoded = exchange.token_set.encode().map_err(ServiceError::from)?;
         let (imap, smtp) = oauth_provider_mail_transport(&profile.provider)?;
         self.create_account(CreateAccountMutation {
             id: None,
@@ -386,10 +360,7 @@ impl AccountMutationService {
         account_id: AccountId,
         token_set: OAuthTokenSet,
     ) -> Result<AccountOverview, RuntimeError> {
-        let encoded = token_set
-            .encode()
-            .map_err(ServiceError::from)
-            .map_err(service_error_to_runtime_error)?;
+        let encoded = token_set.encode().map_err(ServiceError::from)?;
         self.patch_account(
             account_id,
             PatchAccountMutation {
@@ -420,10 +391,12 @@ impl AccountMutationService {
         let account = self.load_account(&account_id)?;
         self.delete_managed_secret(account.transport.secret_ref.as_ref())?;
         self.supervisor.remove_account(&account_id).await;
-        self.service
-            .delete_source(&account_id)
-            .map_err(service_error_to_runtime_error)?;
-        self.append_and_publish_account_event(&account_id, EVENT_TOPIC_ACCOUNT_DELETED)
+        self.service.delete_source(&account_id)?;
+        self.append_and_publish_event(
+            &account_id,
+            EVENT_TOPIC_ACCOUNT_DELETED,
+            account_event_payload(EVENT_TOPIC_ACCOUNT_DELETED, &account_id),
+        )
     }
 
     pub async fn verify_account(
@@ -431,11 +404,7 @@ impl AccountMutationService {
         account_id: AccountId,
     ) -> Result<AccountVerificationResult, RuntimeError> {
         let account = self.load_account(&account_id)?;
-        let result = self
-            .supervisor
-            .verify_account(&account)
-            .await
-            .map_err(service_error_to_runtime_error)?;
+        let result = self.supervisor.verify_account(&account).await?;
         Ok(AccountVerificationResult {
             ok: result.ok,
             identity_email: result.identity.map(|identity| identity.email),
@@ -451,28 +420,23 @@ impl AccountMutationService {
         let mut account = self.load_account(&account_id)?;
         account.enabled = enabled;
         account.updated_at = domain_now_iso8601()
-            .map_err(|error| runtime_error(RuntimeErrorCode::Internal, error))?;
-        self.service
-            .save_source(&account)
-            .map_err(service_error_to_runtime_error)?;
+            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
+        self.service.save_source(&account)?;
         self.supervisor.start_account(&account).await;
-        self.append_and_publish_account_event(&account_id, EVENT_TOPIC_ACCOUNT_UPDATED)
+        self.append_and_publish_event(
+            &account_id,
+            EVENT_TOPIC_ACCOUNT_UPDATED,
+            account_event_payload(EVENT_TOPIC_ACCOUNT_UPDATED, &account_id),
+        )
     }
 
     pub async fn reload_config(&self) -> Result<(), RuntimeError> {
-        let diff = self
-            .service
-            .reload_config()
-            .map_err(service_error_to_runtime_error)?;
+        let diff = self.service.reload_config()?;
         for id in &diff.removed_sources {
             self.supervisor.remove_account(id).await;
         }
         for id in diff.added_sources.iter().chain(diff.changed_sources.iter()) {
-            if let Some(source) = self
-                .service
-                .get_source(id)
-                .map_err(service_error_to_runtime_error)?
-            {
+            if let Some(source) = self.service.get_source(id)? {
                 self.supervisor.start_account(&source).await;
             }
         }
@@ -493,14 +457,17 @@ impl AccountMutationService {
                 .iter()
                 .map(|id| ResourceChange::account(ResourceOperation::Deleted, id)),
         );
-        self.append_and_publish_config_event(
+        self.append_and_publish_event(
+            &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
             EVENT_TOPIC_CONFIG_RELOADED,
-            resources,
-            json!({
-                "addedSourceCount": diff.added_sources.len(),
-                "changedSourceCount": diff.changed_sources.len(),
-                "removedSourceCount": diff.removed_sources.len(),
-            }),
+            config_event_payload(
+                resources,
+                json!({
+                    "addedSourceCount": diff.added_sources.len(),
+                    "changedSourceCount": diff.changed_sources.len(),
+                    "removedSourceCount": diff.removed_sources.len(),
+                }),
+            ),
         )?;
         Ok(())
     }
@@ -508,12 +475,7 @@ impl AccountMutationService {
     fn allocate_unique_account_id(&self, seed: &str) -> Result<AccountId, RuntimeError> {
         let mut candidate = AccountId::from(seed);
         let mut suffix = 2;
-        while self
-            .service
-            .get_source(&candidate)
-            .map_err(service_error_to_runtime_error)?
-            .is_some()
-        {
+        while self.service.get_source(&candidate)?.is_some() {
             candidate = AccountId::from(format!("{seed}-{suffix}"));
             suffix += 1;
         }
@@ -523,17 +485,20 @@ impl AccountMutationService {
     async fn persist_new_account(&self, account: &AccountSettings) -> Result<(), RuntimeError> {
         if let Err(error) = self.service.save_source(account) {
             self.delete_managed_secret(account.transport.secret_ref.as_ref())?;
-            return Err(service_error_to_runtime_error(error));
+            return Err(error.into());
         }
         self.supervisor.start_account(account).await;
-        self.append_and_publish_account_event(&account.id, EVENT_TOPIC_ACCOUNT_CREATED)
+        self.append_and_publish_event(
+            &account.id,
+            EVENT_TOPIC_ACCOUNT_CREATED,
+            account_event_payload(EVENT_TOPIC_ACCOUNT_CREATED, &account.id),
+        )
     }
 
     fn load_account(&self, account_id: &AccountId) -> Result<AccountSettings, RuntimeError> {
         self.service
-            .get_source(account_id)
-            .map_err(service_error_to_runtime_error)?
-            .ok_or_else(|| runtime_error(RuntimeErrorCode::NotFound, "account not found"))
+            .get_source(account_id)?
+            .ok_or_else(|| RuntimeError::not_found("account not found"))
     }
 
     async fn read_account_overview(
@@ -542,9 +507,8 @@ impl AccountMutationService {
     ) -> Result<AccountOverview, RuntimeError> {
         self.reads
             .get_account(account_id)
-            .await
-            .map_err(service_error_to_runtime_error)?
-            .ok_or_else(|| runtime_error(RuntimeErrorCode::NotFound, "account not found"))
+            .await?
+            .ok_or_else(|| RuntimeError::not_found("account not found"))
     }
 
     fn apply_secret_instruction(
@@ -562,21 +526,18 @@ impl AccountMutationService {
             } => self
                 .secret_store
                 .save(secret_ref, password)
-                .map_err(ServiceError::from)
-                .map_err(service_error_to_runtime_error)?,
+                .map_err(ServiceError::from)?,
             SecretStoreInstruction::Update {
                 secret_ref,
                 password,
             } => self
                 .secret_store
                 .update(secret_ref, password)
-                .map_err(ServiceError::from)
-                .map_err(service_error_to_runtime_error)?,
+                .map_err(ServiceError::from)?,
             SecretStoreInstruction::Delete { secret_ref } => self
                 .secret_store
                 .delete(secret_ref)
-                .map_err(ServiceError::from)
-                .map_err(service_error_to_runtime_error)?,
+                .map_err(ServiceError::from)?,
         }
         match decision.account_secret_ref {
             AccountSecretRefUpdate::Preserve => {}
@@ -590,8 +551,7 @@ impl AccountMutationService {
             if matches!(secret_ref.kind, SecretKind::Os) {
                 self.secret_store
                     .delete(secret_ref)
-                    .map_err(ServiceError::from)
-                    .map_err(service_error_to_runtime_error)?;
+                    .map_err(ServiceError::from)?;
             }
         }
         Ok(())
@@ -603,51 +563,17 @@ impl AccountMutationService {
         }
     }
 
-    fn append_and_publish_account_event(
+    fn append_and_publish_event(
         &self,
         account_id: &AccountId,
         topic: &str,
+        payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
-        let operation = account_operation_from_topic(topic);
         let event = self
             .store
-            .append_event(
-                account_id,
-                topic,
-                None,
-                None,
-                json!({
-                    "accountId": account_id.as_str(),
-                    "resources": [ResourceChange::account(operation, account_id)],
-                }),
-            )
+            .append_event(account_id, topic, None, None, payload)
             .map_err(store_error_to_runtime_error)?;
-        self.publish_events(&[event]);
-        Ok(())
-    }
-
-    fn append_and_publish_config_event(
-        &self,
-        topic: &str,
-        resources: Vec<ResourceChange>,
-        extra: serde_json::Value,
-    ) -> Result<(), RuntimeError> {
-        let mut payload = match extra {
-            serde_json::Value::Object(map) => map,
-            _ => serde_json::Map::new(),
-        };
-        payload.insert("resources".to_string(), json!(resources));
-        let event = self
-            .store
-            .append_event(
-                &AccountId::from(GLOBAL_EVENT_ACCOUNT_ID),
-                topic,
-                None,
-                None,
-                serde_json::Value::Object(payload),
-            )
-            .map_err(store_error_to_runtime_error)?;
-        self.publish_events(&[event]);
+        self.publish_events(std::slice::from_ref(&event));
         Ok(())
     }
 }
@@ -670,8 +596,7 @@ fn oauth_provider_mail_transport(
     OAuthProviderProfile::for_provider(provider)
         .and_then(|profile| profile.default_mail_transport())
         .ok_or_else(|| {
-            runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            RuntimeError::invalid_account(
                 "provider does not support built-in OAuth account creation",
             )
         })
@@ -836,32 +761,27 @@ fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), RuntimeErro
     let mut ids = std::collections::BTreeSet::new();
     for rule in rules {
         if rule.id.trim().is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule id is required",
             ));
         }
         if !ids.insert(rule.id.trim().to_string()) {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule ids must be unique",
             ));
         }
         if rule.name.trim().is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule name is required",
             ));
         }
         if rule.triggers.is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule must include at least one trigger",
             ));
         }
         if rule.actions.is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule must include at least one action",
             ));
         }
@@ -870,16 +790,14 @@ fn validate_automation_rules(rules: &[AutomationRule]) -> Result<(), RuntimeErro
                 AutomationAction::ApplyTag { tag } | AutomationAction::RemoveTag { tag }
                     if tag.trim().is_empty() || tag.starts_with('$') =>
                 {
-                    return Err(runtime_error(
-                        RuntimeErrorCode::InvalidAccount,
+                    return Err(RuntimeError::invalid_account(
                         "automation tag must be a non-system keyword",
                     ));
                 }
                 AutomationAction::MoveToMailbox { mailbox_id }
                     if mailbox_id.as_str().trim().is_empty() =>
                 {
-                    return Err(runtime_error(
-                        RuntimeErrorCode::InvalidAccount,
+                    return Err(RuntimeError::invalid_account(
                         "automation target mailbox id is required",
                     ));
                 }
@@ -900,14 +818,12 @@ fn validate_automation_drafts(
     }
     for rule in draft_rules {
         if rule.id.trim().is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation draft id is required",
             ));
         }
         if !ids.insert(rule.id.trim().to_string()) {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "automation rule and draft ids must be unique",
             ));
         }
@@ -917,24 +833,17 @@ fn validate_automation_drafts(
 
 fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeError> {
     if account.id.as_str().trim().is_empty() {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidAccount,
-            "account id is required",
-        ));
+        return Err(RuntimeError::invalid_account("account id is required"));
     }
     if account.name.trim().is_empty() {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidAccount,
-            "account name is required",
-        ));
+        return Err(RuntimeError::invalid_account("account name is required"));
     }
     if account
         .email_patterns
         .iter()
         .any(|pattern| pattern.trim().is_empty())
     {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidAccount,
+        return Err(RuntimeError::invalid_account(
             "email patterns must not be blank",
         ));
     }
@@ -947,14 +856,12 @@ fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeErr
             .filter(|value| !value.is_empty())
             .is_none()
         {
-            return Err(runtime_error(
-                RuntimeErrorCode::AccountBaseUrlRequired,
+            return Err(RuntimeError::account_base_url_required(
                 "JMAP base URL is required",
             ));
         }
         if account.transport.secret_ref.is_none() {
-            return Err(runtime_error(
-                RuntimeErrorCode::AccountSecretRequired,
+            return Err(RuntimeError::account_secret_required(
                 "JMAP secret must be configured before saving the account",
             ));
         }
@@ -968,14 +875,12 @@ fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeErr
             .filter(|value| !value.is_empty())
             .is_none()
         {
-            return Err(runtime_error(
-                RuntimeErrorCode::AccountUsernameRequired,
+            return Err(RuntimeError::account_username_required(
                 "IMAP/SMTP username is required",
             ));
         }
         if account.transport.secret_ref.is_none() {
-            return Err(runtime_error(
-                RuntimeErrorCode::AccountSecretRequired,
+            return Err(RuntimeError::account_secret_required(
                 "IMAP/SMTP secret must be configured before saving the account",
             ));
         }
@@ -986,8 +891,7 @@ fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeErr
             .iter()
             .any(|pattern| is_concrete_email_pattern(pattern))
         {
-            return Err(runtime_error(
-                RuntimeErrorCode::AccountSenderRequired,
+            return Err(RuntimeError::account_sender_required(
                 "IMAP/SMTP accounts require a concrete sender email pattern",
             ));
         }
@@ -997,8 +901,7 @@ fn validate_account_settings(account: &AccountSettings) -> Result<(), RuntimeErr
     ) = &account.appearance
     {
         if initials.trim().is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidAccount,
+            return Err(RuntimeError::invalid_account(
                 "account appearance initials are required",
             ));
         }
@@ -1031,23 +934,17 @@ fn validate_endpoint<T: EndpointLike>(
     label: &str,
     endpoint: Option<&T>,
 ) -> Result<(), RuntimeError> {
-    let endpoint = endpoint.ok_or_else(|| {
-        runtime_error(
-            RuntimeErrorCode::InvalidAccount,
-            format!("{label} endpoint is required"),
-        )
-    })?;
+    let endpoint = endpoint
+        .ok_or_else(|| RuntimeError::invalid_account(format!("{label} endpoint is required")))?;
     if endpoint.host().trim().is_empty() {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidAccount,
-            format!("{label} host is required"),
-        ));
+        return Err(RuntimeError::invalid_account(format!(
+            "{label} host is required"
+        )));
     }
     if endpoint.port() == 0 {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidAccount,
-            format!("{label} port must be greater than zero"),
-        ));
+        return Err(RuntimeError::invalid_account(format!(
+            "{label} port must be greater than zero"
+        )));
     }
     Ok(())
 }
@@ -1145,8 +1042,7 @@ fn validate_secret_request(secret: &SecretWriteMutation) -> Result<(), RuntimeEr
     match secret.mode {
         SecretWriteMode::Keep => {
             if secret.password.is_some() {
-                return Err(runtime_error(
-                    RuntimeErrorCode::InvalidSecret,
+                return Err(RuntimeError::invalid_secret(
                     "secret.password is only allowed when secret.mode is replace",
                 ));
             }
@@ -1156,8 +1052,7 @@ fn validate_secret_request(secret: &SecretWriteMutation) -> Result<(), RuntimeEr
         }
         SecretWriteMode::Clear => {
             if secret.password.is_some() {
-                return Err(runtime_error(
-                    RuntimeErrorCode::InvalidSecret,
+                return Err(RuntimeError::invalid_secret(
                     "secret.password is not allowed when secret.mode is clear",
                 ));
             }
@@ -1173,10 +1068,7 @@ fn required_secret_password(secret: &SecretWriteMutation) -> Result<&str, Runtim
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            runtime_error(
-                RuntimeErrorCode::InvalidSecret,
-                "secret.password is required when secret.mode is replace",
-            )
+            RuntimeError::invalid_secret("secret.password is required when secret.mode is replace")
         })
 }
 
@@ -1270,6 +1162,26 @@ fn account_operation_from_topic(topic: &str) -> ResourceOperation {
     }
 }
 
+fn account_event_payload(topic: &str, account_id: &AccountId) -> serde_json::Value {
+    let operation = account_operation_from_topic(topic);
+    json!({
+        "accountId": account_id.as_str(),
+        "resources": [ResourceChange::account(operation, account_id)],
+    })
+}
+
+fn config_event_payload(
+    resources: Vec<ResourceChange>,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    let mut payload = match extra {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    payload.insert("resources".to_string(), json!(resources));
+    serde_json::Value::Object(payload)
+}
+
 fn generate_smart_mailbox_id(name: &str) -> String {
     let slug = name
         .trim()
@@ -1320,44 +1232,6 @@ fn generate_account_id_seed(name: &str, email_patterns: &[String]) -> String {
     }
 }
 
-pub(crate) fn service_error_to_runtime_error(error: ServiceError) -> RuntimeError {
-    let code = match error.kind() {
-        posthaste_domain::ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
-        posthaste_domain::ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
-        posthaste_domain::ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
-        posthaste_domain::ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
-        posthaste_domain::ServiceErrorKind::GatewayUnavailable => {
-            RuntimeErrorCode::ProviderUnavailable
-        }
-        posthaste_domain::ServiceErrorKind::NetworkError => RuntimeErrorCode::NetworkError,
-        posthaste_domain::ServiceErrorKind::CannotCalculateChanges => {
-            RuntimeErrorCode::CannotCalculateChanges
-        }
-        posthaste_domain::ServiceErrorKind::GatewayRejected => RuntimeErrorCode::GatewayRejected,
-        posthaste_domain::ServiceErrorKind::SecretUnavailable => {
-            RuntimeErrorCode::SecretUnavailable
-        }
-        posthaste_domain::ServiceErrorKind::SecretUnsupported => {
-            RuntimeErrorCode::SecretUnsupported
-        }
-        posthaste_domain::ServiceErrorKind::StorageFailure => RuntimeErrorCode::StorageFailure,
-        posthaste_domain::ServiceErrorKind::ConfigValidation => RuntimeErrorCode::ConfigValidation,
-        posthaste_domain::ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
-        posthaste_domain::ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
-    };
-    runtime_error(code, error.to_string())
-}
-
 pub(crate) fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
-    runtime_error(RuntimeErrorCode::Internal, error.to_string())
-}
-
-fn runtime_error(code: RuntimeErrorCode, message: impl Into<String>) -> RuntimeError {
-    RuntimeError(RuntimeAdapterError {
-        code,
-        message: message.into(),
-        retryable: false,
-        correlation_id: None,
-        details: serde_json::Value::Null,
-    })
+    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
 }

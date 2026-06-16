@@ -17,97 +17,58 @@ use posthaste_domain::{
     AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, EventFilter,
     Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId, MessageSummary,
     ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
+    ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
+    SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
+    SyncMode, TagSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RuntimeSessionId(String);
+macro_rules! define_id {
+    ($name:ident, u64, $getter:ident) => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $name(u64);
 
-impl RuntimeSessionId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
+        impl $name {
+            pub fn new(value: u64) -> Self {
+                Self(value)
+            }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+            pub fn $getter(self) -> u64 {
+                self.0
+            }
+        }
+    };
+    ($($name:ident),+ $(,)?) => {
+        $(
+            #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+            #[serde(transparent)]
+            pub struct $name(String);
+
+            impl $name {
+                pub fn new(value: impl Into<String>) -> Self {
+                    Self(value.into())
+                }
+
+                pub fn as_str(&self) -> &str {
+                    &self.0
+                }
+            }
+        )+
+    };
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ViewId(String);
-
-impl ViewId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ViewRevision(u64);
-
-impl ViewRevision {
-    pub fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub fn get(self) -> u64 {
-        self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct SubscriptionId(String);
-
-impl SubscriptionId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ClientMutationId(String);
-
-impl ClientMutationId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RuntimeMutationId(String);
-
-impl RuntimeMutationId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+define_id!(
+    RuntimeSessionId,
+    ViewId,
+    SubscriptionId,
+    ClientMutationId,
+    RuntimeMutationId,
+);
+define_id!(ViewRevision, u64, get);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -477,6 +438,34 @@ impl fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 impl RuntimeError {
+    pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self::with_details(code, message, Value::Null)
+    }
+
+    pub fn with_details(
+        code: RuntimeErrorCode,
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        Self(RuntimeAdapterError {
+            code,
+            message: message.into(),
+            retryable: false,
+            correlation_id: None,
+            details,
+        })
+    }
+
+    pub fn retryable(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self(RuntimeAdapterError {
+            code,
+            message: message.into(),
+            retryable: true,
+            correlation_id: None,
+            details: Value::Null,
+        })
+    }
+
     pub fn internal(message: impl Into<String>, correlation_id: Option<String>) -> Self {
         Self(RuntimeAdapterError {
             code: RuntimeErrorCode::Internal,
@@ -487,8 +476,106 @@ impl RuntimeError {
         })
     }
 
+    pub fn runtime_not_ready(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::RuntimeNotReady, message)
+    }
+
+    pub fn invalid_descriptor(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::InvalidDescriptor, message)
+    }
+
+    pub fn invalid_mutation(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::InvalidMutation, message)
+    }
+
+    pub fn invalid_secret(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::InvalidSecret, message)
+    }
+
+    pub fn invalid_account(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::InvalidAccount, message)
+    }
+
+    pub fn account_base_url_required(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::AccountBaseUrlRequired, message)
+    }
+
+    pub fn account_secret_required(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::AccountSecretRequired, message)
+    }
+
+    pub fn account_username_required(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::AccountUsernameRequired, message)
+    }
+
+    pub fn account_sender_required(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::AccountSenderRequired, message)
+    }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::Unauthorized, message)
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::NotFound, message)
+    }
+
+    pub fn provider_unavailable(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::ProviderUnavailable, message)
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::Conflict, message)
+    }
+
     pub fn envelope(&self) -> &RuntimeAdapterError {
         &self.0
+    }
+}
+
+impl From<ServiceError> for RuntimeError {
+    fn from(error: ServiceError) -> Self {
+        let code = match error.kind() {
+            ServiceErrorKind::NotFound => RuntimeErrorCode::NotFound,
+            ServiceErrorKind::Conflict => RuntimeErrorCode::Conflict,
+            ServiceErrorKind::StateMismatch => RuntimeErrorCode::StateMismatch,
+            ServiceErrorKind::AuthError => RuntimeErrorCode::Unauthorized,
+            ServiceErrorKind::GatewayUnavailable => RuntimeErrorCode::ProviderUnavailable,
+            ServiceErrorKind::NetworkError => RuntimeErrorCode::NetworkError,
+            ServiceErrorKind::CannotCalculateChanges => RuntimeErrorCode::CannotCalculateChanges,
+            ServiceErrorKind::GatewayRejected => RuntimeErrorCode::GatewayRejected,
+            ServiceErrorKind::SecretUnavailable => RuntimeErrorCode::SecretUnavailable,
+            ServiceErrorKind::SecretUnsupported => RuntimeErrorCode::SecretUnsupported,
+            ServiceErrorKind::StorageFailure => RuntimeErrorCode::StorageFailure,
+            ServiceErrorKind::ConfigValidation => RuntimeErrorCode::ConfigValidation,
+            ServiceErrorKind::ConfigIo => RuntimeErrorCode::ConfigIo,
+            ServiceErrorKind::ConfigParse => RuntimeErrorCode::ConfigParse,
+        };
+        Self::new(code, error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use posthaste_domain::StoreError;
+
+    #[test]
+    fn service_error_conversion_preserves_runtime_error_code() {
+        let error = RuntimeError::from(ServiceError::from(StoreError::NotFound(
+            "account missing".to_string(),
+        )));
+
+        assert_eq!(error.envelope().code, RuntimeErrorCode::NotFound);
+    }
+
+    #[test]
+    fn retryable_constructor_marks_retryable_envelope() {
+        let error =
+            RuntimeError::retryable(RuntimeErrorCode::ProviderUnavailable, "gateway unavailable");
+
+        assert!(error.envelope().retryable);
+        assert_eq!(error.envelope().code, RuntimeErrorCode::ProviderUnavailable);
     }
 }
 
