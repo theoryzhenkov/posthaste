@@ -8,8 +8,14 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  buildOAuthRedirectUri,
+  createAccount,
   createSmartMailbox,
+  deleteAccount,
   deleteSmartMailbox,
+  disableAccount,
+  enableAccount,
+  fetchAccount,
   fetchAccounts,
   fetchConversation,
   fetchConversations,
@@ -31,8 +37,12 @@ import {
   read,
   resetDefaultSmartMailboxes,
   sendMessage,
+  startProviderOAuth,
   triggerSync,
+  updateAccount,
   updateSmartMailbox,
+  uploadAccountLogo,
+  verifyAccount,
 } from '../api/client'
 
 import type { DomainEvent } from '../api/types'
@@ -124,11 +134,26 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     })
     return () => controller.abort()
   },
+  createAccount(input) {
+    return createAccount(input)
+  },
   createSmartMailbox(input) {
     return createSmartMailbox(input)
   },
+  deleteAccount(accountId) {
+    return deleteAccount(accountId)
+  },
   deleteSmartMailbox(smartMailboxId) {
     return deleteSmartMailbox(smartMailboxId)
+  },
+  disableAccount(accountId) {
+    return disableAccount(accountId)
+  },
+  enableAccount(accountId) {
+    return enableAccount(accountId)
+  },
+  fetchAccount(accountId) {
+    return fetchAccount(accountId)
   },
   fetchAccounts() {
     return fetchAccounts()
@@ -185,6 +210,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
         return fetchSearchMessages(req.query, input)
     }
   },
+  fetchOAuthRedirectUri() {
+    return buildOAuthRedirectUri()
+  },
   fetchReplyContext({ sourceId, messageId }) {
     return fetchReplyContext(sourceId, messageId)
   },
@@ -221,10 +249,22 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   sendMessage({ sourceId, input }) {
     return sendMessage(sourceId, input)
   },
+  startProviderOAuth(input) {
+    return startProviderOAuth(input)
+  },
   triggerSync(request) {
     return triggerSync(request)
   },
+  updateAccount(accountId, input) {
+    return updateAccount(accountId, input)
+  },
   updateSmartMailbox(smartMailboxId, input) {
     return updateSmartMailbox(smartMailboxId, input)
+  },
+  uploadAccountLogo(accountId, file) {
+    return uploadAccountLogo(accountId, file)
+  },
+  verifyAccount(accountId) {
+    return verifyAccount(accountId)
   },
 }

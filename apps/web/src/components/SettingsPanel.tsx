@@ -8,12 +8,12 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fetchAccount } from '../api/client'
 import type {
   AccountOverview,
   AppSettings,
   SmartMailboxSummary,
 } from '../api/types'
+import { fetchRuntimeAccount } from '../runtime/accounts'
 import {
   applyAccountMutationResult,
   invalidateAccountReadModels,
@@ -123,7 +123,7 @@ export function SettingsPanel({
       : effectiveEditorTarget
   const accountQuery = useQuery({
     queryKey: queryKeys.account(editorAccountId),
-    queryFn: () => fetchAccount(editorAccountId!),
+    queryFn: () => fetchRuntimeAccount(editorAccountId!),
     enabled: editorAccountId !== null,
   })
   const editingAccount =
