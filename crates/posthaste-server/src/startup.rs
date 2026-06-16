@@ -52,7 +52,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         }
     }
 
-    let secret_store = runtime_build.api_bridge.secret_store.clone();
+    let secret_store = runtime_build.secret_store.clone();
 
     // Per-process bearer token for the loopback trust model: a full-scope
     // macaroon (no caveats) minted from the per-install root key. Replaces the
