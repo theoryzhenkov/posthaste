@@ -11,7 +11,6 @@ use posthaste_runtime_contract::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, RuntimeError,
 };
 
-use crate::account_mutations::service_error_to_runtime_error;
 use crate::supervisor::AccountSupervisor;
 
 pub(crate) struct MailQueryService {
@@ -84,18 +83,21 @@ impl MailQueryService {
     ) -> Result<MessagePage, RuntimeError> {
         let rule = rules::compile(&self.service, query)?;
         if let Some(limit) = limit {
-            return self
-                .service
-                .query_message_page_by_rule(&rule, limit, cursor, sort_field, sort_direction)
-                .map_err(service_error_to_runtime_error);
+            return Ok(self.service.query_message_page_by_rule(
+                &rule,
+                limit,
+                cursor,
+                sort_field,
+                sort_direction,
+            )?);
         }
-        self.service
-            .query_messages_by_rule_sorted(&rule, sort_field, sort_direction)
-            .map(|items| MessagePage {
-                items,
-                next_cursor: None,
-            })
-            .map_err(service_error_to_runtime_error)
+        let items =
+            self.service
+                .query_messages_by_rule_sorted(&rule, sort_field, sort_direction)?;
+        Ok(MessagePage {
+            items,
+            next_cursor: None,
+        })
     }
 
     fn query_conversations(
@@ -107,8 +109,12 @@ impl MailQueryService {
         sort_direction: SortDirection,
     ) -> Result<ConversationPage, RuntimeError> {
         let rule = rules::compile(&self.service, query)?;
-        self.service
-            .query_conversations_by_rule(&rule, limit, cursor, sort_field, sort_direction)
-            .map_err(service_error_to_runtime_error)
+        Ok(self.service.query_conversations_by_rule(
+            &rule,
+            limit,
+            cursor,
+            sort_field,
+            sort_direction,
+        )?)
     }
 }

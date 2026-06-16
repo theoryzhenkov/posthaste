@@ -5,9 +5,8 @@ use posthaste_domain::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxValue,
 };
-use posthaste_runtime_contract::{RuntimeAdapterError, RuntimeError, RuntimeErrorCode};
+use posthaste_runtime_contract::RuntimeError;
 
-use crate::account_mutations::service_error_to_runtime_error;
 use tokenize::tokenize;
 
 pub(crate) fn compile(
@@ -35,7 +34,7 @@ pub(crate) fn compile(
     if !remaining.trim().is_empty() {
         rules.push(
             posthaste_domain::search::parse_query(&remaining)
-                .map_err(|message| runtime_error(RuntimeErrorCode::InvalidDescriptor, message))?,
+                .map_err(RuntimeError::invalid_descriptor)?,
         );
     }
     Ok(combine(rules).unwrap_or_else(empty_rule))
@@ -44,16 +43,14 @@ pub(crate) fn compile(
 fn resolve_in(service: &MailService, value: &str) -> Result<SmartMailboxRule, RuntimeError> {
     let value = value.trim();
     if value.is_empty() {
-        return Err(runtime_error(
-            RuntimeErrorCode::InvalidDescriptor,
+        return Err(RuntimeError::invalid_descriptor(
             "in: selector cannot be empty",
         ));
     }
     if let Some((account, mailbox)) = value.split_once('/') {
         let account = account.trim();
         if account.is_empty() {
-            return Err(runtime_error(
-                RuntimeErrorCode::InvalidDescriptor,
+            return Err(RuntimeError::invalid_descriptor(
                 "in: source selector cannot be empty",
             ));
         }
@@ -63,15 +60,9 @@ fn resolve_in(service: &MailService, value: &str) -> Result<SmartMailboxRule, Ru
         return Ok(source_scope_rule(&account_id, mailbox_id.as_ref()));
     }
     service
-        .find_smart_mailbox(value)
-        .map_err(service_error_to_runtime_error)?
+        .find_smart_mailbox(value)?
         .map(|mailbox| mailbox.rule)
-        .ok_or_else(|| {
-            runtime_error(
-                RuntimeErrorCode::NotFound,
-                format!("smart mailbox not found: {value}"),
-            )
-        })
+        .ok_or_else(|| RuntimeError::not_found(format!("smart mailbox not found: {value}")))
 }
 
 pub(crate) fn source_scope_rule(
@@ -131,16 +122,6 @@ fn all_rule(nodes: Vec<SmartMailboxRuleNode>) -> SmartMailboxRule {
 
 fn empty_rule() -> SmartMailboxRule {
     all_rule(Vec::new())
-}
-
-fn runtime_error(code: RuntimeErrorCode, message: impl Into<String>) -> RuntimeError {
-    RuntimeError(RuntimeAdapterError {
-        code,
-        message: message.into(),
-        retryable: false,
-        correlation_id: None,
-        details: serde_json::Value::Null,
-    })
 }
 
 #[cfg(test)]
