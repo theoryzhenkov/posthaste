@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { shouldForceAccountSettings } from '@/accountSetup'
-import { fetchAccounts, fetchMessage, triggerSync } from '@/api/client'
+import { fetchAccounts, triggerSync } from '@/api/client'
 import type { TagSummary } from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
 import {
@@ -31,6 +31,7 @@ import { mailKeys, type MailSelection } from '@/mailState'
 import { useOperations } from '@/operationsContext'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
+import { fetchRuntimeMessage } from '@/runtime/adapter'
 import { prepareServerSearchQuery } from '@/searchQuery'
 import { type SurfaceDescriptor } from '@/surfaces'
 import { MailClientView } from './MailClientView'
@@ -122,7 +123,10 @@ export function MailClient({
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
       : [...mailKeys.messageRoot, null, null],
     queryFn: () =>
-      fetchMessage(selectedMessage!.messageId, selectedMessage!.sourceId),
+      fetchRuntimeMessage(
+        selectedMessage!.messageId,
+        selectedMessage!.sourceId,
+      ),
     enabled: selectedMessage !== null,
   })
   const isMessageDetailOpen = selectedMessage !== null
