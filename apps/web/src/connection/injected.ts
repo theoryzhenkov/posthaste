@@ -11,9 +11,12 @@ function normalizeApiBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
 
+export type InjectedRuntimeMode = 'loopback' | 'native'
+
 interface InjectedRuntimeForTesting {
   port?: number
   token?: string
+  runtimeMode?: InjectedRuntimeMode
 }
 
 let injectedRuntimeForTesting: InjectedRuntimeForTesting | undefined
@@ -23,6 +26,18 @@ export function setInjectedRuntimeForTesting(
   runtime: InjectedRuntimeForTesting | undefined,
 ): void {
   injectedRuntimeForTesting = runtime
+}
+
+export function injectedRuntimeMode(): InjectedRuntimeMode | undefined {
+  if (injectedRuntimeForTesting) {
+    return injectedRuntimeForTesting.runtimeMode
+  }
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+  const mode = (window as unknown as Record<string, unknown>)
+    .__POSTHASTE_RUNTIME_MODE__
+  return mode === 'loopback' || mode === 'native' ? mode : undefined
 }
 
 /** The embedded server's injected port, or `undefined` outside the bundled build. */

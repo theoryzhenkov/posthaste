@@ -8,8 +8,8 @@ pub(crate) struct EmbeddedBackend {
 /// Backend connection details injected into a webview at window-build time.
 ///
 /// In the embedded build this carries the in-process server's port and token,
-/// which are injected as `window.__POSTHASTE_PORT__`/`__POSTHASTE_TOKEN__`. In
-/// the client-only build (`embedded-server` off) it carries nothing and no
+/// which are injected as `window.__POSTHASTE_PORT__`/`__POSTHASTE_TOKEN__`
+/// with runtime mode metadata. In the client-only build (`embedded-server` off) it carries nothing and no
 /// injection occurs; the connection-profile runtime (Phase B) supplies the
 /// backend in that mode.
 pub(crate) struct BackendInjection {
@@ -69,7 +69,8 @@ pub(crate) fn backend_init_script(backend: &BackendInjection, window_label: &str
         let auth_token_json = serde_json::to_string(&backend.auth_token)
             .expect("auth token should serialize to JSON");
         format!(
-            "Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
+            "Object.defineProperty(window, '__POSTHASTE_RUNTIME_MODE__', {{ value: 'loopback', writable: false }});\
+             Object.defineProperty(window, '__POSTHASTE_PORT__', {{ value: {port}, writable: false }});\
              Object.defineProperty(window, '__POSTHASTE_TOKEN__', {{ value: {auth_token_json}, writable: false }});\
              {window_label_script}"
         )
