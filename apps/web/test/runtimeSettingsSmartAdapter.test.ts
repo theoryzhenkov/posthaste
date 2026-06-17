@@ -8,18 +8,9 @@ import type {
   SmartMailbox,
   SmartMailboxRule,
 } from '../src/api/types'
-import {
-  createRuntimeSmartMailbox,
-  deleteRuntimeSmartMailbox,
-  fetchRuntimeSettings,
-  fetchRuntimeSmartMailbox,
-  patchRuntimeMailbox,
-  patchRuntimeSettings,
-  previewRuntimeAutomationRule,
-  resetRuntimeAdapterForTesting,
-  resetRuntimeDefaultSmartMailboxes,
-  updateRuntimeSmartMailbox,
-} from '../src/runtime/adapter'
+import { resetRuntimeAdapterForTesting } from '../src/runtime/adapter'
+import { runtimeMutations } from '../src/runtime/mutations'
+import { runtimeViews } from '../src/runtime/views'
 
 const emptyRule: SmartMailboxRule = {
   root: { operator: 'all', negated: false, nodes: [] },
@@ -80,13 +71,15 @@ describe('runtime settings and smart mailbox adapter', () => {
     ).mockResolvedValue(preview)
 
     try {
-      expect(await fetchRuntimeSettings()).toBe(settings)
-      expect(await patchRuntimeSettings({ defaultAccountId: 'primary' })).toBe(
-        settings,
-      )
-      expect(await previewRuntimeAutomationRule({ condition: emptyRule })).toBe(
-        preview,
-      )
+      expect(await runtimeViews.settings.current()).toBe(settings)
+      expect(
+        await runtimeMutations.settings.patch({ defaultAccountId: 'primary' }),
+      ).toBe(settings)
+      expect(
+        await runtimeMutations.settings.previewAutomationRule({
+          condition: emptyRule,
+        }),
+      ).toBe(preview)
       expect(fetchSettingsSpy).toHaveBeenCalledWith()
       expect(patchSettingsSpy).toHaveBeenCalledWith({
         defaultAccountId: 'primary',
@@ -122,16 +115,27 @@ describe('runtime settings and smart mailbox adapter', () => {
 
     try {
       expect(
-        await createRuntimeSmartMailbox({ name: 'Smart', rule: emptyRule }),
+        await runtimeMutations.smartMailboxes.create({
+          name: 'Smart',
+          rule: emptyRule,
+        }),
       ).toBe(smartMailbox)
-      expect(await fetchRuntimeSmartMailbox('smart-1')).toBe(smartMailbox)
-      expect(await updateRuntimeSmartMailbox('smart-1', { position: 2 })).toBe(
+      expect(await runtimeViews.smartMailboxes.detail('smart-1')).toBe(
         smartMailbox,
       )
-      expect(await deleteRuntimeSmartMailbox('smart-1')).toEqual({ ok: true })
-      expect(await resetRuntimeDefaultSmartMailboxes()).toEqual([])
       expect(
-        await patchRuntimeMailbox('primary', 'inbox', { role: 'archive' }),
+        await runtimeMutations.smartMailboxes.update('smart-1', {
+          position: 2,
+        }),
+      ).toBe(smartMailbox)
+      expect(await runtimeMutations.smartMailboxes.delete('smart-1')).toEqual({
+        ok: true,
+      })
+      expect(await runtimeMutations.smartMailboxes.resetDefaults()).toEqual([])
+      expect(
+        await runtimeMutations.mailboxes.patch('primary', 'inbox', {
+          role: 'archive',
+        }),
       ).toEqual([mailbox])
       expect(createSpy).toHaveBeenCalledWith({ name: 'Smart', rule: emptyRule })
       expect(fetchSpy).toHaveBeenCalledWith('smart-1')

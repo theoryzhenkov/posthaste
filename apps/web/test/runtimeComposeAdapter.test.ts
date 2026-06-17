@@ -2,14 +2,9 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 
 import * as apiClient from '../src/api/client'
 import type { Identity, ReplyContext, SendMessageInput } from '../src/api/types'
-import {
-  fetchRuntimeConversationPage,
-  fetchRuntimeIdentity,
-  fetchRuntimeReplyContext,
-  fetchRuntimeSenderAddresses,
-  resetRuntimeAdapterForTesting,
-  sendRuntimeMessage,
-} from '../src/runtime/adapter'
+import { resetRuntimeAdapterForTesting } from '../src/runtime/adapter'
+import { runtimeMutations } from '../src/runtime/mutations'
+import { runtimeViews } from '../src/runtime/views'
 
 const identity: Identity = {
   id: 'primary',
@@ -61,14 +56,16 @@ describe('runtime compose adapter', () => {
     )
 
     try {
-      expect(await fetchRuntimeIdentity('primary')).toBe(identity)
-      expect(await fetchRuntimeSenderAddresses()).toEqual([])
-      expect(await fetchRuntimeConversationPage({ limit: 75 })).toEqual({
+      expect(await runtimeViews.compose.identity('primary')).toBe(identity)
+      expect(await runtimeViews.compose.senderAddresses()).toEqual([])
+      expect(
+        await runtimeViews.compose.conversationPage({ limit: 75 }),
+      ).toEqual({
         items: [],
         nextCursor: null,
       })
       expect(
-        await fetchRuntimeReplyContext({
+        await runtimeViews.compose.replyContext({
           sourceId: 'primary',
           messageId: 'm1',
         }),
@@ -92,7 +89,10 @@ describe('runtime compose adapter', () => {
 
     try {
       await expect(
-        sendRuntimeMessage({ sourceId: 'primary', input: sendInput }),
+        runtimeMutations.messages.send({
+          sourceId: 'primary',
+          input: sendInput,
+        }),
       ).resolves.toEqual({ ok: true })
       expect(sendSpy).toHaveBeenCalledWith('primary', sendInput)
     } finally {

@@ -3,24 +3,12 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import * as apiClient from '../src/api/client'
 import type { AccountOverview, CreateAccountInput } from '../src/api/types'
 import {
-  createRuntimeAccount,
-  deleteRuntimeAccount,
-  disableRuntimeAccount,
-  enableRuntimeAccount,
-  fetchRuntimeAccount,
-  fetchRuntimeOAuthRedirectUri,
-  startRuntimeProviderOAuth,
-  updateRuntimeAccount,
-  uploadRuntimeAccountLogo,
-  verifyRuntimeAccount,
-} from '../src/runtime/accounts'
-import {
-  fetchRuntimeAccounts,
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
-  triggerRuntimeSync,
 } from '../src/runtime/adapter'
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
+import { runtimeMutations } from '../src/runtime/mutations'
+import { runtimeViews } from '../src/runtime/views'
 
 const createInput: CreateAccountInput = {
   name: 'Primary',
@@ -76,8 +64,10 @@ describe('runtime account and sync adapter', () => {
     fake.queueSyncResult(syncResult)
     setRuntimeAdapterForTesting(fake)
 
-    expect(await fetchRuntimeAccounts()).toEqual([account])
-    expect(await triggerRuntimeSync({ sourceId: 'primary' })).toBe(syncResult)
+    expect(await runtimeViews.accounts.list()).toEqual([account])
+    expect(await runtimeMutations.accounts.sync({ sourceId: 'primary' })).toBe(
+      syncResult,
+    )
     expect(fake.accountCalls).toBe(1)
     expect(fake.syncCalls).toEqual([{ sourceId: 'primary' }])
   })
@@ -99,29 +89,37 @@ describe('runtime account and sync adapter', () => {
     setRuntimeAdapterForTesting(fake)
 
     const logo = new File(['logo'], 'logo.png', { type: 'image/png' })
-    await expect(fetchRuntimeAccount('primary')).resolves.toBe(account)
-    await expect(createRuntimeAccount(createInput)).resolves.toBe(account)
-    await expect(
-      updateRuntimeAccount('primary', { name: 'Renamed' }),
-    ).resolves.toBe(account)
-    await expect(uploadRuntimeAccountLogo('primary', logo)).resolves.toBe(
+    await expect(runtimeViews.accounts.detail('primary')).resolves.toBe(account)
+    await expect(runtimeMutations.accounts.create(createInput)).resolves.toBe(
       account,
     )
-    await expect(verifyRuntimeAccount('primary')).resolves.toEqual({
+    await expect(
+      runtimeMutations.accounts.update('primary', { name: 'Renamed' }),
+    ).resolves.toBe(account)
+    await expect(
+      runtimeMutations.accounts.uploadLogo('primary', logo),
+    ).resolves.toBe(account)
+    await expect(runtimeMutations.accounts.verify('primary')).resolves.toEqual({
       ok: true,
       identityEmail: 'primary@example.com',
       pushSupported: false,
     })
-    await expect(enableRuntimeAccount('primary')).resolves.toEqual({ ok: true })
-    await expect(disableRuntimeAccount('primary')).resolves.toEqual({
+    await expect(runtimeMutations.accounts.enable('primary')).resolves.toEqual({
       ok: true,
     })
-    await expect(deleteRuntimeAccount('primary')).resolves.toEqual({ ok: true })
+    await expect(runtimeMutations.accounts.disable('primary')).resolves.toEqual(
+      {
+        ok: true,
+      },
+    )
+    await expect(runtimeMutations.accounts.delete('primary')).resolves.toEqual({
+      ok: true,
+    })
     await expect(
-      startRuntimeProviderOAuth({
+      runtimeMutations.oauth.startProvider({
         provider: 'gmail',
         clientId: 'client-1',
-        redirectUri: fetchRuntimeOAuthRedirectUri(),
+        redirectUri: runtimeViews.oauth.redirectUri(),
       }),
     ).resolves.toEqual({
       authorizationUrl: 'https://accounts.example.test/auth',
@@ -146,7 +144,7 @@ describe('runtime account and sync adapter', () => {
       {
         provider: 'gmail',
         clientId: 'client-1',
-        redirectUri: fetchRuntimeOAuthRedirectUri(),
+        redirectUri: runtimeViews.oauth.redirectUri(),
         hasClientSecret: false,
       },
     ])
@@ -184,32 +182,42 @@ describe('runtime account and sync adapter', () => {
     })
 
     try {
-      const redirectUri = fetchRuntimeOAuthRedirectUri()
+      const redirectUri = runtimeViews.oauth.redirectUri()
       const logo = new File(['logo'], 'logo.png', { type: 'image/png' })
 
       expect(redirectUri).toBe(apiClient.buildOAuthRedirectUri())
-      expect(await fetchRuntimeAccount('primary')).toBe(account)
-      expect(await createRuntimeAccount(createInput)).toBe(account)
-      expect(await updateRuntimeAccount('primary', { name: 'Renamed' })).toBe(
+      expect(await runtimeViews.accounts.detail('primary')).toBe(account)
+      expect(await runtimeMutations.accounts.create(createInput)).toBe(account)
+      expect(
+        await runtimeMutations.accounts.update('primary', { name: 'Renamed' }),
+      ).toBe(account)
+      expect(await runtimeMutations.accounts.uploadLogo('primary', logo)).toBe(
         account,
       )
-      expect(await uploadRuntimeAccountLogo('primary', logo)).toBe(account)
-      await expect(verifyRuntimeAccount('primary')).resolves.toEqual({
+      await expect(
+        runtimeMutations.accounts.verify('primary'),
+      ).resolves.toEqual({
         ok: true,
         identityEmail: 'primary@example.com',
         pushSupported: false,
       })
-      await expect(enableRuntimeAccount('primary')).resolves.toEqual({
-        ok: true,
-      })
-      await expect(disableRuntimeAccount('primary')).resolves.toEqual({
-        ok: true,
-      })
-      await expect(deleteRuntimeAccount('primary')).resolves.toEqual({
+      await expect(
+        runtimeMutations.accounts.enable('primary'),
+      ).resolves.toEqual({
         ok: true,
       })
       await expect(
-        startRuntimeProviderOAuth({
+        runtimeMutations.accounts.disable('primary'),
+      ).resolves.toEqual({
+        ok: true,
+      })
+      await expect(
+        runtimeMutations.accounts.delete('primary'),
+      ).resolves.toEqual({
+        ok: true,
+      })
+      await expect(
+        runtimeMutations.oauth.startProvider({
           provider: 'gmail',
           clientId: 'client-1',
           redirectUri,
@@ -259,9 +267,9 @@ describe('runtime account and sync adapter', () => {
     )
 
     try {
-      expect(await fetchRuntimeAccounts()).toEqual([account])
+      expect(await runtimeViews.accounts.list()).toEqual([account])
       expect(
-        await triggerRuntimeSync({
+        await runtimeMutations.accounts.sync({
           sourceId: 'primary',
           mode: 'fullMetadata',
         }),
