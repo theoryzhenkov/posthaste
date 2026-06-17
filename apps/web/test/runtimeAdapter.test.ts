@@ -11,20 +11,15 @@ import type {
 import { messagePageClient } from '../src/messagePageClient'
 import type { OperationContext } from '../src/observability'
 import {
-  fetchRuntimeConversation,
-  fetchRuntimeMailboxes,
-  fetchRuntimeMessage,
-  fetchRuntimeMessagePage,
-  fetchRuntimeSmartMailboxes,
   getRuntimeAdapter,
   resetRuntimeAdapterForTesting,
-  runRuntimeMessageCommand,
   runtimeAdapterForMode,
-  runtimeRead,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
 import { httpRuntimeAdapter } from '../src/runtime/httpAdapter'
+import { runtimeMutations } from '../src/runtime/mutations'
+import { runtimeViews } from '../src/runtime/views'
 
 const command: MessageCommand = {
   kind: 'replaceMailboxes',
@@ -106,7 +101,7 @@ describe('runtime adapter facade', () => {
     fake.queueMessageCommandResult(okResult)
     setRuntimeAdapterForTesting(fake)
 
-    const result = await runRuntimeMessageCommand({
+    const result = await runtimeMutations.messages.command({
       command,
       messageId: 'm1',
       sourceId: 'primary',
@@ -128,8 +123,8 @@ describe('runtime adapter facade', () => {
     fake.queueMessage(detail)
     setRuntimeAdapterForTesting(fake)
 
-    expect(await fetchRuntimeConversation('c1')).toBe(conversation)
-    expect(await fetchRuntimeMessage('m1', 'primary')).toBe(detail)
+    expect(await runtimeViews.mail.conversation('c1')).toBe(conversation)
+    expect(await runtimeViews.mail.message('m1', 'primary')).toBe(detail)
     expect(fake.conversationCalls).toEqual(['c1'])
     expect(fake.messageCalls).toEqual([
       { messageId: 'm1', sourceId: 'primary' },
@@ -153,7 +148,7 @@ describe('runtime adapter facade', () => {
       sort: 'date' as const,
       sortDir: 'desc' as const,
     }
-    const result = await fetchRuntimeMessagePage(request)
+    const result = await runtimeViews.mail.messagePage(request)
 
     expect(result).toBe(emptyPage)
     expect(fake.messagePageCalls).toEqual([request])
@@ -171,15 +166,15 @@ describe('runtime adapter facade', () => {
       calls: [{ id: 'accounts', op: 'Account/list' as const }],
     }
 
-    expect(await runtimeRead(readRequest)).toBe(readResponse)
-    expect(await fetchRuntimeMailboxes('primary')).toEqual([])
-    expect(await fetchRuntimeSmartMailboxes()).toEqual([])
+    expect(await runtimeViews.mail.read(readRequest)).toBe(readResponse)
+    expect(await runtimeViews.mail.mailboxes('primary')).toEqual([])
+    expect(await runtimeViews.smartMailboxes.list()).toEqual([])
     expect(fake.readCalls).toEqual([readRequest])
     expect(fake.mailboxCalls).toEqual(['primary'])
     expect(fake.smartMailboxCalls).toBe(1)
   })
 
-  it('keeps messagePageClient as a compatibility wrapper over the runtime adapter', async () => {
+  it('keeps messagePageClient as a compatibility wrapper over runtime views', async () => {
     const fake = createFakeRuntimeAdapter()
     fake.queueMessagePage(emptyPage)
     setRuntimeAdapterForTesting(fake)
@@ -225,7 +220,7 @@ describe('runtime adapter facade', () => {
     ).mockResolvedValue(okResult)
 
     try {
-      const result = await runRuntimeMessageCommand({
+      const result = await runtimeMutations.messages.command({
         command,
         messageId: 'm1',
         sourceId: 'primary',
@@ -248,8 +243,8 @@ describe('runtime adapter facade', () => {
     )
 
     try {
-      expect(await fetchRuntimeConversation('c1')).toBe(conversation)
-      expect(await fetchRuntimeMessage('m1', 'primary')).toBe(detail)
+      expect(await runtimeViews.mail.conversation('c1')).toBe(conversation)
+      expect(await runtimeViews.mail.message('m1', 'primary')).toBe(detail)
       expect(conversationSpy).toHaveBeenCalledWith('c1')
       expect(messageSpy).toHaveBeenCalledWith('m1', 'primary')
     } finally {
@@ -265,7 +260,7 @@ describe('runtime adapter facade', () => {
       const request = {
         calls: [{ id: 'accounts', op: 'Account/list' as const }],
       }
-      const result = await runtimeRead(request)
+      const result = await runtimeViews.mail.read(request)
 
       expect(result).toEqual({ results: {} })
       expect(readSpy).toHaveBeenCalledWith(request)
@@ -280,7 +275,7 @@ describe('runtime adapter facade', () => {
     )
 
     try {
-      const result = await fetchRuntimeMessagePage({
+      const result = await runtimeViews.mail.messagePage({
         scope: { kind: 'source-mailbox', sourceId: 'primary', mailboxId: null },
         query: 'subject:test',
         cursor: 'cursor-1',
