@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { MessageCommand } from '../../api/types'
-import { runRuntimeMessageCommand } from '../../runtime/adapter'
+import { runtimeMutations } from '../../runtime/mutations'
 import {
   invalidateMessageMutationReadModels,
   invalidateMessageScopeReadModels,
@@ -116,7 +116,7 @@ export async function runOperationInternal(input: {
         ? [{ kind: 'destroy' } as MessageCommand]
         : diffMutableState(before, after)
       for (const command of commands) {
-        const result = await runRuntimeMessageCommand({
+        const result = await runtimeMutations.messages.command({
           command,
           messageId: target.messageId,
           sourceId: target.sourceId,

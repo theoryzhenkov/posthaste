@@ -11,10 +11,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { MessageSummary, SourceMessageRef } from '../api/types'
 import { mailKeys, mergeConversationView } from '../mailState'
-import {
-  fetchRuntimeConversation,
-  fetchRuntimeMessage,
-} from '../runtime/adapter'
+import { runtimeViews } from '../runtime/views'
 import { MessageAttachments } from './message-detail/MessageAttachments'
 import { MessageBody } from './message-detail/MessageBody'
 import { MessageHeader } from './message-detail/MessageHeader'
@@ -61,7 +58,7 @@ export function MessageDetail({
     queryKey: selection
       ? mailKeys.conversation(selection.conversationId)
       : [...mailKeys.conversationRoot, null],
-    queryFn: () => fetchRuntimeConversation(selection!.conversationId),
+    queryFn: () => runtimeViews.mail.conversation(selection!.conversationId),
     enabled: selection !== null,
   })
 
@@ -76,7 +73,7 @@ export function MessageDetail({
       ? mailKeys.message(selection.sourceId, selection.messageId)
       : [...mailKeys.messageRoot, null, null],
     queryFn: () =>
-      fetchRuntimeMessage(selection!.messageId, selection!.sourceId),
+      runtimeViews.mail.message(selection!.messageId, selection!.sourceId),
     enabled: selection !== null,
   })
 

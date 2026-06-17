@@ -9,12 +9,7 @@ import {
   settingsCategorySurface,
   type SettingsSurfaceDescriptor,
 } from '../../surfaces'
-import {
-  deleteRuntimeAccount,
-  disableRuntimeAccount,
-  enableRuntimeAccount,
-} from '../../runtime/accounts'
-import { triggerRuntimeSync } from '../../runtime/adapter'
+import { runtimeMutations } from '../../runtime/mutations'
 
 export function useAccountCommandMutation(input: {
   accounts: AccountOverview[]
@@ -35,15 +30,15 @@ export function useAccountCommandMutation(input: {
     }) => {
       switch (action) {
         case 'enable':
-          return enableRuntimeAccount(account.id)
+          return runtimeMutations.accounts.enable(account.id)
         case 'disable':
-          return disableRuntimeAccount(account.id)
+          return runtimeMutations.accounts.disable(account.id)
         case 'delete':
-          return deleteRuntimeAccount(account.id)
+          return runtimeMutations.accounts.delete(account.id)
         case 'sync':
-          return triggerRuntimeSync({ sourceId: account.id })
+          return runtimeMutations.accounts.sync({ sourceId: account.id })
         case 'repairMetadata':
-          return triggerRuntimeSync({
+          return runtimeMutations.accounts.sync({
             sourceId: account.id,
             mode: 'fullMetadata',
           })

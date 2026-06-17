@@ -6,7 +6,7 @@ import type {
   SmartMailboxRule,
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
-import { previewRuntimeAutomationRule } from '../../../runtime/adapter'
+import { runtimeMutations } from '../../../runtime/mutations'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
 import { SelectItem } from '../../ui/select'
@@ -53,7 +53,7 @@ export function AutomationRuleEditor({
       condition: SmartMailboxRule
     }) => ({
       key: input.key,
-      preview: await previewRuntimeAutomationRule({
+      preview: await runtimeMutations.settings.previewAutomationRule({
         condition: input.condition,
         limit: 5,
       }),

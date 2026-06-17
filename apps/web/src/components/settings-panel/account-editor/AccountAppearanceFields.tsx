@@ -8,7 +8,7 @@ import {
 import { useMutation } from '@tanstack/react-query'
 
 import type { AccountOverview } from '../../../api/types'
-import { updateRuntimeAccount } from '../../../runtime/accounts'
+import { runtimeMutations } from '../../../runtime/mutations'
 import { AccountMark } from '../../AccountMark'
 import { buildAccountAppearanceInput } from '../helpers'
 import { FeedbackBanner, Field } from '../shared'
@@ -37,7 +37,7 @@ export function AccountAppearanceFields({
   )
   const saveAppearanceMutation = useMutation({
     mutationFn: () =>
-      updateRuntimeAccount(accountId!, {
+      runtimeMutations.accounts.update(accountId!, {
         appearance: buildAccountAppearanceInput(form),
       }),
     onSuccess: async (account) => {

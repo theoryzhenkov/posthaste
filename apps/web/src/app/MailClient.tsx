@@ -27,11 +27,8 @@ import { mailKeys, type MailSelection } from '@/mailState'
 import { useOperations } from '@/operationsContext'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
-import {
-  fetchRuntimeAccounts,
-  fetchRuntimeMessage,
-  triggerRuntimeSync,
-} from '@/runtime/adapter'
+import { runtimeMutations } from '@/runtime/mutations'
+import { runtimeViews } from '@/runtime/views'
 import { prepareServerSearchQuery } from '@/searchQuery'
 import { type SurfaceDescriptor } from '@/surfaces'
 import { MailClientView } from './MailClientView'
@@ -80,7 +77,7 @@ export function MailClient({
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchRuntimeAccounts,
+    queryFn: runtimeViews.accounts.list,
     enabled: false,
   })
   const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
@@ -123,7 +120,7 @@ export function MailClient({
       ? mailKeys.message(selectedMessage.sourceId, selectedMessage.messageId)
       : [...mailKeys.messageRoot, null, null],
     queryFn: () =>
-      fetchRuntimeMessage(
+      runtimeViews.mail.message(
         selectedMessage!.messageId,
         selectedMessage!.sourceId,
       ),
@@ -290,7 +287,8 @@ function useDesktopCloseRequest(
 
 function useSyncSourceMutation() {
   return useMutation({
-    mutationFn: (sourceId: string) => triggerRuntimeSync({ sourceId }),
+    mutationFn: (sourceId: string) =>
+      runtimeMutations.accounts.sync({ sourceId }),
     onSuccess: async (_result, sourceId) => {
       await invalidateSyncStartedReadModels(queryClient, sourceId)
       toast('Sync started')
