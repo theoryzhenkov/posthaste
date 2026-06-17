@@ -39,6 +39,9 @@ export type AccountUpdateCall = {
 export type EventSubscriptionCall = {
   request: RuntimeEventSubscriptionRequest
 }
+export type OAuthStartCall = Omit<StartProviderOAuthInput, 'clientSecret'> & {
+  hasClientSecret: boolean
+}
 export type MessageDetailCall = { messageId: string; sourceId: string }
 export type ResourceCall = { descriptor: RuntimeResourceDescriptor }
 
@@ -60,7 +63,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly messageCalls: MessageDetailCall[]
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
   readonly messagePageCalls: RuntimeMessagePageRequest[]
-  readonly oauthStartCalls: StartProviderOAuthInput[]
+  readonly oauthStartCalls: OAuthStartCall[]
   readonly readCalls: ReadRequest[]
   readonly resourceCalls: ResourceCall[]
   readonly smartMailboxCalls: number
@@ -110,7 +113,7 @@ export type FakeCallRecords = {
   messageCalls: MessageDetailCall[]
   messageCommandCalls: RuntimeMessageCommandRequest[]
   messagePageCalls: RuntimeMessagePageRequest[]
-  oauthStartCalls: StartProviderOAuthInput[]
+  oauthStartCalls: OAuthStartCall[]
   readCalls: ReadRequest[]
   resourceCalls: ResourceCall[]
   syncCalls: RuntimeTriggerSyncRequest[]

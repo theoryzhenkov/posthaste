@@ -37,6 +37,8 @@ export function setupDomEnvironment(): void {
   afterAll(async () => {
     activeDomSuites -= 1
     if (activeDomSuites === 0 && registeredByTestHarness) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      if (activeDomSuites !== 0 || !registeredByTestHarness) return
       registeredByTestHarness = false
       await GlobalRegistrator.unregister()
     }
