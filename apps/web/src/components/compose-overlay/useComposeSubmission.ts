@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import type { Recipient, ReplyContext, SendMessageInput } from '@/api/types'
 import type { ComposeIntent } from '@/composeIntent'
 import { invalidateComposeSendReadModels } from '@/domainCache'
-import { sendRuntimeMessage } from '@/runtime/adapter'
+import { runtimeMutations } from '@/runtime/mutations'
 
 import {
   buildSendInput,
@@ -39,7 +39,7 @@ export function useComposeSubmission({
   const queryClient = useQueryClient()
   const sendMutation = useMutation({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
-      sendRuntimeMessage(variables),
+      runtimeMutations.messages.send(variables),
     onSuccess: async (_result, variables) => {
       await invalidateComposeSendReadModels(queryClient, variables.sourceId)
       toast('Message sent')

@@ -16,11 +16,7 @@ import type {
   TagSummary,
 } from './api/types'
 import { queryKeys } from './queryKeys'
-import {
-  fetchRuntimeMailboxes,
-  fetchRuntimeSmartMailboxes,
-  runtimeRead,
-} from './runtime/adapter'
+import { runtimeViews } from './runtime/views'
 
 export interface MailboxNavigationSource {
   id: string
@@ -57,7 +53,7 @@ export function useMailNavigationReadBootstrap() {
   return useQuery({
     queryKey: queryKeys.mailNavigationRead,
     queryFn: async () => {
-      const response = await runtimeRead({
+      const response = await runtimeViews.mail.read({
         calls: [
           { id: 'accounts', op: 'Account/list' },
           {
@@ -146,7 +142,7 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
   const mailboxQueries = useQueries({
     queries: enabledAccounts.map((account) => ({
       queryKey: queryKeys.mailboxes(account.id),
-      queryFn: () => fetchRuntimeMailboxes(account.id),
+      queryFn: () => runtimeViews.mail.mailboxes(account.id),
       enabled: bootstrapQuery.isSuccess,
       staleTime: 30_000,
     })),
@@ -154,7 +150,7 @@ export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
 
   const smartMailboxesQuery = useQuery({
     queryKey: queryKeys.smartMailboxes,
-    queryFn: fetchRuntimeSmartMailboxes,
+    queryFn: runtimeViews.smartMailboxes.list,
     enabled: bootstrapQuery.isSuccess,
     staleTime: 30_000,
   })

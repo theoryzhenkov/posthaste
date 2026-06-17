@@ -5,10 +5,8 @@ import { useState, type ReactNode } from 'react'
 import type { ProviderKind } from '../../../api/types'
 import { providerOAuthClientCredentials } from '../../../config/oauthProviders'
 import { openExternalUrl } from '../../../desktop'
-import {
-  fetchRuntimeOAuthRedirectUri,
-  startRuntimeProviderOAuth,
-} from '../../../runtime/accounts'
+import { runtimeMutations } from '../../../runtime/mutations'
+import { runtimeViews } from '../../../runtime/views'
 import { Button } from '../../ui/button'
 import { SettingsPageHeader } from '../shared'
 
@@ -39,11 +37,11 @@ export function AccountSetupChoice({ onManual }: { onManual: () => void }) {
           `${providerLabel(provider)} OAuth client ID is not configured`,
         )
       }
-      const session = await startRuntimeProviderOAuth({
+      const session = await runtimeMutations.oauth.startProvider({
         provider,
         clientId,
         clientSecret: credentials?.clientSecret,
-        redirectUri: fetchRuntimeOAuthRedirectUri(),
+        redirectUri: runtimeViews.oauth.redirectUri(),
       })
       try {
         await openExternalUrl(session.authorizationUrl)

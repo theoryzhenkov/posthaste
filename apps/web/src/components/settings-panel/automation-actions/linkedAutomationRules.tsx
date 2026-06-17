@@ -9,7 +9,7 @@ import type {
 } from '../../../api/types'
 import type { AutomationRuleDraft } from '../../../automationRules'
 import { ruleToDraft } from '../../../automationRules'
-import { patchRuntimeSettings } from '../../../runtime/adapter'
+import { runtimeMutations } from '../../../runtime/mutations'
 import {
   isDraftComplete,
   removeRule,
@@ -87,7 +87,8 @@ export function LinkedAutomationRuleFields({
     itemsFromSettings(settings),
   )
   const persistMutation = useMutation({
-    mutationFn: (input: Partial<AppSettings>) => patchRuntimeSettings(input),
+    mutationFn: (input: Partial<AppSettings>) =>
+      runtimeMutations.settings.patch(input),
     onSuccess: async (savedSettings) => {
       setItems(itemsFromSettings(savedSettings))
       await onSaved(savedSettings)

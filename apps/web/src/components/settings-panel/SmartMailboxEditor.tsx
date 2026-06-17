@@ -15,10 +15,7 @@ import type {
   SmartMailboxSummary,
   UpdateSmartMailboxInput,
 } from '../../api/types'
-import {
-  createRuntimeSmartMailbox,
-  updateRuntimeSmartMailbox,
-} from '../../runtime/adapter'
+import { runtimeMutations } from '../../runtime/mutations'
 import { Button } from '../ui/button'
 import { SmartMailboxAutomationFields } from './AutomationActionsEditor'
 import { EMPTY_SMART_MAILBOX_FORM, formFromSmartMailbox } from './helpers'
@@ -94,7 +91,7 @@ export function SmartMailboxEditor({
           position: currentForm.position,
           rule: currentForm.rule,
         }
-        return createRuntimeSmartMailbox(payload)
+        return runtimeMutations.smartMailboxes.create(payload)
       }
 
       const payload: UpdateSmartMailboxInput = {
@@ -102,7 +99,7 @@ export function SmartMailboxEditor({
         position: currentForm.position,
         rule: currentForm.rule,
       }
-      return updateRuntimeSmartMailbox(editorTarget, payload)
+      return runtimeMutations.smartMailboxes.update(editorTarget, payload)
     },
     onSuccess: async (smartMailbox) => {
       setErrorMessage(null)

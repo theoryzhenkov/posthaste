@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 
 import { LOG_EVENTS } from '../logEvents'
 import { syncLogger } from '../logger'
-import { fetchRuntimeResourceBlob } from '../runtime/adapter'
+import { runtimeResources } from '../runtime/resources'
 import type { RuntimeResourceDescriptor } from '../runtime/types'
 
 export interface RuntimeResourceObjectUrl {
@@ -74,7 +74,7 @@ export function useRuntimeResourceObjectUrl(
 
     void (async () => {
       try {
-        const blob = await fetchRuntimeResourceBlob(target, {
+        const blob = await runtimeResources.blob(target, {
           signal: controller.signal,
         })
         if (controller.signal.aborted) {

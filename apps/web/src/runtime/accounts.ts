@@ -7,58 +7,59 @@ import type {
   UpdateAccountInput,
   VerificationResponse,
 } from '../api/types'
-import { getRuntimeAdapter } from './adapter'
+import { runtimeMutations } from './mutations'
+import { runtimeViews } from './views'
 
 export function fetchRuntimeAccount(
   accountId: string,
 ): Promise<AccountOverview> {
-  return getRuntimeAdapter().fetchAccount(accountId)
+  return runtimeViews.accounts.detail(accountId)
 }
 
 export function createRuntimeAccount(
   input: CreateAccountInput,
 ): Promise<AccountOverview> {
-  return getRuntimeAdapter().createAccount(input)
+  return runtimeMutations.accounts.create(input)
 }
 
 export function updateRuntimeAccount(
   accountId: string,
   input: UpdateAccountInput,
 ): Promise<AccountOverview> {
-  return getRuntimeAdapter().updateAccount(accountId, input)
+  return runtimeMutations.accounts.update(accountId, input)
 }
 
 export function uploadRuntimeAccountLogo(
   accountId: string,
   file: File,
 ): Promise<AccountOverview> {
-  return getRuntimeAdapter().uploadAccountLogo(accountId, file)
+  return runtimeMutations.accounts.uploadLogo(accountId, file)
 }
 
 export function verifyRuntimeAccount(
   accountId: string,
 ): Promise<VerificationResponse> {
-  return getRuntimeAdapter().verifyAccount(accountId)
+  return runtimeMutations.accounts.verify(accountId)
 }
 
 export function enableRuntimeAccount(accountId: string): Promise<OkResponse> {
-  return getRuntimeAdapter().enableAccount(accountId)
+  return runtimeMutations.accounts.enable(accountId)
 }
 
 export function disableRuntimeAccount(accountId: string): Promise<OkResponse> {
-  return getRuntimeAdapter().disableAccount(accountId)
+  return runtimeMutations.accounts.disable(accountId)
 }
 
 export function deleteRuntimeAccount(accountId: string): Promise<OkResponse> {
-  return getRuntimeAdapter().deleteAccount(accountId)
+  return runtimeMutations.accounts.delete(accountId)
 }
 
 export function fetchRuntimeOAuthRedirectUri(): string {
-  return getRuntimeAdapter().fetchOAuthRedirectUri()
+  return runtimeViews.oauth.redirectUri()
 }
 
 export function startRuntimeProviderOAuth(
   input: StartProviderOAuthInput,
 ): Promise<StartOAuthResponse> {
-  return getRuntimeAdapter().startProviderOAuth(input)
+  return runtimeMutations.oauth.startProvider(input)
 }

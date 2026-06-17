@@ -11,7 +11,7 @@ import type {
   KnownMailboxRole,
   Mailbox,
 } from '../../api/types'
-import { patchRuntimeMailbox } from '../../runtime/adapter'
+import { runtimeMutations } from '../../runtime/mutations'
 import { invalidateAccountReadModels } from '../../domainCache'
 import { isKnownMailboxRole, renderMailboxRoleIcon } from '../../mailboxRoles'
 import { queryKeys } from '../../queryKeys'
@@ -54,7 +54,7 @@ export function SourceMailboxEditor({
   const queryClient = useQueryClient()
   const roleMutation = useMutation({
     mutationFn: (role: KnownMailboxRole | null) =>
-      patchRuntimeMailbox(account.id, mailbox.id, { role }),
+      runtimeMutations.mailboxes.patch(account.id, mailbox.id, { role }),
     onSuccess: (nextMailboxes) => {
       queryClient.setQueryData(queryKeys.mailboxes(account.id), nextMailboxes)
       invalidateAccountReadModels(queryClient, account.id)
