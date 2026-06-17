@@ -5,11 +5,11 @@ import {
   resetActiveConnectionForTesting,
 } from '../src/connection/runtime'
 import {
-  fetchRuntimeResourceBlob,
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
 } from '../src/runtime/adapter'
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
+import { runtimeResources } from '../src/runtime/resources'
 
 const originalFetch = globalThis.fetch
 
@@ -27,7 +27,7 @@ describe('runtime resource adapter', () => {
     setRuntimeAdapterForTesting(fake)
 
     const resource = { kind: 'account-logo' as const, imageId: 'logo-1' }
-    const result = await fetchRuntimeResourceBlob(resource)
+    const result = await runtimeResources.blob(resource)
 
     expect(result).toBe(blob)
     expect(fake.resourceCalls).toEqual([{ descriptor: resource }])
@@ -46,7 +46,7 @@ describe('runtime resource adapter', () => {
       return new Response('bytes', { status: 200 })
     }) as typeof fetch
 
-    const blob = await fetchRuntimeResourceBlob({
+    const blob = await runtimeResources.blob({
       kind: 'message-attachment',
       sourceId: 'src 1',
       messageId: 'msg/2',
