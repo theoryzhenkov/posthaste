@@ -13,7 +13,8 @@ import type {
   AppSettings,
   SmartMailboxSummary,
 } from '../api/types'
-import { fetchRuntimeAccount } from '../runtime/accounts'
+import { runtimeMutations } from '../runtime/mutations'
+import { runtimeViews } from '../runtime/views'
 import {
   applyAccountMutationResult,
   invalidateAccountReadModels,
@@ -21,15 +22,6 @@ import {
 } from '../domainCache'
 import { cn } from '../lib/utils'
 import { queryKeys } from '../queryKeys'
-import {
-  deleteRuntimeSmartMailbox,
-  fetchRuntimeSettings,
-  fetchRuntimeSmartMailbox,
-  fetchRuntimeSmartMailboxes,
-  patchRuntimeSettings,
-  resetRuntimeDefaultSmartMailboxes,
-  updateRuntimeSmartMailbox,
-} from '../runtime/adapter'
 import {
   accountSettingsSurface,
   newAccountSettingsSurface,
@@ -109,11 +101,11 @@ export function SettingsPanel({
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
-    queryFn: fetchRuntimeSettings,
+    queryFn: runtimeViews.settings.current,
   })
   const smartMailboxListQuery = useQuery({
     queryKey: queryKeys.smartMailboxes,
-    queryFn: fetchRuntimeSmartMailboxes,
+    queryFn: runtimeViews.smartMailboxes.list,
   })
 
   const effectiveEditorTarget = editorTarget
@@ -123,7 +115,7 @@ export function SettingsPanel({
       : effectiveEditorTarget
   const accountQuery = useQuery({
     queryKey: queryKeys.account(editorAccountId),
-    queryFn: () => fetchRuntimeAccount(editorAccountId!),
+    queryFn: () => runtimeViews.accounts.detail(editorAccountId!),
     enabled: editorAccountId !== null,
   })
   const editingAccount =
@@ -142,7 +134,7 @@ export function SettingsPanel({
       : effectiveSmartMailboxTarget
   const smartMailboxQuery = useQuery({
     queryKey: queryKeys.smartMailbox(editingSmartMailboxId),
-    queryFn: () => fetchRuntimeSmartMailbox(editingSmartMailboxId!),
+    queryFn: () => runtimeViews.smartMailboxes.detail(editingSmartMailboxId!),
     enabled: editingSmartMailboxId !== null,
   })
   const editingSmartMailbox =
@@ -179,7 +171,7 @@ export function SettingsPanel({
 
   const defaultMutation = useMutation({
     mutationFn: (accountId: string | null) =>
-      patchRuntimeSettings({ defaultAccountId: accountId }),
+      runtimeMutations.settings.patch({ defaultAccountId: accountId }),
     onSuccess: async () => {
       invalidateAccountReadModels(queryClient)
     },
@@ -264,19 +256,21 @@ export function SettingsPanel({
             settings: currentSettings(),
             smartMailboxId: mailboxId,
           })
-          await deleteRuntimeSmartMailbox(mailboxId)
+          await runtimeMutations.smartMailboxes.delete(mailboxId)
           await invalidateSmartMailboxQueries()
           onNavigate(settingsCategorySurface('mailboxes'))
         }}
         onReorderSmartMailbox={(mailbox: SmartMailboxSummary, position) => {
           void runSmartMailboxAction(`reorder:${mailbox.id}`, async () => {
-            await updateRuntimeSmartMailbox(mailbox.id, { position })
+            await runtimeMutations.smartMailboxes.update(mailbox.id, {
+              position,
+            })
             await invalidateSmartMailboxQueries(mailbox.id)
           })
         }}
         onResetSmartMailboxes={() => {
           void runSmartMailboxAction('reset-defaults', async () => {
-            await resetRuntimeDefaultSmartMailboxes()
+            await runtimeMutations.smartMailboxes.resetDefaults()
             await invalidateSmartMailboxQueries()
             onNavigate(settingsCategorySurface('mailboxes'))
           })

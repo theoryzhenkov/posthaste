@@ -6,7 +6,7 @@ import {
   rewriteSmartMailboxLinkedRules,
 } from '../../automationRules'
 import { queryKeys } from '../../queryKeys'
-import { patchRuntimeSettings } from '../../runtime/adapter'
+import { runtimeMutations } from '../../runtime/mutations'
 
 export async function rewriteLinkedSmartMailboxAutomation(input: {
   queryClient: QueryClient
@@ -31,7 +31,7 @@ export async function rewriteLinkedSmartMailboxAutomation(input: {
   ) {
     return
   }
-  const savedSettings = await patchRuntimeSettings({
+  const savedSettings = await runtimeMutations.settings.patch({
     automationRules,
     automationDrafts,
   })
@@ -61,7 +61,7 @@ export async function removeLinkedSmartMailboxAutomation(input: {
   ) {
     return
   }
-  const savedSettings = await patchRuntimeSettings({
+  const savedSettings = await runtimeMutations.settings.patch({
     automationRules,
     automationDrafts,
   })

@@ -12,7 +12,7 @@ import {
 import { useComposeIntent } from '@/hooks/useComposeIntent'
 import { useEmailActions } from '@/hooks/useEmailActions'
 import { replaceFocusedSurface } from '@/hooks/useSurfaceRouting'
-import { fetchRuntimeAccounts } from '@/runtime/adapter'
+import { runtimeViews } from '@/runtime/views'
 import { AttachmentSurface } from './AttachmentSurface'
 import { ComposeOverlay } from './ComposeOverlay'
 import { MessageDetail } from './MessageDetail'
@@ -37,7 +37,7 @@ export function FocusedSurface({
   const selectedMessage = surface.kind === 'message' ? surface.params : null
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
-    queryFn: fetchRuntimeAccounts,
+    queryFn: runtimeViews.accounts.list,
     enabled: surface.kind === 'settings',
   })
   const actions = useEmailActions()

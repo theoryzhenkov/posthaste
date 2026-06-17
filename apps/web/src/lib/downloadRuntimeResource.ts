@@ -6,7 +6,7 @@
  */
 import { LOG_EVENTS } from '../logEvents'
 import { syncLogger } from '../logger'
-import { fetchRuntimeResourceBlob } from '../runtime/adapter'
+import { runtimeResources } from '../runtime/resources'
 import type { RuntimeResourceDescriptor } from '../runtime/types'
 
 export async function downloadRuntimeResource(
@@ -14,7 +14,7 @@ export async function downloadRuntimeResource(
   filename: string,
 ): Promise<void> {
   try {
-    const blob = await fetchRuntimeResourceBlob(resource)
+    const blob = await runtimeResources.blob(resource)
     const objectUrl = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = objectUrl

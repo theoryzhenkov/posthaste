@@ -18,7 +18,7 @@ import { LOG_EVENTS } from '../logEvents'
 import type { DomainEvent } from '../api/types'
 import { applyDomainEvent } from '../domainCache'
 import { shouldSuppressLocalEcho } from '../mailState'
-import { subscribeRuntimeEvents } from '../runtime/adapter'
+import { runtimeSubscriptions } from '../runtime/subscriptions'
 
 /** `sessionStorage` key for the last processed event sequence number. */
 const EVENT_CURSOR_STORAGE_KEY = 'mail:last-event-seq'
@@ -47,7 +47,7 @@ export function useDaemonEvents() {
   useEffect(() => {
     const storedSeq = window.sessionStorage.getItem(EVENT_CURSOR_STORAGE_KEY)
     const afterSeq = storedSeq ? Number.parseInt(storedSeq, 10) : null
-    const unsubscribe = subscribeRuntimeEvents(
+    const unsubscribe = runtimeSubscriptions.events(
       { afterSeq: Number.isFinite(afterSeq) ? afterSeq : null },
       {
         onEvent(payload) {

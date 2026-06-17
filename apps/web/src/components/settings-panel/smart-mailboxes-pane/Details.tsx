@@ -6,7 +6,7 @@ import type {
   SmartMailboxSummary,
 } from '../../../api/types'
 import { queryKeys } from '../../../queryKeys'
-import { fetchRuntimeMailboxes } from '../../../runtime/adapter'
+import { runtimeViews } from '../../../runtime/views'
 import { SmartMailboxEditor } from '../SmartMailboxEditor'
 import { SourceMailboxEditor } from '../SourceMailboxEditor'
 import { FeedbackBanner } from '../shared'
@@ -82,7 +82,7 @@ export function SourceMailboxDetail({
     accounts.find((candidate) => candidate.id === target.accountId) ?? null
   const mailboxesQuery = useQuery({
     queryKey: queryKeys.mailboxes(target.accountId),
-    queryFn: () => fetchRuntimeMailboxes(target.accountId),
+    queryFn: () => runtimeViews.mail.mailboxes(target.accountId),
     enabled: account !== null,
   })
   const mailboxes = mailboxesQuery.data ?? []

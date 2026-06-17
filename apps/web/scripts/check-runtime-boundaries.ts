@@ -85,6 +85,14 @@ function isApiClientModule(modulePath: string): boolean {
   return /(?:^|\/)api\/client(?:\/|$)/.test(modulePath)
 }
 
+function isRuntimeCompatibilityModule(modulePath: string): boolean {
+  const normalized = modulePath.replaceAll('\\', '/')
+  return (
+    normalized.endsWith('/runtime/accounts') ||
+    normalized.endsWith('/runtime/adapter')
+  )
+}
+
 function importViolations(source: string): Violation[] {
   const violations: Violation[] = []
   const namedImportPattern =
@@ -93,6 +101,8 @@ function importViolations(source: string): Violation[] {
     /import\s+\*\s+as\s+\w+\s+from\s*['"]([^'"]*api\/client(?:\/[^'"]*)?)['"]/g
   const defaultImportPattern =
     /import\s+\w+\s+from\s*['"]([^'"]*api\/client(?:\/[^'"]*)?)['"]/g
+  const runtimeAdapterImportPattern =
+    /import\s+(?:type\s+)?[\s\S]*?\s+from\s*['"]([^'"]+)['"]/g
 
   for (const match of source.matchAll(namedImportPattern)) {
     const importList = match[1] ?? ''
@@ -122,6 +132,17 @@ function importViolations(source: string): Violation[] {
     })
   }
 
+  for (const match of source.matchAll(runtimeAdapterImportPattern)) {
+    const modulePath = match[1] ?? ''
+    if (!isRuntimeCompatibilityModule(modulePath)) {
+      continue
+    }
+    violations.push({
+      line: lineNumberAt(source, match.index ?? 0),
+      symbol: 'runtime compatibility import',
+    })
+  }
+
   return violations
 }
 
@@ -135,8 +156,8 @@ for (const file of visit(sourceRoot)) {
   for (const violation of violations) {
     failed = true
     console.error(
-      `${rel}:${violation.line}: ${violation.symbol} is a migrated mail runtime operation. ` +
-        `Import it through src/runtime/adapter.ts; only ${allowedHttpBridge} may wrap api/client transport.`,
+      `${rel}:${violation.line}: ${violation.symbol} crosses the runtime boundary directly. ` +
+        `Use src/runtime intent facades; only ${allowedHttpBridge} may wrap api/client transport.`,
     )
   }
 }

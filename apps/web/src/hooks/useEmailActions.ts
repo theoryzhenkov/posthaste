@@ -34,7 +34,7 @@ import {
 } from '../operations'
 import { useOperations } from '../operationsContext'
 import { queryKeys } from '../queryKeys'
-import { fetchRuntimeMailboxes } from '../runtime/adapter'
+import { runtimeViews } from '../runtime/views'
 import type { SourceMessageRef } from '../api/types'
 
 /** Message reference augmented with optional keyword fields for optimistic patching. */
@@ -148,7 +148,7 @@ async function resolveRoleMailboxId(
   const mailboxes =
     queryClient.getQueryData<Mailbox[]>(queryKeys.mailboxes(sourceId)) ??
     (await queryClient.ensureQueryData({
-      queryFn: () => fetchRuntimeMailboxes(sourceId),
+      queryFn: () => runtimeViews.mail.mailboxes(sourceId),
       queryKey: queryKeys.mailboxes(sourceId),
     }))
   return requiredMailboxByRole(mailboxes, sourceId, role).id

@@ -8,11 +8,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import type { AccountOverview, VerificationResponse } from '../../api/types'
-import {
-  createRuntimeAccount,
-  updateRuntimeAccount,
-  verifyRuntimeAccount,
-} from '../../runtime/accounts'
+import { runtimeMutations } from '../../runtime/mutations'
 import { AccountMark } from '../AccountMark'
 import { Button } from '../ui/button'
 import {
@@ -85,8 +81,10 @@ export function AccountEditor({
   const saveMutation = useMutation({
     mutationFn: async (currentForm: AccountFormState) => {
       return editorModel.kind === 'new'
-        ? createRuntimeAccount(buildCreateAccountPayload(currentForm))
-        : updateRuntimeAccount(
+        ? runtimeMutations.accounts.create(
+            buildCreateAccountPayload(currentForm),
+          )
+        : runtimeMutations.accounts.update(
             editorModel.account.id,
             buildUpdateAccountPayload(currentForm, editorModel),
           )
@@ -108,7 +106,8 @@ export function AccountEditor({
   })
 
   const verifyMutation = useMutation({
-    mutationFn: (accountId: string) => verifyRuntimeAccount(accountId),
+    mutationFn: (accountId: string) =>
+      runtimeMutations.accounts.verify(accountId),
     onSuccess: async (result) => {
       setVerification(result)
       setErrorMessage(null)

@@ -1,5 +1,5 @@
 import type { MessagePage } from './api/types'
-import { fetchRuntimeMessagePage } from './runtime/adapter'
+import { runtimeViews } from './runtime/views'
 import type {
   RuntimeMessagePageRequest,
   RuntimeMessagePageScope,
@@ -14,6 +14,6 @@ export interface MessagePageClient {
 
 export const messagePageClient: MessagePageClient = {
   fetchPage(req) {
-    return fetchRuntimeMessagePage(req)
+    return runtimeViews.mail.messagePage(req)
   },
 }

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type React from 'react'
 import type { AutomationAction, Mailbox } from '../../../api/types'
 import { queryKeys } from '../../../queryKeys'
-import { fetchRuntimeMailboxes } from '../../../runtime/adapter'
+import { runtimeViews } from '../../../runtime/views'
 import { Button } from '../../ui/button'
 import { Input } from '../../ui/input'
 import {
@@ -204,7 +204,7 @@ function MailboxSelect({
 }) {
   const mailboxesQuery = useQuery({
     queryKey: queryKeys.mailboxes(accountId),
-    queryFn: () => fetchRuntimeMailboxes(accountId),
+    queryFn: () => runtimeViews.mail.mailboxes(accountId),
     enabled: staticMailboxes === null && accountId.trim().length > 0,
   })
   const mailboxes = staticMailboxes ?? mailboxesQuery.data ?? []
