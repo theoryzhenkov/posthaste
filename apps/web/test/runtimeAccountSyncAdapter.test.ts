@@ -147,6 +147,7 @@ describe('runtime account and sync adapter', () => {
         provider: 'gmail',
         clientId: 'client-1',
         redirectUri: fetchRuntimeOAuthRedirectUri(),
+        hasClientSecret: false,
       },
     ])
   })

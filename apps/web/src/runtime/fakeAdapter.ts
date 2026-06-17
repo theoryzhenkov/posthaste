@@ -200,7 +200,12 @@ export function createFakeRuntimeAdapter(
       return unsupported('send message result')
     },
     startProviderOAuth(oauthInput) {
-      calls.oauthStartCalls.push(oauthInput)
+      calls.oauthStartCalls.push({
+        provider: oauthInput.provider,
+        clientId: oauthInput.clientId,
+        redirectUri: oauthInput.redirectUri,
+        hasClientSecret: Boolean(oauthInput.clientSecret),
+      })
       return resolveQueuedOptional(
         queues.oauthStartResponses,
         input?.defaultOAuthStartResponse,
