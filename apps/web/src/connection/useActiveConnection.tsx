@@ -33,7 +33,11 @@ import {
 } from './connectionContext'
 import { resolveActiveConnection } from './resolve'
 import { applyResolvedConnection } from './runtime'
-import { clientStore, defaultConnectionsFile } from './store'
+import {
+  clientStore,
+  defaultConnectionsFile,
+  validateConnectionsFileForStorage,
+} from './store'
 import { type ConnectionProfile, type ConnectionsFile } from './types'
 
 function makeProfileId(): string {
@@ -95,8 +99,8 @@ export function ActiveConnectionProvider({
   }, [resolveAndApply])
 
   const persist = useCallback(async (next: ConnectionsFile) => {
-    setFile(next)
     await clientStore().saveConnections(next)
+    setFile(next)
   }, [])
 
   const addProfile = useCallback(
@@ -110,14 +114,25 @@ export function ActiveConnectionProvider({
         hostHeader: input.hostHeader,
         tokenRef: input.mode === 'remote' ? id : undefined,
       }
-      if (input.mode === 'remote' && input.token) {
-        await clientStore().setToken(id, input.token)
-      }
-      await persist({
+      const next: ConnectionsFile = {
         version: 1,
         activeProfileId: id,
         profiles: [...file.profiles, profile],
-      })
+      }
+      validateConnectionsFileForStorage(next)
+      let tokenStored = false
+      if (input.mode === 'remote' && input.token) {
+        await clientStore().setToken(id, input.token)
+        tokenStored = true
+      }
+      try {
+        await persist(next)
+      } catch (error) {
+        if (tokenStored) {
+          await clientStore().deleteToken(id)
+        }
+        throw error
+      }
       await resolveAndApply()
     },
     [file.profiles, persist, resolveAndApply],
