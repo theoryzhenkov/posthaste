@@ -22,12 +22,13 @@ use std::path::PathBuf;
 
 use keyring::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tauri::{AppHandle, Manager, Runtime};
 
 /// Keyring service name for client-held per-profile remote tokens. Kept
 /// distinct from the daemon's `posthaste` service so client and daemon secrets
 /// never collide.
-const CLIENT_KEYRING_SERVICE: &str = "posthaste-client";
+pub(crate) const CLIENT_KEYRING_SERVICE: &str = "posthaste-client";
 
 /// File name of the client connection-profile store.
 const CONNECTIONS_FILE: &str = "connections.json";
@@ -92,6 +93,208 @@ pub fn client_connections_read<R: Runtime>(app: AppHandle<R>) -> Result<Option<S
     }
 }
 
+fn is_allowed_connections_file_key(key: &str) -> bool {
+    matches!(key, "version" | "activeProfileId" | "profiles")
+}
+
+fn is_allowed_connection_profile_key(key: &str) -> bool {
+    matches!(
+        key,
+        "id" | "name" | "baseUrl" | "hostHeader" | "mode" | "tokenRef"
+    )
+}
+
+fn percent_decode_ascii_once(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3]) {
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    decoded.push(byte as char);
+                    index += 3;
+                    continue;
+                }
+            }
+        }
+        decoded.push(bytes[index] as char);
+        index += 1;
+    }
+    decoded
+}
+
+fn percent_decode_ascii(value: &str) -> (String, bool) {
+    let mut current = value.to_string();
+    for _ in 0..8 {
+        let decoded = percent_decode_ascii_once(&current);
+        if decoded == current {
+            return (current, true);
+        }
+        current = decoded;
+    }
+    (current, false)
+}
+
+fn contains_secret_marker(value: &str) -> bool {
+    let (decoded, stable) = percent_decode_ascii(value);
+    if !stable {
+        return true;
+    }
+    let normalized = decoded
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    [
+        "token",
+        "secret",
+        "password",
+        "credential",
+        "authorization",
+        "authheader",
+        "bearer",
+        "apikey",
+        "privatekey",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn is_inline_secret_field(key: &str) -> bool {
+    key != "tokenRef" && contains_secret_marker(key)
+}
+
+fn object_field<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<Option<&'a Value>, String> {
+    Ok(object.get(field))
+}
+
+fn string_field(object: &Map<String, Value>, field: &str) -> Result<Option<String>, String> {
+    object
+        .get(field)
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("connection profile field {field} must be a string"))
+        })
+        .transpose()
+}
+
+fn validate_profile_base_url(value: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(value).map_err(|err| format!("invalid profile baseUrl: {err}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("profile baseUrl must use http or https".to_string());
+    }
+    if !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.host_str().is_some_and(contains_secret_marker)
+        || contains_secret_marker(parsed.path())
+    {
+        return Err(
+            "profile baseUrl must not contain credentials, query, fragment, or secret path markers"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_host_header(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.chars().any(char::is_control) || contains_secret_marker(value) {
+        return Err("connection profile hostHeader is unsafe".to_string());
+    }
+    let parsed = url::Url::parse(&format!("http://{value}"))
+        .map_err(|err| format!("invalid connection profile hostHeader: {err}"))?;
+    if parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("connection profile hostHeader must be host[:port]".to_string());
+    }
+    Ok(())
+}
+
+fn validate_connection_profile(value: &Value) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "connection profiles must be objects".to_string())?;
+    for key in object.keys() {
+        if !is_allowed_connection_profile_key(key) || is_inline_secret_field(key) {
+            return Err(format!("connection profile contains unsafe field {key}"));
+        }
+    }
+    let id = string_field(object, "id")?
+        .ok_or_else(|| "connection profile missing required field id".to_string())?;
+    if string_field(object, "name")?.is_none() {
+        return Err("connection profile missing required field name".to_string());
+    }
+    let mode = string_field(object, "mode")?
+        .ok_or_else(|| "connection profile missing required field mode".to_string())?;
+    if !matches!(mode.as_str(), "embedded" | "local-daemon" | "remote") {
+        return Err(format!("connection profile mode {mode:?} is unsupported"));
+    }
+    if let Some(host_header) = string_field(object, "hostHeader")? {
+        validate_host_header(&host_header)?;
+    }
+    if let Some(token_ref) = string_field(object, "tokenRef")? {
+        if token_ref != id {
+            return Err("connection profile tokenRef must match id".to_string());
+        }
+    }
+    if let Some(base_url) = string_field(object, "baseUrl")? {
+        validate_profile_base_url(&base_url)?;
+    }
+    Ok(())
+}
+
+fn validate_connections_value(value: &Value) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "connections.json must be an object".to_string())?;
+    for key in object.keys() {
+        if !is_allowed_connections_file_key(key) || is_inline_secret_field(key) {
+            return Err(format!("connection store contains unsafe field {key}"));
+        }
+    }
+    if object.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err("connection store version must be 1".to_string());
+    }
+    if !matches!(
+        object_field(object, "activeProfileId")?,
+        Some(Value::String(_)) | Some(Value::Null)
+    ) {
+        return Err("connection store activeProfileId must be a string or null".to_string());
+    }
+    let profiles = object
+        .get("profiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "connection store profiles must be an array".to_string())?;
+    for profile in profiles {
+        validate_connection_profile(profile)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn canonical_connections_json(contents: &str) -> Result<String, String> {
+    let value: Value = serde_json::from_str(contents)
+        .map_err(|err| format!("connections.json is not valid JSON: {err}"))?;
+    validate_connections_value(&value)?;
+    serde_json::to_string(&value)
+        .map_err(|err| format!("connections.json could not be serialized: {err}"))
+}
+
+pub(crate) fn validate_connections_json(contents: &str) -> Result<(), String> {
+    canonical_connections_json(contents).map(|_| ())
+}
+
 /// Persist the connection-profile store. The frontend serializes the
 /// `ConnectionsFile` (which holds NO secrets — tokens live in the keyring).
 #[tauri::command]
@@ -99,11 +302,13 @@ pub fn client_connections_write<R: Runtime>(
     app: AppHandle<R>,
     contents: String,
 ) -> Result<(), String> {
+    let safe_contents = canonical_connections_json(&contents)?;
     let dir = client_dir(&app)?;
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
     let path = dir.join(CONNECTIONS_FILE);
-    std::fs::write(&path, contents).map_err(|err| format!("cannot write {}: {err}", path.display()))
+    std::fs::write(&path, safe_contents)
+        .map_err(|err| format!("cannot write {}: {err}", path.display()))
 }
 
 fn client_token_entry(profile_id: &str) -> Result<Entry, String> {
