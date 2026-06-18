@@ -170,6 +170,32 @@ jobs:
           echo "Desktop bundle version: $version"
           node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$version"
 
+      - name: Import Apple Developer certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: tools/release/import-macos-certificate.sh
+
+      - name: Configure App Store Connect API key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY_PRIVATE_KEY }}
+        run: |
+          if [ -z "${APPLE_API_KEY:-}" ] || [ -z "${APPLE_API_KEY_PRIVATE_KEY:-}" ]; then
+            echo "App Store Connect API key is not configured; notarization can still use APPLE_ID credentials if present."
+            exit 0
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s\n' "$APPLE_API_KEY_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
       # Single build (devtools compiled in, gated at runtime); no separate
       # "DevTools" bundle. Build one installer format per OS to keep the release
       # critical path short.
@@ -180,12 +206,24 @@ jobs:
           bun --cwd=apps/web run build
           bun run tauri build --ci --no-sign --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null}}'
 
-      - name: Build ad-hoc signed macOS desktop bundle
+      - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           bun --cwd=apps/web run build
-          bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+          if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
+            echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
+            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"hardenedRuntime":true}}}'
+          else
+            echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
+            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+          fi
 
       - name: Print sccache stats
         if: always()
@@ -275,8 +313,8 @@ jobs:
         shell: bash
         run: |
           cat > release-assets/MACOS-INSTALL.txt <<'EOF'
-          macOS dogfood builds are ad-hoc signed but not notarized.
-          Drag Posthaste.app to Applications. On first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
+          macOS dogfood builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
+          Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
           EOF
 
       - name: Generate checksums
