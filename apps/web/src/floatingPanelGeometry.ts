@@ -16,7 +16,10 @@ export {
   type ResizeResult,
   type ResizeSnapLines,
 } from './floating-panel-geometry/types'
-export { clampPanelOffset, isFiniteOffset } from './floating-panel-geometry/offset'
+export {
+  clampPanelOffset,
+  isFiniteOffset,
+} from './floating-panel-geometry/offset'
 export {
   guideColumns,
   guideRows,

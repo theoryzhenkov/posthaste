@@ -19,11 +19,11 @@ import {
 
 import { cn } from '@/lib/utils'
 
+import { FormatMenuButton } from './markdown-composer/FormatMenuButton'
 import {
   FORMAT_COMMANDS,
-  FormatMenuButton,
   formatSelection,
-} from './markdown-composer/formatting'
+} from './markdown-composer/formattingCommands'
 import {
   composerTheme,
   markdownSyntaxHighlighting,

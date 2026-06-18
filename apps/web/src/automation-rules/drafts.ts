@@ -1,4 +1,8 @@
-import type { AutomationAction, AutomationRule, SmartMailboxRule } from '../api/types'
+import type {
+  AutomationAction,
+  AutomationRule,
+  SmartMailboxRule,
+} from '../api/types'
 import {
   accountScopedCondition,
   cloneRule,

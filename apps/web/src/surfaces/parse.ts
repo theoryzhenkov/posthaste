@@ -52,7 +52,9 @@ export function parseSurfaceRoute(route: string): SurfaceDescriptor | null {
 function parseMessageSurface(
   params: URLSearchParams,
 ): MessageSurfaceDescriptor | null {
-  if (!hasOnlySurfaceParams(params, ['conversationId', 'sourceId', 'messageId'])) {
+  if (
+    !hasOnlySurfaceParams(params, ['conversationId', 'sourceId', 'messageId'])
+  ) {
     return null
   }
   const conversationId = params.get('conversationId')
@@ -71,7 +73,9 @@ function parseMessageSurface(
 function parseAttachmentSurface(
   params: URLSearchParams,
 ): AttachmentSurfaceDescriptor | null {
-  if (!hasOnlySurfaceParams(params, ['sourceId', 'messageId', 'attachmentId'])) {
+  if (
+    !hasOnlySurfaceParams(params, ['sourceId', 'messageId', 'attachmentId'])
+  ) {
     return null
   }
   const sourceId = params.get('sourceId')
@@ -90,7 +94,10 @@ function parseSettingsSurface(
   if (category !== null && !isSettingsSurfaceCategory(category)) {
     return null
   }
-  if (!params.has('targetKind') && !hasOnlySurfaceParams(params, ['category'])) {
+  if (
+    !params.has('targetKind') &&
+    !hasOnlySurfaceParams(params, ['category'])
+  ) {
     return null
   }
   const target = parseSettingsTarget(params)

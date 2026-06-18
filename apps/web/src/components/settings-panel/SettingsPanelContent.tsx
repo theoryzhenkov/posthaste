@@ -10,17 +10,24 @@ import type { SettingsSurfaceDescriptor } from '../../surfaces'
 import { AccountsPane } from './AccountsPane'
 import { AppearancePane } from './AppearancePane'
 import { GeneralPane } from './GeneralPane'
-import { SmartMailboxesPane, type MailboxEditorTarget } from './SmartMailboxesPane'
+import {
+  SmartMailboxesPane,
+  type MailboxEditorTarget,
+} from './SmartMailboxesPane'
 import type { EditorTarget } from './types'
 
 interface SettingsPanelContentProps {
   accounts: AccountOverview[]
   accountCommandError: string | null
   activeCategory: SettingsSurfaceDescriptor['params']['category']
-  commandMutation: UseMutationResult<unknown, Error, {
-    action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata'
-    account: AccountOverview
-  }>
+  commandMutation: UseMutationResult<
+    unknown,
+    Error,
+    {
+      action: 'enable' | 'disable' | 'delete' | 'sync' | 'repairMetadata'
+      account: AccountOverview
+    }
+  >
   defaultAccountId: string | null | undefined
   defaultMutation: UseMutationResult<AppSettings, Error, string | null>
   editingAccount: AccountOverview | null
@@ -41,7 +48,10 @@ interface SettingsPanelContentProps {
   onCreateMailbox: () => void
   onDefaultAccountChange: (accountId: string | null) => void
   onDeletedSmartMailbox: (mailboxId: string) => Promise<void>
-  onReorderSmartMailbox: (mailbox: SmartMailboxSummary, position: number) => void
+  onReorderSmartMailbox: (
+    mailbox: SmartMailboxSummary,
+    position: number,
+  ) => void
   onResetSmartMailboxes: () => void
   onSavedAccount: (account: AccountOverview) => Promise<void>
   onSavedSmartMailbox: (mailbox: SmartMailbox) => Promise<void>

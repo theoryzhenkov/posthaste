@@ -10,11 +10,7 @@ import type { AccountOverview } from '../../api/types'
 import { AccountEditor } from './AccountEditor'
 import { AccountList, AccountsEmptyState } from './accounts-pane/AccountList'
 import { AccountSetupChoice } from './accounts-pane/AccountSetupChoice'
-import {
-  SettingsBackButton,
-  SettingsPage,
-  SettingsPageHeader,
-} from './shared'
+import { SettingsBackButton, SettingsPage, SettingsPageHeader } from './shared'
 import type { EditorTarget } from './types'
 
 export function AccountsPane({

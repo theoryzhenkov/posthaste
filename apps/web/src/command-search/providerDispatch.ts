@@ -57,7 +57,8 @@ export function dispatchProviderSearch(input: {
       }
       if (signal.aborted) return
 
-      const latencyMs = page.latencyMs ?? Math.round(performance.now() - startedAt)
+      const latencyMs =
+        page.latencyMs ?? Math.round(performance.now() - startedAt)
       uiLogger.debug(
         {
           event: LOG_EVENTS.paletteProviderCompleted,

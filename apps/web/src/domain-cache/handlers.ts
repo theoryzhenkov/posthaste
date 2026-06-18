@@ -5,10 +5,7 @@ import { EVENT_TOPICS, isDomainEventTopic } from '../domainVocabulary'
 import type { DomainEventTopic } from '../domainVocabulary'
 import { applyKeywordEventPatch } from '../mailState'
 import { queryKeys } from '../queryKeys'
-import {
-  applyAccountStatusPatch,
-  removeAccountOverview,
-} from './accounts'
+import { applyAccountStatusPatch, removeAccountOverview } from './accounts'
 import {
   invalidateAccountReadModels,
   invalidateAccountRuntimeReadModels,

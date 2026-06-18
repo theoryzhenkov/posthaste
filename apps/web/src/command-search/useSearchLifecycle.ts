@@ -1,4 +1,9 @@
-import { useCallback, useEffect, type Dispatch, type SetStateAction } from 'react'
+import {
+  useCallback,
+  useEffect,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 
 import { LOG_EVENTS } from '@/logEvents'
 import { uiLogger } from '@/logger'

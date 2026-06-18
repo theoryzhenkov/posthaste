@@ -96,7 +96,9 @@ export function ComposeOverlay({
       : intent.kind === 'forward'
         ? 'forward composer'
         : 'message composer'
-  const header = <ComposeHeader fromLabel={fromLabel} intentKind={intent.kind} />
+  const header = (
+    <ComposeHeader fromLabel={fromLabel} intentKind={intent.kind} />
+  )
   const content = (
     <>
       <ComposeFields

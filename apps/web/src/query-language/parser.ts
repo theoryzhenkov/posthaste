@@ -1,8 +1,5 @@
 import { SPACED_VALUE_PREFIXES } from '../queryDefinitions'
-import {
-  isWhitespace,
-  prefixDefinition,
-} from './helpers'
+import { isWhitespace, prefixDefinition } from './helpers'
 import type { QueryValidation } from './types'
 
 export function parseQueryTokens(input: string):

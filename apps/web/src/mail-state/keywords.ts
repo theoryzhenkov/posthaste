@@ -9,10 +9,7 @@ import type {
   SourceMessageRef,
 } from '../api/types'
 import { queryKeys } from '../queryKeys'
-import {
-  getConversationSummary,
-  summarizeConversation,
-} from './conversations'
+import { getConversationSummary, summarizeConversation } from './conversations'
 import { mailKeys } from './keys'
 import { snapshotQuery } from './snapshots'
 import type {
@@ -33,10 +30,9 @@ export function deriveKeywordState(keywords: string[]): KeywordState {
   }
 }
 
-export function replaceMessageKeywords<T extends MessageSummary | MessageDetail>(
-  message: T,
-  keywordState: KeywordState,
-): T {
+export function replaceMessageKeywords<
+  T extends MessageSummary | MessageDetail,
+>(message: T, keywordState: KeywordState): T {
   return {
     ...message,
     isFlagged: keywordState.isFlagged,
@@ -275,4 +271,3 @@ export function mergeMessageDetail(
 
   return true
 }
-

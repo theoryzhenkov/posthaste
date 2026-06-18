@@ -25,10 +25,8 @@ import {
   smartMailboxRulePrefix,
 } from '../../automationRules'
 import { defaultDraft } from './automationRuleHelpers'
-import {
-  LinkedAutomationRuleFields,
-  linkedAutomationRuleItems,
-} from './automation-actions/linkedAutomationRules'
+import { LinkedAutomationRuleFields } from './automation-actions/linkedAutomationRules'
+import { linkedAutomationRuleItems } from './automation-actions/linkedAutomationRuleItems'
 
 export function SmartMailboxAutomationFields({
   accounts,

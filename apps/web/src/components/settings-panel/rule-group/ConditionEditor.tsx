@@ -181,7 +181,9 @@ function ValueEditor({
       {isBooleanField ? (
         <Select
           value={String(Boolean(condition.value))}
-          onValueChange={(value) => onChange({ ...condition, value: value === 'true' })}
+          onValueChange={(value) =>
+            onChange({ ...condition, value: value === 'true' })
+          }
         >
           <SelectTrigger
             aria-label="Value"

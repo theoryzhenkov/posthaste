@@ -168,7 +168,7 @@ function containsUrlPathSecretMarker(value: string): boolean {
     return true
   }
   return decoded
-    .split(/[\/;]/)
+    .split(/[/;]/)
     .map((segment) => segment.replace(/[^a-z0-9]/gi, '').toLowerCase())
     .some(
       (segment) =>
@@ -208,8 +208,18 @@ function isSafeProfileBaseUrl(value: string): boolean {
   return true
 }
 
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const charCode = value.charCodeAt(index)
+    if (charCode <= 0x1f || charCode === 0x7f) {
+      return true
+    }
+  }
+  return false
+}
+
 function isSafeProfileHostHeader(value: string): boolean {
-  if (!value || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (!value || hasControlCharacter(value)) {
     return false
   }
   let parsed: URL

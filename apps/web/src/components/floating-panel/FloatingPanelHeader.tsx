@@ -99,7 +99,9 @@ export function FloatingPanelHeader({
           <button
             type="button"
             aria-pressed={isExpanded}
-            title={isExpanded ? `Restore ${panelLabel}` : `Expand ${panelLabel}`}
+            title={
+              isExpanded ? `Restore ${panelLabel}` : `Expand ${panelLabel}`
+            }
             className={cn(
               'ph-focus-ring flex size-7 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-[color-mix(in_oklab,var(--brand-coral)_11%,transparent)] hover:text-foreground',
               isExpanded &&
