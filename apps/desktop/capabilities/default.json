@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default permissions for Posthaste",
-  "windows": ["main", "settings", "message-*", "attachment-*"],
+  "windows": ["main", "settings", "message-*", "attachment-*", "compose-*"],
   "permissions": [
     "core:default",
     "opener:allow-open-url"
