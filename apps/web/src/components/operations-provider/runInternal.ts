@@ -1,7 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { MessageCommand } from '../../api/types'
+import type { KnownMailboxRole, Mailbox, MessageCommand } from '../../api/types'
 import { runtimeMutations } from '../../runtime/mutations'
+import { runtimeViews } from '../../runtime/views'
 import {
   invalidateMessageMutationReadModels,
   invalidateMessageScopeReadModels,
@@ -24,8 +25,10 @@ import type {
   AppliedOperation,
   MailOperation,
   OperationEntry,
+  OperationKind,
   OperationTarget,
 } from '../../operations'
+import { queryKeys } from '../../queryKeys'
 
 export interface RunOutcome {
   applied: AppliedOperation | null
@@ -34,6 +37,74 @@ export interface RunOutcome {
 
 function neutralState(): MutableState {
   return { keywords: [], mailboxIds: [] }
+}
+
+function requiredMailboxByRole(
+  mailboxes: Mailbox[] | undefined,
+  sourceId: string,
+  role: KnownMailboxRole,
+): string {
+  const mailbox = mailboxes?.find((candidate) => candidate.role === role)
+  if (!mailbox) {
+    throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`)
+  }
+  return mailbox.id
+}
+
+async function resolveRoleMailboxIds(
+  queryClient: QueryClient,
+  operation: MailOperation,
+): Promise<Map<string, string>> {
+  const roleMailboxIds = new Map<string, string>()
+  if (operation.kind !== 'mailbox-role' || !operation.mailboxRole) {
+    return roleMailboxIds
+  }
+  for (const target of operation.targets) {
+    if (roleMailboxIds.has(target.sourceId)) {
+      continue
+    }
+    const mailboxes =
+      queryClient.getQueryData<Mailbox[]>(
+        queryKeys.mailboxes(target.sourceId),
+      ) ??
+      (await queryClient.ensureQueryData({
+        queryFn: () => runtimeViews.mail.mailboxes(target.sourceId),
+        queryKey: queryKeys.mailboxes(target.sourceId),
+      }))
+    roleMailboxIds.set(
+      target.sourceId,
+      requiredMailboxByRole(mailboxes, target.sourceId, operation.mailboxRole),
+    )
+  }
+  return roleMailboxIds
+}
+
+function projectAfter(
+  operation: MailOperation,
+  target: OperationTarget,
+  before: MutableState,
+  roleMailboxIds: Map<string, string>,
+): MutableState {
+  if (operation.kind === 'destroy') {
+    return before
+  }
+  if (operation.kind === 'mailbox-role') {
+    const mailboxId = roleMailboxIds.get(target.sourceId)
+    if (!mailboxId) {
+      throw new Error(
+        `Missing resolved mailbox role for source ${target.sourceId}`,
+      )
+    }
+    return { ...before, mailboxIds: [mailboxId] }
+  }
+  if (!operation.project) {
+    throw new Error(`Operation ${operation.kind} is missing its projector`)
+  }
+  return operation.project(target, before)
+}
+
+function appliedOperationKind(kind: OperationKind): OperationKind {
+  return kind === 'mailbox-role' ? 'mailboxes' : kind
 }
 
 function selectionFor(target: OperationTarget): MailSelection {
@@ -52,6 +123,13 @@ export async function runOperationInternal(input: {
 }): Promise<RunOutcome> {
   const { operation, queryClient, setErrorMessage, setPending } = input
   const destroy = operation.kind === 'destroy'
+  let roleMailboxIds: Map<string, string>
+  try {
+    roleMailboxIds = await resolveRoleMailboxIds(queryClient, operation)
+  } catch (error) {
+    setErrorMessage(error instanceof Error ? error.message : 'Operation failed')
+    return { applied: null, ok: false }
+  }
   const prepared = operation.targets.map((rawTarget) => {
     const conversationId =
       rawTarget.conversationId ??
@@ -61,7 +139,7 @@ export async function runOperationInternal(input: {
     const captured = captureMutableState(queryClient, target)
     const before = captured ?? neutralState()
     return {
-      after: destroy ? before : operation.project(target, before),
+      after: projectAfter(operation, target, before, roleMailboxIds),
       before,
       captured: captured !== null,
       target,
@@ -112,18 +190,37 @@ export async function runOperationInternal(input: {
   setPending(1)
   try {
     for (const { target, before, after } of prepared) {
-      const commands = destroy
-        ? [{ kind: 'destroy' } as MessageCommand]
-        : diffMutableState(before, after)
-      for (const command of commands) {
-        const result = await runtimeMutations.messages.command({
-          command,
+      if (operation.kind === 'mailbox-role') {
+        if (!operation.mailboxRole) {
+          throw new Error('Mailbox role operation is missing its role')
+        }
+        const result = await runtimeMutations.messages.moveToMailboxRole({
           messageId: target.messageId,
+          role: operation.mailboxRole,
           sourceId: target.sourceId,
         })
         recordLocalMutationEvents(result.events)
-        if (!destroy && result.detail && target.conversationId) {
+        if (result.detail && target.conversationId) {
           mergeMessageDetail(queryClient, result.detail, target.conversationId)
+        }
+      } else {
+        const commands = destroy
+          ? [{ kind: 'destroy' } as MessageCommand]
+          : diffMutableState(before, after)
+        for (const command of commands) {
+          const result = await runtimeMutations.messages.command({
+            command,
+            messageId: target.messageId,
+            sourceId: target.sourceId,
+          })
+          recordLocalMutationEvents(result.events)
+          if (!destroy && result.detail && target.conversationId) {
+            mergeMessageDetail(
+              queryClient,
+              result.detail,
+              target.conversationId,
+            )
+          }
         }
       }
       void invalidateMessageMutationReadModels(queryClient, target)
@@ -150,7 +247,7 @@ export async function runOperationInternal(input: {
     ? {
         entries: recordedEntries,
         invertible: true,
-        kind: operation.kind,
+        kind: appliedOperationKind(operation.kind),
         label: operation.label,
         undoLabel: operation.undoLabel,
       }

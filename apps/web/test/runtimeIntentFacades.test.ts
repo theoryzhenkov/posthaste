@@ -62,6 +62,7 @@ describe('runtime intent facades', () => {
     const receivedEvents: DomainEvent[] = []
     fake.queueAccounts([account])
     fake.queueMessageCommandResult({ detail: null, events: [] })
+    fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueResourceBlob(resourceBlob)
     setRuntimeAdapterForTesting(fake)
 
@@ -70,6 +71,11 @@ describe('runtime intent facades', () => {
       sourceId: 'primary',
       messageId: 'm1',
       command: { kind: 'setKeywords', add: ['seen'], remove: [] },
+    })
+    await runtimeMutations.messages.moveToMailboxRole({
+      sourceId: 'primary',
+      messageId: 'm1',
+      role: 'archive',
     })
     expect(
       await runtimeResources.blob({ kind: 'account-logo', imageId: 'logo-1' }),
@@ -88,6 +94,9 @@ describe('runtime intent facades', () => {
         messageId: 'm1',
         command: { kind: 'setKeywords', add: ['seen'], remove: [] },
       },
+    ])
+    expect(fake.messageRoleMoveCalls).toEqual([
+      { sourceId: 'primary', messageId: 'm1', role: 'archive' },
     ])
     expect(fake.resourceCalls).toEqual([
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
