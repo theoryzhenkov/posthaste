@@ -155,11 +155,24 @@ describe('connection secret storage', () => {
   })
 
   it('rejects URL-carried secrets in connection-profile base URLs', async () => {
+    let unstableEncodedPath = '%78'
+    for (let pass = 0; pass < 9; pass += 1) {
+      unstableEncodedPath = unstableEncodedPath.replaceAll('%', '%25')
+    }
+
     for (const baseUrl of [
       'https://user:password@daemon.example.test/v1',
       'https://daemon.example.test/v1?access_token=must-not-be-trusted',
       'https://daemon.example.test/v1?token=must-not-be-trusted',
       'https://daemon.example.test/v1#must-not-be-trusted',
+      'https://daemon.example.test/v1/access_token/must-not-be-trusted',
+      'https://daemon.example.test/v1;access_token=must-not-be-trusted',
+      'https://daemon.example.test/v1/access_%74oken/must-not-be-trusted',
+      'https://daemon.example.test/v1/access_%2574oken/must-not-be-trusted',
+      'https://daemon.example.test/v1/access_%ZZtoken/must-not-be-trusted',
+      'https://daemon.example.test/v1/client_secret/must-not-be-trusted',
+      'https://daemon.example.test/v1/refresh_token/must-not-be-trusted',
+      `https://daemon.example.test/v1/${unstableEncodedPath}`,
     ]) {
       resetClientStoreForTesting()
       window.localStorage.clear()
@@ -183,6 +196,58 @@ describe('connection secret storage', () => {
       expect(loaded).toEqual(defaultConnectionsFile())
       expect(JSON.stringify(loaded)).not.toContain('must-not-be-trusted')
     }
+  })
+
+  it('rejects unsafe connection-profile host headers', async () => {
+    for (const hostHeader of [
+      'Authorization: Bearer must-not-be-trusted',
+      'daemon.example.test\r\nAuthorization: Bearer must-not-be-trusted',
+      'daemon.example.test/path',
+    ]) {
+      resetClientStoreForTesting()
+      window.localStorage.clear()
+      window.localStorage.setItem(
+        'posthaste-connections-v1',
+        JSON.stringify({
+          version: 1,
+          activeProfileId: 'remote-1',
+          profiles: [
+            {
+              id: 'remote-1',
+              name: 'Remote daemon',
+              mode: 'remote',
+              baseUrl: 'https://daemon.example.test/v1',
+              hostHeader,
+              tokenRef: 'remote-1',
+            },
+          ],
+        }),
+      )
+
+      const loaded = await clientStore().loadConnections()
+      expect(loaded).toEqual(defaultConnectionsFile())
+      expect(JSON.stringify(loaded)).not.toContain('must-not-be-trusted')
+    }
+  })
+
+  it('accepts benign authority names that contain secret marker substrings', async () => {
+    const file: ConnectionsFile = {
+      version: 1,
+      activeProfileId: 'remote-1',
+      profiles: [
+        {
+          id: 'remote-1',
+          name: 'Remote daemon',
+          mode: 'remote',
+          baseUrl: 'https://token.example.test/v1',
+          hostHeader: 'token.example.test',
+          tokenRef: 'remote-token-entry',
+        },
+      ],
+    }
+
+    await clientStore().saveConnections(file)
+    expect(await clientStore().loadConnections()).toEqual(file)
   })
 
   it('refuses to save unsafe connection-profile base URLs', async () => {
@@ -224,6 +289,7 @@ describe('connection secret storage', () => {
     await clientStore().saveConnections(file)
     const snapshot = JSON.stringify(localStorageSnapshot())
 
+    expect(await clientStore().loadConnections()).toEqual(file)
     expect(snapshot).toContain('remote-token-entry')
     expect(snapshot).not.toContain('Authorization')
     expect(snapshot).not.toContain('Bearer')
