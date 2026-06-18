@@ -63,6 +63,17 @@ function parseConnectionsFile(raw: string | null): ConnectionsFile {
   return parsed
 }
 
+export function validateConnectionsFileForStorage(file: ConnectionsFile): void {
+  if (!isConnectionsFile(file)) {
+    throw new Error('connection profile store contains unsafe fields')
+  }
+}
+
+function serializedConnectionsFile(file: ConnectionsFile): string {
+  validateConnectionsFileForStorage(file)
+  return JSON.stringify(file)
+}
+
 export interface ClientStore {
   /** Load the connection-profile store (returns the default when none exists). */
   loadConnections(): Promise<ConnectionsFile>
@@ -93,7 +104,7 @@ class WebClientStore implements ClientStore {
     if (typeof localStorage === 'undefined') {
       return
     }
-    localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(file))
+    localStorage.setItem(WEB_STORAGE_KEY, serializedConnectionsFile(file))
   }
 
   // The web build has no secure store. Only the embedded profile exists, whose
@@ -120,7 +131,9 @@ class DesktopClientStore implements ClientStore {
   }
 
   async saveConnections(file: ConnectionsFile): Promise<void> {
-    await writeConnectionsRaw(JSON.stringify(file, null, 2))
+    await writeConnectionsRaw(
+      JSON.stringify(JSON.parse(serializedConnectionsFile(file)), null, 2),
+    )
   }
 
   async getToken(profileId: string): Promise<string | undefined> {
