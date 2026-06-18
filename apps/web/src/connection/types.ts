@@ -114,7 +114,11 @@ function isConnectionProfile(value: unknown): value is ConnectionProfile {
   ) {
     return false
   }
-  if (obj.hostHeader !== undefined && typeof obj.hostHeader !== 'string') {
+  if (
+    obj.hostHeader !== undefined &&
+    (typeof obj.hostHeader !== 'string' ||
+      !isSafeProfileHostHeader(obj.hostHeader))
+  ) {
     return false
   }
   if (obj.tokenRef !== undefined && typeof obj.tokenRef !== 'string') {
@@ -123,14 +127,63 @@ function isConnectionProfile(value: unknown): value is ConnectionProfile {
   return !Object.keys(obj).some(isInlineSecretField)
 }
 
-function isInlineSecretField(key: string): boolean {
-  if (key === 'tokenRef') {
-    return false
+function percentDecodeRepeated(value: string): {
+  decoded: string
+  stable: boolean
+} {
+  let current = value
+  for (let pass = 0; pass < 8; pass += 1) {
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(current)
+    } catch {
+      return { decoded: current, stable: false }
+    }
+    if (decoded === current) {
+      return { decoded, stable: true }
+    }
+    current = decoded
   }
-  const normalized = key.replace(/[^a-z0-9]/gi, '')
+  return { decoded: current, stable: false }
+}
+
+function containsSecretMarker(value: string): boolean {
+  const { decoded, stable } = percentDecodeRepeated(value)
+  if (!stable) {
+    return true
+  }
+  const normalized = decoded.replace(/[^a-z0-9]/gi, '')
   return /(token|secret|password|credential|authorization|authheader|bearer|apikey|privatekey)/i.test(
     normalized,
   )
+}
+
+function isInlineSecretField(key: string): boolean {
+  return key !== 'tokenRef' && containsSecretMarker(key)
+}
+
+function containsUrlPathSecretMarker(value: string): boolean {
+  const { decoded, stable } = percentDecodeRepeated(value)
+  if (!stable) {
+    return true
+  }
+  return decoded
+    .split(/[\/;]/)
+    .map((segment) => segment.replace(/[^a-z0-9]/gi, '').toLowerCase())
+    .some(
+      (segment) =>
+        segment === 'token' ||
+        segment === 'secret' ||
+        segment.includes('token') ||
+        segment.includes('secret') ||
+        segment.includes('authorization') ||
+        segment.includes('authheader') ||
+        segment.includes('bearer') ||
+        segment.includes('apikey') ||
+        segment.includes('privatekey') ||
+        segment.includes('password') ||
+        segment.includes('credential'),
+    )
 }
 
 function isSafeProfileBaseUrl(value: string): boolean {
@@ -140,10 +193,39 @@ function isSafeProfileBaseUrl(value: string): boolean {
   } catch {
     return false
   }
-  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return false
   }
-  return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    containsUrlPathSecretMarker(parsed.pathname)
+  ) {
+    return false
+  }
+  return true
+}
+
+function isSafeProfileHostHeader(value: string): boolean {
+  if (!value || /[\u0000-\u001f\u007f]/.test(value)) {
+    return false
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(`http://${value}`)
+  } catch {
+    return false
+  }
+  return (
+    parsed.hostname.length > 0 &&
+    !parsed.username &&
+    !parsed.password &&
+    parsed.pathname === '/' &&
+    !parsed.search &&
+    !parsed.hash
+  )
 }
 
 function isKnownConnectionProfileField(key: string): boolean {

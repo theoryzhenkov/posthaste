@@ -174,7 +174,6 @@ fn desktop_connection_store_write_validation_rejects_unsafe_host_headers() {
     for host_header in [
         "Authorization: Bearer must-not-be-trusted",
         "daemon.example.test\r\nAuthorization: Bearer must-not-be-trusted",
-        "token.example.test",
         "daemon.example.test/path",
     ] {
         let store = serde_json::json!({
@@ -215,7 +214,8 @@ fn desktop_connection_store_write_validation_rejects_url_carried_secrets() {
         "https://daemon.example.test/v1/access_%74oken/must-not-be-trusted".to_string(),
         "https://daemon.example.test/v1/access_%2574oken/must-not-be-trusted".to_string(),
         "https://daemon.example.test/v1/access_%2525252574oken/must-not-be-trusted".to_string(),
-        "https://token.example.test/v1".to_string(),
+        "https://daemon.example.test/v1/client_secret/must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1/refresh_token/must-not-be-trusted".to_string(),
         format!("https://daemon.example.test/v1/{unstable_encoded_path}"),
     ] {
         let store = serde_json::json!({
@@ -240,7 +240,7 @@ fn desktop_connection_store_write_validation_rejects_url_carried_secrets() {
 }
 
 #[test]
-fn desktop_connection_store_write_validation_rejects_cross_profile_token_refs() {
+fn desktop_connection_store_write_validation_accepts_custom_token_refs() {
     let store = serde_json::json!({
         "version": 1,
         "activeProfileId": "remote-1",
@@ -248,17 +248,14 @@ fn desktop_connection_store_write_validation_rejects_cross_profile_token_refs() 
             "id": "remote-1",
             "name": "Remote daemon",
             "mode": "remote",
-            "baseUrl": "https://daemon.example.test/v1",
-            "tokenRef": "remote-2"
+            "baseUrl": "https://token.example.test/v1",
+            "hostHeader": "token.example.test",
+            "tokenRef": "remote-token-entry"
         }]
     });
 
-    let error = client_connection::validate_connections_json(&store.to_string())
-        .expect_err("cross-profile tokenRef should be rejected");
-    assert!(
-        error.contains("tokenRef"),
-        "expected tokenRef validation error, got: {error}"
-    );
+    client_connection::validate_connections_json(&store.to_string())
+        .expect("custom tokenRef should remain compatible with stored profiles");
 }
 
 #[test]
