@@ -184,17 +184,17 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         env:
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY_PRIVATE_KEY }}
+          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          POSTHASTE_APPLE_API_KEY_PRIVATE_KEY: ${{ secrets.APPLE_API_KEY_PRIVATE_KEY }}
         run: |
-          if [ -z "${APPLE_API_KEY:-}" ] || [ -z "${APPLE_API_KEY_PRIVATE_KEY:-}" ]; then
+          if [ -z "${POSTHASTE_APPLE_API_KEY:-}" ] || [ -z "${POSTHASTE_APPLE_API_KEY_PRIVATE_KEY:-}" ]; then
             echo "App Store Connect API key is not configured; notarization can still use APPLE_ID credentials if present."
             exit 0
           fi
-          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
-          printf '%s\n' "$APPLE_API_KEY_PRIVATE_KEY" > "$key_path"
+          key_path="$RUNNER_TEMP/AuthKey_${POSTHASTE_APPLE_API_KEY}.p8"
+          printf '%s\n' "$POSTHASTE_APPLE_API_KEY_PRIVATE_KEY" > "$key_path"
           chmod 600 "$key_path"
-          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "POSTHASTE_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
       # Single build (devtools compiled in, gated at runtime); no separate
       # "DevTools" bundle. Build one installer format per OS to keep the release
@@ -210,13 +210,48 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          POSTHASTE_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          POSTHASTE_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          POSTHASTE_APPLE_ID: ${{ secrets.APPLE_ID }}
+          POSTHASTE_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          POSTHASTE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          configure_notarization() {
+            unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+
+            if [ -n "${POSTHASTE_APPLE_API_KEY:-}" ] || [ -n "${POSTHASTE_APPLE_API_ISSUER:-}" ] || [ -n "${POSTHASTE_APPLE_API_KEY_PATH:-}" ]; then
+              if [ -n "${POSTHASTE_APPLE_API_KEY:-}" ] && [ -n "${POSTHASTE_APPLE_API_ISSUER:-}" ] && [ -n "${POSTHASTE_APPLE_API_KEY_PATH:-}" ]; then
+                export APPLE_API_KEY="$POSTHASTE_APPLE_API_KEY"
+                export APPLE_API_ISSUER="$POSTHASTE_APPLE_API_ISSUER"
+                export APPLE_API_KEY_PATH="$POSTHASTE_APPLE_API_KEY_PATH"
+                echo "macOS notarization enabled with App Store Connect API key."
+              else
+                echo "Incomplete App Store Connect API key secrets; building signed but not notarized."
+              fi
+              return
+            fi
+
+            team_id="${POSTHASTE_APPLE_TEAM_ID:-}"
+            if [ -z "$team_id" ] && [[ "${APPLE_SIGNING_IDENTITY:-}" =~ \(([A-Z0-9]{3,})\)$ ]]; then
+              team_id="${BASH_REMATCH[1]}"
+            fi
+
+            if [ -n "${POSTHASTE_APPLE_ID:-}" ] || [ -n "${POSTHASTE_APPLE_PASSWORD:-}" ] || [ -n "$team_id" ]; then
+              if [ -n "${POSTHASTE_APPLE_ID:-}" ] && [ -n "${POSTHASTE_APPLE_PASSWORD:-}" ] && [ -n "$team_id" ]; then
+                export APPLE_ID="$POSTHASTE_APPLE_ID"
+                export APPLE_PASSWORD="$POSTHASTE_APPLE_PASSWORD"
+                export APPLE_TEAM_ID="$team_id"
+                echo "macOS notarization enabled with Apple ID credentials."
+              else
+                echo "Incomplete Apple ID notarization secrets; building signed but not notarized."
+              fi
+            else
+              echo "No macOS notarization credentials configured; building signed but not notarized."
+            fi
+          }
+
           bun --cwd=apps/web run build
+          configure_notarization
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
             bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"hardenedRuntime":true}}}'

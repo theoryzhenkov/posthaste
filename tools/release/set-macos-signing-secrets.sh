@@ -13,6 +13,7 @@ Optional env:
   APPLE_CERTIFICATE_PASSWORD  p12 export password; prompted if omitted
   KEYCHAIN_PASSWORD           CI keychain password; generated if omitted
   APPLE_SIGNING_IDENTITY      Exact codesigning identity if the p12 has more than one
+  GH_REPO                     GitHub owner/repo; defaults to origin
 EOF
 }
 
@@ -47,6 +48,17 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
+repo="${GH_REPO:-}"
+origin_url=""
+if [ -z "$repo" ]; then
+  origin_url="$(git config --get remote.origin.url || true)"
+  repo="$(printf '%s' "$origin_url" | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')"
+fi
+if [ -z "$repo" ] || [ "$repo" = "$origin_url" ]; then
+  echo "ERROR: cannot determine GitHub repository; set GH_REPO=owner/repo." >&2
+  exit 1
+fi
+
 if [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
   printf 'p12 export password: ' >&2
   read -rs APPLE_CERTIFICATE_PASSWORD
@@ -62,15 +74,15 @@ if [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
   KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
 fi
 
-openssl base64 -A -in "$p12_path" | gh secret set APPLE_CERTIFICATE
-printf '%s' "$APPLE_CERTIFICATE_PASSWORD" | gh secret set APPLE_CERTIFICATE_PASSWORD
-printf '%s' "$KEYCHAIN_PASSWORD" | gh secret set KEYCHAIN_PASSWORD
+openssl base64 -A -in "$p12_path" | gh secret set -R "$repo" APPLE_CERTIFICATE
+printf '%s' "$APPLE_CERTIFICATE_PASSWORD" | gh secret set -R "$repo" APPLE_CERTIFICATE_PASSWORD
+printf '%s' "$KEYCHAIN_PASSWORD" | gh secret set -R "$repo" KEYCHAIN_PASSWORD
 
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-  printf '%s' "$APPLE_SIGNING_IDENTITY" | gh secret set APPLE_SIGNING_IDENTITY
+  printf '%s' "$APPLE_SIGNING_IDENTITY" | gh secret set -R "$repo" APPLE_SIGNING_IDENTITY
 fi
 
-echo "Configured APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD secrets."
+echo "Configured APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD secrets for $repo."
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   echo "Configured APPLE_SIGNING_IDENTITY secret."
 else
