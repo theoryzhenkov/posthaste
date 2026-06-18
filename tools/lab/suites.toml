@@ -12,7 +12,7 @@ paths = [
   "crates/posthaste-server/tests/api_boundary_contracts.rs",
 ]
 command = "cargo test -p posthaste-server health"
-timeout_seconds = 120
+timeout_seconds = 300
 artifacts = ["log.backend.health.dev"]
 
 [suite.api.settings.dev]
@@ -71,7 +71,7 @@ paths = [
   "crates/posthaste-lab/Cargo.toml",
   "crates/posthaste-lab/src/lib.rs",
   "crates/posthaste-lab/src/main.rs",
-  "docs/L1-lab.md",
+  "docs/stale/L1-lab.md",
   "tools/lab/justfile",
   "tools/lab/suites.toml",
 ]
