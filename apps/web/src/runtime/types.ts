@@ -27,6 +27,7 @@ import type {
   StartProviderOAuthInput,
   SyncMode,
   Identity,
+  KnownMailboxRole,
   UpdateAccountInput,
   UpdateSmartMailboxInput,
   VerificationResponse,
@@ -109,6 +110,12 @@ export interface RuntimeSendMessageRequest {
   input: SendMessageInput
 }
 
+export interface RuntimeMoveMessageToMailboxRoleRequest {
+  sourceId: string
+  messageId: string
+  role: KnownMailboxRole
+}
+
 export interface RuntimeEventHandlers {
   onEvent(event: DomainEvent): void
   onMalformedFrame?(input: { raw: string; error: unknown }): void
@@ -164,6 +171,9 @@ export interface RuntimeAdapter {
   resetDefaultSmartMailboxes(): Promise<SmartMailboxSummary[]>
   runMessageCommand(
     request: RuntimeMessageCommandRequest,
+  ): Promise<MessageCommandResult>
+  moveMessageToMailboxRole(
+    request: RuntimeMoveMessageToMailboxRoleRequest,
   ): Promise<MessageCommandResult>
   sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
   startProviderOAuth(

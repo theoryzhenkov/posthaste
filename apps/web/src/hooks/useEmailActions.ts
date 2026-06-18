@@ -13,10 +13,9 @@
  * @spec docs/L1-ui#undo-system
  */
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import type {
   KnownMailboxRole,
-  Mailbox,
   MessageDetail,
   MessageSummary,
 } from '../api/types'
@@ -28,13 +27,11 @@ import {
 import { deriveKeywordState, mailKeys, type MailSelection } from '../mailState'
 import {
   destroyOp,
-  moveToMailboxOp,
+  moveToMailboxRoleOp,
   setKeywordsOp,
   type OperationTarget,
 } from '../operations'
 import { useOperations } from '../operationsContext'
-import { queryKeys } from '../queryKeys'
-import { runtimeViews } from '../runtime/views'
 import type { SourceMessageRef } from '../api/types'
 
 /** Message reference augmented with optional keyword fields for optimistic patching. */
@@ -46,18 +43,6 @@ type FlagToggleTarget = MailSelection &
 
 /** Return type of {@link useEmailActions}. */
 export type EmailActions = ReturnType<typeof useEmailActions>
-
-function requiredMailboxByRole(
-  mailboxes: Mailbox[] | undefined,
-  sourceId: string,
-  role: KnownMailboxRole,
-) {
-  const mailbox = mailboxes?.find((candidate) => candidate.role === role)
-  if (!mailbox) {
-    throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`)
-  }
-  return mailbox
-}
 
 function toSourceMessageRef(
   message: SourceMessageRef | MessageSummary | MailSelection,
@@ -140,20 +125,6 @@ function uniqueUserTags(tags: string[]): string[] {
   return unique
 }
 
-async function resolveRoleMailboxId(
-  queryClient: ReturnType<typeof useQueryClient>,
-  sourceId: string,
-  role: KnownMailboxRole,
-): Promise<string> {
-  const mailboxes =
-    queryClient.getQueryData<Mailbox[]>(queryKeys.mailboxes(sourceId)) ??
-    (await queryClient.ensureQueryData({
-      queryFn: () => runtimeViews.mail.mailboxes(sourceId),
-      queryKey: queryKeys.mailboxes(sourceId),
-    }))
-  return requiredMailboxByRole(mailboxes, sourceId, role).id
-}
-
 /**
  * Build an {@link OperationTarget} for a keyword action from a message that
  * already carries its conversation id (list rows and selections both do), so
@@ -180,7 +151,6 @@ function keywordTarget(
 export function useEmailActions() {
   const queryClient = useQueryClient()
   const operations = useOperations()
-  const [resolveError, setResolveError] = useState<string | null>(null)
 
   const moveToRole = useCallback(
     (
@@ -189,23 +159,10 @@ export function useEmailActions() {
       label: string,
       undoLabel?: string,
     ) => {
-      void (async () => {
-        try {
-          const mailboxId = await resolveRoleMailboxId(
-            queryClient,
-            target.sourceId,
-            role,
-          )
-          // conversationId is left for the runner to resolve once.
-          operations.run(moveToMailboxOp(target, mailboxId, label, undoLabel))
-        } catch (error) {
-          setResolveError(
-            error instanceof Error ? error.message : 'Move failed',
-          )
-        }
-      })()
+      // conversationId is left for the runner to resolve once.
+      operations.run(moveToMailboxRoleOp(target, role, label, undoLabel))
     },
-    [operations, queryClient],
+    [operations],
   )
 
   const runKeywords = useCallback(
@@ -270,10 +227,9 @@ export function useEmailActions() {
       // conversationId is left for the runner to resolve once.
       operations.run(destroyOp(target, 'Permanently deleted')),
     clearError: () => {
-      setResolveError(null)
       operations.clearError()
     },
-    errorMessage: resolveError ?? operations.errorMessage,
+    errorMessage: operations.errorMessage,
     isPending: operations.isPending,
   }
 }

@@ -14,11 +14,15 @@
  *
  * @spec docs/L1-ui#undo-system
  */
-import type { SourceMessageRef } from './api/types'
+import type { KnownMailboxRole, SourceMessageRef } from './api/types'
 import type { MutableState } from './mailState'
 
 /** Which facet of a message an operation changes. */
-export type OperationKind = 'keywords' | 'mailboxes' | 'destroy'
+export type OperationKind =
+  | 'keywords'
+  | 'mailboxes'
+  | 'mailbox-role'
+  | 'destroy'
 
 /** A single message target, with its conversation id when known. */
 export type OperationTarget = SourceMessageRef & { conversationId?: string }
@@ -34,8 +38,10 @@ export type OperationTarget = SourceMessageRef & { conversationId?: string }
 export interface MailOperation {
   kind: OperationKind
   targets: OperationTarget[]
-  /** Project a target's current state to its desired next state. */
-  project: (target: OperationTarget, current: MutableState) => MutableState
+  /** Runtime-owned mailbox role intent for `mailbox-role` operations. */
+  mailboxRole?: KnownMailboxRole
+  /** Project a target's current state to its desired next state when local. */
+  project?: (target: OperationTarget, current: MutableState) => MutableState
   /** Toast copy shown after the operation runs (e.g. "Message archived"). */
   label: string
   /** Undo-button copy; defaults to "Undo". */
@@ -70,7 +76,7 @@ export function targetKey(target: SourceMessageRef): string {
 function projectToRecorded(
   applied: AppliedOperation,
   facet: 'before' | 'after',
-): MailOperation['project'] {
+): NonNullable<MailOperation['project']> {
   const byKey = new Map(
     applied.entries.map((entry) => [targetKey(entry.target), entry[facet]]),
   )
@@ -135,6 +141,22 @@ export function moveToMailboxOp(
     kind: 'mailboxes',
     targets: [target],
     project: (_target, current) => ({ ...current, mailboxIds: [mailboxId] }),
+    label,
+    undoLabel,
+  }
+}
+
+/** Move the target by runtime mailbox-role intent; the runner resolves legacy ids. */
+export function moveToMailboxRoleOp(
+  target: OperationTarget,
+  role: KnownMailboxRole,
+  label: string,
+  undoLabel?: string,
+): MailOperation {
+  return {
+    kind: 'mailbox-role',
+    mailboxRole: role,
+    targets: [target],
     label,
     undoLabel,
   }

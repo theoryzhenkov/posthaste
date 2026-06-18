@@ -8,10 +8,11 @@ import {
 } from '@tanstack/react-query'
 
 import { OperationsProvider } from '../src/components/OperationsProvider'
-import { moveToMailboxOp } from '../src/operations'
+import { moveToMailboxOp, moveToMailboxRoleOp } from '../src/operations'
 import { useOperations } from '../src/operationsContext'
 import { queryKeys } from '../src/queryKeys'
 import type {
+  Mailbox,
   MessageCommandResult,
   MessagePage,
   MessageSummary,
@@ -30,6 +31,10 @@ setupDomEnvironment()
 
 const okResult: MessageCommandResult = { detail: null, events: [] }
 let runtimeAdapter: FakeRuntimeAdapter
+
+function mailbox(id: string, role: string | null): Mailbox {
+  return { id, name: id, role, totalEmails: 0, unreadEmails: 0 }
+}
 
 function messageSummary(
   overrides: Partial<MessageSummary> = {},
@@ -143,6 +148,37 @@ describe('operation runner', () => {
       command: { kind: 'replaceMailboxes', mailboxIds: ['inbox'] },
     })
     await waitFor(() => expect(result.current.canRedo).toBe(true))
+  })
+
+  it('submits role moves as runtime intent while resolving legacy ids only for local optimism', async () => {
+    runtimeAdapter.queueMailboxes([
+      mailbox('inbox', 'inbox'),
+      mailbox('archive', 'archive'),
+    ])
+    seedView(inboxView, [messageSummary({ mailboxIds: ['inbox'] })])
+    const { result } = renderHook(() => useOperations(), { wrapper })
+
+    await act(async () => {
+      result.current.run(
+        moveToMailboxRoleOp(
+          { sourceId: 'primary', messageId: 'm1' },
+          'archive',
+          'Message archived',
+        ),
+      )
+    })
+
+    await waitFor(() =>
+      expect(runtimeAdapter.messageRoleMoveCalls.length).toBe(1),
+    )
+    expect(runtimeAdapter.messageRoleMoveCalls[0]).toEqual({
+      messageId: 'm1',
+      role: 'archive',
+      sourceId: 'primary',
+    })
+    expect(runtimeAdapter.messageCommandCalls).toEqual([])
+    expect(runtimeAdapter.mailboxCalls).toEqual(['primary'])
+    await waitFor(() => expect(result.current.canUndo).toBe(true))
   })
 
   it('two rapid undos revert distinct entries to their own before-images', async () => {

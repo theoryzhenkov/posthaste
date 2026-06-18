@@ -45,7 +45,7 @@ import {
   verifyAccount,
 } from '../api/client'
 
-import type { DomainEvent } from '../api/types'
+import type { DomainEvent, KnownMailboxRole, Mailbox } from '../api/types'
 
 import type {
   RuntimeAdapter,
@@ -65,6 +65,18 @@ function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
 }
 
 class FatalStreamError extends Error {}
+
+function requiredMailboxByRole(
+  mailboxes: Mailbox[],
+  sourceId: string,
+  role: KnownMailboxRole,
+): Mailbox {
+  const mailbox = mailboxes.find((candidate) => candidate.role === role)
+  if (!mailbox) {
+    throw new Error(`Missing mailbox with role ${role} for source ${sourceId}`)
+  }
+  return mailbox
+}
 
 function resourceUrl(resource: RuntimeResourceDescriptor): string {
   switch (resource.kind) {
@@ -242,6 +254,15 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   runMessageCommand({ command, messageId, sourceId }) {
     return performMessageCommand(messageId, command, sourceId)
+  },
+  async moveMessageToMailboxRole({ messageId, role, sourceId }) {
+    const mailboxes = await fetchMailboxes(sourceId)
+    const mailbox = requiredMailboxByRole(mailboxes, sourceId, role)
+    return performMessageCommand(
+      messageId,
+      { kind: 'replaceMailboxes', mailboxIds: [mailbox.id] },
+      sourceId,
+    )
   },
   resetDefaultSmartMailboxes() {
     return resetDefaultSmartMailboxes()
