@@ -316,6 +316,7 @@ pub(crate) fn canonical_connections_json(contents: &str) -> Result<String, Strin
         .map_err(|err| format!("connections.json could not be serialized: {err}"))
 }
 
+#[cfg(test)]
 pub(crate) fn validate_connections_json(contents: &str) -> Result<(), String> {
     canonical_connections_json(contents).map(|_| ())
 }
