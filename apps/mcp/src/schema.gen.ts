@@ -461,7 +461,7 @@ export interface paths {
         };
         /**
          * List smart mailbox conversations
-         * @description Returns a paginated page of conversation summaries matching a smart mailbox rule, optionally narrowed by a search query.
+         * @description Returns a paginated page of conversation-grouped rows matching a smart mailbox query, optionally narrowed by a search query.
          */
         get: operations["list_smart_mailbox_conversations"];
         put?: never;
@@ -481,7 +481,7 @@ export interface paths {
         };
         /**
          * List smart mailbox messages
-         * @description Returns a paginated page of message summaries matching a smart mailbox rule, optionally narrowed by a search query.
+         * @description Returns a paginated page of message summaries matching a smart mailbox query, optionally narrowed by a search query.
          */
         get: operations["list_smart_mailbox_messages"];
         put?: never;
@@ -1451,15 +1451,7 @@ export interface components {
          * @enum {string}
          */
         ProviderHint: "generic" | "gmail" | "outlook" | "icloud";
-        /**
-         * @description Provider family independent of the account driver/protocol.
-         *
-         *     `AccountDriver` selects the runtime protocol. `ProviderKind` selects the
-         *     vendor/family policy applied within that protocol.
-         *
-         *     @spec docs/L0-providers#driver-model
-         * @enum {string}
-         */
+        /** @enum {string} */
         ProviderKind: "generic" | "gmail" | "outlook" | "icloud";
         /**
          * @description Current state of the push notification transport for an account.
@@ -1601,17 +1593,25 @@ export interface components {
             password?: string | null;
         };
         /**
-         * @description Request payload for sending a new email via `EmailSubmission/set`.
+         * @description File attachment payload for an outgoing compose request.
          *
-         *     @spec docs/L1-jmap#methods-used
+         *     The frontend sends base64 content to the daemon; the provider adapter uploads
+         *     or embeds the bytes using the transport-native attachment path before send.
+         *
+         *     @spec docs/L1-compose#attachment-handling
          */
         SendMessageAttachment: {
             contentBase64: string;
             filename: string;
             mimeType: string;
         };
+        /**
+         * @description Request payload for sending a new email via `EmailSubmission/set`.
+         *
+         *     @spec docs/L1-jmap#methods-used
+         */
         SendMessageRequest: {
-            attachments: components["schemas"]["SendMessageAttachment"][];
+            attachments?: components["schemas"]["SendMessageAttachment"][];
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
@@ -1666,7 +1666,7 @@ export interface components {
          *     @spec docs/L1-accounts#condition-fields-and-operators
          * @enum {string}
          */
-        SmartMailboxField: "sourceId" | "sourceName" | "messageId" | "threadId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "subject" | "preview" | "receivedAt";
+        SmartMailboxField: "sourceId" | "sourceName" | "messageId" | "threadId" | "conversationId" | "mailboxId" | "mailboxName" | "mailboxRole" | "isRead" | "isFlagged" | "hasAttachment" | "keyword" | "fromName" | "fromEmail" | "subject" | "preview" | "receivedAt";
         /**
          * @description Boolean group node containing child conditions or nested groups.
          *
