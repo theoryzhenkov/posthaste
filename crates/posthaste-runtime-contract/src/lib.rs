@@ -622,129 +622,6 @@ impl From<ServiceError> for RuntimeError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use posthaste_domain::StoreError;
-
-    #[test]
-    fn service_error_conversion_preserves_runtime_error_code() {
-        let error = RuntimeError::from(ServiceError::from(StoreError::NotFound(
-            "account missing".to_string(),
-        )));
-
-        assert_eq!(error.envelope().code, RuntimeErrorCode::NotFound);
-    }
-
-    #[test]
-    fn retryable_constructor_marks_retryable_envelope() {
-        let error =
-            RuntimeError::retryable(RuntimeErrorCode::ProviderUnavailable, "gateway unavailable");
-
-        assert!(error.envelope().retryable);
-        assert_eq!(error.envelope().code, RuntimeErrorCode::ProviderUnavailable);
-    }
-
-    #[test]
-    fn mail_list_view_state_serializes_rows_continuation_and_anchor() {
-        let state = MailListViewState {
-            scope: serde_json::json!({ "kind": "sourceMailbox", "sourceId": "primary" }),
-            projection_kind: MailListProjectionKind::Message,
-            sort: serde_json::json!({ "field": "date", "direction": "desc" }),
-            window_request: serde_json::json!({ "limit": 50 }),
-            rows: vec![MailListRowState {
-                row_key: "primary:m1".to_string(),
-                resource_ref: Some("message:primary:m1".to_string()),
-                projection: serde_json::json!({ "subject": "Subject" }),
-                sort_key: serde_json::json!(["2026-04-28T12:00:00Z", "m1"]),
-                order_key: "0001".to_string(),
-                pending_markers: vec![RuntimeMutationId::new("mutation-1")],
-            }],
-            continuation: MailListContinuation {
-                before_cursor: Some("before-1".to_string()),
-                after_cursor: Some("after-1".to_string()),
-                has_before: true,
-                has_after: true,
-            },
-            read_watermark: Some(ReadWatermark {
-                value: "watermark-1".to_string(),
-            }),
-            coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
-            },
-            known_total_count: Some(1),
-            pending_mutations: vec![RuntimeMutationId::new("mutation-1")],
-            anchor: MailListAnchorState::Kept {
-                row_key: "primary:m1".to_string(),
-            },
-        };
-
-        let serialized = serde_json::to_value(&state).expect("state should serialize");
-        assert_eq!(serialized["rows"][0]["rowKey"], "primary:m1");
-        assert_eq!(serialized["rows"][0]["pendingMarkers"][0], "mutation-1");
-        assert_eq!(serialized["continuation"]["beforeCursor"], "before-1");
-        assert_eq!(serialized["continuation"]["afterCursor"], "after-1");
-        assert_eq!(serialized["readWatermark"]["value"], "watermark-1");
-        assert_eq!(serialized["coverage"]["kind"], "complete");
-        assert_eq!(serialized["pendingMutations"][0], "mutation-1");
-        assert_eq!(serialized["anchor"]["kind"], "kept");
-    }
-
-    #[test]
-    fn mail_list_view_snapshot_carries_complete_runtime_coverage() {
-        let state = MailListViewState {
-            scope: serde_json::json!({ "kind": "sourceMailbox", "sourceId": "primary" }),
-            projection_kind: MailListProjectionKind::Message,
-            sort: serde_json::json!({ "field": "date", "direction": "desc" }),
-            window_request: serde_json::json!({ "limit": 50 }),
-            rows: Vec::new(),
-            continuation: MailListContinuation {
-                before_cursor: None,
-                after_cursor: None,
-                has_before: false,
-                has_after: false,
-            },
-            read_watermark: Some(ReadWatermark {
-                value: "watermark-1".to_string(),
-            }),
-            coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
-            },
-            known_total_count: Some(0),
-            pending_mutations: Vec::new(),
-            anchor: MailListAnchorState::Removed {
-                row_key: "primary:m1".to_string(),
-            },
-        };
-        let snapshot = ViewSnapshot {
-            view_id: ViewId::new("view-1"),
-            descriptor: ViewDescriptor {
-                family: "mailList".to_string(),
-                payload: serde_json::json!({ "sourceId": "primary" }),
-            },
-            revision: ViewRevision::new(1),
-            lifecycle: ViewLifecycle::Ready,
-            read_watermark: Some(ReadWatermark {
-                value: "watermark-1".to_string(),
-            }),
-            coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
-            },
-            data: serde_json::to_value(state).expect("state should serialize"),
-            pending_mutations: Vec::new(),
-            error: None,
-        };
-
-        assert_eq!(snapshot.coverage.kind, RuntimeCoverageKind::Complete);
-        assert_eq!(snapshot.data["continuation"]["hasAfter"], false);
-        assert_eq!(snapshot.data["anchor"]["kind"], "removed");
-        assert_eq!(snapshot.read_watermark.unwrap().value, "watermark-1");
-    }
-}
-
 #[async_trait]
 pub trait RuntimeCore: Send + Sync {
     async fn runtime_status(&self, caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError>;
@@ -972,4 +849,127 @@ pub trait RuntimeCore: Send + Sync {
     ) -> Result<(), RuntimeError>;
 
     async fn reload_config(&self, caller: RuntimeCaller) -> Result<(), RuntimeError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use posthaste_domain::StoreError;
+
+    #[test]
+    fn service_error_conversion_preserves_runtime_error_code() {
+        let error = RuntimeError::from(ServiceError::from(StoreError::NotFound(
+            "account missing".to_string(),
+        )));
+
+        assert_eq!(error.envelope().code, RuntimeErrorCode::NotFound);
+    }
+
+    #[test]
+    fn retryable_constructor_marks_retryable_envelope() {
+        let error =
+            RuntimeError::retryable(RuntimeErrorCode::ProviderUnavailable, "gateway unavailable");
+
+        assert!(error.envelope().retryable);
+        assert_eq!(error.envelope().code, RuntimeErrorCode::ProviderUnavailable);
+    }
+
+    #[test]
+    fn mail_list_view_state_serializes_rows_continuation_and_anchor() {
+        let state = MailListViewState {
+            scope: serde_json::json!({ "kind": "sourceMailbox", "sourceId": "primary" }),
+            projection_kind: MailListProjectionKind::Message,
+            sort: serde_json::json!({ "field": "date", "direction": "desc" }),
+            window_request: serde_json::json!({ "limit": 50 }),
+            rows: vec![MailListRowState {
+                row_key: "primary:m1".to_string(),
+                resource_ref: Some("message:primary:m1".to_string()),
+                projection: serde_json::json!({ "subject": "Subject" }),
+                sort_key: serde_json::json!(["2026-04-28T12:00:00Z", "m1"]),
+                order_key: "0001".to_string(),
+                pending_markers: vec![RuntimeMutationId::new("mutation-1")],
+            }],
+            continuation: MailListContinuation {
+                before_cursor: Some("before-1".to_string()),
+                after_cursor: Some("after-1".to_string()),
+                has_before: true,
+                has_after: true,
+            },
+            read_watermark: Some(ReadWatermark {
+                value: "watermark-1".to_string(),
+            }),
+            coverage: RuntimeCoverage {
+                kind: RuntimeCoverageKind::Complete,
+                details: serde_json::json!({ "authority": true }),
+            },
+            known_total_count: Some(1),
+            pending_mutations: vec![RuntimeMutationId::new("mutation-1")],
+            anchor: MailListAnchorState::Kept {
+                row_key: "primary:m1".to_string(),
+            },
+        };
+
+        let serialized = serde_json::to_value(&state).expect("state should serialize");
+        assert_eq!(serialized["rows"][0]["rowKey"], "primary:m1");
+        assert_eq!(serialized["rows"][0]["pendingMarkers"][0], "mutation-1");
+        assert_eq!(serialized["continuation"]["beforeCursor"], "before-1");
+        assert_eq!(serialized["continuation"]["afterCursor"], "after-1");
+        assert_eq!(serialized["readWatermark"]["value"], "watermark-1");
+        assert_eq!(serialized["coverage"]["kind"], "complete");
+        assert_eq!(serialized["pendingMutations"][0], "mutation-1");
+        assert_eq!(serialized["anchor"]["kind"], "kept");
+    }
+
+    #[test]
+    fn mail_list_view_snapshot_carries_complete_runtime_coverage() {
+        let state = MailListViewState {
+            scope: serde_json::json!({ "kind": "sourceMailbox", "sourceId": "primary" }),
+            projection_kind: MailListProjectionKind::Message,
+            sort: serde_json::json!({ "field": "date", "direction": "desc" }),
+            window_request: serde_json::json!({ "limit": 50 }),
+            rows: Vec::new(),
+            continuation: MailListContinuation {
+                before_cursor: None,
+                after_cursor: None,
+                has_before: false,
+                has_after: false,
+            },
+            read_watermark: Some(ReadWatermark {
+                value: "watermark-1".to_string(),
+            }),
+            coverage: RuntimeCoverage {
+                kind: RuntimeCoverageKind::Complete,
+                details: serde_json::json!({ "authority": true }),
+            },
+            known_total_count: Some(0),
+            pending_mutations: Vec::new(),
+            anchor: MailListAnchorState::Removed {
+                row_key: "primary:m1".to_string(),
+            },
+        };
+        let snapshot = ViewSnapshot {
+            view_id: ViewId::new("view-1"),
+            descriptor: ViewDescriptor {
+                family: "mailList".to_string(),
+                payload: serde_json::json!({ "sourceId": "primary" }),
+            },
+            revision: ViewRevision::new(1),
+            lifecycle: ViewLifecycle::Ready,
+            read_watermark: Some(ReadWatermark {
+                value: "watermark-1".to_string(),
+            }),
+            coverage: RuntimeCoverage {
+                kind: RuntimeCoverageKind::Complete,
+                details: serde_json::json!({ "authority": true }),
+            },
+            data: serde_json::to_value(state).expect("state should serialize"),
+            pending_mutations: Vec::new(),
+            error: None,
+        };
+
+        assert_eq!(snapshot.coverage.kind, RuntimeCoverageKind::Complete);
+        assert_eq!(snapshot.data["continuation"]["hasAfter"], false);
+        assert_eq!(snapshot.data["anchor"]["kind"], "removed");
+        assert_eq!(snapshot.read_watermark.unwrap().value, "watermark-1");
+    }
 }

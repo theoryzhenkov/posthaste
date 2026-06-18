@@ -15,6 +15,7 @@ use posthaste_domain::{
     ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
     SyncTrigger,
 };
+use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes,
@@ -727,7 +728,8 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .await?;
         if let Some(sender) = &request.from {
             if let Err(error) = self.core.store.remember_sender_address(&account_id, sender) {
-                tracing::warn!(
+                ph_warn!(
+                    events::SEND_SENDER_CACHE_UPDATE_FAILED,
                     source_id = %account_id,
                     sender = %sender.email,
                     error = %error,
@@ -741,7 +743,8 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .trigger_account_sync(&account_id, SyncTrigger::Manual)
             .await
         {
-            tracing::warn!(
+            ph_warn!(
+                events::SEND_FOLLOWUP_SYNC_TRIGGER_FAILED,
                 source_id = %account_id,
                 error = %error,
                 "send accepted but follow-up sync trigger failed"

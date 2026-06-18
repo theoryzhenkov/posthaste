@@ -96,7 +96,7 @@ pub async fn start_account_oauth(
         AccountConnectionOverview::ManualCredentials { provider, .. }
         | AccountConnectionOverview::ManagedOAuth { provider, .. } => provider,
     };
-    let profile = OAuthProviderProfile::for_provider(&provider).ok_or_else(|| {
+    let profile = OAuthProviderProfile::for_provider(provider).ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
             ApiErrorCode::InvalidAccount,
