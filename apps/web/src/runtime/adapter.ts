@@ -45,6 +45,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     read: () => reject(),
     resetDefaultSmartMailboxes: () => reject(),
     runMessageCommand: () => reject(),
+    moveMessageToMailboxRole: () => reject(),
     sendMessage: () => reject(),
     startProviderOAuth: () => reject(),
     triggerSync: () => reject(),

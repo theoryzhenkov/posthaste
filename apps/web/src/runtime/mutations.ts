@@ -21,6 +21,7 @@ import type {
 import { getRuntimeAdapter } from './adapter'
 import type {
   RuntimeMessageCommandRequest,
+  RuntimeMoveMessageToMailboxRoleRequest,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
 } from './types'
@@ -71,6 +72,11 @@ export const runtimeMutations = {
       request: RuntimeMessageCommandRequest,
     ): Promise<MessageCommandResult> {
       return getRuntimeAdapter().runMessageCommand(request)
+    },
+    moveToMailboxRole(
+      request: RuntimeMoveMessageToMailboxRoleRequest,
+    ): Promise<MessageCommandResult> {
+      return getRuntimeAdapter().moveMessageToMailboxRole(request)
     },
     send(request: {
       sourceId: string

@@ -22,6 +22,7 @@ import type {
   RuntimeEventSubscriptionRequest,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
+  RuntimeMoveMessageToMailboxRoleRequest,
   RuntimeResourceDescriptor,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
@@ -62,6 +63,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly mailboxCalls: string[]
   readonly messageCalls: MessageDetailCall[]
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
+  readonly messageRoleMoveCalls: RuntimeMoveMessageToMailboxRoleRequest[]
   readonly messagePageCalls: RuntimeMessagePageRequest[]
   readonly oauthStartCalls: OAuthStartCall[]
   readonly readCalls: ReadRequest[]
@@ -112,6 +114,7 @@ export type FakeCallRecords = {
   mailboxCalls: string[]
   messageCalls: MessageDetailCall[]
   messageCommandCalls: RuntimeMessageCommandRequest[]
+  messageRoleMoveCalls: RuntimeMoveMessageToMailboxRoleRequest[]
   messagePageCalls: RuntimeMessagePageRequest[]
   oauthStartCalls: OAuthStartCall[]
   readCalls: ReadRequest[]
@@ -179,6 +182,7 @@ export function createFakeCallRecords(): FakeCallRecords {
     mailboxCalls: [],
     messageCalls: [],
     messageCommandCalls: [],
+    messageRoleMoveCalls: [],
     messagePageCalls: [],
     oauthStartCalls: [],
     readCalls: [],
@@ -199,6 +203,7 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.mailboxCalls.length = 0
   calls.messageCalls.length = 0
   calls.messageCommandCalls.length = 0
+  calls.messageRoleMoveCalls.length = 0
   calls.messagePageCalls.length = 0
   calls.oauthStartCalls.length = 0
   calls.readCalls.length = 0

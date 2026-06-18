@@ -193,6 +193,13 @@ export function createFakeRuntimeAdapter(
         input?.defaultMessageCommandResult ?? defaultMessageCommandResult,
       )
     },
+    moveMessageToMailboxRole(request) {
+      calls.messageRoleMoveCalls.push({ ...request })
+      return resolveQueued(
+        queues.messageCommands,
+        input?.defaultMessageCommandResult ?? defaultMessageCommandResult,
+      )
+    },
     resetDefaultSmartMailboxes() {
       return Promise.resolve([])
     },
