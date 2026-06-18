@@ -62,6 +62,225 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
 }
 
 #[test]
+fn desktop_client_keyring_service_is_distinct_from_daemon_runtime_secrets() {
+    assert_eq!(
+        client_connection::CLIENT_KEYRING_SERVICE,
+        "posthaste-client"
+    );
+    assert_ne!(client_connection::CLIENT_KEYRING_SERVICE, "posthaste");
+}
+
+#[test]
+fn desktop_connection_store_write_validation_rejects_renderer_supplied_secrets() {
+    for extra in [
+        serde_json::json!({ "token": "must-not-be-trusted" }),
+        serde_json::json!({ "metadata": { "authorization": "Bearer must-not-be-trusted" } }),
+    ] {
+        let mut store = serde_json::json!({
+            "version": 1,
+            "activeProfileId": "embedded",
+            "profiles": [{ "id": "embedded", "name": "This computer", "mode": "embedded" }]
+        });
+        store
+            .as_object_mut()
+            .expect("store should be an object")
+            .extend(
+                extra
+                    .as_object()
+                    .expect("extra should be an object")
+                    .clone(),
+            );
+
+        let error = client_connection::validate_connections_json(&store.to_string())
+            .expect_err("unsafe top-level fields should be rejected");
+        assert!(error.contains("unsafe field"), "unexpected error: {error}");
+    }
+
+    for profile_extra in [
+        serde_json::json!({ "token": "must-not-be-trusted" }),
+        serde_json::json!({ "api_key": "must-not-be-trusted" }),
+        serde_json::json!({ "headers": { "Authorization": "Bearer must-not-be-trusted" } }),
+    ] {
+        let mut profile = serde_json::json!({
+            "id": "remote-1",
+            "name": "Remote daemon",
+            "mode": "remote",
+            "baseUrl": "https://daemon.example.test/v1"
+        });
+        profile
+            .as_object_mut()
+            .expect("profile should be an object")
+            .extend(
+                profile_extra
+                    .as_object()
+                    .expect("extra should be an object")
+                    .clone(),
+            );
+        let store = serde_json::json!({
+            "version": 1,
+            "activeProfileId": "remote-1",
+            "profiles": [profile]
+        });
+
+        let error = client_connection::validate_connections_json(&store.to_string())
+            .expect_err("unsafe profile fields should be rejected");
+        assert!(error.contains("unsafe field"), "unexpected error: {error}");
+    }
+}
+
+#[test]
+fn desktop_connection_store_write_validation_rejects_unknown_profile_modes() {
+    let store = serde_json::json!({
+        "version": 1,
+        "activeProfileId": "remote-1",
+        "profiles": [{
+            "id": "remote-1",
+            "name": "Remote daemon",
+            "mode": "magic-daemon",
+            "baseUrl": "https://daemon.example.test/v1"
+        }]
+    });
+
+    let error = client_connection::validate_connections_json(&store.to_string())
+        .expect_err("unknown profile mode should be rejected");
+    assert!(
+        error.contains("unsupported"),
+        "expected unsupported mode error, got: {error}"
+    );
+}
+
+#[test]
+fn desktop_connection_store_canonicalization_drops_duplicate_secret_fields() {
+    let raw = r#"{
+        "version": 1,
+        "activeProfileId": "remote-1",
+        "profiles": [{
+            "id": "remote-1",
+            "name": "Remote daemon",
+            "mode": "remote",
+            "baseUrl": "https://daemon.example.test/v1?access_token=must-not-be-trusted",
+            "baseUrl": "https://daemon.example.test/v1"
+        }]
+    }"#;
+
+    let canonical = client_connection::canonical_connections_json(raw)
+        .expect("validation should canonicalize parsed safe values");
+    assert!(!canonical.contains("must-not-be-trusted"));
+    assert_eq!(canonical.matches("baseUrl").count(), 1);
+}
+
+#[test]
+fn desktop_connection_store_write_validation_rejects_unsafe_host_headers() {
+    for host_header in [
+        "Authorization: Bearer must-not-be-trusted",
+        "daemon.example.test\r\nAuthorization: Bearer must-not-be-trusted",
+        "token.example.test",
+        "daemon.example.test/path",
+    ] {
+        let store = serde_json::json!({
+            "version": 1,
+            "activeProfileId": "remote-1",
+            "profiles": [{
+                "id": "remote-1",
+                "name": "Remote daemon",
+                "mode": "remote",
+                "baseUrl": "https://daemon.example.test/v1",
+                "hostHeader": host_header,
+                "tokenRef": "remote-1"
+            }]
+        });
+
+        let error = client_connection::validate_connections_json(&store.to_string())
+            .expect_err("unsafe hostHeader should be rejected");
+        assert!(
+            error.contains("hostHeader"),
+            "expected hostHeader validation error, got: {error}"
+        );
+    }
+}
+
+#[test]
+fn desktop_connection_store_write_validation_rejects_url_carried_secrets() {
+    let mut unstable_encoded_path = "%78".to_string();
+    for _ in 0..9 {
+        unstable_encoded_path = unstable_encoded_path.replace('%', "%25");
+    }
+
+    for base_url in [
+        "https://user:password@daemon.example.test/v1".to_string(),
+        "https://daemon.example.test/v1?access_token=must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1#must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1/access_token/must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1;access_token=must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1/access_%74oken/must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1/access_%2574oken/must-not-be-trusted".to_string(),
+        "https://daemon.example.test/v1/access_%2525252574oken/must-not-be-trusted".to_string(),
+        "https://token.example.test/v1".to_string(),
+        format!("https://daemon.example.test/v1/{unstable_encoded_path}"),
+    ] {
+        let store = serde_json::json!({
+            "version": 1,
+            "activeProfileId": "remote-1",
+            "profiles": [{
+                "id": "remote-1",
+                "name": "Remote daemon",
+                "mode": "remote",
+                "baseUrl": base_url,
+                "tokenRef": "remote-1"
+            }]
+        });
+
+        let error = client_connection::validate_connections_json(&store.to_string())
+            .expect_err("unsafe baseUrl should be rejected");
+        assert!(
+            error.contains("baseUrl"),
+            "expected baseUrl validation error, got: {error}"
+        );
+    }
+}
+
+#[test]
+fn desktop_connection_store_write_validation_rejects_cross_profile_token_refs() {
+    let store = serde_json::json!({
+        "version": 1,
+        "activeProfileId": "remote-1",
+        "profiles": [{
+            "id": "remote-1",
+            "name": "Remote daemon",
+            "mode": "remote",
+            "baseUrl": "https://daemon.example.test/v1",
+            "tokenRef": "remote-2"
+        }]
+    });
+
+    let error = client_connection::validate_connections_json(&store.to_string())
+        .expect_err("cross-profile tokenRef should be rejected");
+    assert!(
+        error.contains("tokenRef"),
+        "expected tokenRef validation error, got: {error}"
+    );
+}
+
+#[test]
+fn desktop_connection_store_write_validation_accepts_token_refs_only() {
+    let store = serde_json::json!({
+        "version": 1,
+        "activeProfileId": "remote-1",
+        "profiles": [{
+            "id": "remote-1",
+            "name": "Remote daemon",
+            "mode": "remote",
+            "baseUrl": "https://daemon.example.test/v1",
+            "hostHeader": "daemon.example.test",
+            "tokenRef": "remote-1"
+        }]
+    });
+
+    client_connection::validate_connections_json(&store.to_string())
+        .expect("safe tokenRef-only connection store should validate");
+}
+
+#[test]
 fn e2e_playwright_capability_is_local_and_main_window_only() {
     let capability = parse_json_fixture(include_str!("../capabilities/e2e-playwright.json"));
 
