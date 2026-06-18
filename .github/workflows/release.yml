@@ -67,6 +67,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             libssl-dev \
+            mold \
             pkg-config
 
       - name: Build browser-localhost package
@@ -149,6 +150,7 @@ jobs:
             libssl-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
+            mold \
             patchelf \
             wget
 
