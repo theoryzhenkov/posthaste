@@ -1,5 +1,121 @@
 use super::*;
 
+fn json_array_strings(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("{key} should be an array"))
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .unwrap_or_else(|| panic!("{key} entries should be strings"))
+                .to_string()
+        })
+        .collect()
+}
+
+fn parse_json_fixture(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).expect("desktop fixture should parse as JSON")
+}
+
+#[test]
+fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
+    let capability = parse_json_fixture(include_str!("../capabilities/default.json"));
+
+    assert_eq!(
+        capability
+            .get("identifier")
+            .and_then(|value| value.as_str()),
+        Some("default")
+    );
+    assert_eq!(
+        json_array_strings(&capability, "windows"),
+        vec!["main", "settings", "message-*", "attachment-*", "compose-*"]
+    );
+    assert_eq!(
+        json_array_strings(&capability, "permissions"),
+        vec!["core:default", "opener:allow-open-url"]
+    );
+    assert!(
+        capability.get("remote").is_none(),
+        "default capability must not grant permissions to remote origins"
+    );
+
+    let permissions = json_array_strings(&capability, "permissions");
+    let forbidden_prefixes = [
+        "fs:",
+        "shell:",
+        "process:",
+        "http:",
+        "clipboard-manager:",
+        "global-shortcut:",
+        "notification:",
+    ];
+    for permission in permissions {
+        assert!(
+            !forbidden_prefixes
+                .iter()
+                .any(|prefix| permission.starts_with(prefix)),
+            "default capability must not expose generic desktop permission {permission}"
+        );
+    }
+}
+
+#[test]
+fn e2e_playwright_capability_is_local_and_main_window_only() {
+    let capability = parse_json_fixture(include_str!("../capabilities/e2e-playwright.json"));
+
+    assert_eq!(
+        capability.get("local").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(json_array_strings(&capability, "windows"), vec!["main"]);
+    assert_eq!(
+        json_array_strings(&capability, "permissions"),
+        vec!["playwright:default"]
+    );
+    let remote_urls = capability
+        .get("remote")
+        .and_then(|remote| remote.get("urls"))
+        .and_then(serde_json::Value::as_array)
+        .expect("e2e capability should list remote dev URLs")
+        .iter()
+        .map(|value| value.as_str().expect("remote URL should be a string"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remote_urls,
+        vec!["http://127.0.0.1:5173/*", "http://localhost:5173/*"]
+    );
+}
+
+#[test]
+fn production_tauri_config_loads_bundled_renderer_assets() {
+    let config = parse_json_fixture(include_str!("../tauri.conf.json"));
+
+    assert_eq!(
+        config
+            .get("build")
+            .and_then(|build| build.get("frontendDist"))
+            .and_then(serde_json::Value::as_str),
+        Some("../web/dist")
+    );
+    assert_eq!(
+        config
+            .get("build")
+            .and_then(|build| build.get("devUrl"))
+            .and_then(serde_json::Value::as_str),
+        Some("http://127.0.0.1:5173")
+    );
+    assert_eq!(
+        config
+            .get("app")
+            .and_then(|app| app.get("windows"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+}
+
 #[test]
 fn backend_init_script_injects_loopback_runtime_mode() {
     let script = backend_init_script(
@@ -14,6 +130,30 @@ fn backend_init_script_injects_loopback_runtime_mode() {
     assert!(script.contains("'loopback'"));
     assert!(script.contains("__POSTHASTE_PORT__"));
     assert!(script.contains("__POSTHASTE_TOKEN__"));
+    assert!(script.contains("writable: false"));
+}
+
+#[test]
+fn backend_init_script_keeps_loopback_token_out_of_urls() {
+    let script = backend_init_script(
+        &BackendInjection {
+            port: 4815,
+            auth_token: "secret-token".to_string(),
+        },
+        "main",
+    );
+
+    let runtime_mode_segment = script
+        .split("__POSTHASTE_RUNTIME_MODE__")
+        .nth(1)
+        .and_then(|tail| tail.split("__POSTHASTE_PORT__").next())
+        .expect("runtime mode should be defined before loopback connection fields");
+    assert!(!runtime_mode_segment.contains("secret-token"));
+    assert!(!runtime_mode_segment.contains("4815"));
+    assert!(!script.contains("http://127.0.0.1:4815"));
+    assert!(!script.contains("http://localhost:4815"));
+    assert!(!script.contains("access_token="));
+    assert!(!script.contains("Bearer secret-token"));
 }
 
 #[test]
