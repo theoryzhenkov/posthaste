@@ -50,7 +50,6 @@ pub(crate) fn open_surface_window(
 }
 
 #[cfg(feature = "embedded-server")]
-
 pub(crate) fn is_main_window_label(label: &str) -> bool {
     label == MAIN_WINDOW_LABEL
 }
