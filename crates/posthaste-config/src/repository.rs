@@ -89,6 +89,5 @@ impl TomlConfigRepository {
 }
 
 /// @spec docs/L1-accounts#configrepository-trait
-
 #[cfg(test)]
 mod tests;

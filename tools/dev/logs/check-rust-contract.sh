@@ -22,7 +22,7 @@ done < <(
 )
 
 if rg -n 'ph_forwarded_(trace|debug|info|warn|error)!' "$root/crates" "$root/apps/desktop/src" --glob '*.rs' \
-  | rg -v '/apps/desktop/src/lib\.rs:' >/tmp/posthaste-forwarded-log-contract.$$; then
+  | rg -v '/apps/desktop/src/(lib|frontend_logging)\.rs:' >/tmp/posthaste-forwarded-log-contract.$$; then
   cat /tmp/posthaste-forwarded-log-contract.$$ | while IFS= read -r match; do
     echo "forwarded dynamic log macro is only allowed in the desktop frontend bridge: $match" >&2
   done
