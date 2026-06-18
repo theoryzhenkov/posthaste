@@ -17,12 +17,12 @@ pub(super) async fn ensure_account_exists(
         .get_account(RuntimeCaller::api(), account_id.clone())
         .await
         .map(|_| ())
-        .map_err(ApiError::from_runtime_error)
-        .or_else(|error| {
+        .map_err(|error| {
+            let error = ApiError::from_runtime_error(error);
             if error.body.code == ApiErrorCode::NotFound {
-                Err(account_not_found())
+                account_not_found()
             } else {
-                Err(error)
+                error
             }
         })
 }
