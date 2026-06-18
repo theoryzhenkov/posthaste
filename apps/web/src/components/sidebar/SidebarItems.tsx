@@ -56,7 +56,10 @@ export function SmartMailboxItem({
       onContextMenu={onSelect}
       type="button"
     >
-      <span className="flex w-4 justify-center" style={accent ? { color: accent } : undefined}>
+      <span
+        className="flex w-4 justify-center"
+        style={accent ? { color: accent } : undefined}
+      >
         {smartMailboxIcon(name)}
       </span>
       <span className="min-w-0 flex-1 truncate">
@@ -86,10 +89,19 @@ export function SmartMailboxItem({
   )
 }
 
-export function TagItem({ tag, onSelect }: { tag: TagSummary; onSelect: () => void }) {
+export function TagItem({
+  tag,
+  onSelect,
+}: {
+  tag: TagSummary
+  onSelect: () => void
+}) {
   return (
     <button className={itemButtonClass(false)} onClick={onSelect} type="button">
-      <span className="flex w-4 justify-center" style={{ color: smartMailboxAccent(tag.name) }}>
+      <span
+        className="flex w-4 justify-center"
+        style={{ color: smartMailboxAccent(tag.name) }}
+      >
         {smartMailboxIcon(tag.name)}
       </span>
       <span className="min-w-0 flex-1 truncate">{tag.name}</span>
@@ -124,7 +136,10 @@ export function MailboxItem({
       onContextMenu={onSelect}
       type="button"
     >
-      <span className="flex w-4 justify-center" style={{ color: mailboxRoleAccent(mailbox.role) }}>
+      <span
+        className="flex w-4 justify-center"
+        style={{ color: mailboxRoleAccent(mailbox.role) }}
+      >
         {roleIcon(mailbox.role)}
       </span>
       <span className="min-w-0 flex-1 truncate">{mailbox.name}</span>
@@ -156,7 +171,13 @@ export function MailboxItem({
   )
 }
 
-function UnreadCount({ count, isSelected = false }: { count: number; isSelected?: boolean }) {
+function UnreadCount({
+  count,
+  isSelected = false,
+}: {
+  count: number
+  isSelected?: boolean
+}) {
   return (
     <span
       className={cn(

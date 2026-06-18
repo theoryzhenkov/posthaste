@@ -22,10 +22,7 @@ import {
   floatingPanelResizeConstraints,
 } from '@/floatingPanelLayout'
 
-import {
-  RESIZE_DOUBLE_CLICK_MS,
-  RESIZE_DOUBLE_CLICK_SLOP,
-} from './constants'
+import { RESIZE_DOUBLE_CLICK_MS, RESIZE_DOUBLE_CLICK_SLOP } from './constants'
 import { persistPanelOffset, persistPanelSize, viewportSize } from './geometry'
 import type { PanelSize } from './types'
 

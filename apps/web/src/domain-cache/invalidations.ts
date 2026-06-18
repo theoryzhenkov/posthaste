@@ -1,10 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { DomainEvent, SourceMessageRef } from '../api/types'
-import {
-  findConversationIdForMessage,
-  mailKeys,
-} from '../mailState'
+import { findConversationIdForMessage, mailKeys } from '../mailState'
 import { queryKeys } from '../queryKeys'
 import { eventTarget, payloadConversationId } from './payload'
 

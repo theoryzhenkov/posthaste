@@ -21,7 +21,10 @@ import {
   SettingsPageHeader,
 } from './shared'
 import type { SmartMailboxEditorTarget } from './types'
-import { SmartMailboxDetail, SourceMailboxDetail } from './smart-mailboxes-pane/Details'
+import {
+  SmartMailboxDetail,
+  SourceMailboxDetail,
+} from './smart-mailboxes-pane/Details'
 import { SmartMailboxesEmptyState } from './smart-mailboxes-pane/EmptyState'
 import { MailboxListRow } from './smart-mailboxes-pane/MailboxListRow'
 import { SourceMailboxListSection } from './smart-mailboxes-pane/SourceMailboxListSection'

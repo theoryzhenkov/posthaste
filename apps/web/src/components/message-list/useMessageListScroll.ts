@@ -66,7 +66,13 @@ export function useMessageListScroll({
     if (distanceToEnd < ROW_HEIGHT * 20 && hasNextPage && !isFetchingNextPage) {
       fetchNextPage()
     }
-  }, [currentViewKey, fetchNextPage, hasNextPage, isFetchingNextPage, isSearchBlocked])
+  }, [
+    currentViewKey,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isSearchBlocked,
+  ])
 
   useEffect(() => {
     const node = scrollContainerRef.current
@@ -79,7 +85,13 @@ export function useMessageListScroll({
     if (node.scrollHeight <= node.clientHeight + ROW_HEIGHT * 4) {
       fetchNextPage()
     }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, messageCount, isSearchBlocked])
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    messageCount,
+    isSearchBlocked,
+  ])
 
   return { handleScroll, scrollContainerRef, scrollTop, viewportHeight }
 }

@@ -26,7 +26,10 @@ export {
 } from './mail-state/localEcho'
 export { findConversationIdForMessage } from './mail-state/lookup'
 export { applyMailboxPatch } from './mail-state/mailboxes'
-export { captureMutableState, diffMutableState } from './mail-state/mutableState'
+export {
+  captureMutableState,
+  diffMutableState,
+} from './mail-state/mutableState'
 export { restoreSnapshots } from './mail-state/snapshots'
 export type {
   CachePatchResult,

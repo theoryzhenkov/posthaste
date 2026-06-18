@@ -29,7 +29,9 @@ describe('frontend domain cache event contracts', () => {
 
   it('invalidates settings and account read models when app settings change', () => {
     const queryClient = createQueryClient()
-    queryClient.setQueryData(queryKeys.settings, { defaultAccountId: 'primary' })
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
     queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
 
     applyDomainEvent(
@@ -43,13 +45,19 @@ describe('frontend domain cache event contracts', () => {
       }),
     )
 
-    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
   })
 
   it('falls back to broad app invalidation for unknown event topics', () => {
     const queryClient = createQueryClient()
-    queryClient.setQueryData(queryKeys.settings, { defaultAccountId: 'primary' })
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
     queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
 
     applyDomainEvent(
@@ -62,8 +70,12 @@ describe('frontend domain cache event contracts', () => {
       }),
     )
 
-    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
   })
 
   it('invalidates account-backed read models when account appearance changes', () => {
@@ -80,12 +92,16 @@ describe('frontend domain cache event contracts', () => {
         messageId: null,
         mailboxId: null,
         payload: {
-          resources: [{ kind: 'account', operation: 'updated', id: account.id }],
+          resources: [
+            { kind: 'account', operation: 'updated', id: account.id },
+          ],
         },
       }),
     )
 
-    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
     expect(
       queryClient.getQueryState(queryKeys.account(account.id))?.isInvalidated,
     ).toBe(true)
@@ -95,7 +111,9 @@ describe('frontend domain cache event contracts', () => {
     const queryClient = createQueryClient()
     const smartMailbox = queryKeys.smartMailbox('sm-work')
     const messageDetailKey = mailKeys.message('primary', 'message-1')
-    queryClient.setQueryData(queryKeys.settings, { defaultAccountId: 'primary' })
+    queryClient.setQueryData(queryKeys.settings, {
+      defaultAccountId: 'primary',
+    })
     queryClient.setQueryData(queryKeys.accounts, [accountOverview()])
     queryClient.setQueryData(queryKeys.mailNavigationRead, { results: {} })
     queryClient.setQueryData(queryKeys.smartMailboxes, [])
@@ -113,21 +131,30 @@ describe('frontend domain cache event contracts', () => {
       }),
     )
 
-    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(queryKeys.settings)?.isInvalidated).toBe(
+      true,
+    )
+    expect(queryClient.getQueryState(queryKeys.accounts)?.isInvalidated).toBe(
+      true,
+    )
     expect(
       queryClient.getQueryState(queryKeys.smartMailboxes)?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState(queryKeys.mailNavigationRead)?.isInvalidated,
     ).toBe(true)
-    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
   })
 
   it('invalidates smart mailbox read models when smart mailbox config changes', () => {
     const queryClient = createQueryClient()
     const smartMailbox = queryKeys.smartMailbox('sm-work')
-    const messageList = queryKeys.messages({ kind: 'smart-mailbox', id: 'sm-work' })
+    const messageList = queryKeys.messages({
+      kind: 'smart-mailbox',
+      id: 'sm-work',
+    })
     queryClient.setQueryData(queryKeys.smartMailboxes, [])
     queryClient.setQueryData(smartMailbox, { id: 'sm-work' })
     seedMessageList(queryClient, messageList, messageSummary())
@@ -167,7 +194,9 @@ describe('frontend domain cache event contracts', () => {
       }),
     )
 
-    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
     expect(queryClient.getQueryState(conversationKey)?.isInvalidated).toBe(true)
   })
 
@@ -181,7 +210,9 @@ describe('frontend domain cache event contracts', () => {
       domainEvent({ topic: EVENT_TOPICS.MessageBodyCached }),
     )
 
-    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(messageDetailKey)?.isInvalidated).toBe(
+      true,
+    )
   })
 
   it('invalidates mailbox read models when a mailbox changes remotely', () => {

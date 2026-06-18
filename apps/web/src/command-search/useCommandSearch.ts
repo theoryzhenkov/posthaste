@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { buildPaletteRows } from './ranker'
-import {
-  allProvidersSettled,
-  initialProviderStates,
-} from './searchState'
+import { allProvidersSettled, initialProviderStates } from './searchState'
 import type {
   CommandSearchController,
   CommandSearchSession,

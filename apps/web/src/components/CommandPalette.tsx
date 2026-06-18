@@ -7,7 +7,10 @@ import {
   type UIEvent as ReactUIEvent,
 } from 'react'
 
-import type { CommandPaletteEntry, SearchCandidate } from '@/command-search/types'
+import type {
+  CommandPaletteEntry,
+  SearchCandidate,
+} from '@/command-search/types'
 import type { MailSelection } from '@/mailState'
 import { validateSearchQuery } from '@/queryLanguage'
 import { normalizeAppliedSearchQuery } from '@/searchQuery'

@@ -7,10 +7,7 @@ import type { EmailActions } from '@/hooks/useEmailActions'
 import type { MailSelection } from '@/mailState'
 import type { OperationsContextValue } from '@/operationsContext'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
-import type {
-  SettingsSurfaceCategory,
-  SurfaceDescriptor,
-} from '@/surfaces'
+import type { SettingsSurfaceCategory, SurfaceDescriptor } from '@/surfaces'
 import type { SidebarSelection } from '@/components/Sidebar'
 
 type PanelGroupProps = ComponentProps<typeof ResizablePanelGroup>

@@ -19,11 +19,7 @@ import { DesignThemeProvider } from './components/ThemeProvider'
 import { ConnectionScreen } from './connection/ConnectionScreen'
 import { useActiveConnection } from './connection/connectionContext'
 import { ActiveConnectionProvider } from './connection/useActiveConnection'
-import {
-  isMainDesktopWindow,
-  isTauriRuntime,
-  toggleDevtools,
-} from './desktop'
+import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from './desktop'
 import { isDeveloperToolsEnabled } from './developerTools'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
@@ -84,7 +80,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <DesignThemeProvider>
         <ActiveConnectionProvider>
-          <DaemonEventBridge key={isStandaloneSurface ? 'standalone' : 'mail'} />
+          <DaemonEventBridge
+            key={isStandaloneSurface ? 'standalone' : 'mail'}
+          />
           <ErrorBoundary label="app-root" fallback={renderAppRootError}>
             <OperationsProvider>
               <ConnectionGate>

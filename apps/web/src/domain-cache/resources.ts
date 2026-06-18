@@ -12,7 +12,10 @@ import {
   invalidateSmartMailboxReadModels,
 } from './invalidations'
 
-export type EventHandler = (queryClient: QueryClient, event: DomainEvent) => void
+export type EventHandler = (
+  queryClient: QueryClient,
+  event: DomainEvent,
+) => void
 
 interface ResourceChange {
   accountId?: string

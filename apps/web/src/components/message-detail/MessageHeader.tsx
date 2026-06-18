@@ -52,7 +52,9 @@ export function MessageHeader({
                   senderName={senderName}
                   onSearch={onSearch}
                 />
-                <span className="text-muted-foreground/60">{recipientLabel}</span>
+                <span className="text-muted-foreground/60">
+                  {recipientLabel}
+                </span>
                 <span className="font-mono text-[11px] text-muted-foreground">
                   {formatAbsoluteDate(message.receivedAt)}
                 </span>
@@ -125,7 +127,14 @@ function HeaderActions({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <Button aria-label="Reply" onClick={onReply} size="icon-sm" title="Reply" type="button" variant="ghost">
+      <Button
+        aria-label="Reply"
+        onClick={onReply}
+        size="icon-sm"
+        title="Reply"
+        type="button"
+        variant="ghost"
+      >
         <Reply size={14} strokeWidth={1.6} />
       </Button>
       <Button
@@ -139,7 +148,14 @@ function HeaderActions({
       >
         <Forward size={14} strokeWidth={1.6} />
       </Button>
-      <Button aria-label="Archive" onClick={onArchive} size="icon-sm" title="Archive" type="button" variant="ghost">
+      <Button
+        aria-label="Archive"
+        onClick={onArchive}
+        size="icon-sm"
+        title="Archive"
+        type="button"
+        variant="ghost"
+      >
         <Archive size={14} strokeWidth={1.6} />
       </Button>
       <Button disabled size="icon-sm" type="button" variant="ghost">
@@ -170,7 +186,9 @@ function MessageTagRow({
           variant="outline"
           className="cursor-pointer rounded-[4px] border-border/80 bg-background/45 px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:border-primary hover:text-primary"
           key={tag}
-          onClick={(event: MouseEvent) => onSearch?.(`tag:${tag}`, event.shiftKey)}
+          onClick={(event: MouseEvent) =>
+            onSearch?.(`tag:${tag}`, event.shiftKey)
+          }
           title={`Search emails tagged "${tag}"`}
         >
           {tag}

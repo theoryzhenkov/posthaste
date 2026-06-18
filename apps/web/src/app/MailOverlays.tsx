@@ -7,8 +7,7 @@ import { InvalidSurface } from '@/components/InvalidSurface'
 import { ShortcutReference } from '@/components/ShortcutReference'
 import { SurfaceHost } from '@/components/SurfaceHost'
 import { TagEditor } from '@/components/TagEditor'
-import { closeWebSurface, openFocusedSurface } from '@/hooks/useSurfaceRouting'
-import { settingsSurface, type SurfaceDescriptor } from '@/surfaces'
+import { closeWebSurface } from '@/hooks/useSurfaceRouting'
 
 import type { MailClientViewProps } from './MailClientView.types'
 
@@ -94,18 +93,4 @@ function ComposeFallback() {
       <Loader2 size={18} className="animate-spin text-muted-foreground" />
     </div>
   )
-}
-
-export function toggleSettingsSurface(input: {
-  effectiveSurface: SurfaceDescriptor | null
-  shouldRenderForcedSettings: boolean
-}) {
-  if (
-    input.effectiveSurface?.kind === 'settings' &&
-    !input.shouldRenderForcedSettings
-  ) {
-    closeWebSurface()
-  } else {
-    openFocusedSurface(settingsSurface())
-  }
 }
