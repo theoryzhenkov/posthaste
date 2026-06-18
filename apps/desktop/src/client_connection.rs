@@ -184,6 +184,35 @@ fn string_field(object: &Map<String, Value>, field: &str) -> Result<Option<Strin
         .transpose()
 }
 
+fn contains_url_path_secret_marker(value: &str) -> bool {
+    let (decoded, stable) = percent_decode_ascii(value);
+    if !stable {
+        return true;
+    }
+    decoded
+        .split(['/', ';'])
+        .map(|segment| {
+            segment
+                .chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_ascii_lowercase()
+        })
+        .any(|segment| {
+            segment == "token"
+                || segment == "secret"
+                || segment.contains("token")
+                || segment.contains("secret")
+                || segment.contains("authorization")
+                || segment.contains("authheader")
+                || segment.contains("bearer")
+                || segment.contains("apikey")
+                || segment.contains("privatekey")
+                || segment.contains("password")
+                || segment.contains("credential")
+        })
+}
+
 fn validate_profile_base_url(value: &str) -> Result<(), String> {
     let parsed = url::Url::parse(value).map_err(|err| format!("invalid profile baseUrl: {err}"))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
@@ -193,8 +222,7 @@ fn validate_profile_base_url(value: &str) -> Result<(), String> {
         || parsed.password().is_some()
         || parsed.query().is_some()
         || parsed.fragment().is_some()
-        || parsed.host_str().is_some_and(contains_secret_marker)
-        || contains_secret_marker(parsed.path())
+        || contains_url_path_secret_marker(parsed.path())
     {
         return Err(
             "profile baseUrl must not contain credentials, query, fragment, or secret path markers"
@@ -205,7 +233,7 @@ fn validate_profile_base_url(value: &str) -> Result<(), String> {
 }
 
 fn validate_host_header(value: &str) -> Result<(), String> {
-    if value.is_empty() || value.chars().any(char::is_control) || contains_secret_marker(value) {
+    if value.is_empty() || value.chars().any(char::is_control) {
         return Err("connection profile hostHeader is unsafe".to_string());
     }
     let parsed = url::Url::parse(&format!("http://{value}"))
@@ -231,8 +259,9 @@ fn validate_connection_profile(value: &Value) -> Result<(), String> {
             return Err(format!("connection profile contains unsafe field {key}"));
         }
     }
-    let id = string_field(object, "id")?
-        .ok_or_else(|| "connection profile missing required field id".to_string())?;
+    if string_field(object, "id")?.is_none() {
+        return Err("connection profile missing required field id".to_string());
+    }
     if string_field(object, "name")?.is_none() {
         return Err("connection profile missing required field name".to_string());
     }
@@ -244,11 +273,7 @@ fn validate_connection_profile(value: &Value) -> Result<(), String> {
     if let Some(host_header) = string_field(object, "hostHeader")? {
         validate_host_header(&host_header)?;
     }
-    if let Some(token_ref) = string_field(object, "tokenRef")? {
-        if token_ref != id {
-            return Err("connection profile tokenRef must match id".to_string());
-        }
-    }
+    let _ = string_field(object, "tokenRef")?;
     if let Some(base_url) = string_field(object, "baseUrl")? {
         validate_profile_base_url(&base_url)?;
     }
