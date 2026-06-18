@@ -2,7 +2,11 @@ import type { ExistingAccountEditorModel } from '../accountEditorModel'
 import { StatusDot } from '../shared'
 import { authLabel, providerLabel } from './labels'
 
-export function AccountHeaderMeta({ model }: { model: ExistingAccountEditorModel }) {
+export function AccountHeaderMeta({
+  model,
+}: {
+  model: ExistingAccountEditorModel
+}) {
   return (
     <>
       <StatusDot status={model.account.status} className="size-1.5" />

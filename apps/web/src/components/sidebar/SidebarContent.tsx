@@ -74,7 +74,9 @@ export function QuickSmartMailboxSection({
             selectedView?.kind === 'smart-mailbox' &&
             selectedView.id === smartMailbox.id
           }
-          onSelect={() => onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)}
+          onSelect={() =>
+            onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
+          }
           onOpenSettings={onOpenSmartMailboxSettings}
         />
       ))}
@@ -113,7 +115,9 @@ export function SmartMailboxSection({
                 selectedView?.kind === 'smart-mailbox' &&
                 selectedView.id === smartMailbox.id
               }
-              onSelect={() => onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)}
+              onSelect={() =>
+                onSelectSmartMailbox(smartMailbox.id, smartMailbox.name)
+              }
               onOpenSettings={onOpenSmartMailboxSettings}
             />
           ))}
@@ -138,7 +142,11 @@ export function TagsSection({
       <SectionHeader label="Tags" collapsed={false} onToggle={() => {}} />
       <div className="space-y-0.5 py-1">
         {tags.map((tag) => (
-          <TagItem key={tag.name} tag={tag} onSelect={() => onSelectTag(tag.name)} />
+          <TagItem
+            key={tag.name}
+            tag={tag}
+            onSelect={() => onSelectTag(tag.name)}
+          />
         ))}
       </div>
     </>
@@ -168,7 +176,11 @@ export function AccountsSection({
 }) {
   return (
     <>
-      <SectionHeader label="Accounts" collapsed={collapsed} onToggle={onToggle} />
+      <SectionHeader
+        label="Accounts"
+        collapsed={collapsed}
+        onToggle={onToggle}
+      />
       {!collapsed && (
         <div className="space-y-2 py-1">
           {sources.map((source) => (

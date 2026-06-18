@@ -39,7 +39,9 @@ export function useComposeFormState({
     if (intentKind === 'new' || !replyContext) {
       return EMPTY_FORM
     }
-    const quoted = replyContext.quotedBody ? `\n\n${replyContext.quotedBody}` : ''
+    const quoted = replyContext.quotedBody
+      ? `\n\n${replyContext.quotedBody}`
+      : ''
     return {
       from: '',
       to: intentKind === 'reply' ? formatRecipients(replyContext.to) : '',

@@ -1,4 +1,11 @@
-import type { AccountDriver, MailEndpointSettings, ProviderAuthKind, ProviderHint, ProviderKind, SecretStatus } from './providers'
+import type {
+  AccountDriver,
+  MailEndpointSettings,
+  ProviderAuthKind,
+  ProviderHint,
+  ProviderKind,
+  SecretStatus,
+} from './providers'
 
 interface AccountConnectionOverviewBase {
   provider: ProviderHint

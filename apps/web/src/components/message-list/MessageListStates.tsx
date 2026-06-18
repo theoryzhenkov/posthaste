@@ -14,7 +14,11 @@ export function NoMailboxSelected({
       data-message-list-empty="true"
       onMouseDown={onMouseDown}
     >
-      <MousePointerClick size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+      <MousePointerClick
+        size={40}
+        strokeWidth={1.5}
+        className="text-muted-foreground/40"
+      />
       <div className="text-center">
         <p className="text-sm font-medium text-muted-foreground">
           No mailbox selected
@@ -29,7 +33,10 @@ export function NoMailboxSelected({
 
 export function LoadingRows() {
   return (
-    <div className="space-y-0 bg-[var(--list-zebra)]" data-message-list-empty="true">
+    <div
+      className="space-y-0 bg-[var(--list-zebra)]"
+      data-message-list-empty="true"
+    >
       {Array.from({ length: 4 }).map((_, i) => (
         <div
           key={i}
@@ -50,7 +57,10 @@ export function LoadingRows() {
 
 export function EmptyMessages() {
   return (
-    <div className="flex flex-col items-center gap-3 px-3 py-12" data-message-list-empty="true">
+    <div
+      className="flex flex-col items-center gap-3 px-3 py-12"
+      data-message-list-empty="true"
+    >
       <Inbox size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
       <div className="text-center">
         <p className="text-sm font-medium text-muted-foreground">

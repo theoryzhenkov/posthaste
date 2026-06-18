@@ -3,10 +3,7 @@ import type { UIEvent as ReactUIEvent } from 'react'
 import type { PaletteRow, SearchCandidate } from '@/command-search/types'
 
 import { CommandItem, CommandList } from '../ui/command'
-import {
-  commandPaletteEntryValue,
-  NO_COMMAND_PALETTE_SELECTION,
-} from './model'
+import { commandPaletteEntryValue, NO_COMMAND_PALETTE_SELECTION } from './model'
 
 export function CommandPaletteList({
   itemRowsLength,

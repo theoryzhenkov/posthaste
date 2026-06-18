@@ -1,4 +1,8 @@
-import type { AccountOverview, ProviderAuthKind, ProviderKind } from '../../../api/types'
+import type {
+  AccountOverview,
+  ProviderAuthKind,
+  ProviderKind,
+} from '../../../api/types'
 
 export function providerLabel(provider: ProviderKind): string {
   switch (provider) {

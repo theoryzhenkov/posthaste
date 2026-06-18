@@ -23,7 +23,10 @@ import type { MailSelection } from '../mailState'
 import { createOperationContext } from '../observability'
 import { queryKeys } from '../queryKeys'
 import type { PreparedServerSearchQuery } from '../searchQuery'
-import { MessageListRows, type MessageListErrorState } from './message-list/MessageListRows'
+import {
+  MessageListRows,
+  type MessageListErrorState,
+} from './message-list/MessageListRows'
 import { NoMailboxSelected } from './message-list/MessageListStates'
 import {
   fetchMessagesForView,
@@ -194,7 +197,10 @@ export function MessageList({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--list-zebra)]">
       <div className="ph-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-[var(--list-zebra)]">
-        <div className="flex h-full min-h-0 flex-col" style={tableLayout.tableStyle}>
+        <div
+          className="flex h-full min-h-0 flex-col"
+          style={tableLayout.tableStyle}
+        >
           <div
             className="shrink-0 border-b border-border/80 bg-[var(--list-header)] text-panel-foreground"
             aria-label={

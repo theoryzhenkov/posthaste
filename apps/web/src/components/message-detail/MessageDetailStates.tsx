@@ -6,7 +6,11 @@ export function EmptyMessageDetail() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 bg-panel px-6">
       <div className="flex size-18 items-center justify-center rounded-2xl border border-border bg-card shadow-[var(--shadow-pane)]">
-        <Mail size={30} strokeWidth={1.5} className="text-muted-foreground/55" />
+        <Mail
+          size={30}
+          strokeWidth={1.5}
+          className="text-muted-foreground/55"
+        />
       </div>
       <div className="max-w-xs text-center">
         <p className="text-sm font-semibold text-foreground">
@@ -48,7 +52,11 @@ export function LoadingMessageDetail({ label }: { label: string }) {
 export function ErrorMessageDetail({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 bg-panel">
-      <AlertCircle size={32} strokeWidth={1.5} className="text-destructive/50" />
+      <AlertCircle
+        size={32}
+        strokeWidth={1.5}
+        className="text-destructive/50"
+      />
       <p className="text-sm text-destructive">Failed to load conversation</p>
       <button
         type="button"

@@ -51,11 +51,22 @@ export function SourceSection({
       onClick={() => setCollapsed((prev) => !prev)}
     >
       {collapsed ? (
-        <ChevronRight size={12} strokeWidth={1.5} className="text-muted-foreground" />
+        <ChevronRight
+          size={12}
+          strokeWidth={1.5}
+          className="text-muted-foreground"
+        />
       ) : (
-        <ChevronDown size={12} strokeWidth={1.5} className="text-muted-foreground" />
+        <ChevronDown
+          size={12}
+          strokeWidth={1.5}
+          className="text-muted-foreground"
+        />
       )}
-      <AccountMark appearance={appearance} className="size-[18px] text-[10px]" />
+      <AccountMark
+        appearance={appearance}
+        className="size-[18px] text-[10px]"
+      />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">
         {source.name}
       </span>

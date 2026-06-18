@@ -45,37 +45,44 @@ export function FloatingPanel({
 }: FloatingPanelProps) {
   const [isPinned, setIsPinned] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
-  const placement = usePanelPlacement({ sizePreset, storageKey })
+  const {
+    panelOffset,
+    panelRef,
+    panelSize,
+    setPanelOffset,
+    setPanelSize,
+    sizeStorageKey,
+  } = usePanelPlacement({ sizePreset, storageKey })
   const drag = usePanelDrag({
     isExpanded,
-    panelOffset: placement.panelOffset,
-    panelRef: placement.panelRef,
-    setPanelOffset: placement.setPanelOffset,
+    panelOffset,
+    panelRef,
+    setPanelOffset,
     storageKey,
   })
   const resize = usePanelResize({
     isExpanded,
-    panelRef: placement.panelRef,
-    setPanelOffset: placement.setPanelOffset,
-    setPanelSize: placement.setPanelSize,
+    panelRef,
+    setPanelOffset,
+    setPanelSize,
     sizePreset,
-    sizeStorageKey: placement.sizeStorageKey,
+    sizeStorageKey,
     storageKey,
   })
   usePanelDismissal({
     closeIgnoreSelector,
     isPinned,
     onClose,
-    panelRef: placement.panelRef,
+    panelRef,
   })
 
   const floatingSizeStyle: CSSProperties =
     !isExpanded && sizePreset ? floatingPanelSizeStyle(sizePreset) : {}
   const resizeSizeStyle: CSSProperties =
-    !isExpanded && placement.panelSize
+    !isExpanded && panelSize
       ? {
-          width: `${placement.panelSize.width}px`,
-          height: `${placement.panelSize.height}px`,
+          width: `${panelSize.width}px`,
+          height: `${panelSize.height}px`,
         }
       : {}
 
@@ -98,7 +105,7 @@ export function FloatingPanel({
         resizeLines={resize.resizeLines}
       />
       <div
-        ref={placement.panelRef}
+        ref={panelRef}
         className={cn(
           'pointer-events-auto relative w-full overflow-hidden rounded-[14px] border [border-color:color-mix(in_oklab,var(--brand-coral)_22%,var(--border))] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--brand-coral)_14%,var(--panel))_0%,color-mix(in_oklab,var(--ring)_7%,var(--panel))_50%,var(--panel)_100%)] text-foreground shadow-[0_28px_80px_rgb(0_0_0/0.24)] backdrop-blur-[24px] backdrop-saturate-150 dark:shadow-[0_28px_80px_rgb(0_0_0/0.48)]',
           className,
@@ -117,7 +124,7 @@ export function FloatingPanel({
           ...resizeSizeStyle,
           transform: isExpanded
             ? undefined
-            : `translate(${placement.panelOffset.x}px, ${placement.panelOffset.y}px)`,
+            : `translate(${panelOffset.x}px, ${panelOffset.y}px)`,
         }}
       >
         <FloatingPanelHeader
@@ -142,10 +149,7 @@ export function FloatingPanel({
           onResizeMove={resize.handleResizeMove}
           onResizeStart={resize.handleResizeStart}
         />
-        <ResizeCellBadge
-          isResizing={resize.isResizing}
-          panelSize={placement.panelSize}
-        />
+        <ResizeCellBadge isResizing={resize.isResizing} panelSize={panelSize} />
       </div>
     </div>
   )

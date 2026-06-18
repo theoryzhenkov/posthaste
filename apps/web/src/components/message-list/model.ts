@@ -19,10 +19,12 @@ export function messageKey(message: MessageSummary): string {
   return `${message.sourceId}:${message.id}`
 }
 
-export function selectionKey(selection: {
-  sourceId: string
-  messageId: string
-} | null): string | null {
+export function selectionKey(
+  selection: {
+    sourceId: string
+    messageId: string
+  } | null,
+): string | null {
   return selection ? `${selection.sourceId}:${selection.messageId}` : null
 }
 

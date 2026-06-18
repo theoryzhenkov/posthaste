@@ -21,7 +21,7 @@ import {
   type SettingsSurfaceCategory,
   type SurfaceDescriptor,
 } from '@/surfaces'
-import { toggleSettingsSurface } from './MailOverlays'
+import { toggleSettingsSurface } from './mailOverlayActions'
 
 export function useMailClientHandlers(input: {
   actions: ReturnType<typeof useEmailActions>
