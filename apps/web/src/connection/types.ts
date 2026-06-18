@@ -81,8 +81,82 @@ export function isConnectionsFile(value: unknown): value is ConnectionsFile {
   }
   const obj = value as Record<string, unknown>
   return (
+    Object.keys(obj).every(isKnownConnectionsFileField) &&
     obj.version === 1 &&
     Array.isArray(obj.profiles) &&
+    obj.profiles.every(isConnectionProfile) &&
     (obj.activeProfileId === null || typeof obj.activeProfileId === 'string')
   )
+}
+
+function isKnownConnectionsFileField(key: string): boolean {
+  return key === 'version' || key === 'activeProfileId' || key === 'profiles'
+}
+
+function isConnectionProfile(value: unknown): value is ConnectionProfile {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const obj = value as Record<string, unknown>
+  if (!Object.keys(obj).every(isKnownConnectionProfileField)) {
+    return false
+  }
+  if (
+    typeof obj.id !== 'string' ||
+    typeof obj.name !== 'string' ||
+    !isConnectionMode(obj.mode)
+  ) {
+    return false
+  }
+  if (
+    obj.baseUrl !== undefined &&
+    (typeof obj.baseUrl !== 'string' || !isSafeProfileBaseUrl(obj.baseUrl))
+  ) {
+    return false
+  }
+  if (obj.hostHeader !== undefined && typeof obj.hostHeader !== 'string') {
+    return false
+  }
+  if (obj.tokenRef !== undefined && typeof obj.tokenRef !== 'string') {
+    return false
+  }
+  return !Object.keys(obj).some(isInlineSecretField)
+}
+
+function isInlineSecretField(key: string): boolean {
+  if (key === 'tokenRef') {
+    return false
+  }
+  const normalized = key.replace(/[^a-z0-9]/gi, '')
+  return /(token|secret|password|credential|authorization|authheader|bearer|apikey|privatekey)/i.test(
+    normalized,
+  )
+}
+
+function isSafeProfileBaseUrl(value: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return false
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    return false
+  }
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+}
+
+function isKnownConnectionProfileField(key: string): boolean {
+  return (
+    key === 'id' ||
+    key === 'name' ||
+    key === 'baseUrl' ||
+    key === 'hostHeader' ||
+    key === 'mode' ||
+    key === 'tokenRef'
+  )
+}
+
+function isConnectionMode(value: unknown): value is ConnectionMode {
+  return value === 'embedded' || value === 'local-daemon' || value === 'remote'
 }
