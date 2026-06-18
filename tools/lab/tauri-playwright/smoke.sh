@@ -240,10 +240,15 @@ set +e
 exit_code=${PIPESTATUS[0]}
 set -e
 
+if [[ "$exit_code" -eq 0 && -e "$state_root/daemon.json" ]]; then
+  echo "Bundled Tauri smoke must not write daemon-style state at $state_root/daemon.json" >&2
+  exit_code=1
+fi
+
 if [[ "$exit_code" -eq 0 ]]; then
-  write_lab_artifacts "passed" "playwright exited successfully" "$exit_code"
+  write_lab_artifacts "passed" "playwright exited successfully without daemon.json" "$exit_code"
 else
-  write_lab_artifacts "failed" "playwright exited with nonzero status" "$exit_code"
+  write_lab_artifacts "failed" "playwright failed or bundled runtime wrote daemon.json" "$exit_code"
 fi
 
 exit "$exit_code"

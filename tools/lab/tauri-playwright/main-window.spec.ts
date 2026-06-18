@@ -44,10 +44,19 @@ async function waitForMainWindowReadiness(
 }
 
 test.describe("Linux Tauri main-window smoke", () => {
-  test("waits for readiness and renders route-backed surface states", async ({
+  test("waits for bundled runtime readiness and renders surface states", async ({
     tauriPage,
   }) => {
     await waitForMainWindowReadiness(tauriPage);
+
+    await expect(
+      tauriPage.evaluate(`
+        ({
+          mode: window.__POSTHASTE_RUNTIME_MODE__,
+          hrefCarriesToken: window.location.href.includes("access_token="),
+        })
+      `),
+    ).resolves.toEqual({ mode: "loopback", hrefCarriesToken: false });
 
     await tauriPage.evaluate(`
       window.history.pushState(
