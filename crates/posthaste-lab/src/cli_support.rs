@@ -93,6 +93,7 @@ pub(crate) enum UsageKind {
     TopLevel,
     SuiteList,
     Verify,
+    ConfigValidate,
 }
 
 pub(crate) fn usage_kind_for_args(args: &[String]) -> Option<UsageKind> {
@@ -101,6 +102,9 @@ pub(crate) fn usage_kind_for_args(args: &[String]) -> Option<UsageKind> {
         Some(arg) if is_help_arg(arg) => Some(UsageKind::TopLevel),
         Some("suite") if args.iter().any(|arg| is_help_arg(arg)) => Some(UsageKind::SuiteList),
         Some("verify") if args.iter().any(|arg| is_help_arg(arg)) => Some(UsageKind::Verify),
+        Some("config") if args.iter().any(|arg| is_help_arg(arg)) => {
+            Some(UsageKind::ConfigValidate)
+        }
         _ => None,
     }
 }
@@ -114,6 +118,7 @@ pub(crate) fn print_usage_kind(program: &str, usage_kind: UsageKind) {
         UsageKind::TopLevel => print_usage(program),
         UsageKind::SuiteList => print_suite_usage(program),
         UsageKind::Verify => print_verify_usage(program),
+        UsageKind::ConfigValidate => print_config_validate_usage(program),
     }
 }
 
@@ -121,6 +126,7 @@ pub(crate) fn print_usage(program: &str) {
     println!("Usage:");
     println!("  {program} suite list [--tag TAG] [--target TARGET] [--registry PATH] [--changed] [--json]");
     println!("  {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
+    println!("  {program} config validate [--config-dir DIR]");
 }
 
 pub(crate) fn print_suite_usage(program: &str) {
@@ -133,4 +139,9 @@ pub(crate) fn print_suite_usage(program: &str) {
 pub(crate) fn print_verify_usage(program: &str) {
     println!("Usage: {program} verify [SUITE_ID] [--tag TAG] [--target TARGET] [--registry PATH] [--run-root PATH] [--changed]");
     println!("Note: --changed reads POSTHASTE_LAB_CHANGED_PATHS when set, otherwise falls back to jj diff main..@ or git diff.");
+}
+
+pub(crate) fn print_config_validate_usage(program: &str) {
+    println!("Usage: {program} config validate [--config-dir DIR]");
+    println!("Default: POSTHASTE_CONFIG_ROOT, otherwise var/dev/posthaste/config.");
 }

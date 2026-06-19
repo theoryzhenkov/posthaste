@@ -38,7 +38,7 @@ mod selection;
 mod summary;
 mod verify;
 
-pub use cli::{default_registry_path, default_run_root, run_cli};
+pub use cli::{default_config_dir, default_registry_path, default_run_root, run_cli};
 pub use error::{LabError, LabResult};
 pub use records::{redacted_env_snapshot_from, LabStatus};
 pub use registry::{validate_lab_id, SuiteEntry, SuiteRegistry};
@@ -56,7 +56,7 @@ use registry::normalize_lab_path;
 use summary::*;
 
 #[cfg(test)]
-use cli::parse_list_options;
+use cli::{parse_config_validate_options, parse_list_options, run_config_validate_command};
 #[cfg(test)]
 use cli_support::{usage_kind_for_args, UsageKind};
 

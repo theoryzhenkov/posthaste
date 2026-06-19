@@ -1,3 +1,5 @@
+use posthaste_config::validate_config_root;
+
 use super::*;
 
 pub fn default_registry_path() -> PathBuf {
@@ -6,6 +8,12 @@ pub fn default_registry_path() -> PathBuf {
 
 pub fn default_run_root() -> PathBuf {
     PathBuf::from("target/lab/runs")
+}
+
+pub fn default_config_dir() -> PathBuf {
+    std::env::var_os("POSTHASTE_CONFIG_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("var/dev/posthaste/config"))
 }
 
 pub fn run_cli(argv: Vec<String>) -> LabResult<()> {
@@ -22,8 +30,9 @@ pub fn run_cli(argv: Vec<String>) -> LabResult<()> {
     match args.first().map(String::as_str) {
         Some("suite") => run_suite_command(&program, &args[1..]),
         Some("verify") => run_verify_command(argv, &args[1..]),
+        Some("config") => run_config_command(&program, &args[1..]),
         Some(other) => Err(LabError::Usage(format!(
-            "unknown command {other:?}; expected 'suite' or 'verify'"
+            "unknown command {other:?}; expected 'suite', 'verify', or 'config'"
         ))),
         None => {
             print_usage(&program);
@@ -99,6 +108,38 @@ pub(crate) fn run_verify_command(argv: Vec<String>, args: &[String]) -> LabResul
     }
 }
 
+pub(crate) fn run_config_command(program: &str, args: &[String]) -> LabResult<()> {
+    match args.first().map(String::as_str) {
+        Some("validate") => run_config_validate_command(program, &args[1..]),
+        Some(other) => Err(LabError::Usage(format!(
+            "unknown config command {other:?}; expected 'validate'"
+        ))),
+        None => Err(LabError::Usage(
+            "missing config command; expected 'validate'".to_string(),
+        )),
+    }
+}
+
+pub(crate) fn run_config_validate_command(program: &str, args: &[String]) -> LabResult<()> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_config_validate_usage(program);
+        return Ok(());
+    }
+    let options = parse_config_validate_options(args)?;
+    if !options.config_dir.is_dir() {
+        return Err(LabError::Usage(format!(
+            "config dir '{}' does not exist or is not a directory",
+            options.config_dir.display()
+        )));
+    }
+    validate_config_root(&options.config_dir).map_err(|error| LabError::ConfigValidation {
+        config_dir: options.config_dir.display().to_string(),
+        message: error.to_string(),
+    })?;
+    println!("Config valid: {}", options.config_dir.display());
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ListOptions {
     pub(crate) registry_path: PathBuf,
@@ -106,6 +147,11 @@ pub(crate) struct ListOptions {
     pub(crate) targets: Vec<String>,
     pub(crate) changed: bool,
     pub(crate) json: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ConfigValidateOptions {
+    pub(crate) config_dir: PathBuf,
 }
 
 pub(crate) fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
@@ -164,6 +210,33 @@ pub(crate) fn parse_list_options(args: &[String]) -> LabResult<ListOptions> {
         changed,
         json,
     })
+}
+
+pub(crate) fn parse_config_validate_options(args: &[String]) -> LabResult<ConfigValidateOptions> {
+    let mut config_dir = default_config_dir();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        match arg.as_str() {
+            "--config-dir" => {
+                index += 1;
+                config_dir = PathBuf::from(required_value(args, index, "--config-dir")?);
+            }
+            _ if arg.starts_with("--config-dir=") => {
+                config_dir = PathBuf::from(arg.trim_start_matches("--config-dir=").to_string());
+            }
+            _ if arg.starts_with("--") => {
+                return Err(LabError::Usage(format!("unknown option {arg:?}")));
+            }
+            _ => {
+                return Err(LabError::Usage(format!(
+                    "unexpected positional argument {arg:?} for config validate"
+                )));
+            }
+        }
+        index += 1;
+    }
+    Ok(ConfigValidateOptions { config_dir })
 }
 
 pub(crate) fn parse_verify_options(args: &[String], argv: Vec<String>) -> LabResult<VerifyOptions> {

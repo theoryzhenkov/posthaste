@@ -33,6 +33,11 @@ fmt-check:
     just web fmt-check
     just site fmt-check
 
+# Validate a Posthaste config directory. No production config is committed, so
+# this is an operator/agent command rather than a default CI input.
+validate-config dir:
+    cargo run -p posthaste-lab -- config validate --config-dir {{ dir }}
+
 # Smoke dev wiring, lint, typecheck, format-check, and docs build
 check:
     just dev smoke
