@@ -7,9 +7,14 @@ edition = "2021"
 name = "posthaste_runtime_contract"
 path = "src/lib.rs"
 
+[features]
+default = []
+openapi = ["dep:utoipa"]
+
 [dependencies]
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 posthaste-domain = { path = "../posthaste-domain" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+utoipa = { workspace = true, optional = true }

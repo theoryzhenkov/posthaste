@@ -3688,6 +3688,7 @@ dependencies = [
  "posthaste-domain",
  "serde",
  "serde_json",
+ "utoipa",
 ]
 
 [[package]]

@@ -20,7 +20,8 @@ use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes,
     RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode, RuntimeEventSubscription,
-    RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
+    RuntimeFrameSubscription, RuntimeLifecycle, RuntimeSession, RuntimeSessionId,
+    RuntimeSessionSeq, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
     ViewId, ViewRevision,
 };
 use posthaste_store::DatabaseStore;
@@ -33,6 +34,7 @@ use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
+use crate::sessions::SessionRegistry;
 use crate::views::ViewRegistry;
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
@@ -238,6 +240,7 @@ pub async fn build_authority_runtime(
         mail_queries.clone(),
         event_sender.clone(),
     ));
+    let sessions = Arc::new(SessionRegistry::new(views.clone()));
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
@@ -246,6 +249,7 @@ pub async fn build_authority_runtime(
         account_mutations: Some(account_mutations),
         mail_queries,
         views,
+        sessions,
         live_accounts: account_supervisor.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
@@ -269,6 +273,7 @@ struct AuthorityRuntimeCore {
     account_mutations: Option<Arc<AccountMutationService>>,
     mail_queries: Arc<MailQueryService>,
     views: Arc<ViewRegistry>,
+    sessions: Arc<SessionRegistry>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
@@ -388,6 +393,7 @@ impl AuthorityRuntimeHandle {
             mail_queries.clone(),
             api_bridge.event_sender.clone(),
         ));
+        let sessions = Arc::new(SessionRegistry::new(views.clone()));
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
@@ -406,6 +412,7 @@ impl AuthorityRuntimeHandle {
                 account_mutations,
                 mail_queries,
                 views,
+                sessions,
                 live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
@@ -734,6 +741,55 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<MailQueryPage, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.mail_queries.query_mail_page(request).await
+    }
+
+    async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core.sessions.open_session(caller)
+    }
+
+    async fn subscribe_runtime_frames(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        after_seq: Option<RuntimeSessionSeq>,
+    ) -> Result<RuntimeFrameSubscription, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .sessions
+            .subscribe_frames(caller, session_id, after_seq)
+    }
+
+    async fn close_session(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core.sessions.close_session(caller, session_id)
+    }
+
+    async fn open_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        descriptor: ViewDescriptor,
+    ) -> Result<posthaste_runtime_contract::ViewSnapshot, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .sessions
+            .open_view(caller, session_id, descriptor)
+            .await
+    }
+
+    async fn close_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        view_id: ViewId,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core.sessions.close_view(caller, session_id, view_id)
     }
 
     async fn open_view(

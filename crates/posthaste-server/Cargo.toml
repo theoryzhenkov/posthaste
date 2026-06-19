@@ -33,7 +33,7 @@ posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-observability = { path = "../posthaste-observability" }
-posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }
 posthaste-store = { path = "../posthaste-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }

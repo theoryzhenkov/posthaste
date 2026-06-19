@@ -127,6 +127,50 @@ export type RuntimeViewFrame<TData = unknown> =
   | { kind: 'error'; viewId: string; revision: number; error: unknown }
   | { kind: 'closed'; viewId: string }
 
+export type RuntimeFrame<TData = unknown> =
+  | {
+      type: 'viewSnapshot'
+      sessionSeq: number
+      viewId: string
+      revision: number
+      snapshot: RuntimeViewSnapshot<TData>
+    }
+  | {
+      type: 'viewReplace'
+      sessionSeq: number
+      viewId: string
+      revision: number
+      snapshot: RuntimeViewSnapshot<TData>
+    }
+  | { type: 'viewError'; sessionSeq: number; viewId: string; error: unknown }
+  | { type: 'viewClosed'; sessionSeq: number; viewId: string }
+  | {
+      type: 'mutationSettlement'
+      sessionSeq: number
+      mutationId: string
+      state: unknown
+    }
+  | { type: 'notification'; sessionSeq: number; kind: string; payload: unknown }
+  | { type: 'heartbeat'; sessionSeq: number }
+
+export interface RuntimeSession {
+  sessionId: string
+}
+
+export interface RuntimeOpenSessionRequest {
+  sourceId?: string | null
+}
+
+export interface RuntimeCloseSessionRequest {
+  sessionId: string
+  sourceId?: string | null
+}
+
+export interface RuntimeSessionViewRequest {
+  sessionId: string
+  view: RuntimeMessagePageRequest
+}
+
 export interface RuntimeOpenMessageListViewResult {
   viewId: string
   snapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
@@ -138,8 +182,22 @@ export interface RuntimeViewSubscriptionRequest {
   sourceId?: string | null
 }
 
+export interface RuntimeFrameSubscriptionRequest {
+  sessionId: string
+  afterSeq?: number | null
+  sourceId?: string | null
+}
+
 export interface RuntimeViewFrameHandlers {
   onFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
+  onMalformedFrame?(input: { raw: string; error: unknown }): void
+  onPermanentError?(error: unknown): void
+  onTransientError?(error: unknown): void
+  onClosed?(error: unknown): void
+}
+
+export interface RuntimeFrameHandlers {
+  onFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
   onMalformedFrame?(input: { raw: string; error: unknown }): void
   onPermanentError?(error: unknown): void
   onTransientError?(error: unknown): void
@@ -215,6 +273,17 @@ export interface RuntimeAdapter {
   subscribeEvents(
     request: RuntimeEventSubscriptionRequest,
     handlers: RuntimeEventHandlers,
+  ): RuntimeUnsubscribe
+  openRuntimeSession(
+    request: RuntimeOpenSessionRequest,
+  ): Promise<RuntimeSession>
+  closeRuntimeSession(request: RuntimeCloseSessionRequest): Promise<OkResponse>
+  openRuntimeSessionMessageListView(
+    request: RuntimeSessionViewRequest,
+  ): Promise<RuntimeOpenMessageListViewResult>
+  subscribeRuntimeFrames(
+    request: RuntimeFrameSubscriptionRequest,
+    handlers: RuntimeFrameHandlers,
   ): RuntimeUnsubscribe
   openMessageListView(
     request: RuntimeMessagePageRequest,

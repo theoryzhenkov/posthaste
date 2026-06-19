@@ -117,12 +117,13 @@ describe('useRuntimeMailListView', () => {
       undefined,
       { columnId: 'date', direction: 'desc' },
     )
-    runtimeAdapter.queueOpenMessageListView({
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeSessionMessageListView({
       viewId: 'view-1',
       snapshot: mailListSnapshot(1, message),
     })
 
-    renderHook(
+    const { unmount } = renderHook(
       () =>
         useRuntimeMailListView({
           enabled: true,
@@ -155,12 +156,19 @@ describe('useRuntimeMailListView', () => {
       }),
     )
     expect(runtimeAdapter.messagePageCalls).toEqual([])
-    expect(runtimeAdapter.viewSubscriptionCalls).toEqual([
-      { request: { viewId: 'view-1', afterRevision: 1, sourceId: 'primary' } },
+    expect(runtimeAdapter.runtimeSessionCalls).toEqual([
+      { sourceId: 'primary' },
+    ])
+    expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
+    expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
+      { request: { sessionId: 'session-1', afterSeq: 0, sourceId: 'primary' } },
     ])
 
-    runtimeAdapter.emitViewFrame({
-      kind: 'replace',
+    runtimeAdapter.emitRuntimeFrame({
+      type: 'viewReplace',
+      sessionSeq: 2,
+      viewId: 'view-1',
+      revision: 2,
       snapshot: mailListSnapshot(2, updatedMessage),
     })
 
@@ -169,6 +177,13 @@ describe('useRuntimeMailListView', () => {
         pages: [{ items: [updatedMessage], nextCursor: null }],
         pageParams: [null],
       }),
+    )
+
+    unmount()
+    await waitFor(() =>
+      expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
+        { sessionId: 'session-1', sourceId: 'primary' },
+      ]),
     )
   })
 })

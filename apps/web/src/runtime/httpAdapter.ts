@@ -8,8 +8,10 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  buildRuntimeSessionStreamUrl,
   buildViewStreamUrl,
   buildOAuthRedirectUri,
+  closeRuntimeSession,
   createAccount,
   createSmartMailbox,
   deleteAccount,
@@ -31,6 +33,8 @@ import {
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
+  openRuntimeSession,
+  openRuntimeSessionView,
   openView,
   patchMailbox,
   patchSettings,
@@ -52,6 +56,8 @@ import type { DomainEvent, KnownMailboxRole, Mailbox } from '../api/types'
 import type {
   RuntimeAdapter,
   RuntimeEventHandlers,
+  RuntimeFrame,
+  RuntimeFrameHandlers,
   RuntimeMailListViewState,
   RuntimeMailQueryRequest,
   RuntimeMessagePageRequest,
@@ -144,7 +150,10 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
 }
 
 function handleMalformedFrame(
-  handlers: RuntimeEventHandlers | RuntimeViewFrameHandlers,
+  handlers:
+    | RuntimeEventHandlers
+    | RuntimeFrameHandlers
+    | RuntimeViewFrameHandlers,
   raw: string,
   error: unknown,
 ): void {
@@ -152,6 +161,82 @@ function handleMalformedFrame(
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  openRuntimeSession(request) {
+    return openRuntimeSession({ sourceId: request.sourceId })
+  },
+  closeRuntimeSession(request) {
+    return closeRuntimeSession(request.sessionId, {
+      sourceId: request.sourceId,
+    })
+  },
+  async openRuntimeSessionMessageListView(request) {
+    const descriptor = {
+      family: 'mailList',
+      payload: mailQueryRequest(request.view),
+    }
+    return openRuntimeSessionView<
+      RuntimeViewSnapshot<RuntimeMailListViewState>
+    >(
+      request.sessionId,
+      { descriptor },
+      { sourceId: sourceScope(request.view) },
+    )
+  },
+  subscribeRuntimeFrames(request, handlers) {
+    const controller = new AbortController()
+    void fetchEventSource(
+      buildRuntimeSessionStreamUrl({
+        sessionId: request.sessionId,
+        afterSeq: request.afterSeq,
+        sourceId: request.sourceId,
+      }),
+      {
+        headers: authHeaders(),
+        signal: controller.signal,
+        openWhenHidden: true,
+        async onopen(response) {
+          const contentType = response.headers.get('content-type') ?? ''
+          if (response.ok && contentType.startsWith(EventStreamContentType)) {
+            return
+          }
+          if (response.status >= 400 && response.status < 500) {
+            throw new FatalStreamError(
+              `runtime stream rejected with ${response.status}`,
+            )
+          }
+          throw new Error(`runtime stream returned ${response.status}`)
+        },
+        onmessage(event) {
+          if (!event.data) {
+            return
+          }
+          let payload: RuntimeFrame<RuntimeMailListViewState>
+          try {
+            payload = JSON.parse(
+              event.data,
+            ) as RuntimeFrame<RuntimeMailListViewState>
+          } catch (error) {
+            handleMalformedFrame(handlers, event.data, error)
+            return
+          }
+          handlers.onFrame(payload)
+        },
+        onerror(error) {
+          if (error instanceof FatalStreamError) {
+            handlers.onPermanentError?.(error)
+            throw error
+          }
+          handlers.onTransientError?.(error)
+        },
+      },
+    ).catch((error) => {
+      if (controller.signal.aborted || error instanceof FatalStreamError) {
+        return
+      }
+      handlers.onClosed?.(error)
+    })
+    return () => controller.abort()
+  },
   async openMessageListView(request) {
     const descriptor = {
       family: 'mailList',

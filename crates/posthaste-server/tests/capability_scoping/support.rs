@@ -116,6 +116,14 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
         .route("/views/conversations", get(ok))
         .route("/views", post(ok))
         .route("/views/{view_id}/stream", get(ok))
+        .route("/runtime/sessions", post(ok))
+        .route("/runtime/sessions/{session_id}", axum::routing::delete(ok))
+        .route("/runtime/sessions/{session_id}/stream", get(ok))
+        .route("/runtime/sessions/{session_id}/views", post(ok))
+        .route(
+            "/runtime/sessions/{session_id}/views/{view_id}",
+            axum::routing::delete(ok),
+        )
         .route("/smart-mailboxes/{smart_mailbox_id}/conversations", get(ok))
         .route("/events", get(ok))
         .route("/sources/{source_id}/messages", get(ok))

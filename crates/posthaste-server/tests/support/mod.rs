@@ -291,6 +291,11 @@ impl Harness {
             .await
     }
 
+    /// `DELETE path` with a bearer token and allowlisted Host.
+    pub async fn delete_json(&self, token: &str, path: &str) -> (StatusCode, serde_json::Value) {
+        self.request_json(Method::DELETE, token, path, None).await
+    }
+
     /// `GET path` and return the first response body data frame. Useful for
     /// infinite SSE bodies where collecting the full body would hang.
     pub async fn get_text_frame(&self, token: &str, path: &str) -> (StatusCode, String) {
