@@ -5,13 +5,12 @@ use posthaste_domain::{
     ConfigSnapshot, SmartMailbox, SmartMailboxId,
 };
 
-use crate::atomic::atomic_write;
 use crate::defaults::default_smart_mailboxes;
-use crate::schema::{AppToml, SourceToml};
+use crate::schema::AppToml;
 
 use super::io::{
     io_error, load_snapshot_from_disk, lock_error, now_iso8601, read_app_toml, validate_safe_id,
-    write_app_toml, write_smart_mailbox_toml,
+    write_app_toml, write_smart_mailbox_toml, write_source_toml,
 };
 use super::TomlConfigRepository;
 
@@ -102,20 +101,43 @@ impl ConfigRepository for TomlConfigRepository {
             .cloned())
     }
 
+    /// Creates an account source file via atomic write and updates the snapshot.
+    /// Duplicate IDs are rejected before writing so account creation cannot
+    /// overwrite existing source config.
+    ///
+    /// @spec docs/L1-accounts#id-validation
+    fn insert_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
+        validate_safe_id(source.id.as_str())?;
+        let path = self
+            .config_root
+            .join("sources")
+            .join(format!("{}.toml", source.id));
+
+        let mut snapshot = self.snapshot.write().map_err(lock_error)?;
+        if snapshot
+            .sources
+            .iter()
+            .any(|existing| existing.id == source.id)
+            || path.exists()
+        {
+            return Err(ConfigError::Conflict(format!(
+                "account '{}' already exists",
+                source.id
+            )));
+        }
+
+        write_source_toml(&self.config_root, source)?;
+        snapshot.sources.push(source.clone());
+        Ok(())
+    }
+
     /// Creates or updates an account source file via atomic write and updates
     /// the snapshot.
     ///
     /// @spec docs/L1-accounts#id-validation
     fn save_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
         validate_safe_id(source.id.as_str())?;
-        let source_toml = SourceToml::from_account_settings(source);
-        let toml_str =
-            toml::to_string_pretty(&source_toml).map_err(|e| ConfigError::Parse(e.to_string()))?;
-        let path = self
-            .config_root
-            .join("sources")
-            .join(format!("{}.toml", source.id));
-        atomic_write(&path, toml_str.as_bytes())?;
+        write_source_toml(&self.config_root, source)?;
 
         let mut snapshot = self.snapshot.write().map_err(lock_error)?;
         if let Some(existing) = snapshot.sources.iter_mut().find(|s| s.id == source.id) {

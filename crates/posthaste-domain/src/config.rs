@@ -64,6 +64,8 @@ pub trait ConfigRepository: Send + Sync {
     fn list_sources(&self) -> Result<Vec<AccountSettings>, ConfigError>;
     /// Look up a single account by ID.
     fn get_source(&self, id: &AccountId) -> Result<Option<AccountSettings>, ConfigError>;
+    /// Create an account configuration, rejecting duplicate IDs.
+    fn insert_source(&self, source: &AccountSettings) -> Result<(), ConfigError>;
     /// Create or update an account configuration.
     fn save_source(&self, source: &AccountSettings) -> Result<(), ConfigError>;
     /// Delete an account configuration.

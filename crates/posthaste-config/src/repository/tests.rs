@@ -74,6 +74,36 @@ fn source_crud_round_trips() {
 }
 
 #[test]
+fn insert_source_rejects_duplicate_without_overwriting() {
+    let root = temp_root();
+    let repo = TomlConfigRepository::open(&root).unwrap();
+
+    let source = AccountSettings {
+        id: AccountId::from("test"),
+        name: "Test".to_string(),
+        full_name: None,
+        email_patterns: Vec::new(),
+        driver: posthaste_domain::AccountDriver::Mock,
+        enabled: true,
+        appearance: None,
+        transport: Default::default(),
+        created_at: "2026-03-31T00:00:00Z".to_string(),
+        updated_at: "2026-03-31T00:00:00Z".to_string(),
+    };
+    repo.insert_source(&source).unwrap();
+
+    let mut duplicate = source.clone();
+    duplicate.name = "Updated".to_string();
+    let error = repo
+        .insert_source(&duplicate)
+        .expect_err("duplicate source insert should fail");
+
+    assert!(matches!(error, ConfigError::Conflict(_)));
+    let loaded = repo.get_source(&AccountId::from("test")).unwrap().unwrap();
+    assert_eq!(loaded.name, "Test");
+}
+
+#[test]
 fn filename_id_mismatch_is_rejected() {
     let root = temp_root();
     let repo = TomlConfigRepository::open(&root).unwrap();
