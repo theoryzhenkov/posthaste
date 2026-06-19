@@ -1198,7 +1198,7 @@
           "smart-mailboxes"
         ],
         "summary": "Create smart mailbox",
-        "description": "Generates an ID from the name and persists a new smart mailbox.",
+        "description": "Generates a namespaced ID and persists a new smart mailbox.",
         "operationId": "create_smart_mailbox",
         "requestBody": {
           "content": {

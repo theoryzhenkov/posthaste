@@ -27,7 +27,7 @@ pub async fn list_smart_mailboxes(
 
 /// POST /v1/smart-mailboxes
 ///
-/// Generates an ID from the name (`sm-{slug}-{uuid}`) and persists to config.
+/// Generates a namespaced ID (`sm_{uuid}`) and persists to config.
 ///
 /// @spec docs/L1-api#smart-mailbox-crud
 #[utoipa::path(
@@ -35,7 +35,7 @@ pub async fn list_smart_mailboxes(
     path = "/v1/smart-mailboxes",
     tag = "smart-mailboxes",
     summary = "Create smart mailbox",
-    description = "Generates an ID from the name and persists a new smart mailbox.",
+    description = "Generates a namespaced ID and persists a new smart mailbox.",
     request_body = CreateSmartMailboxRequest,
     responses(
         (status = 200, description = "The created smart mailbox", body = SmartMailbox),
