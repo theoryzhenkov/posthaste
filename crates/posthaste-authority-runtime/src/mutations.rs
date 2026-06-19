@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use posthaste_domain::{
-    generate_account_id, generate_smart_mailbox_id, now_iso8601 as domain_now_iso8601,
-    AccountAppearance, AccountDriver, AccountId, AccountOverview, AccountSettings,
-    AccountTransportSettings, AppSettings, AutomationAction, AutomationRule, CachePolicy,
-    DomainEvent, ImapTransportSettings, MailService, MailStore, MailboxId, MessageSortField,
-    ProviderAuthKind, ProviderHint, SecretKind, SecretRef, SecretStore, ServiceError, SmartMailbox,
-    SmartMailboxId, SmartMailboxKind, SmtpTransportSettings, SortDirection, StoreError,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
-    EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
+    now_iso8601 as domain_now_iso8601, AccountAppearance, AccountDriver, AccountId, AccountIdKind,
+    AccountOverview, AccountSettings, AccountTransportSettings, AppSettings, AutomationAction,
+    AutomationRule, CachePolicy, DomainEvent, Id, ImapTransportSettings, MailService, MailStore,
+    MailboxId, MessageSortField, ProviderAuthKind, ProviderHint, SecretKind, SecretRef,
+    SecretStore, ServiceError, SmartMailbox, SmartMailboxId, SmartMailboxIdKind, SmartMailboxKind,
+    SmtpTransportSettings, SortDirection, StoreError, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED,
+    EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
     EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
     EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
