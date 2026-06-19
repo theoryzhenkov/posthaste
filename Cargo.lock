@@ -3617,6 +3617,7 @@ dependencies = [
  "time",
  "tokio",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]

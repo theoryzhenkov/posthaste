@@ -12,6 +12,7 @@ posthaste-observability = { path = "../posthaste-observability" }
 thiserror = { workspace = true }
 time = { workspace = true }
 utoipa = { workspace = true, optional = true }
+uuid = { workspace = true }
 
 [features]
 # Derive `utoipa::ToSchema` on wire-facing domain types so the server can emit

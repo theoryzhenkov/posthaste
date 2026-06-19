@@ -1,28 +1,28 @@
 use std::marker::PhantomData;
 
-use super::*;
+use crate::{AccountId, SmartMailboxId};
 
-pub(super) trait GeneratedIdKind {
+pub trait GeneratedIdKind {
     const PREFIX: &'static str;
 }
 
-pub(super) struct AccountGeneratedId;
+pub struct AccountGeneratedId;
 impl GeneratedIdKind for AccountGeneratedId {
     const PREFIX: &'static str = "acct";
 }
 
-pub(super) struct SmartMailboxGeneratedId;
+pub struct SmartMailboxGeneratedId;
 impl GeneratedIdKind for SmartMailboxGeneratedId {
     const PREFIX: &'static str = "sm";
 }
 
-pub(super) struct GeneratedId<K: GeneratedIdKind> {
+pub struct GeneratedId<K: GeneratedIdKind> {
     uuid: uuid::Uuid,
     _kind: PhantomData<K>,
 }
 
 impl<K: GeneratedIdKind> GeneratedId<K> {
-    pub(super) fn generate() -> Self {
+    pub fn generate() -> Self {
         Self {
             uuid: uuid::Uuid::new_v4(),
             _kind: PhantomData,
@@ -36,11 +36,11 @@ impl<K: GeneratedIdKind> std::fmt::Display for GeneratedId<K> {
     }
 }
 
-pub(super) fn generate_account_id() -> AccountId {
+pub fn generate_account_id() -> AccountId {
     AccountId::from(GeneratedId::<AccountGeneratedId>::generate().to_string())
 }
 
-pub(super) fn generate_smart_mailbox_id() -> SmartMailboxId {
+pub fn generate_smart_mailbox_id() -> SmartMailboxId {
     SmartMailboxId::from(GeneratedId::<SmartMailboxGeneratedId>::generate().to_string())
 }
 
