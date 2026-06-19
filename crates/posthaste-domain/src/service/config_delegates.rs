@@ -29,6 +29,16 @@ impl MailService {
         self.config.get_source(id).map_err(Into::into)
     }
 
+    /// Create an account, rejecting duplicate IDs, and sync the source projection in the store.
+    ///
+    /// @spec docs/L1-api#account-crud-lifecycle
+    pub fn insert_source(&self, source: &AccountSettings) -> Result<(), ServiceError> {
+        self.config.insert_source(source)?;
+        self.source_projections
+            .upsert_source_projection(&source.id, &source.name)?;
+        Ok(())
+    }
+
     /// Create or update an account, syncing the source projection in the store.
     ///
     /// @spec docs/L1-api#account-crud-lifecycle

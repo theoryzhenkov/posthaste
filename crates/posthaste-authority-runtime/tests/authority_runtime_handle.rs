@@ -95,6 +95,42 @@ fn mock_account_mutation(account_id: &str) -> CreateAccountMutation {
     }
 }
 
+fn imap_smtp_account_mutation(
+    account_id: &str,
+    name: &str,
+    password: &str,
+) -> CreateAccountMutation {
+    CreateAccountMutation {
+        id: Some(account_id.to_string()),
+        name: name.to_string(),
+        full_name: None,
+        email_patterns: vec![format!("{account_id}@example.com")],
+        driver: Some(AccountDriver::ImapSmtp),
+        enabled: Some(false),
+        appearance: None,
+        transport: AccountTransportMutation {
+            provider: Some(ProviderHint::Generic),
+            auth: Some(ProviderAuthKind::Password),
+            base_url: None,
+            username: Some(format!("{account_id}@example.com")),
+            imap: Some(ImapTransportSettings {
+                host: "imap.example.com".to_string(),
+                port: 993,
+                security: TransportSecurity::Tls,
+            }),
+            smtp: Some(SmtpTransportSettings {
+                host: "smtp.example.com".to_string(),
+                port: 465,
+                security: TransportSecurity::Tls,
+            }),
+        },
+        secret: SecretWriteMutation {
+            mode: SecretWriteMode::Replace,
+            password: Some(password.to_string()),
+        },
+    }
+}
+
 // spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 // spec: docs/runtime/L2#runtime-builder-transport-free
 // spec: docs/backend/L2#runtime-build-before-adapters
@@ -277,6 +313,62 @@ async fn authority_builder_handle_supports_account_mutations() {
 
     assert_eq!(created.id.as_str(), "acct-builder");
     assert_eq!(created.name, "Builder Account");
+}
+
+// spec: docs/backend/L3#account-mutations-runtime-backed
+#[tokio::test]
+async fn create_account_duplicate_id_conflicts_without_overwriting_config_or_secret() {
+    let root = temp_root();
+    let secret_store = Arc::new(TestSecretStore::default());
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(secret_store.clone());
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let created = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            imap_smtp_account_mutation("duplicate", "Original", "old-password"),
+        )
+        .await
+        .expect("initial account should be created");
+    let secret_ref = build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .expect("created account should exist")
+        .transport
+        .secret_ref
+        .expect("created account should have a secret");
+
+    let error = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            imap_smtp_account_mutation("duplicate", "Replacement", "new-password"),
+        )
+        .await
+        .expect_err("duplicate account id should conflict");
+
+    assert_eq!(error.envelope().code, RuntimeErrorCode::Conflict);
+    let account = build
+        .api_bridge
+        .service
+        .get_source(&created.id)
+        .expect("source lookup should succeed")
+        .expect("original account should remain configured");
+    assert_eq!(account.name, "Original");
+    assert_eq!(
+        secret_store.value(&secret_ref).as_deref(),
+        Some("old-password")
+    );
 }
 
 // spec: docs/backend/L3#account-assets-runtime-backed
