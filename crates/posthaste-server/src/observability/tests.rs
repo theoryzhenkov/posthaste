@@ -40,5 +40,6 @@ fn request_context_rejects_unsafe_header_values() {
     let context = RequestLogContext::from_headers(&headers);
 
     assert!(context.operation_id.is_none());
-    assert!(context.request_id.starts_with("srv_"));
+    assert_eq!(context.request_id.len(), 32);
+    assert!(context.request_id.chars().all(|ch| ch.is_ascii_hexdigit()));
 }

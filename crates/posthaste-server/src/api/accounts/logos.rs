@@ -61,7 +61,7 @@ pub async fn upload_account_logo(
     fs::create_dir_all(&state.account_logo_root)
         .await
         .map_err(|err| internal_error(format!("failed to create account logo directory: {err}")))?;
-    let image_id = uuid::Uuid::new_v4().simple().to_string();
+    let image_id = Id::generate().to_string();
     let path = state
         .account_logo_root
         .join(format!("{image_id}.{extension}"));

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use base64::Engine;
 use macaroon::{ByteString, Caveat, Format, Macaroon, MacaroonKey, Verifier};
-use posthaste_domain::{SecretKind, SecretRef, SecretStore};
+use posthaste_domain::{Id, SecretKind, SecretRef, SecretStore};
 
 /// Stable macaroon `location` hint embedded in every minted token. Purely
 /// informational (macaroons are verified by the HMAC chain, not the location).
@@ -165,14 +165,14 @@ pub fn resolve_root_key(secret_store: &dyn SecretStore, state_root: &Path) -> Ro
 
 /// Mint a **full-scope** macaroon: signed with the root key, carrying NO
 /// first-party caveats, so it is accepted on every request (Stage A behavior
-/// parity with the former random token). The identifier is a random UUID,
-/// giving each process a distinct token. Returned as the V2 serialization,
+/// parity with the former random token). The identifier is a random generated
+/// app ID, giving each process a distinct token. Returned as the V2 serialization,
 /// which `macaroon` emits as a URL-safe base64 ASCII string — directly usable
 /// as the `Authorization: Bearer` value.
 ///
 /// @spec docs/eph/DESIGN-L1-capability-tokens
 pub fn mint_full_scope_token(root: &RootKey) -> String {
-    let identifier = uuid::Uuid::new_v4().to_string();
+    let identifier = Id::generate().to_string();
     let macaroon = Macaroon::create(
         Some(MACAROON_LOCATION.to_string()),
         root.macaroon_key(),
@@ -256,7 +256,7 @@ pub fn attenuate(presented: &str, predicate: &str) -> Result<String, TokenError>
 ///
 /// @spec docs/eph/DESIGN-L1-capability-tokens
 pub fn mint_with_caveats(root: &RootKey, predicates: &[&str]) -> String {
-    let identifier = uuid::Uuid::new_v4().to_string();
+    let identifier = Id::generate().to_string();
     let mut macaroon = Macaroon::create(
         Some(MACAROON_LOCATION.to_string()),
         root.macaroon_key(),
