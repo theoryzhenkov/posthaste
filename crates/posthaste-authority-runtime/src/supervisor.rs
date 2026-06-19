@@ -7,7 +7,7 @@ use futures_util::{future::pending, StreamExt};
 use posthaste_domain::{
     AccountDriver, AccountId, AccountRuntimeOverview, AccountSettings, AccountStatus,
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
-    GatewayError, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,
+    GatewayError, Id, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,
     PushNotification, PushStatus, PushStreamEvent, RemoteIdleScope, RemoteObservationPolicy,
     ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind, SharedGateway, SyncMode,
     SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
@@ -23,7 +23,6 @@ use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{info_span, Instrument};
-use uuid::Uuid;
 
 use crate::oauth::{OAuthTokenService, OAuthTokenSet};
 use crate::push::resilient_push_stream;
