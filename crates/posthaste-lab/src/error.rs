@@ -47,12 +47,14 @@ pub enum LabError {
     VerificationBlocked { summary_path: String },
     #[error("verification skipped; summary: {summary_path}")]
     VerificationSkipped { summary_path: String },
+    #[error("config validation failed for {config_dir}: {message}")]
+    ConfigValidation { config_dir: String, message: String },
 }
 
 impl LabError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::VerificationFailed { .. } => 1,
+            Self::VerificationFailed { .. } | Self::ConfigValidation { .. } => 1,
             Self::VerificationSkipped { .. } => 77,
             Self::VerificationBlocked { .. } => 78,
             _ => 2,
