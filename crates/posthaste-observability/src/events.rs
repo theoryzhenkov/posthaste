@@ -4,6 +4,10 @@ pub const API_REQUEST_COMPLETED: LogEvent = LogEvent::new("api.request.completed
 pub const API_REQUEST_FAILED: LogEvent = LogEvent::new("api.request.failed");
 pub const API_REQUEST_STARTED: LogEvent = LogEvent::new("api.request.started");
 
+pub const ACCOUNT_CREATE_COMPENSATION_FAILED: LogEvent =
+    LogEvent::new("account.create.compensation_failed");
+pub const ACCOUNT_SECRET_DELETE_FAILED: LogEvent = LogEvent::new("account.secret.delete_failed");
+
 pub const CACHE_BODY_ADMISSION_EVALUATED: LogEvent =
     LogEvent::new("cache.body.admission_evaluated");
 pub const CACHE_BODY_CANDIDATE_GENERATION_SKIPPED: LogEvent =

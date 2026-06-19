@@ -8,6 +8,7 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 
 mod account_reads;
+mod account_repository;
 mod bootstrap;
 mod build;
 mod live_accounts;

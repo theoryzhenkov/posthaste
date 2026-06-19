@@ -6,12 +6,11 @@ use posthaste_domain::{
     AccountId, AccountOverview, AccountSettings, AccountTransportSettings, AppSettings,
     AutomationAction, AutomationRule, CachePolicy, DomainEvent, Id, ImapTransportSettings,
     MailService, MailStore, MailboxId, MessageSortField, ProviderAuthKind, ProviderHint,
-    SecretKind, SecretRef, SecretStore, ServiceError, SmartMailbox, SmartMailboxId,
-    SmartMailboxKind, SmtpTransportSettings, SortDirection, StoreError,
-    EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_UPDATED,
-    EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED, EVENT_TOPIC_SMART_MAILBOX_CREATED,
-    EVENT_TOPIC_SMART_MAILBOX_DELETED, EVENT_TOPIC_SMART_MAILBOX_RESET,
-    EVENT_TOPIC_SMART_MAILBOX_UPDATED,
+    ServiceError, SmartMailbox, SmartMailboxId, SmartMailboxKind, SmtpTransportSettings,
+    SortDirection, StoreError, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_ACCOUNT_UPDATED, EVENT_TOPIC_CONFIG_RELOADED, EVENT_TOPIC_SETTINGS_UPDATED,
+    EVENT_TOPIC_SMART_MAILBOX_CREATED, EVENT_TOPIC_SMART_MAILBOX_DELETED,
+    EVENT_TOPIC_SMART_MAILBOX_RESET, EVENT_TOPIC_SMART_MAILBOX_UPDATED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, AccountVerificationResult, AutomationRulePreviewMutation,
@@ -24,24 +23,23 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::account_reads::AccountReadService;
+use crate::account_repository::AccountRepository;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
 use crate::supervisor::AccountSupervisor;
 
 mod accounts;
 mod app_settings;
 mod automation;
-mod secrets;
 mod smart_mailboxes;
 
 use automation::*;
-use secrets::*;
 
 const GLOBAL_EVENT_ACCOUNT_ID: &str = "app";
 
 pub struct AccountMutationService {
     service: Arc<MailService>,
     store: Arc<dyn MailStore>,
-    secret_store: Arc<dyn SecretStore>,
+    account_repository: Arc<AccountRepository>,
     event_sender: broadcast::Sender<DomainEvent>,
     supervisor: Arc<AccountSupervisor>,
     reads: Arc<AccountReadService>,
@@ -51,7 +49,7 @@ impl AccountMutationService {
     pub fn new(
         service: Arc<MailService>,
         store: Arc<dyn MailStore>,
-        secret_store: Arc<dyn SecretStore>,
+        account_repository: Arc<AccountRepository>,
         event_sender: broadcast::Sender<DomainEvent>,
         supervisor: Arc<AccountSupervisor>,
         reads: Arc<AccountReadService>,
@@ -59,7 +57,7 @@ impl AccountMutationService {
         Self {
             service,
             store,
-            secret_store,
+            account_repository,
             event_sender,
             supervisor,
             reads,
