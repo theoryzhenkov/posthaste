@@ -2,7 +2,7 @@
 scope: L3
 summary: "Temporary API runtime-wrapper migration controls for moving /v1 from AppState-owned services to the authority runtime handle"
 modified: 2026-06-16
-reviewed: 2026-06-16
+reviewed: 2026-06-19
 lifecycle: ephemeral
 type: PLAN
 depends:
