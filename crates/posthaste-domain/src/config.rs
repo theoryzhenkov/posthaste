@@ -1,6 +1,8 @@
 use thiserror::Error;
 
-use crate::{AccountId, AccountSettings, AppSettings, SmartMailbox, SmartMailboxId};
+use crate::{
+    AccountId, AccountSettings, AppSettings, SmartMailbox, SmartMailboxId, ValidationError,
+};
 
 /// Full in-memory snapshot of all config: app settings, sources, smart mailboxes.
 ///
@@ -37,6 +39,29 @@ pub enum ConfigError {
     Io(String),
     #[error("parse error: {0}")]
     Parse(String),
+}
+
+impl From<ValidationError> for ConfigError {
+    fn from(error: ValidationError) -> Self {
+        Self::Validation(error.to_string())
+    }
+}
+
+impl From<Vec<ValidationError>> for ConfigError {
+    fn from(errors: Vec<ValidationError>) -> Self {
+        Self::Validation(format_validation_errors(&errors))
+    }
+}
+
+fn format_validation_errors(errors: &[ValidationError]) -> String {
+    if errors.is_empty() {
+        return "config validation failed".to_string();
+    }
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Config persistence boundary for TOML-backed account and smart mailbox storage.
