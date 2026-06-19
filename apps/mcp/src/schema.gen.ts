@@ -415,7 +415,7 @@ export interface paths {
         put?: never;
         /**
          * Create smart mailbox
-         * @description Generates an ID from the name and persists a new smart mailbox.
+         * @description Generates a namespaced ID and persists a new smart mailbox.
          */
         post: operations["create_smart_mailbox"];
         delete?: never;
