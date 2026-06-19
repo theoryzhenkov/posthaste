@@ -56,6 +56,8 @@ use utoipa::OpenApi;
         crate::api::messages::compose::send_message,
         crate::api::sync_events::trigger_sync,
         crate::api::sync_events::stream_events,
+        crate::api::views::open_view,
+        crate::api::views::stream_view,
         crate::api::message_commands::set_keywords,
         crate::api::message_commands::add_to_mailbox,
         crate::api::message_commands::remove_from_mailbox,
@@ -93,6 +95,8 @@ use utoipa::OpenApi;
         crate::api::VerificationResponse,
         crate::api::TriggerSyncRequest,
         crate::api::TriggerSyncResponse,
+        crate::api::views::OpenViewRequest,
+        crate::api::views::OpenViewResponse,
         crate::api::ConversationPageResponse,
         crate::api::MessagePageResponse,
         crate::api::AutomationRulePreviewResponse,
@@ -192,6 +196,7 @@ use utoipa::OpenApi;
         (name = "settings", description = "Application settings and automation rules"),
         (name = "sync", description = "Sync triggers and configuration reload"),
         (name = "events", description = "Server-sent domain event stream"),
+        (name = "views", description = "Runtime-owned view snapshots and streams"),
         (name = "auth", description = "Capability-token minting")
     )
 )]

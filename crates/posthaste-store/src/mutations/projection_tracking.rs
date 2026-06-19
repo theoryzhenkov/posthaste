@@ -41,6 +41,8 @@ pub(crate) fn append_message_diff_events_tx(
     )?);
 
     if !before.existed || before.keywords != message.keywords {
+        let assertion = query_message_detail_tx(tx, account_id, &message.id)?
+            .map(|detail| posthaste_domain::MessageChangeAssertion::after(detail.summary));
         events.push(insert_event_tx(
             tx,
             account_id,
@@ -50,6 +52,7 @@ pub(crate) fn append_message_diff_events_tx(
             json!({
                 "messageId": message.id.as_str(),
                 "keywords": message.keywords,
+                "assertion": assertion,
             }),
         )?);
     }

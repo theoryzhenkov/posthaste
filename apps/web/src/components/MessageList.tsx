@@ -18,6 +18,7 @@ import {
 } from '../accountDirectory'
 import { ApiError } from '../api/errors'
 import type { MessageSummary } from '../api/types'
+import { runtimeMailListViewsEnabled } from '../features'
 import type { EmailActions } from '../hooks/useEmailActions'
 import type { MailSelection } from '../mailState'
 import { createOperationContext } from '../observability'
@@ -34,6 +35,7 @@ import {
   viewKey,
 } from './message-list/model'
 import { useDomainEventRefresh } from './message-list/useDomainEventRefresh'
+import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
 import type { SidebarSelection } from './Sidebar'
@@ -104,9 +106,14 @@ export function MessageList({
     null,
   )
   const accountDirectory = useAccountDirectory()
+  const useRuntimeViewFrames = runtimeMailListViewsEnabled()
+  const messageQueryKey = useMemo(
+    () => queryKeys.messages(selectedView, searchQuery, sort),
+    [selectedView, searchQuery, sort],
+  )
 
   const query = useInfiniteQuery({
-    queryKey: queryKeys.messages(selectedView, searchQuery, sort),
+    queryKey: messageQueryKey,
     queryFn: ({ pageParam, signal }) =>
       fetchMessagesForView(
         selectedView!,
@@ -116,7 +123,10 @@ export function MessageList({
         signal,
         operationEntry.context,
       ),
-    enabled: selectedView !== null && !preparedSearchQuery.isBlocked,
+    enabled:
+      selectedView !== null &&
+      !preparedSearchQuery.isBlocked &&
+      !useRuntimeViewFrames,
     initialPageParam: null as string | null,
     placeholderData: (previousData) => previousData,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
@@ -153,7 +163,16 @@ export function MessageList({
     selectedKey,
     selection,
   })
+  useRuntimeMailListView({
+    enabled: useRuntimeViewFrames,
+    operation: operationEntry.context,
+    preparedSearchQuery,
+    queryKey: messageQueryKey,
+    selectedView,
+    sort,
+  })
   useDomainEventRefresh({
+    enabled: !useRuntimeViewFrames,
     isSearchBlocked: preparedSearchQuery.isBlocked,
     refetch: () => void query.refetch(),
     selectedView,
@@ -161,9 +180,13 @@ export function MessageList({
   const { handleScroll, scrollContainerRef, scrollTop, viewportHeight } =
     useMessageListScroll({
       currentViewKey,
-      fetchNextPage: () => void query.fetchNextPage(),
-      hasNextPage: Boolean(query.hasNextPage),
-      isFetchingNextPage: query.isFetchingNextPage,
+      fetchNextPage: () => {
+        if (!useRuntimeViewFrames) {
+          void query.fetchNextPage()
+        }
+      },
+      hasNextPage: !useRuntimeViewFrames && Boolean(query.hasNextPage),
+      isFetchingNextPage: !useRuntimeViewFrames && query.isFetchingNextPage,
       isSearchBlocked: preparedSearchQuery.isBlocked,
       messageCount: messages.length,
     })
@@ -231,7 +254,9 @@ export function MessageList({
               actions={actions}
               columns={columns}
               errorState={errorState}
-              isFetchingNextPage={query.isFetchingNextPage}
+              isFetchingNextPage={
+                !useRuntimeViewFrames && query.isFetchingNextPage
+              }
               isLoading={query.isLoading}
               layout={tableLayout}
               messages={messages}

@@ -11,13 +11,16 @@ use posthaste_authority_runtime::{
     AuthorityRuntimeHandle,
 };
 use posthaste_domain::{
-    AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, ProviderAuthKind,
-    ProviderHint, SecretRef, SecretStore, SecretStoreError, SmtpTransportSettings,
-    TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_ARRIVED,
+    AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
+    MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
+    SecretStore, SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection,
+    SyncBatch, SyncCursor, SyncObject, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
+    EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use posthaste_runtime_contract::{
-    AccountTransportMutation, CreateAccountMutation, RuntimeCaller, RuntimeCore, RuntimeErrorCode,
-    RuntimeLifecycle, SecretWriteMode, SecretWriteMutation,
+    AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
+    MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeLifecycle,
+    SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame, ViewRevision,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -93,6 +96,95 @@ fn mock_account_mutation(account_id: &str) -> CreateAccountMutation {
         transport: AccountTransportMutation::default(),
         secret: SecretWriteMutation::default(),
     }
+}
+
+fn seeded_message(message_id: &str, mailbox_id: &str) -> MessageRecord {
+    MessageRecord {
+        id: MessageId::from(message_id),
+        source_thread_id: ThreadId::from(format!("thread-{message_id}")),
+        remote_blob_id: None,
+        subject: Some(format!("Subject {message_id}")),
+        from_name: Some("Alice".to_string()),
+        from_email: Some("alice@example.com".to_string()),
+        to: Vec::new(),
+        preview: Some("Preview".to_string()),
+        received_at: "2026-03-31T10:00:00Z".to_string(),
+        has_attachment: false,
+        size: 42,
+        mailbox_ids: vec![MailboxId::from(mailbox_id)],
+        keywords: vec!["$seen".to_string()],
+        body_html: None,
+        body_text: None,
+        raw_mime: None,
+        rfc_message_id: Some(format!("<{message_id}@example.test>")),
+        in_reply_to: None,
+        references: Vec::new(),
+    }
+}
+
+fn seed_message_batch(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account_id: &AccountId,
+) {
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            account_id,
+            &SyncBatch {
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 2,
+                }],
+                messages: vec![
+                    seeded_message("message-1", "inbox"),
+                    seeded_message("message-2", "inbox"),
+                ],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "state-1".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )
+        .expect("message batch should apply");
+}
+
+fn mail_list_descriptor(query: &str) -> ViewDescriptor {
+    let request = MailQueryRequest {
+        query: query.to_string(),
+        presentation: MailPresentationRequest::Messages {
+            limit: Some(10),
+            cursor: None,
+            sort_field: MessageSortField::Date,
+            sort_direction: SortDirection::Desc,
+        },
+        visibility: None,
+    };
+    ViewDescriptor {
+        family: "mailList".to_string(),
+        payload: serde_json::to_value(request).expect("request should serialize"),
+    }
+}
+
+fn mail_list_state(snapshot: &posthaste_runtime_contract::ViewSnapshot) -> MailListViewState {
+    serde_json::from_value(snapshot.data.clone()).expect("snapshot data should be mail list state")
+}
+
+fn scoped_test_caller(source_id: &str) -> RuntimeCaller {
+    let mut caller = RuntimeCaller::test();
+    caller.account_scope = Some(vec![source_id.to_string()]);
+    caller
 }
 
 fn imap_smtp_account_mutation(
@@ -316,6 +408,472 @@ async fn authority_builder_handle_supports_account_mutations() {
 }
 
 // spec: docs/backend/L3#account-mutations-runtime-backed
+#[tokio::test]
+async fn mail_list_view_replaces_snapshot_after_keyword_event() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mock_account_mutation("view-account"))
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:view-account/inbox"),
+        )
+        .await
+        .expect("mail list view should open");
+    assert_eq!(snapshot.revision.get(), 1);
+    let state = mail_list_state(&snapshot);
+    assert_eq!(state.rows.len(), 2);
+
+    let mut subscription = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("view should subscribe");
+    assert!(subscription.catch_up.is_none());
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+        .await
+        .expect("view frame should arrive")
+        .expect("view stream should remain open");
+    let ViewFrame::Replace { snapshot } = frame else {
+        panic!("expected replace frame");
+    };
+    assert_eq!(snapshot.revision.get(), 2);
+    let state = mail_list_state(&snapshot);
+    let row = state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == "message-1")
+        .expect("updated row should remain in window");
+    assert_eq!(row.projection["isFlagged"], true);
+    assert_eq!(
+        row.projection["keywords"],
+        serde_json::json!(["$flagged", "$seen"])
+    );
+
+    let catch_up = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(ViewRevision::new(1)),
+        )
+        .await
+        .expect("behind subscriber should get collapsed catch-up")
+        .catch_up
+        .expect("behind subscriber should get snapshot");
+    let ViewFrame::Snapshot { snapshot } = catch_up else {
+        panic!("catch-up should be a fresh snapshot");
+    };
+    assert_eq!(snapshot.revision.get(), 2);
+}
+
+#[tokio::test]
+async fn mail_list_view_enforces_caller_account_scope() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("view-account-scope"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let denied = build
+        .handle
+        .open_view(
+            scoped_test_caller("other-account"),
+            mail_list_descriptor("in:view-account-scope/inbox"),
+        )
+        .await
+        .expect_err("out-of-scope view should be rejected");
+    assert_eq!(denied.envelope().code, RuntimeErrorCode::InvalidDescriptor);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            scoped_test_caller("view-account-scope"),
+            mail_list_descriptor("in:view-account-scope/inbox"),
+        )
+        .await
+        .expect("matching account scope should open");
+    let subscription = build
+        .handle
+        .subscribe_view(
+            scoped_test_caller("other-account"),
+            snapshot.view_id,
+            Some(snapshot.revision),
+        )
+        .await;
+    let Err(error) = subscription else {
+        panic!("out-of-scope subscription should be rejected");
+    };
+    assert_eq!(error.envelope().code, RuntimeErrorCode::InvalidDescriptor);
+}
+
+#[tokio::test]
+async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("view-account-fanout"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:view-account-fanout/inbox"),
+        )
+        .await
+        .expect("mail list view should open");
+    let mut first = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("first subscriber should open");
+    let mut second = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("second subscriber should open");
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    for subscription in [&mut first, &mut second] {
+        let frame =
+            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+                .await
+                .expect("view frame should arrive")
+                .expect("view stream should remain open");
+        let ViewFrame::Replace { snapshot } = frame else {
+            panic!("expected replace frame");
+        };
+        assert_eq!(snapshot.revision.get(), 2);
+    }
+}
+
+#[tokio::test]
+async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("view-account-reconnect"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:view-account-reconnect/inbox"),
+        )
+        .await
+        .expect("mail list view should open");
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let catch_up = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let subscription = build
+                .handle
+                .subscribe_view(
+                    RuntimeCaller::test(),
+                    snapshot.view_id.clone(),
+                    Some(ViewRevision::new(1)),
+                )
+                .await
+                .expect("subscription should open");
+            if let Some(ViewFrame::Snapshot { snapshot }) = subscription.catch_up {
+                if snapshot.revision.get() == 2 {
+                    break snapshot;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("open view should refresh while disconnected");
+    let state = mail_list_state(&catch_up);
+    let row = state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == "message-1")
+        .expect("updated row should remain in window");
+    assert_eq!(row.projection["isFlagged"], true);
+}
+
+#[tokio::test]
+async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("view-account-flagged"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:view-account-flagged/inbox is:flagged"),
+        )
+        .await
+        .expect("flagged view should open");
+    assert!(mail_list_state(&snapshot).rows.is_empty());
+    let mut subscription = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("view should subscribe");
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+        .await
+        .expect("view frame should arrive")
+        .expect("view stream should remain open");
+    let ViewFrame::Replace { snapshot } = frame else {
+        panic!("expected replace frame");
+    };
+    let state = mail_list_state(&snapshot);
+    assert_eq!(state.rows.len(), 1);
+    assert_eq!(state.rows[0].projection["id"], "message-1");
+}
+
+#[tokio::test]
+async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("view-account-2"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:view-account-2/archive"),
+        )
+        .await
+        .expect("unaffected view should open");
+    assert!(mail_list_state(&snapshot).rows.is_empty());
+    let mut subscription = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("view should subscribe");
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let no_frame = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        subscription.live.next(),
+    )
+    .await;
+    assert!(
+        no_frame.is_err(),
+        "unaffected view should not receive a frame"
+    );
+}
+
 #[tokio::test]
 async fn create_account_duplicate_id_conflicts_without_overwriting_config_or_secret() {
     let root = temp_root();

@@ -27,6 +27,22 @@ export function buildOAuthRedirectUri(): string {
  * `Authorization` header (see {@link authHeaders}) — no token in the URL.
  * @spec docs/L1-api#sse-event-stream
  */
+export function buildViewStreamUrl(input: {
+  viewId: string
+  afterRevision?: number | null
+  sourceId?: string | null
+}): string {
+  const params = new URLSearchParams()
+  if (input.afterRevision != null) {
+    params.set('afterRevision', String(input.afterRevision))
+  }
+  if (input.sourceId) {
+    params.set('sourceId', input.sourceId)
+  }
+  const search = params.toString()
+  return `${baseUrl()}/views/${encodeURIComponent(input.viewId)}/stream${search ? `?${search}` : ''}`
+}
+
 export function buildEventsUrl(input?: {
   accountId?: string
   afterSeq?: number | null

@@ -114,6 +114,8 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
         .route("/accounts", get(ok))
         .route("/read", post(ok))
         .route("/views/conversations", get(ok))
+        .route("/views", post(ok))
+        .route("/views/{view_id}/stream", get(ok))
         .route("/smart-mailboxes/{smart_mailbox_id}/conversations", get(ok))
         .route("/events", get(ok))
         .route("/sources/{source_id}/messages", get(ok))
