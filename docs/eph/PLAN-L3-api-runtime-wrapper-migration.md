@@ -1,7 +1,7 @@
 ---
 scope: L3
 summary: "Temporary API runtime-wrapper migration controls for moving /v1 from AppState-owned services to the authority runtime handle"
-modified: 2026-06-16
+modified: 2026-06-19
 reviewed: 2026-06-19
 lifecycle: ephemeral
 type: PLAN
@@ -54,11 +54,12 @@ Delete the wrapper and this ephemeral plan when all are true:
 
 1. `AppState` does not expose `service`, `store`, `secret_store`, `supervisor`, or `event_sender` to route handlers for mail behavior.
 2. `/v1` reads use runtime read methods or shared projection helpers owned below the handle.
-3. `/v1/events` consumes runtime event history/bus through the handle.
-4. message command routes use named mutation/runtime command paths or shared mutation helpers below the handle.
-5. account lifecycle and OAuth-specific HTTP routes keep HTTP concerns in `posthaste-server` while delegating runtime behavior to the handle.
-6. API tests build router state around the runtime handle; harness-owned service/store/supervisor handles are isolated from route state when needed for fixture seeding.
-7. a guard check prevents reintroducing direct route-module service/store construction.
+3. `/v1/events` consumes runtime event history/bus through the handle, and renderer behavior no longer depends on `/v1/events` as a cache-invalidation path.
+4. runtime session routes (`/v1/runtime/sessions...`) serialize session-scoped `RuntimeFrame` values from the handle rather than maintaining independent route-owned view/event state.
+5. message command routes use named mutation/runtime command paths or shared mutation helpers below the handle.
+6. account lifecycle and OAuth-specific HTTP routes keep HTTP concerns in `posthaste-server` while delegating runtime behavior to the handle.
+7. API tests build router state around the runtime handle; harness-owned service/store/supervisor handles are isolated from route state when needed for fixture seeding.
+8. a guard check prevents reintroducing direct route-module service/store construction.
 
 ## 6. Migration tag
 

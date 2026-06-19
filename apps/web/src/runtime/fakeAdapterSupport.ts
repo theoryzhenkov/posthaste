@@ -19,13 +19,19 @@ import type {
 
 import type {
   RuntimeAdapter,
+  RuntimeCloseSessionRequest,
   RuntimeEventSubscriptionRequest,
+  RuntimeFrame,
+  RuntimeFrameSubscriptionRequest,
   RuntimeMailListViewState,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
   RuntimeOpenMessageListViewResult,
+  RuntimeOpenSessionRequest,
   RuntimeResourceDescriptor,
+  RuntimeSession,
+  RuntimeSessionViewRequest,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
   RuntimeViewFrame,
@@ -47,6 +53,9 @@ export type EventSubscriptionCall = {
 export type ViewSubscriptionCall = {
   request: RuntimeViewSubscriptionRequest
 }
+export type RuntimeFrameSubscriptionCall = {
+  request: RuntimeFrameSubscriptionRequest
+}
 export type OAuthStartCall = Omit<StartProviderOAuthInput, 'clientSecret'> & {
   hasClientSecret: boolean
 }
@@ -67,6 +76,10 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly accountVerificationCalls: string[]
   readonly conversationCalls: string[]
   readonly eventSubscriptionCalls: EventSubscriptionCall[]
+  readonly runtimeSessionCalls: RuntimeOpenSessionRequest[]
+  readonly runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
+  readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   readonly viewOpenCalls: RuntimeMessagePageRequest[]
   readonly viewSubscriptionCalls: ViewSubscriptionCall[]
   readonly mailboxCalls: string[]
@@ -80,6 +93,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly smartMailboxCalls: number
   readonly syncCalls: RuntimeTriggerSyncRequest[]
   emitDomainEvent(event: DomainEvent): void
+  emitRuntimeFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
   emitViewFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
   queueAccount(account: AccountOverview): void
   queueAccountError(error: Error): void
@@ -99,6 +113,12 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueMessagePageError(error: Error): void
   queueOpenMessageListView(result: RuntimeOpenMessageListViewResult): void
   queueOpenMessageListViewError(error: Error): void
+  queueRuntimeSession(session: RuntimeSession): void
+  queueRuntimeSessionError(error: Error): void
+  queueRuntimeSessionMessageListView(
+    result: RuntimeOpenMessageListViewResult,
+  ): void
+  queueRuntimeSessionMessageListViewError(error: Error): void
   queueOAuthStartResponse(response: StartOAuthResponse): void
   queueOAuthStartError(error: Error): void
   queueResourceBlob(blob: Blob): void
@@ -123,6 +143,10 @@ export type FakeCallRecords = {
   accountVerificationCalls: string[]
   conversationCalls: string[]
   eventSubscriptionCalls: EventSubscriptionCall[]
+  runtimeSessionCalls: RuntimeOpenSessionRequest[]
+  runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
+  runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   viewOpenCalls: RuntimeMessagePageRequest[]
   viewSubscriptionCalls: ViewSubscriptionCall[]
   mailboxCalls: string[]
@@ -146,6 +170,8 @@ export type FakeQueues = {
   messageCommands: QueuedOutcome<MessageCommandResult>[]
   messagePages: QueuedOutcome<MessagePage>[]
   openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
+  runtimeSessions: QueuedOutcome<RuntimeSession>[]
+  runtimeSessionMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   oauthStartResponses: QueuedOutcome<StartOAuthResponse>[]
   reads: QueuedOutcome<ReadResponse>[]
   resources: QueuedOutcome<Blob>[]
@@ -164,6 +190,8 @@ export interface FakeRuntimeAdapterOptions {
   defaultMessageCommandResult?: MessageCommandResult
   defaultMessagePage?: MessagePage
   defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
+  defaultRuntimeSession?: RuntimeSession
+  defaultRuntimeSessionMessageListView?: RuntimeOpenMessageListViewResult
   defaultOAuthStartResponse?: StartOAuthResponse
   defaultReadResponse?: ReadResponse
   defaultSmartMailboxes?: SmartMailboxSummary[]
@@ -195,6 +223,10 @@ export function createFakeCallRecords(): FakeCallRecords {
     accountVerificationCalls: [],
     conversationCalls: [],
     eventSubscriptionCalls: [],
+    runtimeSessionCalls: [],
+    runtimeSessionCloseCalls: [],
+    runtimeSessionViewOpenCalls: [],
+    runtimeFrameSubscriptionCalls: [],
     viewOpenCalls: [],
     viewSubscriptionCalls: [],
     mailboxCalls: [],
@@ -218,6 +250,10 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.accountVerificationCalls.length = 0
   calls.conversationCalls.length = 0
   calls.eventSubscriptionCalls.length = 0
+  calls.runtimeSessionCalls.length = 0
+  calls.runtimeSessionCloseCalls.length = 0
+  calls.runtimeSessionViewOpenCalls.length = 0
+  calls.runtimeFrameSubscriptionCalls.length = 0
   calls.viewOpenCalls.length = 0
   calls.viewSubscriptionCalls.length = 0
   calls.mailboxCalls.length = 0
@@ -242,6 +278,8 @@ export function createFakeQueues(): FakeQueues {
     messageCommands: [],
     messagePages: [],
     openMessageListViews: [],
+    runtimeSessions: [],
+    runtimeSessionMessageListViews: [],
     oauthStartResponses: [],
     reads: [],
     resources: [],
@@ -261,6 +299,8 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.messageCommands.length = 0
   queues.messagePages.length = 0
   queues.openMessageListViews.length = 0
+  queues.runtimeSessions.length = 0
+  queues.runtimeSessionMessageListViews.length = 0
   queues.oauthStartResponses.length = 0
   queues.reads.length = 0
   queues.resources.length = 0

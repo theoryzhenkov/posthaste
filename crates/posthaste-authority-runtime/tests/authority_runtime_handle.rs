@@ -19,8 +19,9 @@ use posthaste_domain::{
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
-    MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeLifecycle,
-    SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame, ViewRevision,
+    MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle,
+    RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame,
+    ViewRevision,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -506,6 +507,121 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
         panic!("catch-up should be a fresh snapshot");
     };
     assert_eq!(snapshot.revision.get(), 2);
+}
+
+#[tokio::test]
+async fn runtime_session_stream_carries_keyword_view_replace_frames() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("runtime-session-account"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+    let snapshot = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            mail_list_descriptor("in:runtime-session-account/inbox"),
+        )
+        .await
+        .expect("session view should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+    assert_eq!(subscription.catch_up.len(), 1);
+    let RuntimeFrame::ViewSnapshot {
+        session_seq,
+        view_id,
+        revision,
+        ..
+    } = &subscription.catch_up[0]
+    else {
+        panic!("expected collapsed view snapshot");
+    };
+    assert_eq!(session_seq.get(), 1);
+    assert_eq!(view_id, &snapshot.view_id);
+    assert_eq!(revision.get(), 1);
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("runtime replace frame should arrive");
+    let RuntimeFrame::ViewReplace {
+        session_seq,
+        view_id,
+        revision,
+        snapshot,
+    } = frame
+    else {
+        panic!("expected runtime view replace frame");
+    };
+    assert_eq!(session_seq.get(), 2);
+    assert_eq!(view_id, snapshot.view_id);
+    assert_eq!(revision.get(), 2);
+    let state = mail_list_state(&snapshot);
+    let row = state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == "message-1")
+        .expect("updated row should remain in window");
+    assert_eq!(row.projection["isFlagged"], true);
 }
 
 #[tokio::test]

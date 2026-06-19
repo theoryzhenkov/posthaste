@@ -1,4 +1,8 @@
-import type { RuntimeEventHandlers, RuntimeViewFrameHandlers } from './types'
+import type {
+  RuntimeEventHandlers,
+  RuntimeFrameHandlers,
+  RuntimeViewFrameHandlers,
+} from './types'
 import { createFakeQueueControls } from './fakeAdapterQueues'
 import {
   createFakeCallRecords,
@@ -27,6 +31,7 @@ export function createFakeRuntimeAdapter(
   const calls = createFakeCallRecords()
   const queues = createFakeQueues()
   const eventHandlers = new Set<RuntimeEventHandlers>()
+  const runtimeFrameHandlers = new Set<RuntimeFrameHandlers>()
   const viewHandlers = new Set<RuntimeViewFrameHandlers>()
   let accountCalls = 0
   let smartMailboxCalls = 0
@@ -42,6 +47,9 @@ export function createFakeRuntimeAdapter(
     emitDomainEvent(event) {
       for (const handlers of eventHandlers) handlers.onEvent(event)
     },
+    emitRuntimeFrame(frame) {
+      for (const handlers of runtimeFrameHandlers) handlers.onFrame(frame)
+    },
     emitViewFrame(frame) {
       for (const handlers of viewHandlers) handlers.onFrame(frame)
     },
@@ -50,6 +58,7 @@ export function createFakeRuntimeAdapter(
       accountCalls = 0
       smartMailboxCalls = 0
       eventHandlers.clear()
+      runtimeFrameHandlers.clear()
       viewHandlers.clear()
       resetFakeCallRecords(calls)
       resetFakeQueues(queues)
@@ -58,6 +67,36 @@ export function createFakeRuntimeAdapter(
       calls.eventSubscriptionCalls.push({ request })
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
+    },
+    openRuntimeSession(request) {
+      calls.runtimeSessionCalls.push({ ...request })
+      return resolveQueued(
+        queues.runtimeSessions,
+        input?.defaultRuntimeSession ?? { sessionId: 'session-1' },
+      )
+    },
+    closeRuntimeSession(request) {
+      calls.runtimeSessionCloseCalls.push({ ...request })
+      return resolveQueued(
+        queues.accountOkResults,
+        input?.defaultAccountOk ?? { ok: true },
+      )
+    },
+    openRuntimeSessionMessageListView(request) {
+      calls.runtimeSessionViewOpenCalls.push({
+        sessionId: request.sessionId,
+        view: { ...request.view },
+      })
+      return resolveQueuedOptional(
+        queues.runtimeSessionMessageListViews,
+        input?.defaultRuntimeSessionMessageListView,
+        'runtime session message list view result',
+      )
+    },
+    subscribeRuntimeFrames(request, handlers) {
+      calls.runtimeFrameSubscriptionCalls.push({ request })
+      runtimeFrameHandlers.add(handlers)
+      return () => runtimeFrameHandlers.delete(handlers)
     },
     openMessageListView(request) {
       calls.viewOpenCalls.push({ ...request })

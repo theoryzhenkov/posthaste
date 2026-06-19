@@ -157,6 +157,80 @@ async fn open_mail_list_view_returns_runtime_snapshot() {
     assert!(frame.contains(r#""id":"m1""#), "{frame}");
 }
 
+#[tokio::test]
+async fn runtime_session_stream_returns_collapsed_view_snapshot() {
+    let harness = Harness::new();
+    harness.save_account("primary", "Primary", true);
+    harness.seed_source("primary", "Primary");
+    harness.seed_messages("primary", "inbox", vec![message("m1", "Subject", "inbox")]);
+    let token = harness.full_scope();
+
+    let (session_status, session_body) = harness
+        .post_json(
+            &token,
+            "/v1/runtime/sessions?sourceId=primary",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(session_status, StatusCode::OK, "{session_body}");
+    let session_id = session_body["sessionId"]
+        .as_str()
+        .expect("session id should serialize");
+
+    let (view_status, view_body) = harness
+        .post_json(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}/views?sourceId=primary"),
+            serde_json::json!({
+                "descriptor": {
+                    "family": "mailList",
+                    "payload": {
+                        "query": "in:primary/inbox",
+                        "presentation": {
+                            "kind": "messages",
+                            "limit": 10,
+                            "cursor": null,
+                            "sortField": "date",
+                            "sortDirection": "desc"
+                        },
+                        "visibility": null
+                    }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(view_status, StatusCode::OK, "{view_body}");
+
+    let (stream_status, frame) = harness
+        .get_text_frame(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}/stream?afterSeq=0&sourceId=primary"),
+        )
+        .await;
+    assert_eq!(stream_status, StatusCode::OK);
+    assert!(frame.contains("id: 1"), "{frame}");
+    assert!(frame.contains(r#""type":"viewSnapshot""#), "{frame}");
+    assert!(frame.contains(r#""sessionSeq":1"#), "{frame}");
+    assert!(frame.contains(r#""id":"m1""#), "{frame}");
+
+    let (close_status, close_body) = harness
+        .delete_json(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}?sourceId=primary"),
+        )
+        .await;
+    assert_eq!(close_status, StatusCode::OK, "{close_body}");
+    assert_eq!(close_body["ok"], true);
+
+    let (closed_stream_status, _) = harness
+        .get_json(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}/stream?sourceId=primary"),
+        )
+        .await;
+    assert_eq!(closed_stream_status, StatusCode::NOT_FOUND);
+}
+
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 #[tokio::test]
 async fn read_account_list_enabled_ids_reference_still_drives_followup_reads() {

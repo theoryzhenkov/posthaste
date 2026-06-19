@@ -1052,6 +1052,392 @@
         }
       }
     },
+    "/v1/runtime/sessions": {
+      "post": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Open a runtime session",
+        "description": "Creates a runtime session whose stream carries RuntimeFrame values.",
+        "operationId": "open_runtime_session",
+        "parameters": [
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The opened runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Close a runtime session",
+        "description": "Closes a runtime session and releases its open runtime views.",
+        "operationId": "close_runtime_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session was closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/sessions/{session_id}/stream": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Subscribe to runtime frames",
+        "description": "Streams session-scoped RuntimeFrame values as server-sent events. Event ids are sessionSeq values.",
+        "operationId": "stream_runtime_session",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSeq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of RuntimeFrame values"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/sessions/{session_id}/views": {
+      "post": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Open a runtime session view",
+        "description": "Opens a view in a runtime session and returns its initial snapshot.",
+        "operationId": "open_runtime_session_view",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenRuntimeSessionViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The opened view snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenRuntimeSessionViewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid view descriptor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime/sessions/{session_id}/views/{view_id}": {
+      "delete": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Close a runtime session view",
+        "description": "Closes a runtime view for a session and emits a viewClosed RuntimeFrame.",
+        "operationId": "close_runtime_session_view",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view_id",
+            "in": "path",
+            "description": "Runtime view id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The view was closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sender-addresses": {
       "get": {
         "tags": [
@@ -4464,6 +4850,32 @@
           }
         }
       },
+      "OpenRuntimeSessionViewRequest": {
+        "type": "object",
+        "required": [
+          "descriptor"
+        ],
+        "properties": {
+          "descriptor": {
+            "type": "object"
+          }
+        }
+      },
+      "OpenRuntimeSessionViewResponse": {
+        "type": "object",
+        "required": [
+          "viewId",
+          "snapshot"
+        ],
+        "properties": {
+          "snapshot": {
+            "$ref": "#/components/schemas/ViewSnapshot"
+          },
+          "viewId": {
+            "type": "string"
+          }
+        }
+      },
       "OpenViewRequest": {
         "type": "object",
         "required": [
@@ -4885,6 +5297,17 @@
         ],
         "description": "A successful read-call result, discriminated by operation name."
       },
+      "ReadWatermark": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "Recipient": {
         "type": "object",
         "description": "Email address with optional display name.\n\n@spec docs/L1-jmap#methods-used",
@@ -4977,6 +5400,290 @@
             }
           }
         }
+      },
+      "RuntimeAdapterError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RuntimeErrorCode"
+          },
+          "correlationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "details": {
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RuntimeCoverage": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "details": {
+            "type": "object"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RuntimeCoverageKind"
+          }
+        }
+      },
+      "RuntimeCoverageKind": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "partial",
+          "unknown"
+        ]
+      },
+      "RuntimeErrorCode": {
+        "type": "string",
+        "enum": [
+          "runtime_not_ready",
+          "invalid_descriptor",
+          "invalid_mutation",
+          "invalid_secret",
+          "invalid_account",
+          "account_base_url_required",
+          "account_secret_required",
+          "account_username_required",
+          "account_sender_required",
+          "unauthorized",
+          "not_found",
+          "provider_unavailable",
+          "conflict",
+          "network_error",
+          "state_mismatch",
+          "cannot_calculate_changes",
+          "gateway_rejected",
+          "secret_unavailable",
+          "secret_unsupported",
+          "storage_failure",
+          "config_validation",
+          "config_io",
+          "config_parse",
+          "transport_disconnected",
+          "internal"
+        ]
+      },
+      "RuntimeFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "viewId",
+              "revision",
+              "snapshot",
+              "type"
+            ],
+            "properties": {
+              "revision": {
+                "$ref": "#/components/schemas/ViewRevision"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/ViewSnapshot"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "viewSnapshot"
+                ]
+              },
+              "viewId": {
+                "$ref": "#/components/schemas/ViewId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "viewId",
+              "revision",
+              "snapshot",
+              "type"
+            ],
+            "properties": {
+              "revision": {
+                "$ref": "#/components/schemas/ViewRevision"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "snapshot": {
+                "$ref": "#/components/schemas/ViewSnapshot"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "viewReplace"
+                ]
+              },
+              "viewId": {
+                "$ref": "#/components/schemas/ViewId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "viewId",
+              "error",
+              "type"
+            ],
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/RuntimeAdapterError"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "viewError"
+                ]
+              },
+              "viewId": {
+                "$ref": "#/components/schemas/ViewId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "viewId",
+              "type"
+            ],
+            "properties": {
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "viewClosed"
+                ]
+              },
+              "viewId": {
+                "$ref": "#/components/schemas/ViewId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "mutationId",
+              "state",
+              "type"
+            ],
+            "properties": {
+              "mutationId": {
+                "$ref": "#/components/schemas/RuntimeMutationId"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "state": {
+                "type": "object"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mutationSettlement"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "kind",
+              "payload",
+              "type"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "object"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "notification"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "sessionSeq",
+              "type"
+            ],
+            "properties": {
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "heartbeat"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "RuntimeMutationId": {
+        "type": "string"
+      },
+      "RuntimeSession": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/RuntimeSessionId"
+          }
+        }
+      },
+      "RuntimeSessionId": {
+        "type": "string"
+      },
+      "RuntimeSessionSeq": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
       },
       "SecretKind": {
         "type": "string",
@@ -5751,6 +6458,93 @@
             "type": "boolean"
           }
         }
+      },
+      "ViewDescriptor": {
+        "type": "object",
+        "required": [
+          "family"
+        ],
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          }
+        }
+      },
+      "ViewId": {
+        "type": "string"
+      },
+      "ViewLifecycle": {
+        "type": "string",
+        "enum": [
+          "loading",
+          "ready",
+          "updating",
+          "error"
+        ]
+      },
+      "ViewRevision": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
+      "ViewSnapshot": {
+        "type": "object",
+        "required": [
+          "viewId",
+          "descriptor",
+          "revision",
+          "lifecycle",
+          "coverage"
+        ],
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/RuntimeCoverage"
+          },
+          "data": {
+            "type": "object"
+          },
+          "descriptor": {
+            "$ref": "#/components/schemas/ViewDescriptor"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeAdapterError"
+              }
+            ]
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/ViewLifecycle"
+          },
+          "pendingMutations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeMutationId"
+            }
+          },
+          "readWatermark": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReadWatermark"
+              }
+            ]
+          },
+          "revision": {
+            "$ref": "#/components/schemas/ViewRevision"
+          },
+          "viewId": {
+            "$ref": "#/components/schemas/ViewId"
+          }
+        }
       }
     }
   },
@@ -5802,6 +6596,10 @@
     {
       "name": "views",
       "description": "Runtime-owned view snapshots and streams"
+    },
+    {
+      "name": "runtime",
+      "description": "Session-scoped runtime frame stream"
     },
     {
       "name": "auth",
