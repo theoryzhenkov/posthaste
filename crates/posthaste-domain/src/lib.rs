@@ -9,6 +9,7 @@
 
 pub mod cache;
 mod config;
+mod generated_id;
 mod imap;
 mod model;
 mod ports;
@@ -20,6 +21,7 @@ mod vocab;
 
 pub use cache::*;
 pub use config::*;
+pub use generated_id::*;
 pub use imap::*;
 pub use model::*;
 pub use ports::*;
