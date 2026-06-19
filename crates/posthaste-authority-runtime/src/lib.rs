@@ -7,12 +7,12 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#runtime-contract-crate-first
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 
-mod account_mutations;
 mod account_reads;
 mod bootstrap;
 mod build;
 mod live_accounts;
 mod mail_queries;
+mod mutations;
 pub mod oauth;
 mod push;
 mod secret;
