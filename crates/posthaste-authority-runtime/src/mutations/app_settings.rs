@@ -91,11 +91,10 @@ impl AccountMutationService {
         match default_account_id {
             Some(id) => {
                 let account_id = AccountId::from(id.as_str());
-                if self.service.get_source(&account_id)?.is_none() {
-                    return Err(RuntimeError::invalid_account(
-                        "default account must reference an existing account",
-                    ));
-                }
+                validate_default_account_exists(
+                    &account_id,
+                    self.service.get_source(&account_id)?.is_some(),
+                )?;
                 settings.default_account_id = Some(account_id);
             }
             None => settings.default_account_id = None,

@@ -19,6 +19,21 @@ fn temp_root() -> PathBuf {
     dir
 }
 
+fn mock_source(id: &str, name: &str) -> AccountSettings {
+    AccountSettings {
+        id: AccountId::from(id),
+        name: name.to_string(),
+        full_name: None,
+        email_patterns: Vec::new(),
+        driver: posthaste_domain::AccountDriver::Mock,
+        enabled: true,
+        appearance: None,
+        transport: Default::default(),
+        created_at: "2026-03-31T00:00:00Z".to_string(),
+        updated_at: "2026-03-31T00:00:00Z".to_string(),
+    }
+}
+
 #[test]
 fn empty_config_root_creates_empty_snapshot() {
     let root = temp_root();
@@ -101,6 +116,70 @@ fn insert_source_rejects_duplicate_without_overwriting() {
     assert!(matches!(error, ConfigError::Conflict(_)));
     let loaded = repo.get_source(&AccountId::from("test")).unwrap().unwrap();
     assert_eq!(loaded.name, "Test");
+}
+
+#[test]
+fn reload_rejects_semantic_validation_errors_and_preserves_snapshot() {
+    let root = temp_root();
+    let repo = TomlConfigRepository::open(&root).unwrap();
+    repo.save_source(&mock_source("primary", "Primary"))
+        .unwrap();
+
+    fs::write(
+        root.join("app.toml"),
+        "schema_version = 1\ndefault_source_id = \"missing\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("sources/broken.toml"),
+        r#"
+id = "broken"
+name = " "
+driver = "mock"
+enabled = true
+"#,
+    )
+    .unwrap();
+
+    let error = repo
+        .reload()
+        .expect_err("semantic validation errors should reject reload")
+        .to_string();
+
+    assert!(
+        error.contains("default account 'missing' does not exist"),
+        "error should mention dangling default account: {error}"
+    );
+    assert!(
+        error.contains("account name is required"),
+        "error should mention invalid source: {error}"
+    );
+    let snapshot = repo.load_snapshot().unwrap();
+    assert_eq!(snapshot.sources, vec![mock_source("primary", "Primary")]);
+    assert_eq!(snapshot.app_settings.default_account_id, None);
+}
+
+#[test]
+fn unsafe_file_id_is_rejected() {
+    let root = temp_root();
+    let repo = TomlConfigRepository::open(&root).unwrap();
+
+    let bad_content = r#"
+id = "bad..id"
+name = "Test"
+driver = "mock"
+enabled = true
+"#;
+    fs::write(root.join("sources/bad..id.toml"), bad_content).unwrap();
+
+    let error = repo
+        .reload()
+        .expect_err("unsafe ids should reject config reload")
+        .to_string();
+    assert!(
+        error.contains("unsafe characters"),
+        "error should mention unsafe id: {error}"
+    );
 }
 
 #[test]

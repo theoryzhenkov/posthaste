@@ -11,7 +11,7 @@ mod config_repository;
 mod io;
 
 use io::{
-    io_error, load_snapshot_from_disk, lock_error, read_app_toml, write_app_toml,
+    io_error, load_snapshot_from_disk, lock_error, read_app_toml, validate_safe_id, write_app_toml,
     write_smart_mailbox_toml,
 };
 
@@ -23,6 +23,14 @@ use io::{
 pub struct TomlConfigRepository {
     pub(super) config_root: PathBuf,
     pub(super) snapshot: RwLock<ConfigSnapshot>,
+}
+
+pub fn validate_config_root(config_root: &Path) -> Result<(), ConfigError> {
+    load_snapshot_from_disk(config_root).map(|_| ())
+}
+
+pub fn validate_safe_config_id(id: &str) -> Result<(), ConfigError> {
+    validate_safe_id(id)
 }
 
 impl TomlConfigRepository {

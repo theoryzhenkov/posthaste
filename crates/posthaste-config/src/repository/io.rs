@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, AccountSettings, ConfigError, ConfigSnapshot, SmartMailbox,
-    RFC3339_EPOCH,
+    now_iso8601 as domain_now_iso8601, validate_snapshot, AccountSettings, ConfigError,
+    ConfigSnapshot, SmartMailbox, RFC3339_EPOCH,
 };
 
 use crate::atomic::atomic_write;
@@ -17,11 +17,13 @@ pub(super) fn load_snapshot_from_disk(config_root: &Path) -> Result<ConfigSnapsh
     let sources = load_sources(config_root)?;
     let smart_mailboxes = load_smart_mailboxes(config_root)?;
 
-    Ok(ConfigSnapshot {
+    let snapshot = ConfigSnapshot {
         app_settings,
         sources,
         smart_mailboxes,
-    })
+    };
+    validate_snapshot(&snapshot).map_err(ConfigError::from)?;
+    Ok(snapshot)
 }
 
 /// Reads and parses `app.toml`, returning defaults if the file does not exist.
@@ -147,6 +149,7 @@ pub(super) fn validate_safe_id(id: &str) -> Result<(), ConfigError> {
 ///
 /// @spec docs/L1-accounts#assertions
 pub(super) fn validate_filename_matches_id(path: &Path, id: &str) -> Result<(), ConfigError> {
+    validate_safe_id(id)?;
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     if stem != id {
         return Err(ConfigError::Validation(format!(

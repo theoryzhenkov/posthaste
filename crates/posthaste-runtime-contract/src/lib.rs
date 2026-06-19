@@ -19,7 +19,7 @@ use posthaste_domain::{
     ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
     SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
-    SyncMode, TagSummary,
+    SyncMode, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -597,6 +597,27 @@ impl RuntimeError {
 
     pub fn envelope(&self) -> &RuntimeAdapterError {
         &self.0
+    }
+}
+
+impl From<ValidationError> for RuntimeError {
+    fn from(error: ValidationError) -> Self {
+        match error {
+            ValidationError::InvalidAccount(message) => Self::invalid_account(message),
+            ValidationError::BaseUrlRequired(message) => Self::account_base_url_required(message),
+            ValidationError::SecretRequired(message) => Self::account_secret_required(message),
+            ValidationError::UsernameRequired(message) => Self::account_username_required(message),
+            ValidationError::SenderRequired(message) => Self::account_sender_required(message),
+            ValidationError::DuplicateSourceId(id) => {
+                Self::invalid_account(format!("duplicate source id '{id}'"))
+            }
+            ValidationError::DuplicateSmartMailboxId(id) => {
+                Self::invalid_account(format!("duplicate smart mailbox id '{id}'"))
+            }
+            ValidationError::DanglingDefaultAccount(_) => {
+                Self::invalid_account("default account must reference an existing account")
+            }
+        }
     }
 }
 
