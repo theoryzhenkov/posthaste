@@ -97,6 +97,20 @@ pub(super) fn load_smart_mailboxes(config_root: &Path) -> Result<Vec<SmartMailbo
     Ok(mailboxes)
 }
 
+/// Serializes and atomically writes an account source TOML file.
+pub(super) fn write_source_toml(
+    config_root: &Path,
+    source: &AccountSettings,
+) -> Result<(), ConfigError> {
+    let source_toml = SourceToml::from_account_settings(source);
+    let content = toml::to_string_pretty(&source_toml)
+        .map_err(|error| ConfigError::Parse(error.to_string()))?;
+    let path = config_root
+        .join("sources")
+        .join(format!("{}.toml", source.id));
+    atomic_write(&path, content.as_bytes())
+}
+
 /// Serializes and atomically writes a smart mailbox TOML file.
 pub(super) fn write_smart_mailbox_toml(
     config_root: &Path,

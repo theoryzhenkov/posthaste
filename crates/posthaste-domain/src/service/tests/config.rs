@@ -61,6 +61,16 @@ impl ConfigRepository for TestConfig {
         Ok(self.sources.iter().find(|source| &source.id == id).cloned())
     }
 
+    fn insert_source(&self, source: &AccountSettings) -> Result<(), ConfigError> {
+        if self.sources.iter().any(|existing| existing.id == source.id) {
+            return Err(ConfigError::Conflict(format!(
+                "account '{}' already exists",
+                source.id
+            )));
+        }
+        Ok(())
+    }
+
     fn save_source(&self, _source: &AccountSettings) -> Result<(), ConfigError> {
         Ok(())
     }

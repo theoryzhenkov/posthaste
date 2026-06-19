@@ -23,9 +23,6 @@ impl AccountMutationService {
             .filter(|id| !id.is_empty())
             .map(AccountId::from)
             .unwrap_or_else(generate_account_id);
-        if self.service.get_source(&account_id)?.is_some() {
-            return Err(RuntimeError::conflict("account already exists"));
-        }
 
         let timestamp = domain_now_iso8601()
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
@@ -44,8 +41,7 @@ impl AccountMutationService {
         account.transport.secret_ref =
             decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
         validate_account_settings(&account)?;
-        self.apply_secret_instruction(&mut account, None, &secret)?;
-        self.persist_new_account(&account).await?;
+        self.persist_new_account(&mut account, &secret).await?;
         self.read_account_overview(account.id.clone()).await
     }
 
@@ -239,10 +235,23 @@ impl AccountMutationService {
         Ok(())
     }
 
-    async fn persist_new_account(&self, account: &AccountSettings) -> Result<(), RuntimeError> {
-        if let Err(error) = self.service.save_source(account) {
-            self.delete_managed_secret(account.transport.secret_ref.as_ref())?;
-            return Err(error.into());
+    async fn persist_new_account(
+        &self,
+        account: &mut AccountSettings,
+        secret: &SecretWriteMutation,
+    ) -> Result<(), RuntimeError> {
+        self.service.insert_source(account)?;
+        if let Err(error) = self.apply_secret_instruction(account, None, secret) {
+            self.service.delete_source(&account.id).map_err(|rollback| {
+                RuntimeError::new(
+                    RuntimeErrorCode::Internal,
+                    format!(
+                        "failed to roll back account after secret write error: {rollback}; original error: {}",
+                        error.envelope().message
+                    ),
+                )
+            })?;
+            return Err(error);
         }
         self.supervisor.start_account(account).await;
         self.append_and_publish_event(
