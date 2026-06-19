@@ -91,19 +91,24 @@ pub(crate) fn set_keywords_tx(
     for mailbox_id in &mailboxes {
         refresh_mailbox_counters_tx(tx, account_id, mailbox_id)?;
     }
+    let detail = query_message_detail_tx(tx, account_id, message_id)?
+        .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
+    let assertion = posthaste_domain::MessageChangeAssertion::after(detail.summary.clone());
     let event = insert_event_tx(
         tx,
         account_id,
         EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
         mailboxes.first(),
         Some(message_id),
-        json!({ "messageId": message_id.as_str(), "keywords": keywords.iter().cloned().collect::<Vec<_>>() }),
+        json!({
+            "messageId": message_id.as_str(),
+            "keywords": keywords.iter().cloned().collect::<Vec<_>>(),
+            "assertion": assertion,
+        }),
     )?;
     if let Some(cursor) = cursor {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
     }
-    let detail = query_message_detail_tx(tx, account_id, message_id)?
-        .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     Ok(CommandResult {
         detail: Some(detail),
         events: vec![event],

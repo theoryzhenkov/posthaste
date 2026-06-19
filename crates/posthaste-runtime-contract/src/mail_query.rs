@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 
 /// How a backend-evaluated message query should be presented in a page.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum MailPresentationRequest {
     Messages {
         limit: Option<usize>,

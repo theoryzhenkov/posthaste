@@ -16,6 +16,13 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
       )
       return () => undefined
     },
+    openMessageListView: () => reject(),
+    subscribeView: (_request, handlers) => {
+      handlers.onPermanentError?.(
+        new Error(`runtime adapter mode ${mode} is not implemented`),
+      )
+      return () => undefined
+    },
     createAccount: () => reject(),
     createSmartMailbox: () => reject(),
     deleteAccount: () => reject(),

@@ -6,17 +6,19 @@ import type { SidebarSelection } from '../Sidebar'
 import { eventMayAffectView } from './model'
 
 export function useDomainEventRefresh({
+  enabled = true,
   isSearchBlocked,
   refetch,
   selectedView,
 }: {
+  enabled?: boolean
   isSearchBlocked: boolean
   refetch: () => void
   selectedView: SidebarSelection | null
 }) {
   useEffect(() => {
     function handleDomainEvent(event: Event) {
-      if (isSearchBlocked) {
+      if (!enabled || isSearchBlocked) {
         return
       }
       const payload = (event as CustomEvent<DomainEvent>).detail
@@ -35,5 +37,5 @@ export function useDomainEventRefresh({
         MAIL_DOMAIN_EVENT_NAME,
         handleDomainEvent as EventListener,
       )
-  }, [isSearchBlocked, refetch, selectedView])
+  }, [enabled, isSearchBlocked, refetch, selectedView])
 }

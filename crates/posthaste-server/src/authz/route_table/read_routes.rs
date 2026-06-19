@@ -20,6 +20,16 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/views/conversations/{conversation_id}",
         authz: gate(Action::Read, ResourceShape::empty()),
     },
+    Entry {
+        method: "POST",
+        template: "/views",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "GET",
+        template: "/views/{view_id}/stream",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
     // -- Per-source resources: account axis from `source_id`. --
     Entry {
         method: "GET",

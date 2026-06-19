@@ -90,6 +90,57 @@ pub struct MessagePage {
     pub next_cursor: Option<MessageCursor>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConversationRef {
+    pub conversation_id: ConversationId,
+    pub conversation_token: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageSummaryState {
+    #[serde(flatten)]
+    pub summary: MessageSummary,
+    pub conversation_ref: ConversationRef,
+    pub body_token: Option<String>,
+    pub attachment_token: Option<String>,
+}
+
+impl MessageSummaryState {
+    pub fn from_summary(summary: MessageSummary) -> Self {
+        let conversation_token = format!("conversation:{}", summary.conversation_id.as_str());
+        Self {
+            conversation_ref: ConversationRef {
+                conversation_id: summary.conversation_id.clone(),
+                conversation_token,
+            },
+            summary,
+            body_token: None,
+            attachment_token: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageChangeAssertion {
+    pub before: Option<MessageSummaryState>,
+    pub after: Option<MessageSummaryState>,
+}
+
+impl MessageChangeAssertion {
+    pub fn after(summary: MessageSummary) -> Self {
+        Self {
+            before: None,
+            after: Some(MessageSummaryState::from_summary(summary)),
+        }
+    }
+}
+
 /// Full message including sanitized body content, returned by message detail endpoint.
 ///
 /// @spec docs/L1-api#message-body-sanitization

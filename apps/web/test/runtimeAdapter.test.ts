@@ -19,7 +19,12 @@ import {
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
 import { httpRuntimeAdapter } from '../src/runtime/httpAdapter'
 import { runtimeMutations } from '../src/runtime/mutations'
+import { runtimeSubscriptions } from '../src/runtime/subscriptions'
 import { runtimeViews } from '../src/runtime/views'
+import type {
+  RuntimeMailListViewState,
+  RuntimeViewSnapshot,
+} from '../src/runtime/types'
 
 const command: MessageCommand = {
   kind: 'replaceMailboxes',
@@ -34,6 +39,37 @@ const okResult: MessageCommandResult = {
 const emptyPage: MessagePage = {
   items: [],
   nextCursor: null,
+}
+
+const emptyMailListState: RuntimeMailListViewState = {
+  scope: null,
+  projectionKind: 'message',
+  sort: null,
+  windowRequest: null,
+  rows: [],
+  continuation: {
+    beforeCursor: null,
+    afterCursor: null,
+    hasBefore: false,
+    hasAfter: false,
+  },
+  readWatermark: null,
+  coverage: { kind: 'complete' },
+  knownTotalCount: 0,
+  pendingMutations: [],
+  anchor: null,
+}
+
+const emptyMailListSnapshot: RuntimeViewSnapshot<RuntimeMailListViewState> = {
+  viewId: 'view-1',
+  descriptor: { family: 'mailList', payload: {} },
+  revision: 1,
+  lifecycle: 'ready',
+  readWatermark: null,
+  coverage: { kind: 'complete' },
+  data: emptyMailListState,
+  pendingMutations: [],
+  error: null,
 }
 
 const operation: OperationContext = {
@@ -154,6 +190,44 @@ describe('runtime adapter facade', () => {
     expect(fake.messagePageCalls).toEqual([request])
   })
 
+  it('dispatches mail-list view opens and frames through a fake adapter override', async () => {
+    const fake = createFakeRuntimeAdapter()
+    const result = { viewId: 'view-1', snapshot: emptyMailListSnapshot }
+    fake.queueOpenMessageListView(result)
+    setRuntimeAdapterForTesting(fake)
+
+    const request = {
+      scope: {
+        kind: 'source-mailbox' as const,
+        sourceId: 'primary',
+        mailboxId: 'inbox',
+      },
+      cursor: null,
+      limit: 25,
+      operation,
+      sort: 'date' as const,
+      sortDir: 'desc' as const,
+    }
+    expect(await runtimeViews.mail.openMessageList(request)).toBe(result)
+
+    const frames: unknown[] = []
+    const unsubscribe = runtimeSubscriptions.view(
+      { viewId: 'view-1', afterRevision: 1 },
+      { onFrame: (frame) => frames.push(frame) },
+    )
+    fake.emitViewFrame({ kind: 'replace', snapshot: emptyMailListSnapshot })
+    unsubscribe()
+    fake.emitViewFrame({ kind: 'closed', viewId: 'view-1' })
+
+    expect(fake.viewOpenCalls).toEqual([request])
+    expect(fake.viewSubscriptionCalls).toEqual([
+      { request: { viewId: 'view-1', afterRevision: 1 } },
+    ])
+    expect(frames).toEqual([
+      { kind: 'replace', snapshot: emptyMailListSnapshot },
+    ])
+  })
+
   it('dispatches navigation reads through a fake adapter override without a backend', async () => {
     const fake = createFakeRuntimeAdapter()
     const readResponse = { results: {} }
@@ -266,6 +340,55 @@ describe('runtime adapter facade', () => {
       expect(readSpy).toHaveBeenCalledWith(request)
     } finally {
       readSpy.mockRestore()
+    }
+  })
+
+  it('wraps HTTP mail-list view opens with an intent descriptor by default', async () => {
+    const openSpy = spyOn(apiClient, 'openView').mockResolvedValue({
+      viewId: 'view-1',
+      snapshot: emptyMailListSnapshot,
+    })
+
+    try {
+      const result = await runtimeViews.mail.openMessageList({
+        scope: {
+          kind: 'source-mailbox',
+          sourceId: 'primary',
+          mailboxId: 'inbox',
+        },
+        query: 'from:alex',
+        cursor: null,
+        limit: 25,
+        operation,
+        sort: 'date',
+        sortDir: 'desc',
+      })
+
+      expect(result).toEqual({
+        viewId: 'view-1',
+        snapshot: emptyMailListSnapshot,
+      })
+      expect(openSpy).toHaveBeenCalledWith(
+        {
+          descriptor: {
+            family: 'mailList',
+            payload: {
+              query: 'in:primary/inbox from:alex',
+              presentation: {
+                kind: 'messages',
+                limit: 25,
+                cursor: null,
+                sortField: 'date',
+                sortDirection: 'desc',
+              },
+              visibility: null,
+            },
+          },
+        },
+        { sourceId: 'primary' },
+      )
+    } finally {
+      openSpy.mockRestore()
     }
   })
 

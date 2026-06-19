@@ -6,6 +6,7 @@ import type {
 } from '@/api/types'
 import { messagePageClient } from '@/messagePageClient'
 import type { OperationContext } from '@/observability'
+import type { RuntimeMessagePageRequest } from '@/runtime/types'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SidebarSelection } from '../Sidebar'
 import type { SortConfig } from '../thread-list/columns'
@@ -78,15 +79,15 @@ function serverSortField(sort: SortConfig): MessageSortField {
   }
 }
 
-export async function fetchMessagesForView(
+export function buildMessagePageRequest(
   selectedView: SidebarSelection,
   preparedSearchQuery: PreparedServerSearchQuery,
   sort: SortConfig,
   cursor: string | null,
   signal: AbortSignal,
   operation: OperationContext,
-): Promise<MessagePage> {
-  return messagePageClient.fetchPage({
+): RuntimeMessagePageRequest {
+  return {
     scope:
       selectedView.kind === 'smart-mailbox'
         ? { kind: 'smart-mailbox', smartMailboxId: selectedView.id }
@@ -102,5 +103,25 @@ export async function fetchMessagesForView(
     sortDir: sort.direction,
     signal,
     operation,
-  })
+  }
+}
+
+export async function fetchMessagesForView(
+  selectedView: SidebarSelection,
+  preparedSearchQuery: PreparedServerSearchQuery,
+  sort: SortConfig,
+  cursor: string | null,
+  signal: AbortSignal,
+  operation: OperationContext,
+): Promise<MessagePage> {
+  return messagePageClient.fetchPage(
+    buildMessagePageRequest(
+      selectedView,
+      preparedSearchQuery,
+      sort,
+      cursor,
+      signal,
+      operation,
+    ),
+  )
 }

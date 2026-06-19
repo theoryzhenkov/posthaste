@@ -20,7 +20,8 @@ use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes,
     RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode, RuntimeEventSubscription,
-    RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus,
+    RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
+    ViewId, ViewRevision,
 };
 use posthaste_store::DatabaseStore;
 use thiserror::Error;
@@ -32,6 +33,7 @@ use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
+use crate::views::ViewRegistry;
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
     SystemSecretStore, UnavailableLiveAccountRuntimeProvider,
@@ -232,6 +234,10 @@ pub async fn build_authority_runtime(
         api_bridge.service.clone(),
         account_supervisor.clone(),
     ));
+    let views = Arc::new(ViewRegistry::new(
+        mail_queries.clone(),
+        event_sender.clone(),
+    ));
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
@@ -239,6 +245,7 @@ pub async fn build_authority_runtime(
         account_reads,
         account_mutations: Some(account_mutations),
         mail_queries,
+        views,
         live_accounts: account_supervisor.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
@@ -261,6 +268,7 @@ struct AuthorityRuntimeCore {
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
     mail_queries: Arc<MailQueryService>,
+    views: Arc<ViewRegistry>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
@@ -376,6 +384,10 @@ impl AuthorityRuntimeHandle {
             api_bridge.service.clone(),
             query_supervisor,
         ));
+        let views = Arc::new(ViewRegistry::new(
+            mail_queries.clone(),
+            api_bridge.event_sender.clone(),
+        ));
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
@@ -393,6 +405,7 @@ impl AuthorityRuntimeHandle {
                 account_reads,
                 account_mutations,
                 mail_queries,
+                views,
                 live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
@@ -721,6 +734,30 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<MailQueryPage, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.mail_queries.query_mail_page(request).await
+    }
+
+    async fn open_view(
+        &self,
+        caller: RuntimeCaller,
+        descriptor: ViewDescriptor,
+    ) -> Result<posthaste_runtime_contract::ViewSnapshot, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .views
+            .open_view(descriptor, caller.account_scope.as_deref())
+            .await
+    }
+
+    async fn subscribe_view(
+        &self,
+        caller: RuntimeCaller,
+        view_id: ViewId,
+        after_revision: Option<ViewRevision>,
+    ) -> Result<RuntimeViewSubscription, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .views
+            .subscribe_view(view_id, after_revision, caller.account_scope.as_deref())
     }
 
     async fn send_message(

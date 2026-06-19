@@ -15,6 +15,7 @@ import type {
   MessageDetail,
   MessagePage,
   MessageSortField,
+  MessageSummary,
   OkResponse,
   PatchMailboxInput,
   ReadRequest,
@@ -60,6 +61,89 @@ export interface RuntimeMessagePageRequest {
   sortDir?: 'asc' | 'desc'
   signal?: AbortSignal
   operation: OperationContext
+}
+
+export interface RuntimeMessageCursor {
+  sortValue: string
+  sourceId: string
+  messageId: string
+}
+
+export interface RuntimeMailQueryRequest {
+  query: string
+  presentation: {
+    kind: 'messages'
+    limit: number | null
+    cursor: RuntimeMessageCursor | null
+    sortField: MessageSortField
+    sortDirection: 'asc' | 'desc'
+  }
+  visibility: null
+}
+
+export interface RuntimeViewSnapshot<TData = unknown> {
+  viewId: string
+  descriptor: { family: string; payload: unknown }
+  revision: number
+  lifecycle: 'loading' | 'ready' | 'updating' | 'error'
+  readWatermark: { value: string } | null
+  coverage: { kind: 'complete' | 'partial' | 'unknown'; details?: unknown }
+  data: TData
+  pendingMutations: string[]
+  error: unknown | null
+}
+
+export interface RuntimeMailListRowState {
+  rowKey: string
+  resourceRef: string | null
+  projection: MessageSummary
+  sortKey?: unknown
+  orderKey: string
+  pendingMarkers?: string[]
+}
+
+export interface RuntimeMailListViewState {
+  scope: unknown
+  projectionKind: 'message' | 'conversation'
+  sort: unknown
+  windowRequest: unknown
+  rows: RuntimeMailListRowState[]
+  continuation: {
+    beforeCursor: string | null
+    afterCursor: string | null
+    hasBefore: boolean
+    hasAfter: boolean
+  }
+  readWatermark: { value: string } | null
+  coverage: { kind: 'complete' | 'partial' | 'unknown'; details?: unknown }
+  knownTotalCount: number | null
+  pendingMutations: string[]
+  anchor: unknown
+}
+
+export type RuntimeViewFrame<TData = unknown> =
+  | { kind: 'snapshot'; snapshot: RuntimeViewSnapshot<TData> }
+  | { kind: 'replace'; snapshot: RuntimeViewSnapshot<TData> }
+  | { kind: 'error'; viewId: string; revision: number; error: unknown }
+  | { kind: 'closed'; viewId: string }
+
+export interface RuntimeOpenMessageListViewResult {
+  viewId: string
+  snapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
+}
+
+export interface RuntimeViewSubscriptionRequest {
+  viewId: string
+  afterRevision?: number | null
+  sourceId?: string | null
+}
+
+export interface RuntimeViewFrameHandlers {
+  onFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
+  onMalformedFrame?(input: { raw: string; error: unknown }): void
+  onPermanentError?(error: unknown): void
+  onTransientError?(error: unknown): void
+  onClosed?(error: unknown): void
 }
 
 export type RuntimeResourceDescriptor =
@@ -131,6 +215,13 @@ export interface RuntimeAdapter {
   subscribeEvents(
     request: RuntimeEventSubscriptionRequest,
     handlers: RuntimeEventHandlers,
+  ): RuntimeUnsubscribe
+  openMessageListView(
+    request: RuntimeMessagePageRequest,
+  ): Promise<RuntimeOpenMessageListViewResult>
+  subscribeView(
+    request: RuntimeViewSubscriptionRequest,
+    handlers: RuntimeViewFrameHandlers,
   ): RuntimeUnsubscribe
   createAccount(input: CreateAccountInput): Promise<AccountOverview>
   createSmartMailbox(input: CreateSmartMailboxInput): Promise<SmartMailbox>

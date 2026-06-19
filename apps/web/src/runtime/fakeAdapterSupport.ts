@@ -20,12 +20,16 @@ import type {
 import type {
   RuntimeAdapter,
   RuntimeEventSubscriptionRequest,
+  RuntimeMailListViewState,
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
+  RuntimeOpenMessageListViewResult,
   RuntimeResourceDescriptor,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
+  RuntimeViewFrame,
+  RuntimeViewSubscriptionRequest,
 } from './types'
 
 export type AccountCommandCall = {
@@ -39,6 +43,9 @@ export type AccountUpdateCall = {
 }
 export type EventSubscriptionCall = {
   request: RuntimeEventSubscriptionRequest
+}
+export type ViewSubscriptionCall = {
+  request: RuntimeViewSubscriptionRequest
 }
 export type OAuthStartCall = Omit<StartProviderOAuthInput, 'clientSecret'> & {
   hasClientSecret: boolean
@@ -60,6 +67,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly accountVerificationCalls: string[]
   readonly conversationCalls: string[]
   readonly eventSubscriptionCalls: EventSubscriptionCall[]
+  readonly viewOpenCalls: RuntimeMessagePageRequest[]
+  readonly viewSubscriptionCalls: ViewSubscriptionCall[]
   readonly mailboxCalls: string[]
   readonly messageCalls: MessageDetailCall[]
   readonly messageCommandCalls: RuntimeMessageCommandRequest[]
@@ -71,6 +80,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly smartMailboxCalls: number
   readonly syncCalls: RuntimeTriggerSyncRequest[]
   emitDomainEvent(event: DomainEvent): void
+  emitViewFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
   queueAccount(account: AccountOverview): void
   queueAccountError(error: Error): void
   queueAccountOk(result: OkResponse): void
@@ -87,6 +97,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   queueMessageCommandError(error: Error): void
   queueMessagePage(page: MessagePage): void
   queueMessagePageError(error: Error): void
+  queueOpenMessageListView(result: RuntimeOpenMessageListViewResult): void
+  queueOpenMessageListViewError(error: Error): void
   queueOAuthStartResponse(response: StartOAuthResponse): void
   queueOAuthStartError(error: Error): void
   queueResourceBlob(blob: Blob): void
@@ -111,6 +123,8 @@ export type FakeCallRecords = {
   accountVerificationCalls: string[]
   conversationCalls: string[]
   eventSubscriptionCalls: EventSubscriptionCall[]
+  viewOpenCalls: RuntimeMessagePageRequest[]
+  viewSubscriptionCalls: ViewSubscriptionCall[]
   mailboxCalls: string[]
   messageCalls: MessageDetailCall[]
   messageCommandCalls: RuntimeMessageCommandRequest[]
@@ -131,6 +145,7 @@ export type FakeQueues = {
   messages: QueuedOutcome<MessageDetail>[]
   messageCommands: QueuedOutcome<MessageCommandResult>[]
   messagePages: QueuedOutcome<MessagePage>[]
+  openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   oauthStartResponses: QueuedOutcome<StartOAuthResponse>[]
   reads: QueuedOutcome<ReadResponse>[]
   resources: QueuedOutcome<Blob>[]
@@ -148,6 +163,7 @@ export interface FakeRuntimeAdapterOptions {
   defaultMessage?: MessageDetail
   defaultMessageCommandResult?: MessageCommandResult
   defaultMessagePage?: MessagePage
+  defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
   defaultOAuthStartResponse?: StartOAuthResponse
   defaultReadResponse?: ReadResponse
   defaultSmartMailboxes?: SmartMailboxSummary[]
@@ -179,6 +195,8 @@ export function createFakeCallRecords(): FakeCallRecords {
     accountVerificationCalls: [],
     conversationCalls: [],
     eventSubscriptionCalls: [],
+    viewOpenCalls: [],
+    viewSubscriptionCalls: [],
     mailboxCalls: [],
     messageCalls: [],
     messageCommandCalls: [],
@@ -200,6 +218,8 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.accountVerificationCalls.length = 0
   calls.conversationCalls.length = 0
   calls.eventSubscriptionCalls.length = 0
+  calls.viewOpenCalls.length = 0
+  calls.viewSubscriptionCalls.length = 0
   calls.mailboxCalls.length = 0
   calls.messageCalls.length = 0
   calls.messageCommandCalls.length = 0
@@ -221,6 +241,7 @@ export function createFakeQueues(): FakeQueues {
     messages: [],
     messageCommands: [],
     messagePages: [],
+    openMessageListViews: [],
     oauthStartResponses: [],
     reads: [],
     resources: [],
@@ -239,6 +260,7 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.messages.length = 0
   queues.messageCommands.length = 0
   queues.messagePages.length = 0
+  queues.openMessageListViews.length = 0
   queues.oauthStartResponses.length = 0
   queues.reads.length = 0
   queues.resources.length = 0

@@ -18,6 +18,7 @@ pub mod oauth;
 mod push;
 mod secret;
 pub mod supervisor;
+mod views;
 
 pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{

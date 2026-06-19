@@ -1,4 +1,4 @@
-import type { RuntimeEventHandlers } from './types'
+import type { RuntimeEventHandlers, RuntimeViewFrameHandlers } from './types'
 import { createFakeQueueControls } from './fakeAdapterQueues'
 import {
   createFakeCallRecords,
@@ -27,6 +27,7 @@ export function createFakeRuntimeAdapter(
   const calls = createFakeCallRecords()
   const queues = createFakeQueues()
   const eventHandlers = new Set<RuntimeEventHandlers>()
+  const viewHandlers = new Set<RuntimeViewFrameHandlers>()
   let accountCalls = 0
   let smartMailboxCalls = 0
 
@@ -41,11 +42,15 @@ export function createFakeRuntimeAdapter(
     emitDomainEvent(event) {
       for (const handlers of eventHandlers) handlers.onEvent(event)
     },
+    emitViewFrame(frame) {
+      for (const handlers of viewHandlers) handlers.onFrame(frame)
+    },
     ...createFakeQueueControls(queues),
     reset() {
       accountCalls = 0
       smartMailboxCalls = 0
       eventHandlers.clear()
+      viewHandlers.clear()
       resetFakeCallRecords(calls)
       resetFakeQueues(queues)
     },
@@ -53,6 +58,19 @@ export function createFakeRuntimeAdapter(
       calls.eventSubscriptionCalls.push({ request })
       eventHandlers.add(handlers)
       return () => eventHandlers.delete(handlers)
+    },
+    openMessageListView(request) {
+      calls.viewOpenCalls.push({ ...request })
+      return resolveQueuedOptional(
+        queues.openMessageListViews,
+        input?.defaultOpenMessageListView,
+        'open message list view result',
+      )
+    },
+    subscribeView(request, handlers) {
+      calls.viewSubscriptionCalls.push({ request })
+      viewHandlers.add(handlers)
+      return () => viewHandlers.delete(handlers)
     },
     createAccount(accountInput) {
       calls.accountCreateCalls.push(accountInput)

@@ -8,6 +8,7 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  buildViewStreamUrl,
   buildOAuthRedirectUri,
   createAccount,
   createSmartMailbox,
@@ -30,6 +31,7 @@ import {
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
+  openView,
   patchMailbox,
   patchSettings,
   performMessageCommand,
@@ -50,8 +52,13 @@ import type { DomainEvent, KnownMailboxRole, Mailbox } from '../api/types'
 import type {
   RuntimeAdapter,
   RuntimeEventHandlers,
+  RuntimeMailListViewState,
+  RuntimeMailQueryRequest,
   RuntimeMessagePageRequest,
   RuntimeResourceDescriptor,
+  RuntimeViewFrame,
+  RuntimeViewFrameHandlers,
+  RuntimeViewSnapshot,
 } from './types'
 
 /**
@@ -62,6 +69,51 @@ import type {
  */
 function currentBackendSort(sort: RuntimeMessagePageRequest['sort']) {
   return sort === 'relevance' ? undefined : sort
+}
+
+function runtimeSort(sort: RuntimeMessagePageRequest['sort']) {
+  return !sort || sort === 'relevance' ? 'date' : sort
+}
+
+function scopeQuery(request: RuntimeMessagePageRequest): string {
+  const parts: string[] = []
+  switch (request.scope.kind) {
+    case 'source-mailbox':
+      parts.push(
+        `in:${request.scope.sourceId}/${request.scope.mailboxId ?? ''}`,
+      )
+      break
+    case 'smart-mailbox':
+      parts.push(`in:${request.scope.smartMailboxId}`)
+      break
+    case 'global':
+      break
+  }
+  const userQuery = request.query?.trim()
+  if (userQuery) {
+    parts.push(userQuery)
+  }
+  return parts.join(' ')
+}
+
+function sourceScope(request: RuntimeMessagePageRequest): string | null {
+  return request.scope.kind === 'source-mailbox' ? request.scope.sourceId : null
+}
+
+function mailQueryRequest(
+  request: RuntimeMessagePageRequest,
+): RuntimeMailQueryRequest {
+  return {
+    query: scopeQuery(request),
+    presentation: {
+      kind: 'messages',
+      limit: request.limit,
+      cursor: null,
+      sortField: runtimeSort(request.sort),
+      sortDirection: request.sortDir ?? 'desc',
+    },
+    visibility: null,
+  }
 }
 
 class FatalStreamError extends Error {}
@@ -92,7 +144,7 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
 }
 
 function handleMalformedFrame(
-  handlers: RuntimeEventHandlers,
+  handlers: RuntimeEventHandlers | RuntimeViewFrameHandlers,
   raw: string,
   error: unknown,
 ): void {
@@ -100,6 +152,71 @@ function handleMalformedFrame(
 }
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
+  async openMessageListView(request) {
+    const descriptor = {
+      family: 'mailList',
+      payload: mailQueryRequest(request),
+    }
+    return openView<RuntimeViewSnapshot<RuntimeMailListViewState>>(
+      { descriptor },
+      { sourceId: sourceScope(request) },
+    )
+  },
+  subscribeView(request, handlers) {
+    const controller = new AbortController()
+    void fetchEventSource(
+      buildViewStreamUrl({
+        viewId: request.viewId,
+        afterRevision: request.afterRevision,
+        sourceId: request.sourceId,
+      }),
+      {
+        headers: authHeaders(),
+        signal: controller.signal,
+        openWhenHidden: true,
+        async onopen(response) {
+          const contentType = response.headers.get('content-type') ?? ''
+          if (response.ok && contentType.startsWith(EventStreamContentType)) {
+            return
+          }
+          if (response.status >= 400 && response.status < 500) {
+            throw new FatalStreamError(
+              `view stream rejected with ${response.status}`,
+            )
+          }
+          throw new Error(`view stream returned ${response.status}`)
+        },
+        onmessage(event) {
+          if (!event.data) {
+            return
+          }
+          let payload: RuntimeViewFrame<RuntimeMailListViewState>
+          try {
+            payload = JSON.parse(
+              event.data,
+            ) as RuntimeViewFrame<RuntimeMailListViewState>
+          } catch (error) {
+            handleMalformedFrame(handlers, event.data, error)
+            return
+          }
+          handlers.onFrame(payload)
+        },
+        onerror(error) {
+          if (error instanceof FatalStreamError) {
+            handlers.onPermanentError?.(error)
+            throw error
+          }
+          handlers.onTransientError?.(error)
+        },
+      },
+    ).catch((error) => {
+      if (controller.signal.aborted || error instanceof FatalStreamError) {
+        return
+      }
+      handlers.onClosed?.(error)
+    })
+    return () => controller.abort()
+  },
   subscribeEvents(request, handlers) {
     const controller = new AbortController()
     void fetchEventSource(buildEventsUrl({ afterSeq: request.afterSeq }), {

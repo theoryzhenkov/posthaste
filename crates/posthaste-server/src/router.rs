@@ -89,6 +89,8 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             get(api::list_source_messages),
         )
         .route("/messages/search", get(api::search_messages))
+        .route("/views", post(api::open_view))
+        .route("/views/{view_id}/stream", get(api::stream_view))
         .route(
             "/sources/{source_id}/messages/{message_id}",
             get(api::get_message),
