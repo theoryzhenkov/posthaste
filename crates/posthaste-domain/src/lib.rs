@@ -17,6 +17,7 @@ mod provider;
 mod push;
 pub mod search;
 mod service;
+mod validation;
 mod vocab;
 
 pub use cache::*;
@@ -28,4 +29,5 @@ pub use ports::*;
 pub use provider::*;
 pub use push::*;
 pub use service::*;
+pub use validation::*;
 pub use vocab::*;
