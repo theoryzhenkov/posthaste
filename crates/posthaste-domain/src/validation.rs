@@ -421,6 +421,7 @@ mod tests {
         validate_snapshot(snapshot).expect_err("snapshot should be rejected")
     }
 
+    // spec: docs/backend/L2#domain-config-validation-source
     #[test]
     fn valid_snapshot_passes_validation() {
         assert_eq!(validate_snapshot(&valid_snapshot()), Ok(()));
