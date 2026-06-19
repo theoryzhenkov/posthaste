@@ -291,6 +291,34 @@ impl Harness {
             .await
     }
 
+    /// `GET path` and return the first response body data frame. Useful for
+    /// infinite SSE bodies where collecting the full body would hang.
+    pub async fn get_text_frame(&self, token: &str, path: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("request should build");
+        let response = self
+            .router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router should respond");
+        let status = response.status();
+        let mut body = response.into_body();
+        let frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
+            .await
+            .expect("body frame should arrive")
+            .expect("body should not end before a frame")
+            .expect("body frame should succeed");
+        let bytes = frame.into_data().expect("first frame should be data");
+        let text = String::from_utf8(bytes.to_vec()).expect("frame should be utf-8");
+        (status, text)
+    }
+
     async fn request_json(
         &self,
         method: Method,

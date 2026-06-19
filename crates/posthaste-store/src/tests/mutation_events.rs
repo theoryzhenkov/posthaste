@@ -35,6 +35,24 @@ fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
     assert_eq!(result.events.len(), 1);
     assert_eq!(result.events[0].topic, EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED);
     assert_eq!(
+        result.events[0].payload["assertion"]["after"]["id"],
+        message_id.as_str()
+    );
+    assert_eq!(
+        result.events[0].payload["assertion"]["after"]["keywords"],
+        serde_json::json!(["$flagged", "$seen"])
+    );
+    assert_eq!(
+        result.events[0].payload["assertion"]["after"]["conversationRef"]["conversationId"],
+        serde_json::json!(result
+            .detail
+            .as_ref()
+            .unwrap()
+            .summary
+            .conversation_id
+            .as_str())
+    );
+    assert_eq!(
         store
             .list_events(&EventFilter {
                 account_id: Some(account),

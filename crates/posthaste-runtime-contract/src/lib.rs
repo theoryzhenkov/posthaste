@@ -281,6 +281,42 @@ pub struct RuntimeEventSubscription {
     pub live: RuntimeEventStream,
 }
 
+pub type RuntimeViewFrameStream = BoxStream<'static, ViewFrame>;
+
+pub struct RuntimeViewSubscription {
+    pub catch_up: Option<ViewFrame>,
+    pub live: RuntimeViewFrameStream,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ViewFrame {
+    Snapshot {
+        snapshot: ViewSnapshot,
+    },
+    Replace {
+        snapshot: ViewSnapshot,
+    },
+    Error {
+        view_id: ViewId,
+        revision: ViewRevision,
+        error: RuntimeAdapterError,
+    },
+    Closed {
+        view_id: ViewId,
+    },
+}
+
+impl ViewFrame {
+    pub fn revision(&self) -> Option<ViewRevision> {
+        match self {
+            Self::Snapshot { snapshot } | Self::Replace { snapshot } => Some(snapshot.revision),
+            Self::Error { revision, .. } => Some(*revision),
+            Self::Closed { .. } => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeLifecycle {
@@ -782,6 +818,19 @@ pub trait RuntimeCore: Send + Sync {
         caller: RuntimeCaller,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError>;
+
+    async fn open_view(
+        &self,
+        caller: RuntimeCaller,
+        descriptor: ViewDescriptor,
+    ) -> Result<ViewSnapshot, RuntimeError>;
+
+    async fn subscribe_view(
+        &self,
+        caller: RuntimeCaller,
+        view_id: ViewId,
+        after_revision: Option<ViewRevision>,
+    ) -> Result<RuntimeViewSubscription, RuntimeError>;
 
     async fn send_message(
         &self,

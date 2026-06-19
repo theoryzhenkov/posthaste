@@ -2670,6 +2670,71 @@
         }
       }
     },
+    "/v1/views": {
+      "post": {
+        "tags": [
+          "views"
+        ],
+        "summary": "Open a runtime view",
+        "description": "Opens a runtime-owned view and returns its initial snapshot.",
+        "operationId": "open_view",
+        "parameters": [
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The opened view snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenViewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid view descriptor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/views/conversations": {
       "get": {
         "tags": [
@@ -2822,6 +2887,76 @@
           },
           "404": {
             "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/views/{view_id}/stream": {
+      "get": {
+        "tags": [
+          "views"
+        ],
+        "summary": "Subscribe to a runtime view stream",
+        "description": "Streams runtime view frames as server-sent events. Event ids are view revisions.",
+        "operationId": "stream_view",
+        "parameters": [
+          {
+            "name": "view_id",
+            "in": "path",
+            "description": "Runtime view id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterRevision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of runtime ViewFrame values"
+          },
+          "404": {
+            "description": "Unknown view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
             "content": {
               "application/json": {
                 "schema": {
@@ -4329,6 +4464,32 @@
           }
         }
       },
+      "OpenViewRequest": {
+        "type": "object",
+        "required": [
+          "descriptor"
+        ],
+        "properties": {
+          "descriptor": {
+            "type": "object"
+          }
+        }
+      },
+      "OpenViewResponse": {
+        "type": "object",
+        "required": [
+          "viewId",
+          "snapshot"
+        ],
+        "properties": {
+          "snapshot": {
+            "type": "object"
+          },
+          "viewId": {
+            "type": "string"
+          }
+        }
+      },
       "PatchAccountRequest": {
         "type": "object",
         "description": "Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.\n\n@spec docs/L1-api#account-crud-lifecycle",
@@ -5637,6 +5798,10 @@
     {
       "name": "events",
       "description": "Server-sent domain event stream"
+    },
+    {
+      "name": "views",
+      "description": "Runtime-owned view snapshots and streams"
     },
     {
       "name": "auth",
