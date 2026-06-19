@@ -87,7 +87,7 @@ pub(crate) async fn process_sync_trigger(
     reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) -> Result<(), ServiceError> {
     let account_id = account.id.clone();
-    let sync_id = Uuid::new_v4().to_string();
+    let sync_id = Id::generate().to_string();
     let span = info_span!(
         "sync.cycle",
         account_id = %account_id,

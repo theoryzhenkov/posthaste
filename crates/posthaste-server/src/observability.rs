@@ -1,5 +1,5 @@
 use axum::http::HeaderMap;
-use uuid::Uuid;
+use posthaste_domain::Id;
 
 pub const REQUEST_ID_HEADER: &str = "x-posthaste-request-id";
 pub const OPERATION_ID_HEADER: &str = "x-posthaste-operation-id";
@@ -20,7 +20,7 @@ impl RequestLogContext {
     pub fn from_headers(headers: &HeaderMap) -> Self {
         Self {
             request_id: header_value(headers, REQUEST_ID_HEADER)
-                .unwrap_or_else(|| format!("srv_{}", Uuid::new_v4())),
+                .unwrap_or_else(|| Id::generate().to_string()),
             operation_id: operation_id_from_headers(headers),
             operation_kind: header_value(headers, OPERATION_KIND_HEADER),
             operation_source: header_value(headers, OPERATION_SOURCE_HEADER),

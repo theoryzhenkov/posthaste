@@ -22,7 +22,7 @@ impl AccountMutationService {
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .map(AccountId::from)
-            .unwrap_or_else(|| Id::<AccountIdKind>::generate().into());
+            .unwrap_or_else(|| Id::generate().into());
 
         let timestamp = domain_now_iso8601()
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;

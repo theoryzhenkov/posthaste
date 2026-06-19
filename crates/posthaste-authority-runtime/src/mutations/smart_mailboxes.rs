@@ -8,7 +8,7 @@ impl AccountMutationService {
         let timestamp = domain_now_iso8601()
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
         let smart_mailbox = SmartMailbox {
-            id: Id::<SmartMailboxIdKind>::generate().into(),
+            id: Id::generate().into(),
             name: request.name,
             position: request.position.unwrap_or(0),
             kind: SmartMailboxKind::User,
