@@ -39,9 +39,16 @@ impl AccountMutationService {
             updated_at: timestamp,
         };
         account.transport.secret_ref =
-            decide_secret_instruction(&account.id, None, &secret)?.resolved_secret_ref(None);
+            self.account_repository
+                .resolve_secret_ref(&account.id, None, &secret)?;
         validate_account_settings(&account)?;
-        self.persist_new_account(&mut account, &secret).await?;
+        self.account_repository.create(&account, &secret)?;
+        self.supervisor.start_account(&account).await;
+        self.append_and_publish_event(
+            &account.id,
+            EVENT_TOPIC_ACCOUNT_CREATED,
+            account_event_payload(EVENT_TOPIC_ACCOUNT_CREATED, &account.id),
+        )?;
         self.read_account_overview(account.id.clone()).await
     }
 
@@ -56,27 +63,14 @@ impl AccountMutationService {
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
         let existing_secret_ref = account.transport.secret_ref.clone();
         let secret_request = request.secret.unwrap_or_default();
-        account.transport.secret_ref =
-            decide_secret_instruction(&account.id, existing_secret_ref.as_ref(), &secret_request)?
-                .resolved_secret_ref(existing_secret_ref.as_ref());
+        account.transport.secret_ref = self.account_repository.resolve_secret_ref(
+            &account.id,
+            existing_secret_ref.as_ref(),
+            &secret_request,
+        )?;
         validate_account_settings(&account)?;
-        let defer_secret_clear = secret_request.mode == SecretWriteMode::Clear;
-        if !defer_secret_clear {
-            self.apply_secret_instruction(
-                &mut account,
-                existing_secret_ref.as_ref(),
-                &secret_request,
-            )?;
-        }
-
-        self.service.save_source(&account)?;
-        if defer_secret_clear {
-            self.apply_secret_instruction(
-                &mut account,
-                existing_secret_ref.as_ref(),
-                &secret_request,
-            )?;
-        }
+        self.account_repository
+            .update(&account, existing_secret_ref.as_ref(), &secret_request)?;
         self.supervisor.start_account(&account).await;
         self.append_and_publish_event(
             &account_id,
@@ -152,9 +146,8 @@ impl AccountMutationService {
 
     pub async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
         let account = self.load_account(&account_id)?;
-        self.delete_managed_secret(account.transport.secret_ref.as_ref())?;
+        self.account_repository.delete(&account)?;
         self.supervisor.remove_account(&account_id).await;
-        self.service.delete_source(&account_id)?;
         self.append_and_publish_event(
             &account_id,
             EVENT_TOPIC_ACCOUNT_DELETED,
@@ -184,7 +177,13 @@ impl AccountMutationService {
         account.enabled = enabled;
         account.updated_at = domain_now_iso8601()
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Internal, error))?;
-        self.service.save_source(&account)?;
+        let existing_secret_ref = account.transport.secret_ref.clone();
+        validate_account_settings(&account)?;
+        self.account_repository.update(
+            &account,
+            existing_secret_ref.as_ref(),
+            &SecretWriteMutation::default(),
+        )?;
         self.supervisor.start_account(&account).await;
         self.append_and_publish_event(
             &account_id,
@@ -233,32 +232,6 @@ impl AccountMutationService {
             ),
         )?;
         Ok(())
-    }
-
-    async fn persist_new_account(
-        &self,
-        account: &mut AccountSettings,
-        secret: &SecretWriteMutation,
-    ) -> Result<(), RuntimeError> {
-        self.service.insert_source(account)?;
-        if let Err(error) = self.apply_secret_instruction(account, None, secret) {
-            self.service.delete_source(&account.id).map_err(|rollback| {
-                RuntimeError::new(
-                    RuntimeErrorCode::Internal,
-                    format!(
-                        "failed to roll back account after secret write error: {rollback}; original error: {}",
-                        error.envelope().message
-                    ),
-                )
-            })?;
-            return Err(error);
-        }
-        self.supervisor.start_account(account).await;
-        self.append_and_publish_event(
-            &account.id,
-            EVENT_TOPIC_ACCOUNT_CREATED,
-            account_event_payload(EVENT_TOPIC_ACCOUNT_CREATED, &account.id),
-        )
     }
 
     fn load_account(&self, account_id: &AccountId) -> Result<AccountSettings, RuntimeError> {

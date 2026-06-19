@@ -1,8 +1,8 @@
 ---
 scope: L1
-summary: "Config directory layout, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
-modified: 2026-06-01
-reviewed: 2026-06-01
+summary: "Config directory layout, account repository secret/config saga, ConfigRepository contract, TOML schema, reload behavior, smart mailbox defaults"
+modified: 2026-06-19
+reviewed: 2026-06-19
 depends:
   - path: docs/L0-accounts
   - path: docs/L0-providers
@@ -51,6 +51,21 @@ reset_default_smart_mailboxes() → Vec<SmartMailbox>
 ```
 
 All methods return `Result<_, ConfigError>`. Error variants: `NotFound`, `Conflict`, `Validation`, `Io`, `Parse`.
+
+## AccountRepository boundary
+
+`AccountRepository` owns account persistence across the config source store and the secret store. Mutation methods build account settings, resolve the planned `secret_ref`, validate the account, call the repository, and then run post-commit effects such as supervisor changes and events.
+
+For completed repository operations, an account record must not reference a secret that the repository failed to write. The repository keeps that invariant by using different ordering for create, update, clear, and delete:
+
+| Operation | Order | Failure handling |
+| --- | --- | --- |
+| create | `insert_source` then write secret | Secret write failure deletes the newly inserted source. If rollback fails, the runtime error carries both the original and rollback errors and logs the incident. |
+| update with replace/save | Write secret then `save_source` | Secret write failure aborts before touching the source. A later source-save failure may leave an orphan managed secret, which is safe to overwrite on retry. |
+| update with clear | `save_source` with `secret_ref = None`, then delete managed secret | Secret delete failure leaves an orphan managed secret. The account record no longer points to it. |
+| delete | `delete_source`, then delete managed secret | Secret delete failure leaves an orphan managed secret. The account record is already gone. |
+
+This boundary does not make the config store and keychain transactional. A process crash between `insert_source` and the create secret write can still leave a source record whose secret has not been written yet. That recovery path is a future repair/GC concern, not something solved by the current two-store repository.
 
 ## ConfigSnapshot
 
@@ -297,6 +312,7 @@ On first open, if `app.toml` does not exist, the repository is considered empty.
 | filename-id-match | MUST | TOML filename stem must equal the `id` field inside the file |
 | atomic-write | MUST | Config file writes use write-fsync-rename to prevent corruption |
 | id-validation | MUST | IDs reject path separators, parent traversal, and null bytes |
+| account-secret-saga | MUST | Completed account repository operations do not leave account records pointing at secrets that failed to write. |
 | snapshot-cached | MUST | After initialization, all reads serve from the in-memory snapshot |
 | reload-diff | MUST | `reload()` returns an accurate diff of added, changed, and removed sources |
 | defaults-preserved | MUST | `reset_default_smart_mailboxes` does not delete user-created mailboxes |

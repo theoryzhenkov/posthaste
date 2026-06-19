@@ -22,7 +22,7 @@ use posthaste_domain::{
     SyncMode, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -593,6 +593,40 @@ impl RuntimeError {
 
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(RuntimeErrorCode::Conflict, message)
+    }
+
+    pub fn compensation_failed(
+        operation: impl Into<String>,
+        original: RuntimeError,
+        rollback: RuntimeError,
+    ) -> Self {
+        let RuntimeAdapterError {
+            code,
+            message,
+            retryable,
+            correlation_id,
+            details,
+        } = original.0;
+        let original_envelope = RuntimeAdapterError {
+            code: code.clone(),
+            message: message.clone(),
+            retryable,
+            correlation_id: correlation_id.clone(),
+            details,
+        };
+        Self(RuntimeAdapterError {
+            code,
+            message,
+            retryable,
+            correlation_id,
+            details: json!({
+                "compensation": {
+                    "operation": operation.into(),
+                    "original": original_envelope,
+                    "rollback": rollback.0,
+                }
+            }),
+        })
     }
 
     pub fn envelope(&self) -> &RuntimeAdapterError {
