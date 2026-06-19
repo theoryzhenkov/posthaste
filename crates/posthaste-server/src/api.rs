@@ -63,6 +63,7 @@ pub(crate) mod mailboxes;
 pub mod message_commands;
 pub(crate) mod messages;
 pub(crate) mod read_calls;
+pub(crate) mod runtime_stream;
 mod search_support;
 pub mod settings;
 pub mod smart_mailboxes;

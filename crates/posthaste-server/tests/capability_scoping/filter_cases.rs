@@ -149,6 +149,60 @@ async fn conversation_views_filter_on_source_id() {
 }
 
 #[tokio::test]
+async fn runtime_session_routes_filter_on_source_id() {
+    let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
+    for (method, path) in [
+        ("POST", "/v1/runtime/sessions?sourceId=acct-a"),
+        ("DELETE", "/v1/runtime/sessions/session-1?sourceId=acct-a"),
+        (
+            "GET",
+            "/v1/runtime/sessions/session-1/stream?sourceId=acct-a",
+        ),
+        (
+            "POST",
+            "/v1/runtime/sessions/session-1/views?sourceId=acct-a",
+        ),
+        (
+            "DELETE",
+            "/v1/runtime/sessions/session-1/views/view-1?sourceId=acct-a",
+        ),
+    ] {
+        assert_eq!(
+            status(&t, method, path).await,
+            StatusCode::OK,
+            "{method} {path}"
+        );
+    }
+    for (method, path) in [
+        ("POST", "/v1/runtime/sessions?sourceId=acct-b"),
+        ("DELETE", "/v1/runtime/sessions/session-1?sourceId=acct-b"),
+        (
+            "GET",
+            "/v1/runtime/sessions/session-1/stream?sourceId=acct-b",
+        ),
+        (
+            "POST",
+            "/v1/runtime/sessions/session-1/views?sourceId=acct-b",
+        ),
+        (
+            "DELETE",
+            "/v1/runtime/sessions/session-1/views/view-1?sourceId=acct-b",
+        ),
+        ("POST", "/v1/runtime/sessions"),
+        ("DELETE", "/v1/runtime/sessions/session-1"),
+        ("GET", "/v1/runtime/sessions/session-1/stream"),
+        ("POST", "/v1/runtime/sessions/session-1/views"),
+        ("DELETE", "/v1/runtime/sessions/session-1/views/view-1"),
+    ] {
+        assert_eq!(
+            status(&t, method, path).await,
+            StatusCode::FORBIDDEN,
+            "{method} {path}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn runtime_view_routes_filter_on_source_id() {
     let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
     assert_eq!(

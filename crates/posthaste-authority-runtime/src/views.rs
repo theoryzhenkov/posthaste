@@ -12,6 +12,7 @@ use posthaste_runtime_contract::{
 };
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
+use tokio::task::AbortHandle;
 
 use crate::mail_queries::MailQueryService;
 
@@ -28,6 +29,7 @@ struct StoredView {
     request: MailQueryRequest,
     snapshot: ViewSnapshot,
     frames: broadcast::Sender<ViewFrame>,
+    event_task: Option<AbortHandle>,
 }
 
 impl ViewRegistry {
@@ -70,9 +72,13 @@ impl ViewRegistry {
                 request,
                 snapshot: snapshot.clone(),
                 frames,
+                event_task: None,
             },
         );
-        self.spawn_event_pump(view_id);
+        let event_task = self.spawn_event_pump(view_id.clone());
+        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(&view_id) {
+            view.event_task = Some(event_task);
+        }
         Ok(snapshot)
     }
 
@@ -119,16 +125,19 @@ impl ViewRegistry {
         })
     }
 
-    fn spawn_event_pump(self: &Arc<Self>, view_id: ViewId) {
+    fn spawn_event_pump(self: &Arc<Self>, view_id: ViewId) -> AbortHandle {
         let registry = Arc::downgrade(self);
         let mut receiver = self.event_sender.subscribe();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             loop {
                 match receiver.recv().await {
                     Ok(event) => {
                         let Some(registry) = registry.upgrade() else {
                             break;
                         };
+                        if !registry.view_exists(&view_id) {
+                            break;
+                        }
                         if event.topic == EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED {
                             registry.send_recomputed_replace(&view_id).await;
                         }
@@ -137,12 +146,16 @@ impl ViewRegistry {
                         let Some(registry) = registry.upgrade() else {
                             break;
                         };
+                        if !registry.view_exists(&view_id) {
+                            break;
+                        }
                         registry.send_recomputed_snapshot(&view_id).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
+        task.abort_handle()
     }
 
     async fn send_recomputed_replace(&self, view_id: &ViewId) {
@@ -179,6 +192,29 @@ impl ViewRegistry {
         if let Ok(view) = self.current_view(view_id) {
             let _ = view.frames.send(frame);
         }
+    }
+
+    pub(crate) fn close_view(&self, view_id: &ViewId) -> Result<(), RuntimeError> {
+        let removed = self
+            .views
+            .lock()
+            .map_err(lock_error)?
+            .remove(view_id)
+            .ok_or_else(|| RuntimeError::not_found("view not found"))?;
+        if let Some(event_task) = removed.event_task {
+            event_task.abort();
+        }
+        let _ = removed.frames.send(ViewFrame::Closed {
+            view_id: view_id.clone(),
+        });
+        Ok(())
+    }
+
+    fn view_exists(&self, view_id: &ViewId) -> bool {
+        self.views
+            .lock()
+            .map(|views| views.contains_key(view_id))
+            .unwrap_or(false)
     }
 
     fn current_view(&self, view_id: &ViewId) -> Result<StoredView, RuntimeError> {

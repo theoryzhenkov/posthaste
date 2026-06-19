@@ -89,6 +89,26 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             get(api::list_source_messages),
         )
         .route("/messages/search", get(api::search_messages))
+        .route(
+            "/runtime/sessions",
+            post(api::runtime_stream::open_runtime_session),
+        )
+        .route(
+            "/runtime/sessions/{session_id}",
+            axum::routing::delete(api::runtime_stream::close_runtime_session),
+        )
+        .route(
+            "/runtime/sessions/{session_id}/stream",
+            get(api::runtime_stream::stream_runtime_session),
+        )
+        .route(
+            "/runtime/sessions/{session_id}/views",
+            post(api::runtime_stream::open_runtime_session_view),
+        )
+        .route(
+            "/runtime/sessions/{session_id}/views/{view_id}",
+            axum::routing::delete(api::runtime_stream::close_runtime_session_view),
+        )
         .route("/views", post(api::open_view))
         .route("/views/{view_id}/stream", get(api::stream_view))
         .route(

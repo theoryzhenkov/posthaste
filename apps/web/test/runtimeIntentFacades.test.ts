@@ -8,6 +8,7 @@ import {
 import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
 import { runtimeMutations } from '../src/runtime/mutations'
 import { runtimeResources } from '../src/runtime/resources'
+import { runtimeStream } from '../src/runtime/runtimeStream'
 import { runtimeSubscriptions } from '../src/runtime/subscriptions'
 import { runtimeViews } from '../src/runtime/views'
 
@@ -60,10 +61,13 @@ describe('runtime intent facades', () => {
     const fake = createFakeRuntimeAdapter()
     const resourceBlob = new Blob(['resource'])
     const receivedEvents: DomainEvent[] = []
+    const receivedRuntimeFrames: Array<{ type: string; sessionSeq: number }> =
+      []
     fake.queueAccounts([account])
     fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueResourceBlob(resourceBlob)
+    fake.queueRuntimeSession({ sessionId: 'session-1' })
     setRuntimeAdapterForTesting(fake)
 
     expect(await runtimeViews.accounts.list()).toEqual([account])
@@ -80,12 +84,19 @@ describe('runtime intent facades', () => {
     expect(
       await runtimeResources.blob({ kind: 'account-logo', imageId: 'logo-1' }),
     ).toBe(resourceBlob)
+    const session = await runtimeStream.openSession({ sourceId: 'primary' })
     const unsubscribe = runtimeSubscriptions.events(
       { afterSeq: 7 },
       { onEvent: (payload) => receivedEvents.push(payload) },
     )
+    const unsubscribeRuntime = runtimeStream.subscribe(
+      { sessionId: session.sessionId, afterSeq: 1, sourceId: 'primary' },
+      { onFrame: (payload) => receivedRuntimeFrames.push(payload) },
+    )
     fake.emitDomainEvent(event)
+    fake.emitRuntimeFrame({ type: 'heartbeat', sessionSeq: 2 })
     unsubscribe()
+    unsubscribeRuntime()
 
     expect(fake.accountCalls).toBe(1)
     expect(fake.messageCommandCalls).toEqual([
@@ -102,6 +113,13 @@ describe('runtime intent facades', () => {
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
     ])
     expect(fake.eventSubscriptionCalls).toEqual([{ request: { afterSeq: 7 } }])
+    expect(fake.runtimeSessionCalls).toEqual([{ sourceId: 'primary' }])
+    expect(fake.runtimeFrameSubscriptionCalls).toEqual([
+      { request: { sessionId: 'session-1', afterSeq: 1, sourceId: 'primary' } },
+    ])
     expect(receivedEvents).toEqual([event])
+    expect(receivedRuntimeFrames).toEqual([
+      { type: 'heartbeat', sessionSeq: 2 },
+    ])
   })
 })

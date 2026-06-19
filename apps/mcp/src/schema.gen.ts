@@ -356,6 +356,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a runtime session
+         * @description Creates a runtime session whose stream carries RuntimeFrame values.
+         */
+        post: operations["open_runtime_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Close a runtime session
+         * @description Closes a runtime session and releases its open runtime views.
+         */
+        delete: operations["close_runtime_session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime/sessions/{session_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscribe to runtime frames
+         * @description Streams session-scoped RuntimeFrame values as server-sent events. Event ids are sessionSeq values.
+         */
+        get: operations["stream_runtime_session"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime/sessions/{session_id}/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a runtime session view
+         * @description Opens a view in a runtime session and returns its initial snapshot.
+         */
+        post: operations["open_runtime_session_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runtime/sessions/{session_id}/views/{view_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Close a runtime session view
+         * @description Closes a runtime view for a session and emits a viewClosed RuntimeFrame.
+         */
+        delete: operations["close_runtime_session_view"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sender-addresses": {
         parameters: {
             query?: never;
@@ -1421,6 +1521,13 @@ export interface components {
         OkResponse: {
             ok: boolean;
         };
+        OpenRuntimeSessionViewRequest: {
+            descriptor: Record<string, never>;
+        };
+        OpenRuntimeSessionViewResponse: {
+            snapshot: components["schemas"]["ViewSnapshot"];
+            viewId: string;
+        };
         OpenViewRequest: {
             descriptor: Record<string, never>;
         };
@@ -1567,6 +1674,9 @@ export interface components {
             op: "Tag/list";
             value: components["schemas"]["TagListReadResult"];
         };
+        ReadWatermark: {
+            value: string;
+        };
         /**
          * @description Email address with optional display name.
          *
@@ -1606,6 +1716,70 @@ export interface components {
             replySubject: string;
             to: components["schemas"]["Recipient"][];
         };
+        RuntimeAdapterError: {
+            code: components["schemas"]["RuntimeErrorCode"];
+            correlationId?: string | null;
+            details?: Record<string, never>;
+            message: string;
+            retryable: boolean;
+        };
+        RuntimeCoverage: {
+            details?: Record<string, never>;
+            kind: components["schemas"]["RuntimeCoverageKind"];
+        };
+        /** @enum {string} */
+        RuntimeCoverageKind: "complete" | "partial" | "unknown";
+        /** @enum {string} */
+        RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
+        RuntimeFrame: {
+            revision: components["schemas"]["ViewRevision"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            snapshot: components["schemas"]["ViewSnapshot"];
+            /** @enum {string} */
+            type: "viewSnapshot";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            revision: components["schemas"]["ViewRevision"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            snapshot: components["schemas"]["ViewSnapshot"];
+            /** @enum {string} */
+            type: "viewReplace";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            error: components["schemas"]["RuntimeAdapterError"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "viewError";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "viewClosed";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            mutationId: components["schemas"]["RuntimeMutationId"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            state: Record<string, never>;
+            /** @enum {string} */
+            type: "mutationSettlement";
+        } | {
+            kind: string;
+            payload: Record<string, never>;
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "notification";
+        } | {
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "heartbeat";
+        };
+        RuntimeMutationId: string;
+        RuntimeSession: {
+            sessionId: components["schemas"]["RuntimeSessionId"];
+        };
+        RuntimeSessionId: string;
+        /** Format: int64 */
+        RuntimeSessionSeq: number;
         /**
          * @description Storage backend for account credentials.
          *
@@ -1955,6 +2129,26 @@ export interface components {
             identityEmail?: string | null;
             ok: boolean;
             pushSupported: boolean;
+        };
+        ViewDescriptor: {
+            family: string;
+            payload?: Record<string, never>;
+        };
+        ViewId: string;
+        /** @enum {string} */
+        ViewLifecycle: "loading" | "ready" | "updating" | "error";
+        /** Format: int64 */
+        ViewRevision: number;
+        ViewSnapshot: {
+            coverage: components["schemas"]["RuntimeCoverage"];
+            data?: Record<string, never>;
+            descriptor: components["schemas"]["ViewDescriptor"];
+            error?: null | components["schemas"]["RuntimeAdapterError"];
+            lifecycle: components["schemas"]["ViewLifecycle"];
+            pendingMutations?: components["schemas"]["RuntimeMutationId"][];
+            readWatermark?: null | components["schemas"]["ReadWatermark"];
+            revision: components["schemas"]["ViewRevision"];
+            viewId: components["schemas"]["ViewId"];
         };
     };
     responses: never;
@@ -2666,6 +2860,268 @@ export interface operations {
             };
             /** @description Invalid read call or result reference */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    open_runtime_session: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The opened runtime session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSession"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    close_runtime_session: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session was closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    stream_runtime_session: {
+        parameters: {
+            query?: {
+                afterSeq?: number | null;
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE stream of RuntimeFrame values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    open_runtime_session_view: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenRuntimeSessionViewRequest"];
+            };
+        };
+        responses: {
+            /** @description The opened view snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRuntimeSessionViewResponse"];
+                };
+            };
+            /** @description Invalid view descriptor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    close_runtime_session_view: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+                /** @description Runtime view id */
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The view was closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

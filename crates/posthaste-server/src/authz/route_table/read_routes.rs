@@ -30,6 +30,31 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/views/{view_id}/stream",
         authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },
+    Entry {
+        method: "POST",
+        template: "/runtime/sessions",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "DELETE",
+        template: "/runtime/sessions/{session_id}",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "GET",
+        template: "/runtime/sessions/{session_id}/stream",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "POST",
+        template: "/runtime/sessions/{session_id}/views",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "DELETE",
+        template: "/runtime/sessions/{session_id}/views/{view_id}",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
     // -- Per-source resources: account axis from `source_id`. --
     Entry {
         method: "GET",

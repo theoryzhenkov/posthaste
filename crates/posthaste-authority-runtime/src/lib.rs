@@ -17,6 +17,7 @@ mod mutations;
 pub mod oauth;
 mod push;
 mod secret;
+mod sessions;
 pub mod supervisor;
 mod views;
 

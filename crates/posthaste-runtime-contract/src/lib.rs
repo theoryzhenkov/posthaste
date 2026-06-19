@@ -29,6 +29,7 @@ use std::fmt;
 macro_rules! define_id {
     ($name:ident, u64, $getter:ident) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+        #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
         #[serde(transparent)]
         pub struct $name(u64);
 
@@ -45,6 +46,7 @@ macro_rules! define_id {
     ($($name:ident),+ $(,)?) => {
         $(
             #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+            #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
             #[serde(transparent)]
             pub struct $name(String);
 
@@ -69,6 +71,7 @@ define_id!(
     RuntimeMutationId,
 );
 define_id!(ViewRevision, u64, get);
+define_id!(RuntimeSessionSeq, u64, get);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +139,14 @@ pub enum RuntimeOperationSource {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSession {
+    pub session_id: RuntimeSessionId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeAccountList {
     pub ids: Vec<AccountId>,
@@ -257,6 +268,7 @@ pub struct AccountVerificationResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatus {
     pub lifecycle: RuntimeLifecycle,
@@ -282,14 +294,98 @@ pub struct RuntimeEventSubscription {
 }
 
 pub type RuntimeViewFrameStream = BoxStream<'static, ViewFrame>;
+pub type RuntimeFrameStream = BoxStream<'static, RuntimeFrame>;
 
 pub struct RuntimeViewSubscription {
     pub catch_up: Option<ViewFrame>,
     pub live: RuntimeViewFrameStream,
 }
 
+pub struct RuntimeFrameSubscription {
+    pub catch_up: Vec<RuntimeFrame>,
+    pub live: RuntimeFrameStream,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "openapi", schema(rename_all = "camelCase"))]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum RuntimeFrame {
+    ViewSnapshot {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "viewId")]
+        view_id: ViewId,
+        revision: ViewRevision,
+        snapshot: ViewSnapshot,
+    },
+    ViewReplace {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "viewId")]
+        view_id: ViewId,
+        revision: ViewRevision,
+        snapshot: ViewSnapshot,
+    },
+    ViewError {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "viewId")]
+        view_id: ViewId,
+        error: RuntimeAdapterError,
+    },
+    ViewClosed {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "viewId")]
+        view_id: ViewId,
+    },
+    MutationSettlement {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "mutationId")]
+        mutation_id: RuntimeMutationId,
+        #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+        state: Value,
+    },
+    Notification {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        kind: String,
+        #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+        payload: Value,
+    },
+    Heartbeat {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+    },
+}
+
+impl RuntimeFrame {
+    pub fn session_seq(&self) -> RuntimeSessionSeq {
+        match self {
+            Self::ViewSnapshot { session_seq, .. }
+            | Self::ViewReplace { session_seq, .. }
+            | Self::ViewError { session_seq, .. }
+            | Self::ViewClosed { session_seq, .. }
+            | Self::MutationSettlement { session_seq, .. }
+            | Self::Notification { session_seq, .. }
+            | Self::Heartbeat { session_seq } => *session_seq,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum ViewFrame {
     Snapshot {
         snapshot: ViewSnapshot,
@@ -318,6 +414,7 @@ impl ViewFrame {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeLifecycle {
     Starting,
@@ -328,6 +425,7 @@ pub enum RuntimeLifecycle {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStoreStatus {
     pub config_loaded: bool,
@@ -336,14 +434,17 @@ pub struct RuntimeStoreStatus {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ViewDescriptor {
     pub family: String,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub payload: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum ViewLifecycle {
     Loading,
@@ -353,28 +454,35 @@ pub enum ViewLifecycle {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ReadWatermark {
     pub value: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCoverage {
     pub kind: RuntimeCoverageKind,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub details: Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailListViewState {
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub scope: Value,
     pub projection_kind: MailListProjectionKind,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub sort: Value,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub window_request: Value,
     pub rows: Vec<MailListRowState>,
     pub continuation: MailListContinuation,
@@ -387,6 +495,7 @@ pub struct MailListViewState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum MailListProjectionKind {
     Message,
@@ -394,13 +503,16 @@ pub enum MailListProjectionKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailListRowState {
     pub row_key: String,
     pub resource_ref: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub projection: Value,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub sort_key: Value,
     pub order_key: String,
     #[serde(default)]
@@ -408,6 +520,7 @@ pub struct MailListRowState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailListContinuation {
     pub before_cursor: Option<String>,
@@ -417,6 +530,7 @@ pub struct MailListContinuation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum MailListAnchorState {
     NotRequested,
@@ -434,6 +548,7 @@ pub enum MailListAnchorState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeCoverageKind {
     Complete,
@@ -442,6 +557,7 @@ pub enum RuntimeCoverageKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ViewSnapshot {
     pub view_id: ViewId,
@@ -451,6 +567,7 @@ pub struct ViewSnapshot {
     pub read_watermark: Option<ReadWatermark>,
     pub coverage: RuntimeCoverage,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub data: Value,
     #[serde(default)]
     pub pending_mutations: Vec<RuntimeMutationId>,
@@ -478,6 +595,7 @@ pub struct MutationReceipt {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum MutationSettlementState {
     Accepted,
@@ -489,6 +607,7 @@ pub enum MutationSettlementState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeAdapterError {
     pub code: RuntimeErrorCode,
@@ -496,10 +615,12 @@ pub struct RuntimeAdapterError {
     pub retryable: bool,
     pub correlation_id: Option<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub details: Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeErrorCode {
     RuntimeNotReady,
@@ -819,6 +940,35 @@ pub trait RuntimeCore: Send + Sync {
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError>;
 
+    async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError>;
+
+    async fn subscribe_runtime_frames(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        after_seq: Option<RuntimeSessionSeq>,
+    ) -> Result<RuntimeFrameSubscription, RuntimeError>;
+
+    async fn close_session(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+    ) -> Result<(), RuntimeError>;
+
+    async fn open_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        descriptor: ViewDescriptor,
+    ) -> Result<ViewSnapshot, RuntimeError>;
+
+    async fn close_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        view_id: ViewId,
+    ) -> Result<(), RuntimeError>;
+
     async fn open_view(
         &self,
         caller: RuntimeCaller,
@@ -1022,6 +1172,40 @@ mod tests {
         assert_eq!(serialized["coverage"]["kind"], "complete");
         assert_eq!(serialized["pendingMutations"][0], "mutation-1");
         assert_eq!(serialized["anchor"]["kind"], "kept");
+    }
+
+    #[test]
+    fn runtime_frame_serializes_session_fields_as_camel_case() {
+        let snapshot = ViewSnapshot {
+            view_id: ViewId::new("view-1"),
+            descriptor: ViewDescriptor {
+                family: "mailList".to_string(),
+                payload: serde_json::json!({ "sourceId": "primary" }),
+            },
+            revision: ViewRevision::new(7),
+            lifecycle: ViewLifecycle::Ready,
+            read_watermark: None,
+            coverage: RuntimeCoverage {
+                kind: RuntimeCoverageKind::Complete,
+                details: serde_json::json!({}),
+            },
+            data: serde_json::json!({ "rows": [] }),
+            pending_mutations: Vec::new(),
+            error: None,
+        };
+        let serialized = serde_json::to_value(RuntimeFrame::ViewReplace {
+            session_seq: RuntimeSessionSeq::new(2),
+            view_id: ViewId::new("view-1"),
+            revision: ViewRevision::new(7),
+            snapshot,
+        })
+        .expect("frame should serialize");
+
+        assert_eq!(serialized["type"], "viewReplace");
+        assert_eq!(serialized["sessionSeq"], 2);
+        assert_eq!(serialized["viewId"], "view-1");
+        assert!(serialized.get("session_seq").is_none());
+        assert!(serialized.get("view_id").is_none());
     }
 
     #[test]

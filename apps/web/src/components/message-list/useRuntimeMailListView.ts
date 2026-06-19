@@ -3,12 +3,11 @@ import { useEffect } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 
 import type { MessagePage } from '@/api/types'
-import { runtimeSubscriptions } from '@/runtime/subscriptions'
+import { runtimeStream } from '@/runtime/runtimeStream'
 import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
 } from '@/runtime/types'
-import { runtimeViews } from '@/runtime/views'
 import type { OperationContext } from '@/observability'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SidebarSelection } from '../Sidebar'
@@ -54,8 +53,21 @@ export function useRuntimeMailListView({
     }
 
     let closed = false
+    let sessionId: string | undefined
     let unsubscribe: (() => void) | undefined
     const abort = new AbortController()
+    const sourceId =
+      selectedView.kind === 'source-mailbox' ? selectedView.sourceId : null
+    const closeSession = () => {
+      if (!sessionId) {
+        return
+      }
+      const closingSessionId = sessionId
+      sessionId = undefined
+      void runtimeStream
+        .closeSession(closingSessionId, sourceId)
+        .catch(() => {})
+    }
     const request = buildMessagePageRequest(
       selectedView,
       preparedSearchQuery,
@@ -65,32 +77,50 @@ export function useRuntimeMailListView({
       operation,
     )
 
-    void runtimeViews.mail
-      .openMessageList(request)
-      .then(({ snapshot, viewId }) => {
-        if (closed) return
+    void runtimeStream
+      .openSession({ sourceId })
+      .then((session) =>
+        runtimeStream
+          .openMessageListView({ sessionId: session.sessionId, view: request })
+          .then(({ snapshot, viewId }) => ({
+            sessionId: session.sessionId,
+            snapshot,
+            viewId,
+          })),
+      )
+      .then((opened) => {
+        sessionId = opened.sessionId
+        if (closed) {
+          closeSession()
+          return
+        }
+        const { snapshot, viewId } = opened
         queryClient.setQueryData(
           queryKey,
           applySnapshotToQueryData({ ...snapshot, viewId }),
         )
-        unsubscribe = runtimeSubscriptions.view(
-          {
-            viewId,
-            afterRevision: snapshot.revision,
-            sourceId:
-              selectedView.kind === 'source-mailbox'
-                ? selectedView.sourceId
-                : null,
-          },
+        unsubscribe = runtimeStream.subscribe(
+          { sessionId, afterSeq: 0, sourceId },
           {
             onFrame(frame) {
-              if (frame.kind !== 'snapshot' && frame.kind !== 'replace') {
-                return
+              switch (frame.type) {
+                case 'viewSnapshot':
+                case 'viewReplace':
+                  if (frame.viewId !== viewId) {
+                    return
+                  }
+                  queryClient.setQueryData(
+                    queryKey,
+                    applySnapshotToQueryData(frame.snapshot),
+                  )
+                  return
+                case 'viewError':
+                case 'viewClosed':
+                case 'mutationSettlement':
+                case 'notification':
+                case 'heartbeat':
+                  return
               }
-              queryClient.setQueryData(
-                queryKey,
-                applySnapshotToQueryData(frame.snapshot),
-              )
             },
           },
         )
@@ -104,6 +134,7 @@ export function useRuntimeMailListView({
       closed = true
       abort.abort()
       unsubscribe?.()
+      closeSession()
     }
   }, [
     enabled,
