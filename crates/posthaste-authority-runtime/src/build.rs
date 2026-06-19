@@ -27,6 +27,7 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
+use crate::account_repository::AccountRepository;
 use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
@@ -215,10 +216,14 @@ pub async fn build_authority_runtime(
         api_bridge.service.clone(),
         account_supervisor.clone(),
     ));
+    let account_repository = Arc::new(AccountRepository::new(
+        api_bridge.service.clone(),
+        api_bridge.secret_store.clone(),
+    ));
     let account_mutations = Arc::new(AccountMutationService::new(
         api_bridge.service.clone(),
         api_bridge.store.clone(),
-        api_bridge.secret_store.clone(),
+        account_repository,
         api_bridge.event_sender.clone(),
         account_supervisor.clone(),
         account_reads.clone(),
@@ -354,10 +359,14 @@ impl AuthorityRuntimeHandle {
             ))
         });
         let account_mutations = account_supervisor.map(|supervisor| {
+            let account_repository = Arc::new(AccountRepository::new(
+                api_bridge.service.clone(),
+                api_bridge.secret_store.clone(),
+            ));
             Arc::new(AccountMutationService::new(
                 api_bridge.service.clone(),
                 api_bridge.store.clone(),
-                api_bridge.secret_store.clone(),
+                account_repository,
                 api_bridge.event_sender.clone(),
                 supervisor,
                 account_reads.clone(),
