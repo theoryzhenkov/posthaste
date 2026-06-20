@@ -29,6 +29,8 @@ type QueueControls = Pick<
   | 'queueRuntimeSessionError'
   | 'queueRuntimeSessionMessageListView'
   | 'queueRuntimeSessionMessageListViewError'
+  | 'queueRuntimeMutationReceipt'
+  | 'queueRuntimeMutationError'
   | 'queueOAuthStartResponse'
   | 'queueOAuthStartError'
   | 'queueResourceBlob'
@@ -76,6 +78,10 @@ export function createFakeQueueControls(queues: FakeQueues): QueueControls {
       queueResolve(queues.runtimeSessionMessageListViews, result),
     queueRuntimeSessionMessageListViewError: (error) =>
       queueReject(queues.runtimeSessionMessageListViews, error),
+    queueRuntimeMutationReceipt: (receipt) =>
+      queueResolve(queues.runtimeMutations, receipt),
+    queueRuntimeMutationError: (error) =>
+      queueReject(queues.runtimeMutations, error),
     queueOAuthStartResponse: (response) =>
       queueResolve(queues.oauthStartResponses, response),
     queueOAuthStartError: (error) =>

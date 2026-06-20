@@ -203,6 +203,44 @@ async fn runtime_session_routes_filter_on_source_id() {
 }
 
 #[tokio::test]
+async fn runtime_session_mutation_route_filters_on_source_id_and_tag_action() {
+    let t = mint_with_caveats(&test_root_key(), &["action = tag", "account = acct-a"]);
+    assert_eq!(
+        status(
+            &t,
+            "POST",
+            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-a",
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(
+            &t,
+            "POST",
+            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-b",
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(&t, "POST", "/v1/runtime/sessions/session-1/mutations").await,
+        StatusCode::FORBIDDEN
+    );
+
+    let read_only = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
+    assert_eq!(
+        status(
+            &read_only,
+            "POST",
+            "/v1/runtime/sessions/session-1/mutations?sourceId=acct-a",
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
 async fn runtime_view_routes_filter_on_source_id() {
     let t = mint_with_caveats(&test_root_key(), &["action = read", "account = acct-a"]);
     assert_eq!(

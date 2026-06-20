@@ -2,12 +2,29 @@ import { runtimeStream } from './runtimeStream'
 import type {
   RuntimeFrameHandlers,
   RuntimeMessagePageRequest,
+  RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
+  RuntimeRunMutationRequest,
   RuntimeSession,
   RuntimeUnsubscribe,
 } from './types'
 
 type FrameHandlers = RuntimeFrameHandlers
+
+type RuntimeSessionMutationRequest = Omit<
+  RuntimeRunMutationRequest,
+  'sessionId' | 'clientMutationId'
+> & {
+  clientMutationId?: string | null
+}
+
+function randomRuntimeId(prefix: string): string {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+  return `${prefix}_${random}`
+}
 
 const frameHandlers = new Set<FrameHandlers>()
 const openViewIds = new Set<string>()
@@ -118,6 +135,10 @@ function sourceIdForView(request: RuntimeMessagePageRequest): string | null {
   return request.scope.kind === 'source-mailbox' ? request.scope.sourceId : null
 }
 
+function activeTransportSourceId(): string | null | undefined {
+  return activeSessionSourceId === undefined ? undefined : activeSessionSourceId
+}
+
 export const runtimeSessionClient = {
   subscribe(
     handlers: FrameHandlers,
@@ -140,9 +161,25 @@ export const runtimeSessionClient = {
     const result = await runtimeStream.openMessageListView({
       sessionId: session.sessionId,
       view: request,
+      sourceId: activeTransportSourceId(),
     })
     openViewIds.add(result.viewId)
     return result
+  },
+
+  async runMutation(
+    request: RuntimeSessionMutationRequest,
+  ): Promise<RuntimeMutationReceipt> {
+    const session = await ensureSession(request.sourceId)
+    return runtimeStream.runMutation({
+      sessionId: session.sessionId,
+      name: request.name,
+      args: request.args,
+      clientMutationId:
+        request.clientMutationId ?? randomRuntimeId('client_mutation'),
+      context: request.context,
+      sourceId: activeTransportSourceId(),
+    })
   },
 
   closeView(viewId: string): void {

@@ -16,6 +16,39 @@ export interface OpenRuntimeSessionViewResponse<TSnapshot = unknown> {
   snapshot: TSnapshot
 }
 
+export interface RunRuntimeMutationRequest {
+  sessionId?: string | null
+  name: string
+  args?: unknown
+  clientMutationId: string
+  context?: unknown
+}
+
+export type RuntimeMutationSettlementStatus =
+  | 'accepted'
+  | 'localApplied'
+  | 'queued'
+  | 'confirmed'
+  | 'failed'
+  | 'conflict'
+
+export interface RuntimeAdapterErrorResponse {
+  code: string
+  message: string
+  retryable: boolean
+  correlationId?: string | null
+  details?: unknown
+}
+
+export interface RunRuntimeMutationResponse {
+  runtimeMutationId: string | null
+  clientMutationId: string
+  name: string
+  state: RuntimeMutationSettlementStatus
+  error: RuntimeAdapterErrorResponse | null
+  output?: unknown
+}
+
 function sourceSearch(sourceId?: string | null): string {
   const params = new URLSearchParams()
   if (sourceId) {
@@ -64,5 +97,17 @@ export function closeRuntimeSessionView(
   return jsonRequest<{ ok: true }>(
     `/runtime/sessions/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(viewId)}${sourceSearch(options?.sourceId)}`,
     'DELETE',
+  )
+}
+
+export function runRuntimeMutation(
+  sessionId: string,
+  input: RunRuntimeMutationRequest,
+  options?: { sourceId?: string | null },
+): Promise<RunRuntimeMutationResponse> {
+  return jsonRequest<RunRuntimeMutationResponse>(
+    `/runtime/sessions/${encodeURIComponent(sessionId)}/mutations${sourceSearch(options?.sourceId)}`,
+    'POST',
+    { ...input, sessionId },
   )
 }
