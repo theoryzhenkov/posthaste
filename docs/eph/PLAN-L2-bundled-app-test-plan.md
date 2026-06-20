@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Implementation test plan for migrating the bundled app to the shared runtime contract and embedded authority runtime"
-modified: 2026-06-15
-reviewed: 2026-06-15
+modified: 2026-06-20
+reviewed: 2026-06-20
 lifecycle: ephemeral
 type: PLAN
 depends:
@@ -65,6 +65,8 @@ The shared contract must be shaped around runtime operations, not current storag
 
 Good contract inputs and outputs:
 
+- `openRuntimeSession(init)` and `subscribeRuntimeFrames(sessionId, afterSeq)`
+- one `RuntimeFrame` sum type for renderer push delivery: view snapshots/replacements/errors/closure, mutation settlement, notifications, and heartbeats
 - `openView(sessionId, descriptor, options)`
 - `ViewSnapshot { lifecycle, readWatermark, coverage, data, pendingMutations }`
 - `runMutation(sessionId, name, args, clientMutationId, context)`
@@ -77,6 +79,7 @@ Do not put these in the contract:
 - JMAP/IMAP/SMTP client objects
 - local-replica table names
 - query invalidation commands
+- `/v1/events` renderer cache-invalidation semantics
 - Axum extractors/responses, Tauri handles/events, or React component types
 
 ### 2.3 Authority runtime implementation
@@ -137,7 +140,7 @@ Required behaviors:
 - existing auth, authz, OpenAPI, AsyncAPI, and full-stack API tests keep passing
 - API reads and runtime-handle reads use the same projection constructors for overlapping state
 - message command routes call named mutation/runtime command paths or shared mutation helpers, not a duplicate service/store graph
-- `/v1/events` consumes the same event history/bus as runtime sessions
+- `/v1/events` consumes the same event history/bus as runtime sessions for API compatibility and integration clients, but renderer behavior moves to `RuntimeFrame::Notification` on the session stream
 - host validation still runs before auth exemptions
 - bearer tokens in query parameters remain rejected
 
@@ -157,10 +160,10 @@ Required behaviors:
 
 - bundled bootstrap selects the embedded-runtime adapter
 - direct mail HTTP clients are contained inside the adapter module while the loopback bridge exists
-- view hooks open serializable descriptors and subscribe by returned `ViewId`
+- view hooks open serializable descriptors and receive view frames on the single session-scoped `RuntimeFrame` stream
 - hooks replace subscriptions when `updateView` returns a different `ViewId`
 - hooks pass through `coverage` and `readWatermark` without interpreting freshness locally
-- hooks recover from missed frames by resubscribing for a full snapshot
+- hooks recover from missed frames by resubscribing with `afterSeq` and accepting collapsed full snapshots for active views
 - list components request initial, next, previous, and around-anchor windows through the adapter
 - list components preserve or reset scroll from runtime anchor status and do not synthesize rows
 - command hooks submit catalogued named mutations with stable `ClientMutationId`
@@ -298,19 +301,31 @@ Migrate `AppState` toward API adapter state around the runtime contract. Keep ex
 
 Introduce the TypeScript runtime adapter facade with a fake adapter in tests. Move components/hooks to the facade before changing the transport.
 
-### 4.5 Implement view snapshots
+### 4.5 Implement the unified runtime frame stream
 
-Add runtime view service tests for `MailListViewState`, then wire the adapter to consume snapshots. Keep full replacement snapshots before adding any patch optimization.
+Add `RuntimeFrame` in the runtime contract and expose one session-scoped server-to-renderer stream. The first slice may carry only `ViewSnapshot` and `ViewReplace` for the `message.keywords_changed` mail-list path, but the envelope must reserve explicit variants for `MutationSettlement`, `Notification`, and `Heartbeat` so later work does not add another renderer push channel.
 
-### 4.6 Implement named mutations
+Commands stay request/response: `openView`, `closeView`, and future `runMutation` return IDs or receipts, then later state arrives on the session stream. Reconnect uses one `afterSeq` cursor. View catch-up collapses to current snapshots; unsettled mutation state can replay as settlement frames; notifications replay only when their source is durable.
+
+The per-view `/v1/views/{view_id}/stream` transport may remain as a migration bridge. It is not the target renderer path.
+
+### 4.6 Implement view snapshots
+
+Add runtime view service tests for `MailListViewState`, then wire the adapter to consume snapshots from `RuntimeFrame` view variants. Keep full replacement snapshots before adding any patch optimization.
+
+### 4.7 Implement notifications and retire renderer `/v1/events`
+
+Move renderer uses of `/v1/events` to `RuntimeFrame::Notification` on the session stream. Keep an integration/API feed separate from renderer behavior; it has different auth, audience, and compatibility guarantees.
+
+### 4.8 Implement named mutations
 
 Move one mutation family at a time: keyword, role move, destroy, draft, send, settings/account. Each family gets runtime tests and renderer command-hook tests before replacing the old operation runner behavior.
 
-### 4.7 Tighten security boundaries
+### 4.9 Tighten security boundaries
 
 After the renderer no longer depends on direct mail HTTP, narrow Tauri capabilities and loopback exposure. Add checks that fail if generic capabilities or query-token auth return.
 
-### 4.8 Expand bundled E2E
+### 4.10 Expand bundled E2E
 
 Add process-level tests once the unit/integration seams are stable. E2E should cover only critical paths that cannot be proven in lower layers.
 
@@ -344,7 +359,9 @@ The migration is ready for app-code rollout when these are true:
 
 The spec direction is intentional: bundled/local-authority mode does not need a local replica. The embedded authority runtime is the local authority. Future local-replica deployments should implement the same runtime contract with a different runtime implementation that owns replica coverage/outbox/sync state.
 
-Do not implement query invalidation as the runtime contract. Use runtime-authored state assertions, full replacement view snapshots, named mutations, and settlement frames.
+Do not implement query invalidation as the runtime contract. Use runtime-authored state assertions, full replacement view snapshots, named mutations, settlement frames, and notification frames on the single session stream.
+
+A single ordered SSE stream can head-of-line-block a notification behind a large view snapshot. Bounded mail-list windows make that acceptable for this migration. If it becomes a problem, change transport behind the same `RuntimeFrame` contract rather than adding another renderer push surface.
 
 Do not expose provider secrets, provider clients, SQLite handles, or runtime secret references to renderer code. Temporary loopback HTTP must remain inside the runtime adapter facade and must use local non-URL capabilities.
 
@@ -357,6 +374,7 @@ Do not expose provider secrets, provider clients, SQLite handles, or runtime sec
 | contract-no-transport-types | MUST | Runtime contract types do not use Axum, Tauri, React, provider-client, SQLite-table, or replica-table types. |
 | api-adapter-regression | MUST | Existing API/auth/contract tests continue to pass through the handle-backed API adapter. |
 | renderer-adapter-tests | MUST | Renderer hooks/components are tested against the runtime adapter facade rather than direct mail HTTP calls. |
+| renderer-one-frame-stream | MUST | Renderer push delivery uses one session-scoped `RuntimeFrame` stream; `/v1/events` is not a renderer cache-invalidation path. |
 | view-window-tests | MUST | Runtime view tests cover row identity, continuation, anchors, replacement snapshots, and recomputation. |
 | mutation-idempotency-tests | MUST | Mutation tests prove accepted `ClientMutationId` dedupe survives retry/crash before provider submission. |
 | send-no-duplicate-test | MUST | Send tests assert a reused `ClientMutationId` cannot submit to the provider twice. |
