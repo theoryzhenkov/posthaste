@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-05-25
-reviewed: 2026-05-25
+modified: 2026-06-20
+reviewed: 2026-06-20
 depends:
   - path: docs/L0-providers
   - path: docs/L0-sync
@@ -289,6 +289,10 @@ Important derived tables:
 
 The store maintains account-scoped indexes for message-page reads, including received date and the sortable sender, subject, flagged, and attachment keys used by the message list. These indexes support seek pagination without making the frontend maintain a duplicate message index.
 
+Full-text message search uses an FTS5 index over message header/search summary fields. The index is maintained by SQLite triggers on message writes so read-side FTS queries remain indexed without duplicating search-maintenance logic in sync apply code.
+
+Mailbox counters (`total_emails`, `unread_emails`) are denormalized local projection state. SQLite triggers maintain them from `message_mailbox` membership changes and `message.is_read` updates; sync and command paths must not full-recount mailboxes after every changed message.
+
 ## Conversation pagination
 
 Conversation pages are generated inside the store from the `conversation` and `message` projections using seek pagination:
@@ -304,8 +308,10 @@ This matters because the frontend keeps many pages cached while live updates kee
 `apply_sync_batch` emits domain events as it mutates the store:
 
 - mailbox upserts and deletions emit `mailbox.updated`
-- message deletions emit `message.updated`
-- mailbox membership changes can emit `message.arrived` and `message.mailboxes_changed`
+- message metadata changes emit one coalesced `message.updated` event per changed message
+- message deletion is represented as `message.updated` with `deleted: true`
+
+A coalesced message metadata payload carries a `changes` object for changed facets (`keywords`, `mailboxes`, `arrived`) plus relevant post-state fields such as `keywords`, `mailboxIds`, and `arrivedMailboxIds`. Consumers that previously needed separate keyword, mailbox, or arrival topics inspect these payload facets instead.
 
 These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. Event payloads include a `resources` array when the changed resource can be expressed generically. SSE is a transport for durable resource-change facts, not a procedural frontend command channel. A successful sync appends `sync.completed` with the trigger, mode, batch counts, and sync/message/mailbox resources. Settings writes append `settings.updated`; smart mailbox config writes append `smart_mailbox.*`; config reload appends `config.reloaded`. Separate desktop windows consume the same backend stream, map resources to read-model invalidations, then refetch authoritative state through REST.
 
