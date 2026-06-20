@@ -14,7 +14,7 @@ impl DatabaseStore {
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
                         m.from_name, m.from_email, m.to_json, m.preview, m.received_at,
                         m.has_attachment, m.is_read, m.is_flagged

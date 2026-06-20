@@ -5,7 +5,7 @@ impl MailboxReadStore for DatabaseStore {
     fn list_mailboxes(&self, account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, name, role, unread_emails, total_emails
                  FROM mailbox
                  WHERE account_id = ?1

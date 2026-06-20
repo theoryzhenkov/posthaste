@@ -43,7 +43,9 @@ pub(crate) fn query_messages_by_rule(
          WHERE ({where_clause})
          ORDER BY m.received_at DESC"
     );
-    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let mut statement = connection
+        .prepare_cached(&sql)
+        .map_err(sql_to_store_error)?;
     let rows = load_message_summary_rows(&mut statement, params_from_iter(params))?;
     hydrate_message_summaries(connection, rows)
 }
@@ -130,7 +132,9 @@ pub(crate) fn query_message_page(
         ORDER BY sort_key {dir}, tie_key {dir}
         LIMIT ?"
     );
-    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let mut statement = connection
+        .prepare_cached(&sql)
+        .map_err(sql_to_store_error)?;
     let rows = statement
         .query_map(params_from_iter(params), |row| {
             let summary = row_to_message_summary_row(row)?;
@@ -184,7 +188,9 @@ pub(crate) fn query_messages_by_rule_sorted(
          WHERE ({where_clause})
          ORDER BY {sort_key} {dir}, m.account_id {dir}, m.id {dir}"
     );
-    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let mut statement = connection
+        .prepare_cached(&sql)
+        .map_err(sql_to_store_error)?;
     let rows = load_message_summary_rows(&mut statement, params_from_iter(params))?;
     hydrate_message_summaries(connection, rows)
 }

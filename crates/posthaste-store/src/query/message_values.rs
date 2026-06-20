@@ -6,7 +6,7 @@ pub(crate) fn fetch_mailbox_ids(
     message_id: &MessageId,
 ) -> Result<Vec<MailboxId>, StoreError> {
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT mailbox_id
              FROM message_mailbox
              WHERE account_id = ?1 AND message_id = ?2
@@ -29,7 +29,7 @@ pub(crate) fn fetch_mailbox_ids_tx(
     message_id: &MessageId,
 ) -> Result<Vec<MailboxId>, StoreError> {
     let mut statement = tx
-        .prepare(
+        .prepare_cached(
             "SELECT mailbox_id
              FROM message_mailbox
              WHERE account_id = ?1 AND message_id = ?2
@@ -52,7 +52,7 @@ pub(crate) fn fetch_keywords_tx(
     message_id: &MessageId,
 ) -> Result<Vec<String>, StoreError> {
     let mut statement = tx
-        .prepare(
+        .prepare_cached(
             "SELECT keyword
              FROM message_keyword
              WHERE account_id = ?1 AND message_id = ?2

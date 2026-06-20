@@ -31,7 +31,7 @@ impl MessageListStore for DatabaseStore {
              WHERE m.account_id = ?1
              ORDER BY m.received_at DESC"
         };
-        let mut statement = connection.prepare(sql).map_err(sql_to_store_error)?;
+        let mut statement = connection.prepare_cached(sql).map_err(sql_to_store_error)?;
         let summary_rows = if let Some(mailbox_id) = mailbox_id {
             load_message_summary_rows(
                 &mut statement,

@@ -195,7 +195,9 @@ pub(crate) fn query_conversations(
         ORDER BY latest.sort_key {dir}, latest.conversation_id {dir}
         LIMIT ?"
     );
-    let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+    let mut statement = connection
+        .prepare_cached(&sql)
+        .map_err(sql_to_store_error)?;
     let rows = statement
         .query_map(params_from_iter(params), |row| {
             let sort_key_value: rusqlite::types::Value = row.get(15)?;
