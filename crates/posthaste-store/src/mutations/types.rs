@@ -2,7 +2,6 @@ use super::*;
 
 #[derive(Default)]
 pub(crate) struct ProjectionInputs {
-    pub(crate) mailboxes: BTreeSet<MailboxId>,
     pub(crate) threads: BTreeSet<ThreadId>,
     pub(crate) conversations: BTreeSet<ConversationId>,
 }

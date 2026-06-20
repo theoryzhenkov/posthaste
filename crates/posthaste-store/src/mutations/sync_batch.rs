@@ -50,13 +50,7 @@ pub(crate) fn apply_sync_batch_tx(
             .collect::<BTreeSet<_>>();
 
         for mailbox_id in local_mailbox_ids.difference(&remote_mailbox_ids) {
-            delete_mailbox_and_track_projection_inputs(
-                tx,
-                account_id,
-                mailbox_id,
-                &mut affected,
-                &mut events,
-            )?;
+            delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, &mut events)?;
             events.push(insert_event_tx(
                 tx,
                 account_id,
@@ -106,13 +100,7 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     for mailbox_id in &batch.deleted_mailbox_ids {
-        delete_mailbox_and_track_projection_inputs(
-            tx,
-            account_id,
-            mailbox_id,
-            &mut affected,
-            &mut events,
-        )?;
+        delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, &mut events)?;
         events.push(insert_event_tx(
             tx,
             account_id,
@@ -136,7 +124,6 @@ pub(crate) fn apply_sync_batch_tx(
             tx,
             account_id,
             location,
-            &mut affected,
             &mut events,
         )?;
     }
@@ -157,20 +144,16 @@ pub(crate) fn apply_sync_batch_tx(
         let effective_role =
             effective_mailbox_role_tx(tx, account_id, &mailbox.id, mailbox.role.as_deref())?;
         tx.execute_cached(
-            "INSERT INTO mailbox (account_id, id, name, role, unread_emails, total_emails)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO mailbox (account_id, id, name, role)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(account_id, id) DO UPDATE SET
                 name = excluded.name,
-                role = excluded.role,
-                unread_emails = excluded.unread_emails,
-                total_emails = excluded.total_emails",
+                role = excluded.role",
             params![
                 account_id.as_str(),
                 mailbox.id.as_str(),
                 mailbox.name,
                 effective_role,
-                mailbox.unread_emails,
-                mailbox.total_emails
             ],
         )
         .map_err(sql_to_store_error)?;
@@ -264,9 +247,6 @@ pub(crate) fn apply_sync_batch_tx(
     }
     for conversation_id in affected.conversations {
         refresh_conversation_projection_tx(tx, &conversation_id)?;
-    }
-    for mailbox_id in affected.mailboxes {
-        refresh_mailbox_counters_tx(tx, account_id, &mailbox_id)?;
     }
     for cursor in &batch.cursors {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;

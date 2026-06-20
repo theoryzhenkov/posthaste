@@ -42,38 +42,3 @@ pub(crate) fn refresh_thread_projection_tx(
     }
     Ok(())
 }
-
-/// Recomputes `total_emails` and `unread_emails` on the `mailbox` row from
-/// the `message_mailbox` junction.
-pub(crate) fn refresh_mailbox_counters_tx(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
-    mailbox_id: &MailboxId,
-) -> Result<(), StoreError> {
-    let (total, unread) = tx
-        .query_row(
-            "SELECT COUNT(*), SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END)
-             FROM message_mailbox mm
-             JOIN message m
-               ON m.account_id = mm.account_id
-              AND m.id = mm.message_id
-             WHERE mm.account_id = ?1 AND mm.mailbox_id = ?2",
-            params![account_id.as_str(), mailbox_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                ))
-            },
-        )
-        .map_err(sql_to_store_error)?;
-    tx.execute(
-        "UPDATE mailbox
-         SET total_emails = ?3,
-             unread_emails = ?4
-         WHERE account_id = ?1 AND id = ?2",
-        params![account_id.as_str(), mailbox_id.as_str(), total, unread],
-    )
-    .map_err(sql_to_store_error)?;
-    Ok(())
-}
