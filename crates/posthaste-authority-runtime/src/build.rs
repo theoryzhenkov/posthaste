@@ -1126,7 +1126,12 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let bytes = self
             .core
             .service
-            .download_blob(&account_id, &attachment.blob_id, gateway.as_ref())
+            .download_blob(
+                &account_id,
+                &message_id,
+                &attachment.blob_id,
+                gateway.as_ref(),
+            )
             .await?;
         Ok(RuntimeAttachmentBytes {
             bytes,

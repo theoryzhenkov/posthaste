@@ -117,13 +117,28 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    /// Download a blob for a specific account via the registered gateway.
+    /// Download a blob for a message, preferring already-cached raw bytes.
+    ///
+    /// When the message's raw RFC822 body is cached and the gateway can resolve
+    /// the blob from it (IMAP), the bytes are served locally without a network
+    /// round trip. Otherwise the blob is downloaded from the gateway.
+    ///
+    /// @spec docs/L1-sync#email-bodies-are-fetched-lazily
     pub async fn download_blob(
         &self,
         account_id: &AccountId,
+        message_id: &MessageId,
         blob_id: &crate::BlobId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<u8>, ServiceError> {
+        if let Some(raw) = self
+            .message_detail_reader
+            .read_raw_message(account_id, message_id)?
+        {
+            if let Some(bytes) = gateway.extract_cached_blob(blob_id, &raw)? {
+                return Ok(bytes);
+            }
+        }
         gateway
             .download_blob(account_id, blob_id)
             .await

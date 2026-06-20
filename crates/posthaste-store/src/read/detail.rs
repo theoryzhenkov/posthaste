@@ -100,6 +100,37 @@ impl MessageDetailStore for DatabaseStore {
         }))
     }
 
+    /// Reads the cached raw RFC822 bytes for a message from its content-
+    /// addressed file, or `None` when no raw body has been cached.
+    ///
+    /// @spec docs/L1-sync#email-bodies-are-fetched-lazily
+    fn read_raw_message(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let connection = self.read_connection()?;
+        let raw_path = connection
+            .query_row(
+                "SELECT raw_path FROM message_body
+                 WHERE account_id = ?1 AND message_id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(sql_to_store_error)?
+            .flatten();
+        let Some(raw_path) = raw_path else {
+            return Ok(None);
+        };
+        match std::fs::read(&raw_path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            // A missing file means the cache was pruned; treat as not cached.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_to_store_error(error)),
+        }
+    }
+
     /// Returns a thread view with all messages ordered chronologically, or
     /// `None` if empty.
     ///

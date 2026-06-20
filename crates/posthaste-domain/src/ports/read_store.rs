@@ -91,6 +91,21 @@ pub trait MessageDetailStore: Send + Sync {
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, StoreError>;
 
+    /// Read the cached raw RFC822 bytes for a message, if any are stored.
+    ///
+    /// Returns `None` when no raw body has been cached yet. Used to serve
+    /// attachment bytes from a previously fetched message without re-fetching
+    /// it from the provider.
+    ///
+    /// @spec docs/L1-sync#body-lazy
+    fn read_raw_message(
+        &self,
+        _account_id: &AccountId,
+        _message_id: &MessageId,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        Ok(None)
+    }
+
     /// Fetch all messages in a thread.
     ///
     /// @spec docs/L1-sync#sqlite-schema

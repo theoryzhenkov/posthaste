@@ -37,6 +37,21 @@ pub trait MailGateway: Send + Sync {
         blob_id: &BlobId,
     ) -> Result<Vec<u8>, GatewayError>;
 
+    /// Extract a blob's bytes from already-cached raw RFC822 message bytes.
+    ///
+    /// Lets callers serve attachments from a previously fetched message instead
+    /// of re-downloading it. Returns `Ok(None)` when this transport cannot
+    /// resolve the blob from raw bytes (the default), in which case callers fall
+    /// back to [`download_blob`]. Adapters whose blob ids index into the raw
+    /// MIME (such as IMAP) override this.
+    fn extract_cached_blob(
+        &self,
+        _blob_id: &BlobId,
+        _raw_mime: &[u8],
+    ) -> Result<Option<Vec<u8>>, GatewayError> {
+        Ok(None)
+    }
+
     /// Update JMAP keywords on a message via `Email/set`.
     ///
     /// @spec docs/L1-jmap#methods-used
