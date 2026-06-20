@@ -8,9 +8,9 @@
 
 use posthaste_domain::{
     search, AccountId, MailboxId, MailboxRecord, MessageCommandStore, MessageId, MessageListStore,
-    MessagePage, MessageRecord, MessageSortField, Recipient, SetKeywordsCommand, SmartMailboxStore,
-    SortDirection, SourceProjectionStore, SyncBatch, SyncCursor, SyncObject, SyncWriteStore,
-    ThreadId,
+    MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient, SetKeywordsCommand,
+    SmartMailboxStore, SortDirection, SourceProjectionStore, SyncBatch, SyncCursor, SyncObject,
+    SyncWriteStore, ThreadId,
 };
 use posthaste_store::DatabaseStore;
 use tempfile::TempDir;
@@ -191,6 +191,15 @@ pub fn search(fixture: &Fixture) -> MessagePage {
         .store
         .query_message_page_by_rule(&rule, 50, None, MessageSortField::Date, SortDirection::Desc)
         .expect("rule query page")
+}
+
+/// Search path (FTS5 index): the prototype full-text index over header fields.
+/// Compare against [`search`], which scans with `LIKE`/`lower()`.
+pub fn fts_search(fixture: &Fixture) -> Vec<MessageSummary> {
+    fixture
+        .store
+        .fts_search_messages(&fixture.account, "invoice", 50)
+        .expect("fts search")
 }
 
 /// Mutation path: toggle a keyword on a single message.

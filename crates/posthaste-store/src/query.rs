@@ -5,6 +5,7 @@ use rusqlite::types::Type;
 mod attachments;
 mod details;
 mod events;
+mod fts;
 mod message_values;
 mod summaries;
 
