@@ -15,6 +15,7 @@ mod read;
 mod sender_cache;
 mod smart_mailboxes;
 mod source;
+mod sql_cache;
 mod store;
 mod sync_state;
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 /// Inserts a domain event into `event_log` with a monotonically increasing
 /// `seq`.
@@ -13,7 +14,7 @@ pub(crate) fn insert_event_tx(
     payload: Value,
 ) -> Result<DomainEvent, StoreError> {
     let occurred_at = now_iso8601()?;
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO event_log (account_id, topic, occurred_at, mailbox_id, message_id, payload)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
