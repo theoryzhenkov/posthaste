@@ -9,9 +9,9 @@ export function ComposeFooter({
   errorMessage,
   fieldsDisabled,
   fileInputRef,
-  isForwardUnavailable,
   isReadingAttachments,
   isSending,
+  statusLabel,
   onAttachFiles,
   onClose,
   onSubmit,
@@ -19,9 +19,9 @@ export function ComposeFooter({
   errorMessage: string | null
   fieldsDisabled: boolean
   fileInputRef: RefObject<HTMLInputElement | null>
-  isForwardUnavailable: boolean
   isReadingAttachments: boolean
   isSending: boolean
+  statusLabel: string
   onAttachFiles: (files: FileList | null) => void
   onClose: () => void
   onSubmit: () => void
@@ -53,11 +53,7 @@ export function ComposeFooter({
         )}
       >
         {errorMessage ??
-          (isForwardUnavailable
-            ? 'Forward is not available in this dogfood build.'
-            : isReadingAttachments
-              ? 'Reading attachments...'
-              : 'Ready')}
+          (isReadingAttachments ? 'Reading attachments...' : statusLabel)}
       </div>
       <Button
         type="button"

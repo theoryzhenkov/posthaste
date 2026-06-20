@@ -35,6 +35,14 @@ fn builds_reply_context_from_raw_mime() {
         context.references.as_deref(),
         Some("root@example.test parent@example.test")
     );
+    let forwarded = context.forwarded_body.expect("forwarded body");
+    assert!(forwarded.starts_with("---------- Forwarded message ----------\n"));
+    assert!(forwarded.contains("From: Alice <alice@example.test>"));
+    assert!(forwarded.contains("Subject: Hello"));
+    // Original body is included unquoted in the forwarded block.
+    assert!(forwarded.contains("Line one"));
+    assert!(forwarded.contains("Line two"));
+    assert!(!forwarded.contains("> Line one"));
 }
 
 #[test]

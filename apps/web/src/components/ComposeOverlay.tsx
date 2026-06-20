@@ -19,6 +19,7 @@ import { useComposeQueries } from './compose-overlay/useComposeQueries'
 import { useDisplayedFromOptions } from './compose-overlay/useDisplayedFromOptions'
 import { useComposeSubmission } from './compose-overlay/useComposeSubmission'
 import { useComposeWindowElevation } from './compose-overlay/useComposeWindowElevation'
+import { useForwardAttachments } from './compose-overlay/useForwardAttachments'
 
 interface ComposeOverlayProps {
   intent: ComposeIntent
@@ -32,8 +33,10 @@ export function ComposeOverlay({
   onClose,
 }: ComposeOverlayProps) {
   const queries = useComposeQueries({ intent })
+  const forwardAttachments = useForwardAttachments({ intent })
   const formState = useComposeFormState({
     composeKey: queries.composeKey,
+    forwardAttachments: forwardAttachments.attachments,
     identity: queries.identityQuery.data,
     intentKind: intent.kind,
     isMessageBasedCompose: queries.isMessageBasedCompose,
@@ -48,9 +51,12 @@ export function ComposeOverlay({
   const isWaitingForMessageContext =
     queries.requiresMessageContext && !queries.replyContextQuery.data
   const isPreparingMessage =
-    isWaitingForMessageContext && !queries.replyContextQuery.isError
-  const isForwardUnavailable = intent.kind === 'forward'
-  const fieldsDisabled = isWaitingForMessageContext || isForwardUnavailable
+    (isWaitingForMessageContext && !queries.replyContextQuery.isError) ||
+    forwardAttachments.isLoading
+  const fieldsDisabled =
+    isWaitingForMessageContext || forwardAttachments.isLoading
+  const preparingLabel =
+    intent.kind === 'forward' ? 'Preparing forward...' : 'Preparing reply...'
   const fromLabel = formState.form.from.trim()
     ? formState.form.from
     : queries.identityQuery.isError
@@ -62,8 +68,7 @@ export function ComposeOverlay({
   const { handleSubmit, isSending } = useComposeSubmission({
     form: formState.form,
     intentKind: intent.kind,
-    isForwardUnavailable,
-    isWaitingForMessageContext,
+    isPreparingMessage,
     onClose,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
@@ -115,9 +120,11 @@ export function ComposeOverlay({
       />
       <ComposeBodyEditor
         bodyRef={formState.bodyRef}
-        isForwardUnavailable={isForwardUnavailable}
         isPreparingMessage={isPreparingMessage}
-        isReplyContextError={queries.replyContextQuery.isError}
+        isReplyContextError={
+          queries.replyContextQuery.isError || forwardAttachments.isError
+        }
+        preparingLabel={preparingLabel}
         value={formState.form.body}
         onChange={formState.handleBodyChange}
       />
@@ -132,9 +139,9 @@ export function ComposeOverlay({
         errorMessage={formState.errorMessage}
         fieldsDisabled={fieldsDisabled}
         fileInputRef={formState.fileInputRef}
-        isForwardUnavailable={isForwardUnavailable}
         isReadingAttachments={formState.isReadingAttachments}
         isSending={isSending}
+        statusLabel={isPreparingMessage ? preparingLabel : 'Ready'}
         onAttachFiles={formState.handleAttachFiles}
         onClose={onClose}
         onSubmit={handleSubmit}

@@ -18,8 +18,7 @@ import { validateComposeSubmission } from './validation'
 export function useComposeSubmission({
   form,
   intentKind,
-  isForwardUnavailable,
-  isWaitingForMessageContext,
+  isPreparingMessage,
   onClose,
   replyContext,
   resolveSubmissionSourceId,
@@ -28,8 +27,7 @@ export function useComposeSubmission({
 }: {
   form: ComposeForm
   intentKind: ComposeIntent['kind']
-  isForwardUnavailable: boolean
-  isWaitingForMessageContext: boolean
+  isPreparingMessage: boolean
   onClose: () => void
   replyContext: ReplyContext | undefined
   resolveSubmissionSourceId: (from: Recipient | null) => string
@@ -52,14 +50,8 @@ export function useComposeSubmission({
 
   const handleSubmit = useCallback(() => {
     void (async () => {
-      if (isForwardUnavailable) {
-        setErrorMessage(
-          'Forward is disabled until forwarded headers and attachments are implemented.',
-        )
-        return
-      }
-      if (isWaitingForMessageContext) {
-        setErrorMessage('Wait for the message context to finish loading.')
+      if (isPreparingMessage) {
+        setErrorMessage('Wait for the message to finish preparing.')
         return
       }
 
@@ -100,8 +92,7 @@ export function useComposeSubmission({
   }, [
     form,
     intentKind,
-    isForwardUnavailable,
-    isWaitingForMessageContext,
+    isPreparingMessage,
     replyContext,
     resolveSubmissionSourceId,
     sendMutation,

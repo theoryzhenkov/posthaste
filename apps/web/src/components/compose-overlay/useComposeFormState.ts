@@ -16,18 +16,21 @@ import {
   composeAttachmentFromFile,
   formatRecipient,
   formatRecipients,
+  type ComposeAttachment,
   type ComposeForm,
 } from '../composeFormHelpers'
 import { validateAttachmentLimits } from './attachments'
 
 export function useComposeFormState({
   composeKey,
+  forwardAttachments,
   identity,
   intentKind,
   isMessageBasedCompose,
   replyContext,
 }: {
   composeKey: string
+  forwardAttachments: ComposeAttachment[]
   identity: Identity | undefined
   intentKind: ComposeIntent['kind']
   isMessageBasedCompose: boolean
@@ -39,9 +42,10 @@ export function useComposeFormState({
     if (intentKind === 'new' || !replyContext) {
       return EMPTY_FORM
     }
-    const quoted = replyContext.quotedBody
-      ? `\n\n${replyContext.quotedBody}`
-      : ''
+    const seed =
+      intentKind === 'forward'
+        ? replyContext.forwardedBody
+        : replyContext.quotedBody
     return {
       from: '',
       to: intentKind === 'reply' ? formatRecipients(replyContext.to) : '',
@@ -51,7 +55,7 @@ export function useComposeFormState({
         intentKind === 'reply'
           ? replyContext.replySubject
           : replyContext.forwardSubject,
-      body: quoted,
+      body: seed ? `\n\n${seed}` : '',
       attachments: [],
     }
   }, [intentKind, replyContext])
@@ -68,6 +72,7 @@ export function useComposeFormState({
   const [editedResetKey, setEditedResetKey] = useState<string | null>(null)
   const [isReadingAttachments, setIsReadingAttachments] = useState(false)
   const editedResetKeyRef = useRef<string | null>(null)
+  const seededAttachmentsKeyRef = useRef<string | null>(null)
 
   const needsFormReset = composeState.resetKey !== formResetKey
   const form = needsFormReset ? initialForm : composeState.form
@@ -163,6 +168,21 @@ export function useComposeFormState({
 
     return () => cancelAnimationFrame(frame)
   }, [form.from, identity, setForm])
+
+  useEffect(() => {
+    if (intentKind !== 'forward' || forwardAttachments.length === 0) {
+      return
+    }
+    if (seededAttachmentsKeyRef.current === formResetKey) {
+      return
+    }
+    seededAttachmentsKeyRef.current = formResetKey
+    setForm((current) =>
+      current.attachments.length > 0
+        ? current
+        : { ...current, attachments: forwardAttachments },
+    )
+  }, [intentKind, forwardAttachments, formResetKey, setForm])
 
   return {
     bodyRef,
