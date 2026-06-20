@@ -1,4 +1,7 @@
 use super::*;
+use std::ops::Deref;
+
+const MAX_IDLE_READ_CONNECTIONS: usize = 4;
 
 /// SQLite-backed store with a single serialized write connection and pooled
 /// read connections. Raw MIME bodies are stored as content-addressed files
@@ -10,6 +13,35 @@ pub struct DatabaseStore {
     db_path: PathBuf,
     data_root: PathBuf,
     write_connection: Mutex<Connection>,
+    read_connections: Mutex<Vec<Connection>>,
+}
+
+pub(crate) struct ReadConnection<'store> {
+    pool: &'store Mutex<Vec<Connection>>,
+    connection: Option<Connection>,
+}
+
+impl Deref for ReadConnection<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        self.connection
+            .as_ref()
+            .expect("read connection available before drop")
+    }
+}
+
+impl Drop for ReadConnection<'_> {
+    fn drop(&mut self) {
+        let Some(connection) = self.connection.take() else {
+            return;
+        };
+        if let Ok(mut pool) = self.pool.lock() {
+            if pool.len() < MAX_IDLE_READ_CONNECTIONS {
+                pool.push(connection);
+            }
+        }
+    }
 }
 
 impl DatabaseStore {
@@ -41,16 +73,36 @@ impl DatabaseStore {
             db_path,
             data_root,
             write_connection: Mutex::new(connection),
+            read_connections: Mutex::new(Vec::new()),
         })
     }
 
-    /// Opens a new read-only SQLite connection (WAL mode allows concurrent
-    /// readers).
-    pub(crate) fn read_connection(&self) -> Result<Connection, StoreError> {
-        let connection =
-            Connection::open(&self.db_path).map_err(|err| StoreError::Failure(err.to_string()))?;
-        configure_connection(&connection)?;
-        Ok(connection)
+    /// Checks out a read SQLite connection (WAL mode allows concurrent readers).
+    ///
+    /// Read connections are pooled so hot read statements and SQLite page-cache
+    /// state survive across UI queries. The connection is returned to the idle
+    /// pool when the guard is dropped.
+    pub(crate) fn read_connection(&self) -> Result<ReadConnection<'_>, StoreError> {
+        let connection = {
+            let mut pool = self
+                .read_connections
+                .lock()
+                .map_err(|_| StoreError::Failure("read pool lock poisoned".to_string()))?;
+            pool.pop()
+        };
+        let connection = match connection {
+            Some(connection) => connection,
+            None => {
+                let connection = Connection::open(&self.db_path)
+                    .map_err(|err| StoreError::Failure(err.to_string()))?;
+                configure_connection(&connection)?;
+                connection
+            }
+        };
+        Ok(ReadConnection {
+            pool: &self.read_connections,
+            connection: Some(connection),
+        })
     }
 
     /// Acquires the write lock and executes `operation` inside a single SQLite

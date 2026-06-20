@@ -7,7 +7,7 @@ impl SyncStateStore for DatabaseStore {
     fn get_sync_cursors(&self, account_id: &AccountId) -> Result<Vec<SyncCursor>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT object_type, state, updated_at
                  FROM sync_cursor
                  WHERE account_id = ?1",
