@@ -303,7 +303,7 @@ Introduce the TypeScript runtime adapter facade with a fake adapter in tests. Mo
 
 ### 4.5 Implement the unified runtime frame stream
 
-Add `RuntimeFrame` in the runtime contract and expose one session-scoped server-to-renderer stream. The first slice may carry only `ViewSnapshot` and `ViewReplace` for the `message.keywords_changed` mail-list path, but the envelope must reserve explicit variants for `MutationSettlement`, `Notification`, and `Heartbeat` so later work does not add another renderer push channel.
+Add `RuntimeFrame` in the runtime contract and expose one session-scoped server-to-renderer stream. The first slice may carry only `ViewSnapshot` and `ViewReplace` for the `message.updated` mail-list path (using payload facets such as `changes.keywords`), but the envelope must reserve explicit variants for `MutationSettlement`, `Notification`, and `Heartbeat` so later work does not add another renderer push channel.
 
 Commands stay request/response: `openView`, `closeView`, and future `runMutation` return IDs or receipts, then later state arrives on the session stream. Reconnect uses one `afterSeq` cursor. View catch-up collapses to current snapshots; unsettled mutation state can replay as settlement frames; notifications replay only when their source is durable.
 
