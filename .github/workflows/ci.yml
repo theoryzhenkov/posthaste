@@ -31,8 +31,9 @@ jobs:
             mold \
             patchelf
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # posthaste-bench (profiling harness) is built/run by profile.yml, not here.
+      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench -- -D warnings
+      - run: cargo test --workspace --exclude posthaste-bench
 
   frontend:
     runs-on: ubuntu-latest

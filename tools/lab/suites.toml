@@ -134,3 +134,34 @@ paths = [
 command = "just lab tauri-smoke"
 timeout_seconds = 600
 artifacts = ["artifact.playwright.desktop-main.linux.test"]
+
+# --- Profiling (offline store hot paths) -------------------------------------
+# Slow + build-heavy; intentionally not tagged `lab-smoke`. Run explicitly with
+# `just lab verify --tag profile` or via the `profile.yml` workflow. Artifacts
+# are written under the lab run dir and recorded via lab artifact markers.
+
+[suite.profile.store.workloads.local]
+level = "profile"
+targets = ["store"]
+runners = ["runner.cargo.bin.local"]
+tags = ["profile", "store", "slow"]
+paths = [
+  "crates/posthaste-bench/",
+  "crates/posthaste-store/src/",
+]
+command = "cargo run --release -p posthaste-bench --bin posthaste-profile"
+timeout_seconds = 900
+artifacts = ["artifact.profile.store.flamegraphs"]
+
+[suite.profile.store.criterion.local]
+level = "profile"
+targets = ["store"]
+runners = ["runner.cargo.bench.local"]
+tags = ["profile", "store", "bench", "slow"]
+paths = [
+  "crates/posthaste-bench/",
+  "crates/posthaste-store/src/",
+]
+command = "cargo bench -p posthaste-bench --bench store_criterion"
+timeout_seconds = 1200
+artifacts = ["artifact.profile.store.criterion"]

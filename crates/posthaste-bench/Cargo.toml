@@ -1,0 +1,40 @@
+[package]
+name = "posthaste-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Profiling and benchmarking harness for PostHaste's offline hot paths.
+#
+# This crate is intentionally kept out of the default workspace build
+# (see `default-members` in the root Cargo.toml) because it pulls heavy,
+# profiling-only dependencies and a Valgrind-backed bench harness. It is
+# exercised by the dedicated `profile.yml` CI workflow, not the main `ci.yml`.
+
+[lib]
+name = "posthaste_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "posthaste-profile"
+path = "src/main.rs"
+
+[dependencies]
+posthaste-domain = { path = "../posthaste-domain" }
+posthaste-store = { path = "../posthaste-store" }
+anyhow = "1"
+pprof = { version = "0.15", features = ["flamegraph", "protobuf-codec"] }
+dhat = "0.3"
+tempfile = "3"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+iai-callgrind = "0.16"
+
+[[bench]]
+name = "store_criterion"
+harness = false
+
+[[bench]]
+name = "store_iai"
+harness = false

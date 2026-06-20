@@ -1,6 +1,20 @@
 [workspace]
 members = ["crates/*", "apps/desktop"]
-default-members = ["crates/*"]
+# `posthaste-bench` is a member (shared lockfile/target cache) but kept out of the
+# default build: it pulls profiling-only deps and a Valgrind-backed bench harness,
+# exercised by `profile.yml` rather than the main `ci.yml`.
+default-members = [
+  "crates/posthaste-authority-runtime",
+  "crates/posthaste-config",
+  "crates/posthaste-domain",
+  "crates/posthaste-engine",
+  "crates/posthaste-imap",
+  "crates/posthaste-lab",
+  "crates/posthaste-observability",
+  "crates/posthaste-runtime-contract",
+  "crates/posthaste-server",
+  "crates/posthaste-store",
+]
 exclude = ["crates/target", "vendor/imap-codec", "vendor/imap-types"]
 resolver = "2"
 
