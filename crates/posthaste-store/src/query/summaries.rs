@@ -42,34 +42,28 @@ pub(crate) fn hydrate_message_summaries(
         return Ok(Vec::new());
     }
 
-    let mailbox_ids = fetch_mailbox_ids_bulk(connection, &rows)?;
-    let keywords = fetch_keywords_bulk(connection, &rows)?;
+    let mut mailbox_ids = fetch_mailbox_ids_bulk(connection, &rows)?.into_iter();
+    let mut keywords = fetch_keywords_bulk(connection, &rows)?.into_iter();
 
     Ok(rows
         .into_iter()
-        .map(|row| {
-            let key = (
-                row.source_id.as_str().to_string(),
-                row.id.as_str().to_string(),
-            );
-            MessageSummary {
-                id: row.id,
-                source_id: row.source_id,
-                source_name: row.source_name,
-                source_thread_id: row.source_thread_id,
-                conversation_id: row.conversation_id,
-                subject: row.subject,
-                from_name: row.from_name,
-                from_email: row.from_email,
-                to: row.to,
-                preview: row.preview,
-                received_at: row.received_at,
-                has_attachment: row.has_attachment,
-                is_read: row.is_read,
-                is_flagged: row.is_flagged,
-                mailbox_ids: mailbox_ids.get(&key).cloned().unwrap_or_default(),
-                keywords: keywords.get(&key).cloned().unwrap_or_default(),
-            }
+        .map(|row| MessageSummary {
+            id: row.id,
+            source_id: row.source_id,
+            source_name: row.source_name,
+            source_thread_id: row.source_thread_id,
+            conversation_id: row.conversation_id,
+            subject: row.subject,
+            from_name: row.from_name,
+            from_email: row.from_email,
+            to: row.to,
+            preview: row.preview,
+            received_at: row.received_at,
+            has_attachment: row.has_attachment,
+            is_read: row.is_read,
+            is_flagged: row.is_flagged,
+            mailbox_ids: mailbox_ids.next().unwrap_or_default(),
+            keywords: keywords.next().unwrap_or_default(),
         })
         .collect())
 }
@@ -105,9 +99,9 @@ pub(super) fn parse_recipients_json(value: String) -> Result<Vec<Recipient>, rus
 fn fetch_mailbox_ids_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
-) -> Result<HashMap<(String, String), Vec<MailboxId>>, StoreError> {
+) -> Result<Vec<Vec<MailboxId>>, StoreError> {
     fetch_message_values_bulk(connection, rows, "message_mailbox", "mailbox_id", |row| {
-        Ok(MailboxId(row.get(2)?))
+        Ok(MailboxId(row.get(1)?))
     })
 }
 
@@ -115,69 +109,59 @@ fn fetch_mailbox_ids_bulk(
 fn fetch_keywords_bulk(
     connection: &Connection,
     rows: &[MessageSummaryRow],
-) -> Result<HashMap<(String, String), Vec<String>>, StoreError> {
+) -> Result<Vec<Vec<String>>, StoreError> {
     fetch_message_values_bulk(connection, rows, "message_keyword", "keyword", |row| {
-        row.get(2)
+        row.get(1)
     })
 }
 
 /// Generic bulk-fetch for message-associated values (mailbox IDs or keywords).
-/// Queries in chunks of 400 to avoid SQLite parameter limits.
+/// Queries in chunks using a VALUES CTE that carries the caller's row index, so
+/// hydration can fill row-aligned vectors without cloning `(account_id,
+/// message_id)` keys out of SQLite into a HashMap.
 fn fetch_message_values_bulk<T>(
     connection: &Connection,
     rows: &[MessageSummaryRow],
     table: &str,
     value_column: &str,
     mut map_value: impl FnMut(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
-) -> Result<HashMap<(String, String), Vec<T>>, StoreError> {
-    const CHUNK_SIZE: usize = 400;
+) -> Result<Vec<Vec<T>>, StoreError> {
+    const CHUNK_SIZE: usize = 300;
 
-    let mut seen = HashSet::new();
-    let mut keys = Vec::new();
-    for row in rows {
-        let key = (
-            row.source_id.as_str().to_string(),
-            row.id.as_str().to_string(),
-        );
-        if seen.insert(key.clone()) {
-            keys.push(key);
-        }
-    }
-
-    let mut values_by_key = HashMap::new();
-    for chunk in keys.chunks(CHUNK_SIZE) {
-        let mut params = Vec::with_capacity(chunk.len() * 2);
-        let mut predicates = Vec::with_capacity(chunk.len());
-        for (account_id, message_id) in chunk {
-            predicates.push("(account_id = ? AND message_id = ?)".to_string());
-            params.push(SqlValue::Text(account_id.clone()));
-            params.push(SqlValue::Text(message_id.clone()));
+    let mut values_by_row = (0..rows.len()).map(|_| Vec::new()).collect::<Vec<_>>();
+    for (chunk_offset, chunk) in rows.chunks(CHUNK_SIZE).enumerate() {
+        let start_index = chunk_offset * CHUNK_SIZE;
+        let mut params = Vec::with_capacity(chunk.len() * 3);
+        let mut values = Vec::with_capacity(chunk.len());
+        for (offset, row) in chunk.iter().enumerate() {
+            values.push("(?, ?, ?)".to_string());
+            params.push(SqlValue::Integer((start_index + offset) as i64));
+            params.push(SqlValue::Text(row.source_id.as_str().to_string()));
+            params.push(SqlValue::Text(row.id.as_str().to_string()));
         }
         let sql = format!(
-            "SELECT account_id, message_id, {value_column}
-             FROM {table}
-             WHERE {}
-             ORDER BY account_id, message_id, {value_column}",
-            predicates.join(" OR ")
+            "WITH requested(row_index, account_id, message_id) AS (VALUES {})
+             SELECT requested.row_index, value.{value_column}
+               FROM requested
+               JOIN {table} value
+                 ON value.account_id = requested.account_id
+                AND value.message_id = requested.message_id
+              ORDER BY requested.row_index, value.{value_column}",
+            values.join(", ")
         );
-        let mut statement = connection.prepare(&sql).map_err(sql_to_store_error)?;
+        let mut statement = connection
+            .prepare_cached(&sql)
+            .map_err(sql_to_store_error)?;
         let rows = statement
             .query_map(params_from_iter(params), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    map_value(row)?,
-                ))
+                Ok((row.get::<_, i64>(0)? as usize, map_value(row)?))
             })
             .map_err(sql_to_store_error)?;
         for row in rows {
-            let (account_id, message_id, value) = row.map_err(sql_to_store_error)?;
-            values_by_key
-                .entry((account_id, message_id))
-                .or_insert_with(Vec::new)
-                .push(value);
+            let (row_index, value) = row.map_err(sql_to_store_error)?;
+            values_by_row[row_index].push(value);
         }
     }
 
-    Ok(values_by_key)
+    Ok(values_by_row)
 }
