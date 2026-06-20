@@ -1,11 +1,29 @@
 use super::*;
+use crate::sql_cache::CachedSql;
+
+const CACHE_RESCORE_QUEUE_UPSERT_SQL: &str = "
+INSERT INTO cache_rescore_queue (
+    account_id, message_id, reason, queued_at, rescore_priority
+) VALUES (?1, ?2, ?3, ?4, ?5)
+ON CONFLICT(account_id, message_id) DO UPDATE SET
+    reason = CASE
+        WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+        THEN excluded.reason
+        ELSE cache_rescore_queue.reason
+    END,
+    queued_at = CASE
+        WHEN excluded.rescore_priority >= cache_rescore_queue.rescore_priority
+        THEN excluded.queued_at
+        ELSE cache_rescore_queue.queued_at
+    END,
+    rescore_priority = MAX(cache_rescore_queue.rescore_priority, excluded.rescore_priority)";
 
 pub(super) fn body_exists_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     message_id: &MessageId,
 ) -> Result<bool, StoreError> {
-    tx.query_row(
+    tx.query_row_cached(
         "SELECT 1 FROM message_body WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
         |_row| Ok(()),
@@ -31,7 +49,7 @@ pub(crate) fn ensure_body_cache_object_tx(
         CacheObjectState::Wanted
     };
     let fetched_at = body_cached.then_some(now.as_str());
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO cache_object (
             account_id, message_id, layer, object_id, fetch_unit, state,
             value_bytes, fetch_bytes, priority, reason, last_scored_at, fetched_at
@@ -81,14 +99,8 @@ pub(super) fn upsert_cache_rescore_queue_tx(
     queued_at: &str,
     rescore_priority: f64,
 ) -> Result<(), StoreError> {
-    let sql = format!(
-        "INSERT INTO cache_rescore_queue (
-            account_id, message_id, reason, queued_at, rescore_priority
-         ) VALUES (?1, ?2, ?3, ?4, ?5)
-         {CACHE_RESCORE_QUEUE_UPSERT_UPDATE_SQL}"
-    );
-    tx.execute(
-        &sql,
+    tx.execute_cached(
+        CACHE_RESCORE_QUEUE_UPSERT_SQL,
         params![
             account_id.as_str(),
             message_id.as_str(),

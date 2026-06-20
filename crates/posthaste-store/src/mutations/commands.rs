@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 /// Stores a lazily fetched body (HTML, text, raw ref), emits
 /// `EVENT_TOPIC_MESSAGE_BODY_CACHED`, and returns the updated message detail.
@@ -61,19 +62,19 @@ pub(crate) fn set_keywords_tx(
     for keyword in &command.remove {
         keywords.remove(keyword);
     }
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_keyword WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
     for keyword in &keywords {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO message_keyword (account_id, message_id, keyword) VALUES (?1, ?2, ?3)",
             params![account_id.as_str(), message_id.as_str(), keyword],
         )
         .map_err(sql_to_store_error)?;
     }
-    tx.execute(
+    tx.execute_cached(
         "UPDATE message
          SET is_read = ?3, is_flagged = ?4
          WHERE account_id = ?1 AND id = ?2",
@@ -122,13 +123,13 @@ pub(crate) fn replace_mailboxes_tx(
     command: &ReplaceMailboxesCommand,
 ) -> Result<CommandResult, StoreError> {
     let previous_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_mailbox WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
     for mailbox_id in &command.mailbox_ids {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO message_mailbox (account_id, message_id, mailbox_id) VALUES (?1, ?2, ?3)",
             params![
                 account_id.as_str(),
@@ -184,7 +185,7 @@ pub(crate) fn destroy_message_tx(
 ) -> Result<CommandResult, StoreError> {
     let previous_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     let thread_id = tx
-        .query_row(
+        .query_row_cached(
             "SELECT thread_id FROM message WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
             |row| row.get::<_, String>(0),
