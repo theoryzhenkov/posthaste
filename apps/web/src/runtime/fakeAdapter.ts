@@ -1,6 +1,8 @@
 import type {
   RuntimeEventHandlers,
   RuntimeFrameHandlers,
+  RuntimeMutationReceipt,
+  RuntimeRunMutationRequest,
   RuntimeViewFrameHandlers,
 } from './types'
 import { createFakeQueueControls } from './fakeAdapterQueues'
@@ -23,6 +25,19 @@ import {
 } from './fakeAdapterSupport'
 
 export type { FakeRuntimeAdapter } from './fakeAdapterSupport'
+
+function defaultRuntimeMutationReceipt(
+  request: RuntimeRunMutationRequest,
+): RuntimeMutationReceipt {
+  return {
+    runtimeMutationId: 'mutation-1',
+    clientMutationId: request.clientMutationId,
+    name: request.name,
+    state: 'confirmed',
+    error: null,
+    output: defaultMessageCommandResult,
+  }
+}
 
 /** Fake runtime adapter for renderer tests. Does not start or contact a backend. */
 export function createFakeRuntimeAdapter(
@@ -86,6 +101,7 @@ export function createFakeRuntimeAdapter(
       calls.runtimeSessionViewOpenCalls.push({
         sessionId: request.sessionId,
         view: { ...request.view },
+        sourceId: request.sourceId,
       })
       return resolveQueuedOptional(
         queues.runtimeSessionMessageListViews,
@@ -98,6 +114,14 @@ export function createFakeRuntimeAdapter(
       return resolveQueued(
         queues.accountOkResults,
         input?.defaultAccountOk ?? { ok: true },
+      )
+    },
+    runRuntimeMutation(request) {
+      calls.runtimeMutationCalls.push({ request: { ...request } })
+      return resolveQueued(
+        queues.runtimeMutations,
+        input?.defaultRuntimeMutationReceipt ??
+          defaultRuntimeMutationReceipt(request),
       )
     },
     subscribeRuntimeFrames(request, handlers) {

@@ -18,8 +18,9 @@ use posthaste_domain::{
     EVENT_TOPIC_MESSAGE_ARRIVED,
 };
 use posthaste_runtime_contract::{
-    AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
-    MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle,
+    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
+    MailPresentationRequest, MailQueryRequest, MutationRequest, MutationSettlementState,
+    RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle,
     RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame,
     ViewRevision,
 };
@@ -154,6 +155,43 @@ fn seed_message_batch(
                 cursors: vec![SyncCursor {
                     object_type: SyncObject::Message,
                     state: "state-1".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )
+        .expect("message batch should apply");
+}
+
+fn seed_single_message_batch(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account_id: &AccountId,
+    message_id: &str,
+    mailbox_id: &str,
+) {
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            account_id,
+            &SyncBatch {
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from(mailbox_id),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 1,
+                }],
+                messages: vec![seeded_message(message_id, mailbox_id)],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "message-1".to_string(),
                     updated_at: "2026-03-31T10:00:00Z".to_string(),
                 }],
             },
@@ -510,6 +548,42 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 }
 
 #[tokio::test]
+async fn runtime_session_ids_are_not_predictable_counters() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+
+    let first = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("first session should open");
+    let second = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("second session should open");
+
+    for session_id in [&first.session_id, &second.session_id] {
+        let raw = session_id.as_str();
+        let suffix = raw
+            .strip_prefix("session-")
+            .expect("session id should carry the session prefix");
+        assert_eq!(suffix.len(), 32);
+        assert!(suffix.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+    assert_ne!(first.session_id.as_str(), "session-1");
+    assert_ne!(second.session_id.as_str(), "session-2");
+}
+
+#[tokio::test]
 async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     let root = temp_root();
     let config = AuthorityRuntimeBuildConfig::new(
@@ -622,6 +696,122 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
         .find(|row| row.projection["id"] == "message-1")
         .expect("updated row should remain in window");
     assert_eq!(row.projection["isFlagged"], true);
+}
+
+#[tokio::test]
+async fn runtime_mutation_streams_settlement_frames() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("runtime-mutation-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+    assert!(subscription.catch_up.is_empty());
+
+    let receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id.clone()),
+                name: "message.setKeywords".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "command": {"add": ["$flagged"], "remove": []}
+                }),
+                client_mutation_id: ClientMutationId::new("client-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("mutation should run");
+    let mutation_id = receipt
+        .runtime_mutation_id
+        .clone()
+        .expect("runtime mutation id should be assigned");
+    assert_eq!(receipt.client_mutation_id.as_str(), "client-1");
+    assert_eq!(receipt.name, "message.setKeywords");
+    assert_eq!(receipt.state, MutationSettlementState::Confirmed);
+    assert_eq!(receipt.output["events"].as_array().unwrap().len(), 1);
+
+    let settlements = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let mut settlements = Vec::new();
+        while settlements.len() < 2 {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if let RuntimeFrame::MutationSettlement {
+                mutation_id, state, ..
+            } = frame
+            {
+                settlements.push((mutation_id, state));
+            }
+        }
+        settlements
+    })
+    .await
+    .expect("settlement frames should arrive");
+    assert_eq!(settlements[0].0, mutation_id);
+    assert_eq!(settlements[0].1.client_mutation_id.as_str(), "client-1");
+    assert_eq!(settlements[0].1.name, "message.setKeywords");
+    assert_eq!(settlements[0].1.status, MutationSettlementState::Accepted);
+    assert_eq!(settlements[1].0, mutation_id);
+    assert_eq!(settlements[1].1.status, MutationSettlementState::Confirmed);
+
+    let duplicate = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id),
+                name: "message.setKeywords".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "command": {"add": ["$flagged"], "remove": []}
+                }),
+                client_mutation_id: ClientMutationId::new("client-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("duplicate mutation should return existing receipt");
+    assert_eq!(duplicate.runtime_mutation_id, Some(mutation_id));
+    assert_eq!(duplicate.state, MutationSettlementState::Confirmed);
 }
 
 #[tokio::test]

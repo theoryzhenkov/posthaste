@@ -20,6 +20,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     closeRuntimeSession: () => reject(),
     openRuntimeSessionMessageListView: () => reject(),
     closeRuntimeSessionView: () => reject(),
+    runRuntimeMutation: () => reject(),
     subscribeRuntimeFrames: (_request, handlers) => {
       handlers.onPermanentError?.(
         new Error(`runtime adapter mode ${mode} is not implemented`),

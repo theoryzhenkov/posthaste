@@ -45,6 +45,7 @@ export interface RuntimeMessageCommandRequest {
   sourceId: string
   messageId: string
   command: MessageCommand
+  clientMutationId?: string | null
 }
 
 export type RuntimeMessagePageScope =
@@ -127,6 +128,38 @@ export type RuntimeViewFrame<TData = unknown> =
   | { kind: 'error'; viewId: string; revision: number; error: unknown }
   | { kind: 'closed'; viewId: string }
 
+export type RuntimeMutationSettlementStatus =
+  | 'accepted'
+  | 'localApplied'
+  | 'queued'
+  | 'confirmed'
+  | 'failed'
+  | 'conflict'
+
+export interface RuntimeAdapterError {
+  code: string
+  message: string
+  retryable: boolean
+  correlationId?: string | null
+  details?: unknown
+}
+
+export interface RuntimeMutationSettlementState {
+  clientMutationId: string
+  name: string
+  status: RuntimeMutationSettlementStatus
+  error: RuntimeAdapterError | null
+}
+
+export interface RuntimeMutationReceipt {
+  runtimeMutationId: string | null
+  clientMutationId: string
+  name: string
+  state: RuntimeMutationSettlementStatus
+  error: RuntimeAdapterError | null
+  output?: unknown
+}
+
 export type RuntimeFrame<TData = unknown> =
   | {
       type: 'viewSnapshot'
@@ -148,7 +181,7 @@ export type RuntimeFrame<TData = unknown> =
       type: 'mutationSettlement'
       sessionSeq: number
       mutationId: string
-      state: unknown
+      state: RuntimeMutationSettlementState
     }
   | { type: 'notification'; sessionSeq: number; kind: string; payload: unknown }
   | { type: 'heartbeat'; sessionSeq: number }
@@ -169,11 +202,21 @@ export interface RuntimeCloseSessionRequest {
 export interface RuntimeSessionViewRequest {
   sessionId: string
   view: RuntimeMessagePageRequest
+  sourceId?: string | null
 }
 
 export interface RuntimeSessionViewCloseRequest {
   sessionId: string
   viewId: string
+  sourceId?: string | null
+}
+
+export interface RuntimeRunMutationRequest {
+  sessionId?: string | null
+  name: string
+  args?: unknown
+  clientMutationId: string
+  context?: unknown
   sourceId?: string | null
 }
 
@@ -290,6 +333,9 @@ export interface RuntimeAdapter {
   closeRuntimeSessionView(
     request: RuntimeSessionViewCloseRequest,
   ): Promise<OkResponse>
+  runRuntimeMutation(
+    request: RuntimeRunMutationRequest,
+  ): Promise<RuntimeMutationReceipt>
   subscribeRuntimeFrames(
     request: RuntimeFrameSubscriptionRequest,
     handlers: RuntimeFrameHandlers,

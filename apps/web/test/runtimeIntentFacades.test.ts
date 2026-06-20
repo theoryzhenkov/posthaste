@@ -9,6 +9,7 @@ import { createFakeRuntimeAdapter } from '../src/runtime/fakeAdapter'
 import { runtimeMutations } from '../src/runtime/mutations'
 import { runtimeResources } from '../src/runtime/resources'
 import { runtimeStream } from '../src/runtime/runtimeStream'
+import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
 import { runtimeSubscriptions } from '../src/runtime/subscriptions'
 import { runtimeViews } from '../src/runtime/views'
 
@@ -53,6 +54,7 @@ const event: DomainEvent = {
 }
 
 afterEach(() => {
+  resetRuntimeSessionClientForTesting()
   resetRuntimeAdapterForTesting()
 })
 
@@ -64,7 +66,6 @@ describe('runtime intent facades', () => {
     const receivedRuntimeFrames: Array<{ type: string; sessionSeq: number }> =
       []
     fake.queueAccounts([account])
-    fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueMessageCommandResult({ detail: null, events: [] })
     fake.queueResourceBlob(resourceBlob)
     fake.queueRuntimeSession({ sessionId: 'session-1' })
@@ -99,13 +100,23 @@ describe('runtime intent facades', () => {
     unsubscribeRuntime()
 
     expect(fake.accountCalls).toBe(1)
-    expect(fake.messageCommandCalls).toEqual([
-      {
+    expect(fake.runtimeMutationCalls).toHaveLength(1)
+    expect(fake.runtimeMutationCalls[0].request).toMatchObject({
+      sessionId: 'session-1',
+      sourceId: 'primary',
+      name: 'message.setKeywords',
+      args: {
         sourceId: 'primary',
         messageId: 'm1',
-        command: { kind: 'setKeywords', add: ['seen'], remove: [] },
+        command: { add: ['seen'], remove: [] },
       },
-    ])
+    })
+    expect(
+      fake.runtimeMutationCalls[0].request.clientMutationId.startsWith(
+        'client_mutation_',
+      ),
+    ).toBe(true)
+    expect(fake.messageCommandCalls).toEqual([])
     expect(fake.messageRoleMoveCalls).toEqual([
       { sourceId: 'primary', messageId: 'm1', role: 'archive' },
     ])
@@ -113,7 +124,10 @@ describe('runtime intent facades', () => {
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
     ])
     expect(fake.eventSubscriptionCalls).toEqual([{ request: { afterSeq: 7 } }])
-    expect(fake.runtimeSessionCalls).toEqual([{ sourceId: 'primary' }])
+    expect(fake.runtimeSessionCalls).toEqual([
+      { sourceId: 'primary' },
+      { sourceId: 'primary' },
+    ])
     expect(fake.runtimeFrameSubscriptionCalls).toEqual([
       { request: { sessionId: 'session-1', afterSeq: 1, sourceId: 'primary' } },
     ])

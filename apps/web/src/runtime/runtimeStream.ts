@@ -3,6 +3,7 @@ import type {
   RuntimeFrameHandlers,
   RuntimeFrameSubscriptionRequest,
   RuntimeOpenSessionRequest,
+  RuntimeRunMutationRequest,
   RuntimeSessionViewRequest,
   RuntimeUnsubscribe,
 } from './types'
@@ -23,6 +24,9 @@ export const runtimeStream = {
       viewId,
       sourceId,
     })
+  },
+  runMutation(request: RuntimeRunMutationRequest) {
+    return getRuntimeAdapter().runRuntimeMutation(request)
   },
   subscribe(
     request: RuntimeFrameSubscriptionRequest,

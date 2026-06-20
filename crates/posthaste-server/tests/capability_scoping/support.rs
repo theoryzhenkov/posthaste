@@ -124,6 +124,7 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
             "/runtime/sessions/{session_id}/views/{view_id}",
             axum::routing::delete(ok),
         )
+        .route("/runtime/sessions/{session_id}/mutations", post(ok))
         .route("/smart-mailboxes/{smart_mailbox_id}/conversations", get(ok))
         .route("/events", get(ok))
         .route("/sources/{source_id}/messages", get(ok))

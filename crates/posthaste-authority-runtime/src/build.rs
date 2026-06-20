@@ -18,13 +18,14 @@ use posthaste_domain::{
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
-    MailQueryRequest, PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes,
-    RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode, RuntimeEventSubscription,
-    RuntimeFrameSubscription, RuntimeLifecycle, RuntimeSession, RuntimeSessionId,
-    RuntimeSessionSeq, RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor,
-    ViewId, ViewRevision,
+    MailQueryRequest, MutationReceipt, MutationRequest, MutationSettlementState,
+    PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore,
+    RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeFrameSubscription,
+    RuntimeLifecycle, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeStatus,
+    RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor, ViewId, ViewRevision,
 };
 use posthaste_store::DatabaseStore;
+use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
@@ -34,7 +35,7 @@ use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
-use crate::sessions::SessionRegistry;
+use crate::sessions::{MutationAcceptance, SessionRegistry};
 use crate::views::ViewRegistry;
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
@@ -279,6 +280,14 @@ struct AuthorityRuntimeCore {
     stopped: Arc<AtomicBool>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageSetKeywordsMutationArgs {
+    source_id: String,
+    message_id: String,
+    command: SetKeywordsCommand,
+}
+
 /// Cloneable authority runtime handle used by transport adapters.
 ///
 /// spec: docs/runtime/L2#runtime-handle-transport-neutral
@@ -486,6 +495,83 @@ impl AuthorityRuntimeHandle {
         account_id: &AccountId,
     ) -> Option<posthaste_domain::SharedGateway> {
         self.core.live_accounts.gateway(account_id).await.ok()
+    }
+
+    fn parse_mutation_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        serde_json::from_value(request.args.clone()).map_err(|error| {
+            RuntimeError::with_details(
+                RuntimeErrorCode::InvalidMutation,
+                format!("invalid args for mutation '{}'", request.name),
+                serde_json::json!({ "error": error.to_string() }),
+            )
+        })
+    }
+
+    fn ensure_account_in_scope(
+        account_id: &str,
+        account_scope: Option<&[String]>,
+    ) -> Result<(), RuntimeError> {
+        if account_scope.is_some_and(|scope| !scope.iter().any(|id| id == account_id)) {
+            return Err(RuntimeError::unauthorized(
+                "mutation source is outside the runtime session account scope",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn run_set_keywords_mutation(
+        &self,
+        caller: RuntimeCaller,
+        request: MutationRequest,
+        args: MessageSetKeywordsMutationArgs,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let session_id = request.session_id.clone().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        })?;
+        let mutation_id = match self.core.sessions.accept_mutation(caller, &request)? {
+            MutationAcceptance::New { mutation_id, .. } => mutation_id,
+            MutationAcceptance::Existing(receipt) => return Ok(receipt),
+        };
+        let account_id = AccountId(args.source_id);
+        let message_id = MessageId(args.message_id);
+        match self
+            .set_message_keywords(
+                RuntimeCaller::system(),
+                account_id,
+                message_id,
+                args.command,
+            )
+            .await
+        {
+            Ok(result) => {
+                let output = serde_json::to_value(&result).map_err(|error| {
+                    RuntimeError::internal(
+                        format!("failed to serialize mutation output: {error}"),
+                        None,
+                    )
+                })?;
+                self.core.sessions.settle_mutation(
+                    &session_id,
+                    &mutation_id,
+                    MutationSettlementState::Confirmed,
+                    None,
+                    output,
+                )
+            }
+            Err(error) => {
+                let envelope = error.envelope().clone();
+                self.core.sessions.settle_mutation(
+                    &session_id,
+                    &mutation_id,
+                    MutationSettlementState::Failed,
+                    Some(envelope),
+                    serde_json::Value::Null,
+                )
+            }
+        }
     }
 
     fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
@@ -793,6 +879,32 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
         self.core.sessions.close_view(caller, session_id, view_id)
+    }
+
+    async fn run_mutation(
+        &self,
+        caller: RuntimeCaller,
+        request: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        self.ensure_runtime_active()?;
+        let session_id = request.session_id.clone().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        })?;
+        let session_scope = self
+            .core
+            .sessions
+            .session_scope(&session_id, caller.account_scope.as_deref())?;
+        match request.name.as_str() {
+            "message.setKeywords" => {
+                let args: MessageSetKeywordsMutationArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                self.run_set_keywords_mutation(caller, request, args).await
+            }
+            _ => Err(RuntimeError::invalid_mutation(format!(
+                "unknown runtime mutation '{}'",
+                request.name
+            ))),
+        }
     }
 
     async fn open_view(

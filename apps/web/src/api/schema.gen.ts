@@ -396,6 +396,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/sessions/{session_id}/mutations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a runtime mutation
+         * @description Submits a named mutation to a runtime session. The initial slice supports message.setKeywords and emits mutationSettlement RuntimeFrame values on the session stream.
+         */
+        post: operations["run_runtime_session_mutation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runtime/sessions/{session_id}/stream": {
         parameters: {
             query?: never;
@@ -1243,6 +1263,7 @@ export interface components {
             name?: string | null;
             sourceId: components["schemas"]["AccountId"];
         };
+        ClientMutationId: string;
         /**
          * @description Result of a message mutation: updated detail (if applicable) and emitted events.
          *
@@ -1513,6 +1534,23 @@ export interface components {
             subject?: string | null;
             to: components["schemas"]["Recipient"][];
         };
+        MutationReceipt: {
+            clientMutationId: components["schemas"]["ClientMutationId"];
+            error?: null | components["schemas"]["RuntimeAdapterError"];
+            name: string;
+            output?: Record<string, never>;
+            runtimeMutationId?: null | components["schemas"]["RuntimeMutationId"];
+            state: components["schemas"]["MutationSettlementState"];
+        };
+        MutationRequest: {
+            args?: unknown;
+            clientMutationId: components["schemas"]["ClientMutationId"];
+            context?: unknown;
+            name: string;
+            sessionId?: null | components["schemas"]["RuntimeSessionId"];
+        };
+        /** @enum {string} */
+        MutationSettlementState: "accepted" | "localApplied" | "queued" | "confirmed" | "failed" | "conflict";
         /**
          * @description Generic success response for mutating endpoints that return no domain data.
          *
@@ -1759,7 +1797,7 @@ export interface components {
         } | {
             mutationId: components["schemas"]["RuntimeMutationId"];
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
-            state: Record<string, never>;
+            state: components["schemas"]["RuntimeMutationSettlement"];
             /** @enum {string} */
             type: "mutationSettlement";
         } | {
@@ -1774,6 +1812,12 @@ export interface components {
             type: "heartbeat";
         };
         RuntimeMutationId: string;
+        RuntimeMutationSettlement: {
+            clientMutationId: components["schemas"]["ClientMutationId"];
+            error?: null | components["schemas"]["RuntimeAdapterError"];
+            name: string;
+            status: components["schemas"]["MutationSettlementState"];
+        };
         RuntimeSession: {
             sessionId: components["schemas"]["RuntimeSessionId"];
         };
@@ -2943,6 +2987,80 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    run_runtime_session_mutation: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Mutation receipt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MutationReceipt"];
+                };
+            };
+            /** @description Invalid mutation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

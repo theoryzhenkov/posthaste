@@ -349,8 +349,7 @@ pub enum RuntimeFrame {
         session_seq: RuntimeSessionSeq,
         #[serde(rename = "mutationId")]
         mutation_id: RuntimeMutationId,
-        #[cfg_attr(feature = "openapi", schema(value_type = Object))]
-        state: Value,
+        state: RuntimeMutationSettlement,
     },
     Notification {
         #[serde(rename = "sessionSeq")]
@@ -575,6 +574,7 @@ pub struct ViewSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MutationRequest {
     pub session_id: Option<RuntimeSessionId>,
@@ -586,11 +586,26 @@ pub struct MutationRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MutationReceipt {
     pub runtime_mutation_id: Option<RuntimeMutationId>,
     pub client_mutation_id: ClientMutationId,
+    pub name: String,
     pub state: MutationSettlementState,
+    pub error: Option<RuntimeAdapterError>,
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub output: Value,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMutationSettlement {
+    pub client_mutation_id: ClientMutationId,
+    pub name: String,
+    pub status: MutationSettlementState,
     pub error: Option<RuntimeAdapterError>,
 }
 
@@ -968,6 +983,12 @@ pub trait RuntimeCore: Send + Sync {
         session_id: RuntimeSessionId,
         view_id: ViewId,
     ) -> Result<(), RuntimeError>;
+
+    async fn run_mutation(
+        &self,
+        caller: RuntimeCaller,
+        request: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError>;
 
     async fn open_view(
         &self,

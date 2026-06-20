@@ -3,12 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
-use posthaste_domain::DomainEvent;
+use posthaste_domain::{DomainEvent, Id};
 use posthaste_runtime_contract::{
-    RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeSession,
-    RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame,
-    ViewId, ViewSnapshot,
+    ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState,
+    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription,
+    RuntimeMutationId, RuntimeMutationSettlement, RuntimeSession, RuntimeSessionId,
+    RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
 };
+use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
@@ -18,7 +20,7 @@ pub(crate) struct SessionRegistry {
     views: Arc<ViewRegistry>,
     event_sender: broadcast::Sender<DomainEvent>,
     sessions: Mutex<HashMap<RuntimeSessionId, StoredSession>>,
-    next_session_id: AtomicU64,
+    next_mutation_id: AtomicU64,
 }
 
 struct StoredSession {
@@ -27,7 +29,55 @@ struct StoredSession {
     frames: broadcast::Sender<RuntimeFrame>,
     open_views: HashSet<ViewId>,
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
+    latest_mutations: HashMap<RuntimeMutationId, StoredMutation>,
+    mutations_by_client_id: HashMap<ClientMutationId, RuntimeMutationId>,
     event_task: Option<AbortHandle>,
+}
+
+#[derive(Clone)]
+struct StoredMutation {
+    mutation_id: RuntimeMutationId,
+    client_mutation_id: ClientMutationId,
+    name: String,
+    args: Value,
+    state: MutationSettlementState,
+    error: Option<RuntimeAdapterError>,
+    output: Value,
+}
+
+pub(crate) enum MutationAcceptance {
+    New { mutation_id: RuntimeMutationId },
+    Existing(MutationReceipt),
+}
+
+impl StoredMutation {
+    fn receipt(&self) -> MutationReceipt {
+        MutationReceipt {
+            runtime_mutation_id: Some(self.mutation_id.clone()),
+            client_mutation_id: self.client_mutation_id.clone(),
+            name: self.name.clone(),
+            state: self.state.clone(),
+            error: self.error.clone(),
+            output: self.output.clone(),
+        }
+    }
+
+    fn settlement(&self) -> RuntimeMutationSettlement {
+        RuntimeMutationSettlement {
+            client_mutation_id: self.client_mutation_id.clone(),
+            name: self.name.clone(),
+            status: self.state.clone(),
+            error: self.error.clone(),
+        }
+    }
+
+    fn frame(&self, session_seq: RuntimeSessionSeq) -> RuntimeFrame {
+        RuntimeFrame::MutationSettlement {
+            session_seq,
+            mutation_id: self.mutation_id.clone(),
+            state: self.settlement(),
+        }
+    }
 }
 
 impl SessionRegistry {
@@ -39,7 +89,7 @@ impl SessionRegistry {
             views,
             event_sender,
             sessions: Mutex::new(HashMap::new()),
-            next_session_id: AtomicU64::new(1),
+            next_mutation_id: AtomicU64::new(1),
         }
     }
 
@@ -47,10 +97,7 @@ impl SessionRegistry {
         self: &Arc<Self>,
         caller: RuntimeCaller,
     ) -> Result<RuntimeSession, RuntimeError> {
-        let session_id = RuntimeSessionId::new(format!(
-            "session-{}",
-            self.next_session_id.fetch_add(1, Ordering::Relaxed)
-        ));
+        let session_id = RuntimeSessionId::new(format!("session-{}", Id::generate()));
         let (frames, _) = broadcast::channel(64);
         self.sessions.lock().map_err(lock_error)?.insert(
             session_id.clone(),
@@ -60,6 +107,8 @@ impl SessionRegistry {
                 frames,
                 open_views: HashSet::new(),
                 latest_snapshots: HashMap::new(),
+                latest_mutations: HashMap::new(),
+                mutations_by_client_id: HashMap::new(),
                 event_task: None,
             },
         );
@@ -88,12 +137,12 @@ impl SessionRegistry {
                 .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
             ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
             let current_seq = RuntimeSessionSeq::new(session.last_seq);
-            let needs_initial_snapshots =
-                session.last_seq == 0 && !session.latest_snapshots.is_empty();
-            let catch_up = if after_seq == Some(current_seq) && !needs_initial_snapshots {
+            let needs_initial_frames = session.last_seq == 0
+                && (!session.latest_snapshots.is_empty() || !session.latest_mutations.is_empty());
+            let catch_up = if after_seq == Some(current_seq) && !needs_initial_frames {
                 Vec::new()
             } else {
-                collapse_snapshots(session)
+                collapse_session_frames(session)
             };
             (catch_up, session.frames.subscribe())
         };
@@ -195,7 +244,92 @@ impl SessionRegistry {
         Ok(())
     }
 
-    fn session_scope(
+    pub(crate) fn accept_mutation(
+        &self,
+        caller: RuntimeCaller,
+        request: &MutationRequest,
+    ) -> Result<MutationAcceptance, RuntimeError> {
+        let session_id = request.session_id.as_ref().ok_or_else(|| {
+            RuntimeError::invalid_mutation("runtime mutation requires a session id")
+        })?;
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
+        if let Some(mutation_id) = session
+            .mutations_by_client_id
+            .get(&request.client_mutation_id)
+        {
+            let mutation = session.latest_mutations.get(mutation_id).ok_or_else(|| {
+                RuntimeError::internal("runtime mutation index is inconsistent", None)
+            })?;
+            if mutation.name != request.name || mutation.args != request.args {
+                return Err(RuntimeError::invalid_mutation(
+                    "client mutation id was already used for a different mutation",
+                ));
+            }
+            return Ok(MutationAcceptance::Existing(mutation.receipt()));
+        }
+
+        let mutation_id = RuntimeMutationId::new(format!(
+            "mutation-{}",
+            self.next_mutation_id.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mutation = StoredMutation {
+            mutation_id: mutation_id.clone(),
+            client_mutation_id: request.client_mutation_id.clone(),
+            name: request.name.clone(),
+            args: request.args.clone(),
+            state: MutationSettlementState::Accepted,
+            error: None,
+            output: Value::Null,
+        };
+        session
+            .mutations_by_client_id
+            .insert(request.client_mutation_id.clone(), mutation_id.clone());
+        session
+            .latest_mutations
+            .insert(mutation_id.clone(), mutation.clone());
+        let frame = mutation.frame(next_seq(session));
+        let sender = session.frames.clone();
+        drop(sessions);
+        let _ = sender.send(frame);
+        Ok(MutationAcceptance::New { mutation_id })
+    }
+
+    pub(crate) fn settle_mutation(
+        &self,
+        session_id: &RuntimeSessionId,
+        mutation_id: &RuntimeMutationId,
+        state: MutationSettlementState,
+        error: Option<RuntimeAdapterError>,
+        output: Value,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        let (receipt, frame) = {
+            let mutation = session
+                .latest_mutations
+                .get_mut(mutation_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime mutation not found"))?;
+            mutation.state = state;
+            mutation.error = error;
+            mutation.output = output;
+            let receipt = mutation.receipt();
+            let mutation = mutation.clone();
+            let frame = mutation.frame(next_seq(session));
+            (receipt, frame)
+        };
+        let sender = session.frames.clone();
+        drop(sessions);
+        let _ = sender.send(frame);
+        Ok(receipt)
+    }
+
+    pub(crate) fn session_scope(
         &self,
         session_id: &RuntimeSessionId,
         caller_scope: Option<&[String]>,
@@ -325,25 +459,30 @@ impl SessionRegistry {
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
         ensure_caller_matches_session(session, caller_scope)?;
-        Ok(collapse_snapshots(session))
+        Ok(collapse_session_frames(session))
     }
 }
 
-fn collapse_snapshots(session: &mut StoredSession) -> Vec<RuntimeFrame> {
+fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
+    let mut frames = Vec::new();
     let mut snapshots: Vec<_> = session.latest_snapshots.values().cloned().collect();
     snapshots.sort_by(|left, right| left.view_id.as_str().cmp(right.view_id.as_str()));
-    snapshots
-        .into_iter()
-        .map(|snapshot| {
-            let session_seq = next_seq(session);
-            RuntimeFrame::ViewSnapshot {
-                session_seq,
-                view_id: snapshot.view_id.clone(),
-                revision: snapshot.revision,
-                snapshot,
-            }
-        })
-        .collect()
+    for snapshot in snapshots {
+        let session_seq = next_seq(session);
+        frames.push(RuntimeFrame::ViewSnapshot {
+            session_seq,
+            view_id: snapshot.view_id.clone(),
+            revision: snapshot.revision,
+            snapshot,
+        });
+    }
+    let mut mutations: Vec<_> = session.latest_mutations.values().cloned().collect();
+    mutations.sort_by(|left, right| left.mutation_id.as_str().cmp(right.mutation_id.as_str()));
+    for mutation in mutations {
+        let session_seq = next_seq(session);
+        frames.push(mutation.frame(session_seq));
+    }
+    frames
 }
 
 fn view_frame_to_runtime(session: &mut StoredSession, frame: ViewFrame) -> Option<RuntimeFrame> {

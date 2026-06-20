@@ -1181,6 +1181,110 @@
         }
       }
     },
+    "/v1/runtime/sessions/{session_id}/mutations": {
+      "post": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Run a runtime mutation",
+        "description": "Submits a named mutation to a runtime session. The initial slice supports message.setKeywords and emits mutationSettlement RuntimeFrame values on the session stream.",
+        "operationId": "run_runtime_session_mutation",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Mutation receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MutationReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid mutation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runtime/sessions/{session_id}/stream": {
       "get": {
         "tags": [
@@ -4136,6 +4240,9 @@
           }
         }
       },
+      "ClientMutationId": {
+        "type": "string"
+      },
       "CommandResult": {
         "type": "object",
         "description": "Result of a message mutation: updated detail (if applicable) and emitted events.\n\n@spec docs/L1-api#message-commands",
@@ -4837,6 +4944,86 @@
             }
           }
         }
+      },
+      "MutationReceipt": {
+        "type": "object",
+        "required": [
+          "clientMutationId",
+          "name",
+          "state"
+        ],
+        "properties": {
+          "clientMutationId": {
+            "$ref": "#/components/schemas/ClientMutationId"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeAdapterError"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "output": {
+            "type": "object"
+          },
+          "runtimeMutationId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeMutationId"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/MutationSettlementState"
+          }
+        }
+      },
+      "MutationRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "clientMutationId"
+        ],
+        "properties": {
+          "args": {},
+          "clientMutationId": {
+            "$ref": "#/components/schemas/ClientMutationId"
+          },
+          "context": {},
+          "name": {
+            "type": "string"
+          },
+          "sessionId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeSessionId"
+              }
+            ]
+          }
+        }
+      },
+      "MutationSettlementState": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "localApplied",
+          "queued",
+          "confirmed",
+          "failed",
+          "conflict"
+        ]
       },
       "OkResponse": {
         "type": "object",
@@ -5607,7 +5794,7 @@
                 "$ref": "#/components/schemas/RuntimeSessionSeq"
               },
               "state": {
-                "type": "object"
+                "$ref": "#/components/schemas/RuntimeMutationSettlement"
               },
               "type": {
                 "type": "string",
@@ -5665,6 +5852,35 @@
       },
       "RuntimeMutationId": {
         "type": "string"
+      },
+      "RuntimeMutationSettlement": {
+        "type": "object",
+        "required": [
+          "clientMutationId",
+          "name",
+          "status"
+        ],
+        "properties": {
+          "clientMutationId": {
+            "$ref": "#/components/schemas/ClientMutationId"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuntimeAdapterError"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MutationSettlementState"
+          }
+        }
       },
       "RuntimeSession": {
         "type": "object",
