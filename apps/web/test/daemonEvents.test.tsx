@@ -16,6 +16,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
+import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
@@ -49,6 +50,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetRuntimeSessionClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
   window.sessionStorage.clear()

@@ -171,6 +171,12 @@ export interface RuntimeSessionViewRequest {
   view: RuntimeMessagePageRequest
 }
 
+export interface RuntimeSessionViewCloseRequest {
+  sessionId: string
+  viewId: string
+  sourceId?: string | null
+}
+
 export interface RuntimeOpenMessageListViewResult {
   viewId: string
   snapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
@@ -281,6 +287,9 @@ export interface RuntimeAdapter {
   openRuntimeSessionMessageListView(
     request: RuntimeSessionViewRequest,
   ): Promise<RuntimeOpenMessageListViewResult>
+  closeRuntimeSessionView(
+    request: RuntimeSessionViewCloseRequest,
+  ): Promise<OkResponse>
   subscribeRuntimeFrames(
     request: RuntimeFrameSubscriptionRequest,
     handlers: RuntimeFrameHandlers,

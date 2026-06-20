@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { MessageSummary } from '../src/api/types'
 import { useRuntimeMailListView } from '../src/components/message-list/useRuntimeMailListView'
+import { useDaemonEvents } from '../src/hooks/useDaemonEvents'
 import { queryKeys } from '../src/queryKeys'
 import {
   resetRuntimeAdapterForTesting,
@@ -14,6 +15,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
+import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
 import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
@@ -106,6 +108,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetRuntimeSessionClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
 })
@@ -181,9 +184,67 @@ describe('useRuntimeMailListView', () => {
 
     unmount()
     await waitFor(() =>
+      expect(runtimeAdapter.runtimeSessionViewCloseCalls).toEqual([
+        { sessionId: 'session-1', viewId: 'view-1', sourceId: 'primary' },
+      ]),
+    )
+    await waitFor(() =>
       expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
         { sessionId: 'session-1', sourceId: 'primary' },
       ]),
     )
+  })
+
+  it('shares the renderer runtime stream with notification subscribers', async () => {
+    const queryKey = queryKeys.messages(
+      { kind: 'source-mailbox', sourceId: 'primary', mailboxId: 'inbox' },
+      undefined,
+      { columnId: 'date', direction: 'desc' },
+    )
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeSessionMessageListView({
+      viewId: 'view-1',
+      snapshot: mailListSnapshot(1, message),
+    })
+
+    renderHook(
+      () => {
+        useDaemonEvents()
+        useRuntimeMailListView({
+          enabled: true,
+          operation: {
+            operationId: 'op_1',
+            operationKind: 'mail.list',
+            operationSource: 'test',
+            sessionId: 'session_1',
+          },
+          preparedSearchQuery: {
+            query: undefined,
+            validation: { state: 'valid' },
+            isBlocked: false,
+          },
+          queryKey,
+          selectedView: {
+            kind: 'source-mailbox',
+            sourceId: 'primary',
+            mailboxId: 'inbox',
+          },
+          sort: { columnId: 'date', direction: 'desc' },
+        })
+      },
+      { wrapper },
+    )
+
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [message], nextCursor: null }],
+        pageParams: [null],
+      }),
+    )
+    expect(runtimeAdapter.runtimeSessionCalls).toEqual([{}])
+    expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
+      { request: { sessionId: 'session-1', afterSeq: null } },
+    ])
+    expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
   })
 })

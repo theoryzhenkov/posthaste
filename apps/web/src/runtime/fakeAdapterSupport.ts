@@ -31,6 +31,7 @@ import type {
   RuntimeOpenSessionRequest,
   RuntimeResourceDescriptor,
   RuntimeSession,
+  RuntimeSessionViewCloseRequest,
   RuntimeSessionViewRequest,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
@@ -79,6 +80,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly runtimeSessionCalls: RuntimeOpenSessionRequest[]
   readonly runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  readonly runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   readonly viewOpenCalls: RuntimeMessagePageRequest[]
   readonly viewSubscriptionCalls: ViewSubscriptionCall[]
@@ -146,6 +148,7 @@ export type FakeCallRecords = {
   runtimeSessionCalls: RuntimeOpenSessionRequest[]
   runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   viewOpenCalls: RuntimeMessagePageRequest[]
   viewSubscriptionCalls: ViewSubscriptionCall[]
@@ -226,6 +229,7 @@ export function createFakeCallRecords(): FakeCallRecords {
     runtimeSessionCalls: [],
     runtimeSessionCloseCalls: [],
     runtimeSessionViewOpenCalls: [],
+    runtimeSessionViewCloseCalls: [],
     runtimeFrameSubscriptionCalls: [],
     viewOpenCalls: [],
     viewSubscriptionCalls: [],
@@ -253,6 +257,7 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.runtimeSessionCalls.length = 0
   calls.runtimeSessionCloseCalls.length = 0
   calls.runtimeSessionViewOpenCalls.length = 0
+  calls.runtimeSessionViewCloseCalls.length = 0
   calls.runtimeFrameSubscriptionCalls.length = 0
   calls.viewOpenCalls.length = 0
   calls.viewSubscriptionCalls.length = 0

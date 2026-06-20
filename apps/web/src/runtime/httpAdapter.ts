@@ -12,6 +12,7 @@ import {
   buildViewStreamUrl,
   buildOAuthRedirectUri,
   closeRuntimeSession,
+  closeRuntimeSessionView,
   createAccount,
   createSmartMailbox,
   deleteAccount,
@@ -181,6 +182,11 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
       { descriptor },
       { sourceId: sourceScope(request.view) },
     )
+  },
+  closeRuntimeSessionView(request) {
+    return closeRuntimeSessionView(request.sessionId, request.viewId, {
+      sourceId: request.sourceId,
+    })
   },
   subscribeRuntimeFrames(request, handlers) {
     const controller = new AbortController()
