@@ -41,7 +41,15 @@ fn main() -> Result<()> {
     profile("search", &out, &mut || {
         let _ = workloads::search(&seeded);
     })?;
+    profile("fts_search", &out, &mut || {
+        let _ = workloads::fts_search(&seeded);
+    })?;
     profile("mutate", &out, &mut || workloads::mutate(&seeded, 1))?;
+
+    let session = workloads::open_seeded(count);
+    profile("session_loop", &out, &mut || {
+        workloads::session_loop(&session, workloads::DEFAULT_SESSION_ROUNDS);
+    })?;
 
     Ok(())
 }
