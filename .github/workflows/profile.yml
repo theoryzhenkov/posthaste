@@ -1,0 +1,87 @@
+name: Profile
+
+# Performance profiling and regression gating for PostHaste's offline store hot
+# paths. The deterministic instruction-count gate runs on relevant PRs; the
+# heavier flamegraph / heap / timing artifacts are produced across machines on a
+# schedule and on demand. See crates/posthaste-bench/README.md for the model.
+
+on:
+  pull_request:
+    paths:
+      - "crates/posthaste-store/**"
+      - "crates/posthaste-domain/**"
+      - "crates/posthaste-bench/**"
+      - ".github/workflows/profile.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-gate:
+    # Callgrind instruction counts are deterministic, so this gate gives reliable
+    # pass/fail signal on shared runners. Compares the PR head against its base.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: profile-gate
+          cache-on-failure: true
+      - name: Install valgrind and linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind mold
+      - name: Install iai-callgrind-runner
+        run: cargo install iai-callgrind-runner --version 0.16.1
+      - name: Save baseline from PR base
+        run: |
+          git checkout --quiet ${{ github.event.pull_request.base.sha }}
+          cargo bench -p posthaste-bench --bench store_iai -- --save-baseline=base
+      - name: Gate PR head against baseline
+        run: |
+          git checkout --quiet ${{ github.event.pull_request.head.sha }}
+          cargo bench -p posthaste-bench --bench store_iai -- --baseline=base
+
+  artifacts:
+    # Flamegraphs, pprof protobufs, dhat heap profiles, and Criterion reports,
+    # produced on more than one machine class. Not run on PRs (slow).
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: profile-artifacts-${{ matrix.os }}
+          cache-on-failure: true
+      - name: Install linker (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold
+      - name: Capture flamegraphs and heap profiles
+        run: cargo run --release -p posthaste-bench --bin posthaste-profile -- --out target/profile/${{ matrix.os }}
+      - name: Run Criterion benchmarks
+        run: cargo bench -p posthaste-bench --bench store_criterion
+      - name: Upload profiling artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-${{ matrix.os }}-${{ github.run_id }}
+          path: |
+            target/profile/${{ matrix.os }}/**
+            target/criterion/**
+          if-no-files-found: warn
+          retention-days: 30
