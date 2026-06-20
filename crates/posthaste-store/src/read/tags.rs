@@ -4,7 +4,7 @@ impl TagReadStore for DatabaseStore {
     fn list_tags(&self, account_id: &AccountId) -> Result<Vec<TagSummary>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT TRIM(mk.keyword) AS keyword,
                         COUNT(DISTINCT CASE WHEN m.is_read = 0 THEN m.id END) AS unread_messages,
                         COUNT(DISTINCT m.id) AS total_messages

@@ -9,7 +9,7 @@ pub(crate) fn query_message_detail_tx(
     message_id: &MessageId,
 ) -> Result<Option<MessageDetail>, StoreError> {
     let mut statement = tx
-        .prepare(
+        .prepare_cached(
             "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged

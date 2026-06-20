@@ -22,7 +22,7 @@ pub(crate) fn fetch_message_attachments(
     message_id: &MessageId,
 ) -> Result<Vec<MessageAttachment>, StoreError> {
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT id, blob_id, part_id, filename, mime_type, size, disposition, cid, is_inline
              FROM message_attachment
              WHERE account_id = ?1 AND message_id = ?2
@@ -45,7 +45,7 @@ pub(crate) fn fetch_message_attachments_tx(
     message_id: &MessageId,
 ) -> Result<Vec<MessageAttachment>, StoreError> {
     let mut statement = tx
-        .prepare(
+        .prepare_cached(
             "SELECT id, blob_id, part_id, filename, mime_type, size, disposition, cid, is_inline
              FROM message_attachment
              WHERE account_id = ?1 AND message_id = ?2

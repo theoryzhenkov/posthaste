@@ -7,7 +7,7 @@ impl ImapSyncStateStore for DatabaseStore {
     ) -> Result<Vec<ImapMailboxSyncState>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT mailbox_id, mailbox_name, uid_validity, highest_uid,
                         highest_modseq, updated_at
                  FROM imap_mailbox_sync_state
@@ -101,7 +101,7 @@ impl ImapMessageLocationStore for DatabaseStore {
     ) -> Result<Vec<ImapMessageLocation>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT message_id, mailbox_id, uid_validity, uid, modseq, updated_at
                  FROM imap_message_location
                  WHERE account_id = ?1 AND message_id = ?2
@@ -125,7 +125,7 @@ impl ImapMessageLocationStore for DatabaseStore {
     ) -> Result<Vec<ImapMessageLocation>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT message_id, mailbox_id, uid_validity, uid, modseq, updated_at
                  FROM imap_message_location
                  WHERE account_id = ?1 AND mailbox_id = ?2
