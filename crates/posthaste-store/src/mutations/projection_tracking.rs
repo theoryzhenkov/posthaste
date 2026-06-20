@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 pub(crate) fn track_applied_message_projection_inputs(
     affected: &mut ProjectionInputs,
@@ -98,7 +99,7 @@ pub(crate) fn delete_message_and_track_projection_inputs(
 ) -> Result<(), StoreError> {
     let prior_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     let thread_id = tx
-        .query_row(
+        .query_row_cached(
             "SELECT thread_id FROM message WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
             |row| row.get::<_, String>(0),
@@ -107,7 +108,7 @@ pub(crate) fn delete_message_and_track_projection_inputs(
         .map_err(sql_to_store_error)?
         .map(ThreadId);
     let conversation_id = tx
-        .query_row(
+        .query_row_cached(
             "SELECT conversation_id FROM message WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
             |row| row.get::<_, Option<String>>(0),
@@ -138,7 +139,7 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
 ) -> Result<(), StoreError> {
     let before = fetch_message_before_apply_tx(tx, account_id, &location.message_id)?;
     let deleted = tx
-        .execute(
+        .execute_cached(
             "DELETE FROM imap_message_location
              WHERE account_id = ?1
                AND message_id = ?2
@@ -158,7 +159,7 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
         return Ok(());
     }
 
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_mailbox
          WHERE account_id = ?1 AND message_id = ?2 AND mailbox_id = ?3",
         params![

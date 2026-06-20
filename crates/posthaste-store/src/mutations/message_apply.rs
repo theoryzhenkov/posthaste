@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 pub(crate) fn effective_mailbox_role_tx(
     tx: &Transaction<'_>,
@@ -7,7 +8,7 @@ pub(crate) fn effective_mailbox_role_tx(
     discovered_role: Option<&str>,
 ) -> Result<Option<String>, StoreError> {
     let override_role = tx
-        .query_row(
+        .query_row_cached(
             "SELECT role FROM mailbox_role_override
              WHERE account_id = ?1 AND mailbox_id = ?2",
             params![account_id.as_str(), mailbox_id.as_str()],
@@ -48,7 +49,7 @@ pub(crate) fn fetch_message_before_apply_tx(
     let mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     let keywords = fetch_keywords_tx(tx, account_id, message_id)?;
     let conversation_id = tx
-        .query_row(
+        .query_row_cached(
             "SELECT conversation_id FROM message WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
             |row| row.get::<_, Option<String>>(0),
@@ -58,7 +59,7 @@ pub(crate) fn fetch_message_before_apply_tx(
         .flatten()
         .map(ConversationId);
     let existed = tx
-        .query_row(
+        .query_row_cached(
             "SELECT 1 FROM message WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), message_id.as_str()],
             |_row| Ok(()),
@@ -81,7 +82,7 @@ pub(crate) fn upsert_message_record_tx(
     message: &posthaste_domain::MessageRecord,
     conversation_id: &ConversationId,
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO message (
             account_id, id, thread_id, conversation_id, remote_blob_id, subject,
             normalized_subject, from_name, from_email, to_json, preview, received_at,
@@ -141,12 +142,12 @@ pub(crate) fn replace_message_conversation_tx(
     message_id: &MessageId,
     conversation_id: &ConversationId,
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM conversation_message WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO conversation_message (conversation_id, account_id, message_id)
          VALUES (?1, ?2, ?3)",
         params![
@@ -165,13 +166,13 @@ pub(crate) fn replace_message_mailboxes_tx(
     message_id: &MessageId,
     mailbox_ids: &[MailboxId],
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_mailbox WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
     for mailbox_id in mailbox_ids {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO message_mailbox (account_id, message_id, mailbox_id)
              VALUES (?1, ?2, ?3)",
             params![
@@ -191,13 +192,13 @@ pub(crate) fn replace_message_keywords_tx(
     message_id: &MessageId,
     keywords: &[String],
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_keyword WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
     for keyword in keywords {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO message_keyword (account_id, message_id, keyword)
              VALUES (?1, ?2, ?3)",
             params![account_id.as_str(), message_id.as_str(), keyword],

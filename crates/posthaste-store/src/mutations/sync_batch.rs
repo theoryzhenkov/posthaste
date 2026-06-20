@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 pub(crate) fn stage_sync_bodies(
     store: &DatabaseStore,
@@ -155,7 +156,7 @@ pub(crate) fn apply_sync_batch_tx(
     for mailbox in &batch.mailboxes {
         let effective_role =
             effective_mailbox_role_tx(tx, account_id, &mailbox.id, mailbox.role.as_deref())?;
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO mailbox (account_id, id, name, role, unread_emails, total_emails)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(account_id, id) DO UPDATE SET
@@ -194,54 +195,68 @@ pub(crate) fn apply_sync_batch_tx(
         )?;
     }
 
-    for location in &batch.imap_message_locations {
-        tx.execute(
-            "INSERT INTO imap_message_location (
-                account_id, message_id, mailbox_id, uid_validity, uid, modseq, updated_at
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(account_id, message_id, mailbox_id) DO UPDATE SET
-                uid_validity = excluded.uid_validity,
-                uid = excluded.uid,
-                modseq = excluded.modseq,
-                updated_at = excluded.updated_at",
-            params![
-                account_id.as_str(),
-                location.message_id.as_str(),
-                location.mailbox_id.as_str(),
-                location.uid_validity.0,
-                location.uid.0,
-                location.modseq.map(|modseq| modseq.0.to_string()),
-                location.updated_at,
-            ],
-        )
-        .map_err(sql_to_store_error)?;
+    // Pure single-statement loops over the whole batch: hoist one prepared
+    // statement and reuse it, the canonical rusqlite bulk-write idiom. (The
+    // per-message helpers stay on `prepare_cached` since they are called once
+    // per message with tiny inner loops.)
+    {
+        let mut insert_location = tx
+            .prepare(
+                "INSERT INTO imap_message_location (
+                    account_id, message_id, mailbox_id, uid_validity, uid, modseq, updated_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(account_id, message_id, mailbox_id) DO UPDATE SET
+                    uid_validity = excluded.uid_validity,
+                    uid = excluded.uid,
+                    modseq = excluded.modseq,
+                    updated_at = excluded.updated_at",
+            )
+            .map_err(sql_to_store_error)?;
+        for location in &batch.imap_message_locations {
+            insert_location
+                .execute(params![
+                    account_id.as_str(),
+                    location.message_id.as_str(),
+                    location.mailbox_id.as_str(),
+                    location.uid_validity.0,
+                    location.uid.0,
+                    location.modseq.map(|modseq| modseq.0.to_string()),
+                    location.updated_at,
+                ])
+                .map_err(sql_to_store_error)?;
+        }
     }
 
-    for state in &batch.imap_mailbox_states {
-        tx.execute(
-            "INSERT INTO imap_mailbox_sync_state (
-                account_id, mailbox_id, mailbox_name, uid_validity,
-                highest_uid, highest_modseq, updated_at
-             )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
-                mailbox_name = excluded.mailbox_name,
-                uid_validity = excluded.uid_validity,
-                highest_uid = excluded.highest_uid,
-                highest_modseq = excluded.highest_modseq,
-                updated_at = excluded.updated_at",
-            params![
-                account_id.as_str(),
-                state.mailbox_id.as_str(),
-                state.mailbox_name,
-                state.uid_validity.0,
-                state.highest_uid.map(|uid| uid.0),
-                state.highest_modseq.map(|modseq| modseq.0.to_string()),
-                state.updated_at,
-            ],
-        )
-        .map_err(sql_to_store_error)?;
+    {
+        let mut insert_state = tx
+            .prepare(
+                "INSERT INTO imap_mailbox_sync_state (
+                    account_id, mailbox_id, mailbox_name, uid_validity,
+                    highest_uid, highest_modseq, updated_at
+                 )
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(account_id, mailbox_id) DO UPDATE SET
+                    mailbox_name = excluded.mailbox_name,
+                    uid_validity = excluded.uid_validity,
+                    highest_uid = excluded.highest_uid,
+                    highest_modseq = excluded.highest_modseq,
+                    updated_at = excluded.updated_at",
+            )
+            .map_err(sql_to_store_error)?;
+        for state in &batch.imap_mailbox_states {
+            insert_state
+                .execute(params![
+                    account_id.as_str(),
+                    state.mailbox_id.as_str(),
+                    state.mailbox_name,
+                    state.uid_validity.0,
+                    state.highest_uid.map(|uid| uid.0),
+                    state.highest_modseq.map(|modseq| modseq.0.to_string()),
+                    state.updated_at,
+                ])
+                .map_err(sql_to_store_error)?;
+        }
     }
 
     for thread_id in affected.threads {
