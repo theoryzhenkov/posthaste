@@ -59,7 +59,7 @@ pub(crate) async fn send_message(
         email_obj.in_reply_to([in_reply_to.as_str()]);
     }
     if let Some(references) = &request_data.references {
-        email_obj.references(references.split_whitespace().collect::<Vec<_>>());
+        email_obj.references(references.split_whitespace());
     }
     for attachment in uploaded_attachments {
         email_obj.attachment(

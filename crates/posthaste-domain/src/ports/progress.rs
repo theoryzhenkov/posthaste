@@ -24,9 +24,9 @@ impl SyncProgressReporter {
     }
 
     pub fn report(&self, mut progress: SyncProgress) {
-        progress.sync_id = self.sync_id.clone();
+        progress.sync_id.clone_from(&self.sync_id);
         progress.trigger = self.trigger.clone();
-        progress.started_at = self.started_at.clone();
+        progress.started_at.clone_from(&self.started_at);
         (self.callback)(progress);
     }
 }

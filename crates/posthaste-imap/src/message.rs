@@ -157,7 +157,7 @@ pub fn imap_flag_keywords(flags: &[String]) -> Vec<String> {
             if let Some(keyword) = imap_system_flag_keyword(flag) {
                 Some(keyword.as_str().to_string())
             } else if !flag.starts_with('\\') {
-                Some(flag.to_string())
+                Some(flag.clone())
             } else {
                 None
             }

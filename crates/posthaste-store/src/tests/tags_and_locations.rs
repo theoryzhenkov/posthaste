@@ -20,7 +20,7 @@ fn list_tags_returns_user_keywords_with_counts() -> Result<(), StoreError> {
                 keywords: vec![
                     "newsletter".to_string(),
                     "work".to_string(),
-                    "".to_string(),
+                    String::new(),
                     "   ".to_string(),
                     "$custom".to_string(),
                 ],

@@ -16,3 +16,6 @@ posthaste-observability = { path = "../posthaste-observability" }
 pulldown-cmark = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[lints]
+workspace = true

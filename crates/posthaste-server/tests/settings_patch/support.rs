@@ -89,7 +89,7 @@ impl SettingsHarness {
                     store.clone(),
                     secret_store.clone(),
                     event_sender.clone(),
-                    supervisor.clone(),
+                    supervisor,
                 ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),

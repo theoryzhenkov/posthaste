@@ -25,13 +25,13 @@ fn runtime_tuning_defaults_match_current_backend_constants() {
 #[test]
 fn runtime_tuning_partial_toml_uses_defaults_for_missing_values() {
     let parsed: DaemonRuntimeTuning = toml::from_str(
-        r#"
+        r"
         [supervisor]
         command_channel_buffer_size = 64
 
         [push]
         resilient_fallback_threshold = 5
-        "#,
+        ",
     )
     .unwrap();
 

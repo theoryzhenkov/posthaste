@@ -103,7 +103,7 @@ fn mailbox_status_requires_matching_modseq_when_available() {
     };
     let changed = ImapMailboxStatus {
         highest_modseq: Some(posthaste_domain::ImapModSeq(101)),
-        ..unchanged.clone()
+        ..unchanged
     };
 
     assert!(mailbox_status_proves_unchanged(&state, 5, &unchanged));

@@ -116,7 +116,7 @@ impl Harness {
                 service.clone(),
                 store.clone(),
                 secret_store.clone(),
-                event_sender.clone(),
+                event_sender,
                 supervisor.clone(),
             ),
             account_logo_root: state_root.join("account-assets/logos"),
