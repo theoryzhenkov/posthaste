@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
+fn set_keywords_emits_message_updated_keyword_change() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -16,7 +16,7 @@ fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
     let event_count_before = store
         .list_events(&EventFilter {
             account_id: Some(account.clone()),
-            topic: Some(EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED.to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: None,
             after_seq: None,
         })?
@@ -33,7 +33,8 @@ fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
     )?;
 
     assert_eq!(result.events.len(), 1);
-    assert_eq!(result.events[0].topic, EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED);
+    assert_eq!(result.events[0].topic, EVENT_TOPIC_MESSAGE_UPDATED);
+    assert_eq!(result.events[0].payload["changes"]["keywords"], true);
     assert_eq!(
         result.events[0].payload["assertion"]["after"]["id"],
         message_id.as_str()
@@ -56,7 +57,7 @@ fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
         store
             .list_events(&EventFilter {
                 account_id: Some(account),
-                topic: Some(EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED.to_string()),
+                topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
                 mailbox_id: None,
                 after_seq: None,
             })?
@@ -67,7 +68,7 @@ fn set_keywords_emits_keywords_changed_event_topic() -> Result<(), StoreError> {
 }
 
 #[test]
-fn replace_mailboxes_emits_mailboxes_changed_event_topic() -> Result<(), StoreError> {
+fn replace_mailboxes_emits_message_updated_mailbox_change() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -82,7 +83,7 @@ fn replace_mailboxes_emits_mailboxes_changed_event_topic() -> Result<(), StoreEr
     let event_count_before = store
         .list_events(&EventFilter {
             account_id: Some(account.clone()),
-            topic: Some(EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED.to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: None,
             after_seq: None,
         })?
@@ -97,15 +98,19 @@ fn replace_mailboxes_emits_mailboxes_changed_event_topic() -> Result<(), StoreEr
         },
     )?;
 
-    assert!(result
-        .events
-        .iter()
-        .any(|event| event.topic == EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED));
+    assert_eq!(result.events.len(), 1);
+    assert_eq!(result.events[0].topic, EVENT_TOPIC_MESSAGE_UPDATED);
+    assert_eq!(result.events[0].payload["changes"]["mailboxes"], true);
+    assert_eq!(result.events[0].payload["changes"]["arrived"], true);
+    assert_eq!(
+        result.events[0].payload["arrivedMailboxIds"],
+        serde_json::json!(["archive"])
+    );
     assert_eq!(
         store
             .list_events(&EventFilter {
                 account_id: Some(account),
-                topic: Some(EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED.to_string()),
+                topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
                 mailbox_id: None,
                 after_seq: None,
             })?

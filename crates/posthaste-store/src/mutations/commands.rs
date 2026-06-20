@@ -45,8 +45,7 @@ pub(crate) fn apply_message_body_tx(
 }
 
 /// Adds and removes keywords on a message, updates the `is_read`/`is_flagged`
-/// denormalized columns, refreshes mailbox counters, and emits a
-/// `EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED` event.
+/// denormalized columns, and emits a coalesced `message.updated` metadata event.
 pub(crate) fn set_keywords_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -94,11 +93,12 @@ pub(crate) fn set_keywords_tx(
     let event = insert_event_tx(
         tx,
         account_id,
-        EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
+        EVENT_TOPIC_MESSAGE_UPDATED,
         mailboxes.first(),
         Some(message_id),
         json!({
             "messageId": message_id.as_str(),
+            "changes": { "keywords": true },
             "keywords": keywords.iter().cloned().collect::<Vec<_>>(),
             "assertion": assertion,
         }),
@@ -112,9 +112,8 @@ pub(crate) fn set_keywords_tx(
     })
 }
 
-/// Replaces a message's mailbox memberships. Refreshes counters for both old
-/// and new mailboxes, emits `EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED` and
-/// `message.arrived` events for newly added mailboxes.
+/// Replaces a message's mailbox memberships and emits one coalesced
+/// `message.updated` metadata event.
 pub(crate) fn replace_mailboxes_tx(
     tx: &Transaction<'_>,
     account_id: &AccountId,
@@ -143,28 +142,26 @@ pub(crate) fn replace_mailboxes_tx(
     let previous_set: BTreeSet<_> = previous_mailboxes.iter().cloned().collect();
     let current_set: BTreeSet<_> = command.mailbox_ids.iter().cloned().collect();
 
-    let mut events = Vec::new();
-    events.push(insert_event_tx(
+    let arrived_mailbox_ids = current_set
+        .difference(&previous_set)
+        .map(MailboxId::as_str)
+        .collect::<Vec<_>>();
+    let event = insert_event_tx(
         tx,
         account_id,
-        EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
+        EVENT_TOPIC_MESSAGE_UPDATED,
         command.mailbox_ids.first(),
         Some(message_id),
         json!({
             "messageId": message_id.as_str(),
+            "changes": {
+                "mailboxes": true,
+                "arrived": !arrived_mailbox_ids.is_empty(),
+            },
             "mailboxIds": command.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+            "arrivedMailboxIds": arrived_mailbox_ids,
         }),
-    )?);
-    for mailbox_id in current_set.difference(&previous_set) {
-        events.push(insert_event_tx(
-            tx,
-            account_id,
-            EVENT_TOPIC_MESSAGE_ARRIVED,
-            Some(mailbox_id),
-            Some(message_id),
-            json!({ "messageId": message_id.as_str(), "mailboxId": mailbox_id.as_str() }),
-        )?);
-    }
+    )?;
 
     if let Some(cursor) = cursor {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
@@ -173,7 +170,7 @@ pub(crate) fn replace_mailboxes_tx(
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     Ok(CommandResult {
         detail: Some(detail),
-        events,
+        events: vec![event],
     })
 }
 

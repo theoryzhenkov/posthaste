@@ -17,75 +17,79 @@ pub(crate) fn track_applied_message_projection_inputs(
 }
 
 pub(crate) fn append_message_diff_events_tx(
-    tx: &Transaction<'_>,
-    account_id: &AccountId,
     message: &posthaste_domain::MessageRecord,
     conversation_id: &ConversationId,
     before: &MessageBeforeApply,
-    events: &mut Vec<DomainEvent>,
+    events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
-    events.push(insert_event_tx(
-        tx,
-        account_id,
+    let diff = MessageEventDiff::new(message, conversation_id, before);
+
+    events.record(
         EVENT_TOPIC_MESSAGE_UPDATED,
-        message.mailbox_ids.first(),
+        diff.primary_mailbox(),
         Some(&message.id),
-        json!({
-            "messageId": message.id.as_str(),
-            "sourceThreadId": message.source_thread_id.as_str(),
-            "conversationId": conversation_id.as_str(),
-            "created": !before.existed
-        }),
-    )?);
-
-    if !before.existed || before.keywords != message.keywords {
-        let assertion = query_message_detail_tx(tx, account_id, &message.id)?
-            .map(|detail| posthaste_domain::MessageChangeAssertion::after(detail.summary));
-        events.push(insert_event_tx(
-            tx,
-            account_id,
-            EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
-            message.mailbox_ids.first(),
-            Some(&message.id),
-            json!({
-                "messageId": message.id.as_str(),
-                "keywords": message.keywords,
-                "assertion": assertion,
-            }),
-        )?);
-    }
-
-    let current_mailboxes: BTreeSet<_> = message.mailbox_ids.iter().cloned().collect();
-    let previous_mailboxes: BTreeSet<_> = before.mailboxes.iter().cloned().collect();
-    if !before.existed || current_mailboxes != previous_mailboxes {
-        events.push(insert_event_tx(
-            tx,
-            account_id,
-            EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
-            message.mailbox_ids.first(),
-            Some(&message.id),
-            json!({
-                "messageId": message.id.as_str(),
-                "mailboxIds": message.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
-            }),
-        )?);
-    }
-
-    for mailbox_id in current_mailboxes.difference(&previous_mailboxes) {
-        events.push(insert_event_tx(
-            tx,
-            account_id,
-            EVENT_TOPIC_MESSAGE_ARRIVED,
-            Some(mailbox_id),
-            Some(&message.id),
-            json!({
-                "messageId": message.id.as_str(),
-                "mailboxId": mailbox_id.as_str(),
-            }),
-        )?);
-    }
+        diff.message_updated_payload(),
+    )?;
 
     Ok(())
+}
+
+struct MessageEventDiff<'a> {
+    message: &'a posthaste_domain::MessageRecord,
+    conversation_id: &'a ConversationId,
+    before: &'a MessageBeforeApply,
+    current_mailboxes: BTreeSet<MailboxId>,
+    previous_mailboxes: BTreeSet<MailboxId>,
+}
+
+impl<'a> MessageEventDiff<'a> {
+    fn new(
+        message: &'a posthaste_domain::MessageRecord,
+        conversation_id: &'a ConversationId,
+        before: &'a MessageBeforeApply,
+    ) -> Self {
+        Self {
+            message,
+            conversation_id,
+            before,
+            current_mailboxes: message.mailbox_ids.iter().cloned().collect(),
+            previous_mailboxes: before.mailboxes.iter().cloned().collect(),
+        }
+    }
+
+    fn primary_mailbox(&self) -> Option<&MailboxId> {
+        self.message.mailbox_ids.first()
+    }
+
+    fn message_updated_payload(&self) -> Value {
+        let arrived_mailbox_ids = self
+            .current_mailboxes
+            .difference(&self.previous_mailboxes)
+            .map(MailboxId::as_str)
+            .collect::<Vec<_>>();
+        json!({
+            "messageId": self.message.id.as_str(),
+            "sourceThreadId": self.message.source_thread_id.as_str(),
+            "conversationId": self.conversation_id.as_str(),
+            "created": !self.before.existed,
+            "changes": {
+                "keywords": self.keywords_changed(),
+                "mailboxes": self.mailboxes_changed(),
+                "arrived": !arrived_mailbox_ids.is_empty(),
+            },
+            "keywords": self.message.keywords,
+            "mailboxIds": self.message.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+            "arrivedMailboxIds": arrived_mailbox_ids,
+        })
+    }
+
+    fn keywords_changed(&self) -> bool {
+        !self.before.existed || self.before.keywords != self.message.keywords
+    }
+
+    fn mailboxes_changed(&self) -> bool {
+        !self.before.existed || self.current_mailboxes != self.previous_mailboxes
+    }
 }
 
 pub(crate) fn delete_message_and_track_projection_inputs(
@@ -127,7 +131,7 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     location: &ImapMessageLocationKey,
-    events: &mut Vec<DomainEvent>,
+    events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
     let before = fetch_message_before_apply_tx(tx, account_id, &location.message_id)?;
     let deleted = tx
@@ -169,16 +173,16 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
         return Ok(());
     }
 
-    events.push(insert_event_tx(
-        tx,
-        account_id,
-        EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
-        Some(&location.mailbox_id),
+    events.record(
+        EVENT_TOPIC_MESSAGE_UPDATED,
+        current_mailboxes.first(),
         Some(&location.message_id),
         json!({
             "messageId": location.message_id.as_str(),
+            "changes": { "mailboxes": true },
             "mailboxIds": current_mailboxes.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+            "removedMailboxId": location.mailbox_id.as_str(),
         }),
-    )?);
+    )?;
     Ok(())
 }

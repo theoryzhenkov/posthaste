@@ -15,7 +15,7 @@ use posthaste_domain::{
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection,
     SyncBatch, SyncCursor, SyncObject, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_MESSAGE_ARRIVED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
@@ -1439,7 +1439,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .expect("authority runtime should build");
     let filter = EventFilter {
         account_id: Some(AccountId::from("primary")),
-        topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
+        topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
         mailbox_id: Some(MailboxId::from("inbox")),
         after_seq: Some(0),
     };
@@ -1448,7 +1448,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .store
         .append_event(
             &AccountId::from("primary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("inbox")),
             None,
             serde_json::json!({"kind": "replayed"}),
@@ -1459,7 +1459,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .store
         .append_event(
             &AccountId::from("secondary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("inbox")),
             None,
             serde_json::json!({"kind": "ignored"}),
@@ -1480,7 +1480,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .store
         .append_event(
             &AccountId::from("primary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("archive")),
             None,
             serde_json::json!({"kind": "ignored-live"}),
@@ -1496,7 +1496,7 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .store
         .append_event(
             &AccountId::from("primary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("inbox")),
             None,
             serde_json::json!({"kind": "live"}),
@@ -1549,7 +1549,7 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
         .store
         .append_event(
             &AccountId::from("secondary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("inbox")),
             None,
             serde_json::json!({"kind": "ignored"}),
@@ -1565,7 +1565,7 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
         .store
         .append_event(
             &AccountId::from("primary"),
-            EVENT_TOPIC_MESSAGE_ARRIVED,
+            EVENT_TOPIC_MESSAGE_UPDATED,
             Some(&MailboxId::from("inbox")),
             None,
             serde_json::json!({"kind": "live"}),
@@ -1590,7 +1590,7 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
         panic!("expected notification frame");
     };
     assert_eq!(session_seq.get(), 1);
-    assert_eq!(kind, EVENT_TOPIC_MESSAGE_ARRIVED);
+    assert_eq!(kind, EVENT_TOPIC_MESSAGE_UPDATED);
     assert_eq!(payload["seq"], matching.seq);
     assert_eq!(payload["accountId"], "primary");
     assert_eq!(payload["payload"]["kind"], "live");

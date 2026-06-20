@@ -111,25 +111,24 @@ fn arrival_event_only_emits_for_new_mailbox_membership() -> Result<(), StoreErro
 
     let first_arrivals: Vec<_> = first_events
         .iter()
-        .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_ARRIVED)
+        .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .filter(|event| event.payload["changes"]["arrived"] == true)
         .collect();
     let second_arrivals: Vec<_> = second_events
         .iter()
-        .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_ARRIVED)
+        .filter(|event| event.topic == EVENT_TOPIC_MESSAGE_UPDATED)
+        .filter(|event| event.payload["changes"]["arrived"] == true)
         .collect();
 
     assert_eq!(first_arrivals.len(), 1);
     assert_eq!(
-        first_arrivals[0].mailbox_id.as_ref().map(MailboxId::as_str),
-        Some("inbox")
+        first_arrivals[0].payload["arrivedMailboxIds"],
+        serde_json::json!(["inbox"])
     );
     assert_eq!(second_arrivals.len(), 1);
     assert_eq!(
-        second_arrivals[0]
-            .mailbox_id
-            .as_ref()
-            .map(MailboxId::as_str),
-        Some("archive")
+        second_arrivals[0].payload["arrivedMailboxIds"],
+        serde_json::json!(["archive"])
     );
     Ok(())
 }

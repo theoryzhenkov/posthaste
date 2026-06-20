@@ -136,11 +136,7 @@ fn gmail_label_observation_removes_stale_inbox_and_starred_state() {
         },
         vec![header],
         Vec::new(),
-        vec![
-            inbox_location,
-            starred_location,
-            all_mail_location,
-        ],
+        vec![inbox_location, starred_location, all_mail_location],
         Vec::new(),
         "2026-04-25T00:01:00Z".to_string(),
     );

@@ -107,34 +107,37 @@ const eventHandlers = {
   [EVENT_TOPICS.MailboxUpdated]: (queryClient, event) => {
     invalidateMailboxReadModels(queryClient, event.accountId)
   },
-  [EVENT_TOPICS.MessageArrived]: (queryClient, event) => {
-    invalidateMailboxReadModels(queryClient, event.accountId)
-    invalidateMailNavigationBootstrapReadModels(queryClient)
-  },
-  [EVENT_TOPICS.MessageKeywordsChanged]: (queryClient, event) => {
-    invalidateMailboxReadModels(queryClient, event.accountId)
-    invalidateMailNavigationBootstrapReadModels(queryClient)
-
-    const target = eventTarget(event)
-    const keywords = event.payload.keywords
-    const patched =
-      target && isStringArray(keywords)
-        ? applyKeywordEventPatch(queryClient, target, keywords)
-        : false
-    if (!patched) {
-      invalidateTargetMessageReadModels(queryClient, event)
-    }
-  },
   [EVENT_TOPICS.MessageBodyCached]: (queryClient, event) => {
-    invalidateTargetMessageReadModels(queryClient, event)
-  },
-  [EVENT_TOPICS.MessageMailboxesChanged]: (queryClient, event) => {
-    invalidateMailboxReadModels(queryClient, event.accountId)
-    invalidateMailNavigationBootstrapReadModels(queryClient)
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {
     invalidateMessageListReadModels(queryClient)
+
+    if (payloadChangeFlag(event, 'arrived')) {
+      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
+    }
+
+    if (payloadChangeFlag(event, 'mailboxes')) {
+      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
+    }
+
+    if (payloadChangeFlag(event, 'keywords')) {
+      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
+
+      const target = eventTarget(event)
+      const keywords = event.payload.keywords
+      const patched =
+        target && isStringArray(keywords)
+          ? applyKeywordEventPatch(queryClient, target, keywords)
+          : false
+      if (patched) {
+        return
+      }
+    }
+
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.PushConnected]: (queryClient, event) => {
@@ -144,6 +147,16 @@ const eventHandlers = {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
   },
 } satisfies Record<DomainEventTopic, EventHandler>
+
+function payloadChangeFlag(event: DomainEvent, key: string): boolean {
+  const changes = event.payload.changes
+  return (
+    typeof changes === 'object' &&
+    changes !== null &&
+    key in changes &&
+    (changes as Record<string, unknown>)[key] === true
+  )
+}
 
 export function applyDomainEvent(queryClient: QueryClient, event: DomainEvent) {
   if (!isDomainEventTopic(event.topic)) {

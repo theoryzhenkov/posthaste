@@ -28,7 +28,8 @@ pub(crate) fn apply_sync_batch_tx(
     batch: &SyncBatch,
     staged_bodies: &[Option<RawMessageRef>],
 ) -> Result<Vec<DomainEvent>, StoreError> {
-    let mut events = Vec::new();
+    let mut events =
+        EventRecorder::with_capacity(tx, account_id, estimate_sync_event_count(batch))?;
     let mut affected = ProjectionInputs::default();
 
     if batch.replace_all_mailboxes {
@@ -51,14 +52,12 @@ pub(crate) fn apply_sync_batch_tx(
 
         for mailbox_id in local_mailbox_ids.difference(&remote_mailbox_ids) {
             delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, &mut events)?;
-            events.push(insert_event_tx(
-                tx,
-                account_id,
+            events.record(
                 EVENT_TOPIC_MAILBOX_UPDATED,
                 Some(mailbox_id),
                 None,
                 json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
-            )?);
+            )?;
         }
     }
 
@@ -82,14 +81,12 @@ pub(crate) fn apply_sync_batch_tx(
 
         for message_id in local_message_ids.difference(&remote_message_ids) {
             delete_message_and_track_projection_inputs(tx, account_id, message_id, &mut affected)?;
-            events.push(insert_event_tx(
-                tx,
-                account_id,
+            events.record(
                 EVENT_TOPIC_MESSAGE_UPDATED,
                 None,
                 Some(message_id),
                 json!({ "messageId": message_id.as_str(), "deleted": true }),
-            )?);
+            )?;
         }
 
         prune_stale_imap_message_locations_for_snapshot_tx(
@@ -101,14 +98,12 @@ pub(crate) fn apply_sync_batch_tx(
 
     for mailbox_id in &batch.deleted_mailbox_ids {
         delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, &mut events)?;
-        events.push(insert_event_tx(
-            tx,
-            account_id,
+        events.record(
             EVENT_TOPIC_MAILBOX_UPDATED,
             Some(mailbox_id),
             None,
             json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
-        )?);
+        )?;
     }
 
     let deleted_message_ids = batch
@@ -130,14 +125,12 @@ pub(crate) fn apply_sync_batch_tx(
 
     for message_id in &batch.deleted_message_ids {
         delete_message_and_track_projection_inputs(tx, account_id, message_id, &mut affected)?;
-        events.push(insert_event_tx(
-            tx,
-            account_id,
+        events.record(
             EVENT_TOPIC_MESSAGE_UPDATED,
             None,
             Some(message_id),
             json!({ "messageId": message_id.as_str(), "deleted": true }),
-        )?);
+        )?;
     }
 
     for mailbox in &batch.mailboxes {
@@ -157,14 +150,12 @@ pub(crate) fn apply_sync_batch_tx(
             ],
         )
         .map_err(sql_to_store_error)?;
-        events.push(insert_event_tx(
-            tx,
-            account_id,
+        events.record(
             EVENT_TOPIC_MAILBOX_UPDATED,
             Some(&mailbox.id),
             None,
             json!({ "mailboxId": mailbox.id.as_str() }),
-        )?);
+        )?;
     }
 
     for (message, raw_ref) in batch.messages.iter().zip(staged_bodies.iter()) {
@@ -252,5 +243,23 @@ pub(crate) fn apply_sync_batch_tx(
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
     }
 
-    Ok(events)
+    Ok(events.into_events())
+}
+
+fn estimate_sync_event_count(batch: &SyncBatch) -> usize {
+    batch.mailboxes.len()
+        + batch.deleted_mailbox_ids.len()
+        + batch.deleted_message_ids.len()
+        + batch.deleted_imap_message_locations.len()
+        + if batch.replace_all_mailboxes {
+            batch.mailboxes.len()
+        } else {
+            0
+        }
+        + if batch.replace_all_messages {
+            batch.messages.len()
+        } else {
+            0
+        }
+        + batch.messages.len() * 4
 }
