@@ -266,4 +266,28 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON cache_message_signal (account_id, dirty_at);
             CREATE INDEX IF NOT EXISTS idx_cache_rescore_queue
                 ON cache_rescore_queue (account_id, queued_at);
+
+            -- Full-text search index over message header fields. External-content
+            -- FTS5 table linked to message.rowid; kept in sync by triggers so the
+            -- write path needs no changes. (Prototype: body_text lives in
+            -- message_body and is not yet indexed here.)
+            CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+                subject, from_name, from_email, preview,
+                content='message', content_rowid='rowid',
+                tokenize='porter unicode61 remove_diacritics 2'
+            );
+            CREATE TRIGGER IF NOT EXISTS message_fts_ai AFTER INSERT ON message BEGIN
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview)
+                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview);
+            END;
+            CREATE TRIGGER IF NOT EXISTS message_fts_ad AFTER DELETE ON message BEGIN
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview)
+                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview);
+            END;
+            CREATE TRIGGER IF NOT EXISTS message_fts_au AFTER UPDATE ON message BEGIN
+                INSERT INTO message_fts(message_fts, rowid, subject, from_name, from_email, preview)
+                VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_email, old.preview);
+                INSERT INTO message_fts(rowid, subject, from_name, from_email, preview)
+                VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview);
+            END;
             ";

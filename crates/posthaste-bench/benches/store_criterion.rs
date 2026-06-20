@@ -27,6 +27,9 @@ fn store_benches(c: &mut Criterion) {
         b.iter(|| workloads::list_inbox(&seeded))
     });
     c.bench_function("store/search", |b| b.iter(|| workloads::search(&seeded)));
+    c.bench_function("store/fts_search", |b| {
+        b.iter(|| workloads::fts_search(&seeded))
+    });
     c.bench_function("store/mutate", |b| {
         let mut index = 0usize;
         b.iter(|| {
