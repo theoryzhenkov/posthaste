@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 pub(crate) fn upsert_body_tx(
     tx: &Transaction<'_>,
@@ -8,7 +9,7 @@ pub(crate) fn upsert_body_tx(
     body_text: Option<&str>,
     raw_ref: Option<&RawMessageRef>,
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO message_body (
             account_id, message_id, body_html, body_text, raw_path, raw_sha256, raw_size, raw_mime_type, fetched_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -43,14 +44,14 @@ pub(crate) fn replace_attachments_tx(
     message_id: &MessageId,
     attachments: &[MessageAttachment],
 ) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM message_attachment WHERE account_id = ?1 AND message_id = ?2",
         params![account_id.as_str(), message_id.as_str()],
     )
     .map_err(sql_to_store_error)?;
 
     for attachment in attachments {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO message_attachment (
                 account_id, message_id, id, blob_id, part_id, filename, mime_type, size,
                 disposition, cid, is_inline

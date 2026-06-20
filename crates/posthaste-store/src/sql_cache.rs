@@ -6,8 +6,8 @@
 //! SQL on every iteration. The cache is keyed by SQL text and lives on the
 //! underlying `Connection`, so it persists across transactions and batches.
 //!
-//! Only meaningful on the persistent write connection; read queries open a
-//! fresh connection per call and do not benefit.
+//! Most important on the persistent write connection. Pooled read connections
+//! also benefit when stable read queries use `prepare_cached`.
 
 use rusqlite::{Params, Row, Transaction};
 

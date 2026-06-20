@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 use std::ops::Deref;
 
 const MAX_IDLE_READ_CONNECTIONS: usize = 4;
@@ -166,7 +167,7 @@ impl DatabaseStore {
         account_id: &AccountId,
         cursor: &SyncCursor,
     ) -> Result<(), StoreError> {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO sync_cursor (account_id, object_type, state, updated_at)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(account_id, object_type) DO UPDATE SET
