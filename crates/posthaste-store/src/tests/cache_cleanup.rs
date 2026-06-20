@@ -130,12 +130,15 @@ fn deleted_mailbox_removes_memberships_and_imap_state() -> Result<(), StoreError
     assert!(store
         .list_events(&EventFilter {
             account_id: Some(account),
-            topic: Some(EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED.to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: None,
             after_seq: None,
         })?
         .iter()
-        .any(|event| event.message_id.as_ref() == Some(&message_id)));
+        .any(|event| {
+            event.message_id.as_ref() == Some(&message_id)
+                && event.payload["changes"]["mailboxes"] == true
+        }));
     Ok(())
 }
 

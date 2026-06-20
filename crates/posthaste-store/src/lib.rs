@@ -46,9 +46,8 @@ use posthaste_domain::{
     SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
     SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore, SourceProjectionStore,
     StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore, SyncWriteStore, TagReadStore,
-    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_ARRIVED,
-    EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
-    EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED, EVENT_TOPIC_MESSAGE_UPDATED,
+    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_observability::{events, ph_debug, ph_info};
 use rusqlite::types::Value as SqlValue;

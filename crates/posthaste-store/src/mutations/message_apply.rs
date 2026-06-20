@@ -26,7 +26,7 @@ pub(crate) fn apply_message_record_tx(
     message: &posthaste_domain::MessageRecord,
     raw_ref: Option<&RawMessageRef>,
     affected: &mut ProjectionInputs,
-    events: &mut Vec<DomainEvent>,
+    events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
     let before = fetch_message_before_apply_tx(tx, account_id, &message.id)?;
     let conversation_id = assign_conversation_id_tx(tx, account_id, message)?;
@@ -38,7 +38,7 @@ pub(crate) fn apply_message_record_tx(
     upsert_message_body_cache_tx(tx, account_id, message, raw_ref)?;
 
     track_applied_message_projection_inputs(affected, message, &conversation_id, &before);
-    append_message_diff_events_tx(tx, account_id, message, &conversation_id, &before, events)
+    append_message_diff_events_tx(message, &conversation_id, &before, events)
 }
 
 pub(crate) fn fetch_message_before_apply_tx(
