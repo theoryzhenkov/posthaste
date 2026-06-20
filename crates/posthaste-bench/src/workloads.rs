@@ -7,7 +7,8 @@
 //! fully synthetic and require no network or external services.
 
 use posthaste_domain::{
-    search, AccountId, MailboxId, MailboxRecord, MessageCommandStore, MessageId, MessageListStore,
+    search, AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid,
+    ImapUidValidity, MailboxId, MailboxRecord, MessageCommandStore, MessageId, MessageListStore,
     MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient, SetKeywordsCommand,
     SmartMailboxStore, SortDirection, SourceProjectionStore, SyncBatch, SyncCursor, SyncObject,
     SyncWriteStore, ThreadId,
@@ -19,6 +20,10 @@ use tempfile::TempDir;
 /// Criterion benches. Large enough that query/search/ingest costs dominate the
 /// per-iteration overhead, small enough to stay fast in CI.
 pub const DEFAULT_MESSAGE_COUNT: usize = 5_000;
+/// Number of UI/sync turns in the longer session workload.
+pub const DEFAULT_SESSION_ROUNDS: usize = 25;
+/// Messages touched by each synthetic incoming sync delta in the session loop.
+pub const DEFAULT_SESSION_DELTA_MESSAGES: usize = 40;
 
 const ACCOUNT: &str = "primary";
 const SUBJECT_WORDS: &[&str] = &[
@@ -217,4 +222,91 @@ pub fn mutate(fixture: &Fixture, index: usize) {
             },
         )
         .expect("set keywords");
+}
+
+/// Longer offline application loop: a user repeatedly opens an FTS-backed smart
+/// mailbox while incremental sync/mutation traffic arrives in the same session.
+///
+/// The workload keeps message ids bounded (it updates existing rows rather than
+/// growing the database forever), but exercises the combined hot paths that a
+/// real session interleaves: FTS lookup + summary hydration, inbox listing,
+/// keyword mutations, message upserts, and IMAP location/state writes.
+pub fn session_loop(fixture: &Fixture, rounds: usize) {
+    for round in 0..rounds {
+        let _ = fts_search(fixture);
+        let _ = list_inbox(fixture);
+        mutate(fixture, round % DEFAULT_MESSAGE_COUNT);
+        apply_batch(
+            fixture,
+            &session_delta_batch(round, DEFAULT_SESSION_DELTA_MESSAGES),
+        );
+    }
+}
+
+fn session_delta_batch(round: usize, count: usize) -> SyncBatch {
+    let mut messages = synthetic_messages(count);
+    for (offset, message) in messages.iter_mut().enumerate() {
+        let index = (round * count + offset) % DEFAULT_MESSAGE_COUNT;
+        message.id = MessageId::from(format!("msg-{index:06}"));
+        message.source_thread_id = ThreadId::from(format!("thread-{}", index / 8));
+        message.preview = Some(format!(
+            "Session round {round} updated preview for message {index}."
+        ));
+        message.received_at = format!(
+            "2026-{:02}-{:02}T{:02}:30:00Z",
+            (round % 12) + 1,
+            (index % 28) + 1,
+            index % 24
+        );
+        if offset % 5 == 0 {
+            message.keywords = vec!["$seen".to_string(), "$flagged".to_string()];
+        }
+    }
+
+    let imap_message_locations = messages
+        .iter()
+        .enumerate()
+        .map(|(offset, message)| ImapMessageLocation {
+            message_id: message.id.clone(),
+            mailbox_id: message.mailbox_ids[0].clone(),
+            uid_validity: ImapUidValidity(42),
+            uid: ImapUid((round * count + offset + 1) as u32),
+            modseq: Some(ImapModSeq((round * count + offset + 1) as u64)),
+            updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
+        })
+        .collect();
+
+    SyncBatch {
+        mailboxes: mailboxes(),
+        messages,
+        imap_mailbox_states: vec![
+            ImapMailboxSyncState {
+                mailbox_id: MailboxId::from("inbox"),
+                mailbox_name: "Inbox".to_string(),
+                uid_validity: ImapUidValidity(42),
+                highest_uid: Some(ImapUid((round * count + count) as u32)),
+                highest_modseq: Some(ImapModSeq((round * count + count) as u64)),
+                updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
+            },
+            ImapMailboxSyncState {
+                mailbox_id: MailboxId::from("archive"),
+                mailbox_name: "Archive".to_string(),
+                uid_validity: ImapUidValidity(43),
+                highest_uid: Some(ImapUid((round * count + count / 2) as u32)),
+                highest_modseq: Some(ImapModSeq((round * count + count / 2) as u64)),
+                updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
+            },
+        ],
+        imap_message_locations,
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: Vec::new(),
+        replace_all_mailboxes: false,
+        replace_all_messages: false,
+        cursors: vec![SyncCursor {
+            object_type: SyncObject::Message,
+            state: format!("session-state-{round}"),
+            updated_at: format!("2026-04-{:02}T10:00:00Z", (round % 28) + 1),
+        }],
+    }
 }

@@ -37,6 +37,11 @@ fn store_benches(c: &mut Criterion) {
             index += 1;
         })
     });
+
+    let session = workloads::open_seeded(count);
+    c.bench_function("store/session_loop", |b| {
+        b.iter(|| workloads::session_loop(&session, workloads::DEFAULT_SESSION_ROUNDS))
+    });
 }
 
 criterion_group!(benches, store_benches);
