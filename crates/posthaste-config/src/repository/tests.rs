@@ -107,7 +107,7 @@ fn insert_source_rejects_duplicate_without_overwriting() {
     };
     repo.insert_source(&source).unwrap();
 
-    let mut duplicate = source.clone();
+    let mut duplicate = source;
     duplicate.name = "Updated".to_string();
     let error = repo
         .insert_source(&duplicate)

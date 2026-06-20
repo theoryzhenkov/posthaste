@@ -112,7 +112,7 @@ fn query_conversations_by_rule_excludes_other_accounts() -> Result<(), StoreErro
     // Only the primary account's conversation is returned, and the cross-account
     // `source_ids` aggregate never names the secondary account.
     assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].source_ids, vec![primary.clone()]);
+    assert_eq!(page.items[0].source_ids, vec![primary]);
     assert!(
         page.items
             .iter()

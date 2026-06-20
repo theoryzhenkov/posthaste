@@ -88,6 +88,6 @@ pub(crate) fn synthesize_raw_mime(message: &posthaste_domain::MessageRecord) -> 
     let text = message
         .body_text
         .as_deref()
-        .unwrap_or(message.preview.as_deref().unwrap_or(""));
+        .unwrap_or_else(|| message.preview.as_deref().unwrap_or(""));
     Some(synthesize_plain_text_raw_mime(&from, subject, Some(text)))
 }

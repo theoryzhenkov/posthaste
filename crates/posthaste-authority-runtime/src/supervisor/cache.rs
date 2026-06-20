@@ -148,16 +148,14 @@ pub(crate) async fn process_cache_maintenance_batch(
                             skipped = outcome.skipped,
                             "cache worker skipped candidates outside current resource/cache budget"
                         );
-                    } else {
-                        if is_interactive {
-                            ph_debug!(
-                                events::CACHE_FETCH_NO_WORK,
-                                account_id = %account_id,
-                                operation_id,
-                                scanned = outcome.scanned,
-                                "cache worker batch completed without fetch work"
-                            );
-                        }
+                    } else if is_interactive {
+                        ph_debug!(
+                            events::CACHE_FETCH_NO_WORK,
+                            account_id = %account_id,
+                            operation_id,
+                            scanned = outcome.scanned,
+                            "cache worker batch completed without fetch work"
+                        );
                     }
                 }
                 Err(error) => {

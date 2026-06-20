@@ -69,7 +69,7 @@ impl PushTransport for WsPushTransport {
                     Some(Ok(push)) => {
                         match convert_ws_push_object(&account_id, &server_account_id, push) {
                             Ok(Some(notification)) => yield Ok(notification),
-                            Ok(None) => continue,
+                            Ok(None) => {}
                             Err(error) => yield Err(error),
                         }
                     }

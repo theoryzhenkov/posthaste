@@ -107,7 +107,7 @@ fn strips_dangerous_elements() {
         r#"<svg onload="alert(1)"></svg>"#,
         r#"<meta http-equiv="refresh" content="0;url=https://evil.example">"#,
         r#"<base href="https://evil.example/">"#,
-        r#"<style>@import url(https://evil.example/x.css);</style>"#,
+        r"<style>@import url(https://evil.example/x.css);</style>",
     ];
     for input in vectors {
         let result = sanitize_email_html(input).to_ascii_lowercase();

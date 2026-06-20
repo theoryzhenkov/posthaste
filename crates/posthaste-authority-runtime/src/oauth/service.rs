@@ -45,14 +45,14 @@ impl OAuthTokenService {
         for (name, value) in profile.extra_authorization_params {
             request = request.add_extra_param(*name, *value);
         }
-        request = request.add_extra_param("nonce", nonce.secret().to_string());
+        request = request.add_extra_param("nonce", nonce.secret().clone());
 
         let (authorization_url, state) = request.url();
         Ok(OAuthAuthorizationSession {
             authorization_url: authorization_url.to_string(),
-            state: state.secret().to_string(),
-            pkce_verifier: pkce_verifier.secret().to_string(),
-            nonce: nonce.secret().to_string(),
+            state: state.secret().clone(),
+            pkce_verifier: pkce_verifier.secret().clone(),
+            nonce: nonce.secret().clone(),
             redirect_uri: redirect_uri.to_string(),
         })
     }
@@ -89,10 +89,10 @@ impl OAuthTokenService {
                 provider: profile.provider.clone(),
                 client_id: client_id.to_string(),
                 client_secret: client_secret.map(ToString::to_string),
-                access_token: token_response.access_token().secret().to_string(),
+                access_token: token_response.access_token().secret().clone(),
                 refresh_token: token_response
                     .refresh_token()
-                    .map(|token| token.secret().to_string()),
+                    .map(|token| token.secret().clone()),
                 expires_at: expires_at_from_duration(now, token_response.expires_in())?,
                 scopes: token_response
                     .scopes()
@@ -143,10 +143,10 @@ impl OAuthTokenService {
             provider: token_set.provider.clone(),
             client_id: token_set.client_id.clone(),
             client_secret: token_set.client_secret.clone(),
-            access_token: token_response.access_token().secret().to_string(),
+            access_token: token_response.access_token().secret().clone(),
             refresh_token: token_response
                 .refresh_token()
-                .map(|token| token.secret().to_string())
+                .map(|token| token.secret().clone())
                 .or_else(|| token_set.refresh_token.clone()),
             expires_at: expires_at_from_duration(now, token_response.expires_in())?,
             scopes: token_response

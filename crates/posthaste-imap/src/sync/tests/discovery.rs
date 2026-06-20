@@ -68,7 +68,7 @@ fn full_sync_batch_carries_messages_and_imap_locations() {
         },
         vec![mapped],
         vec![ImapMailboxSyncState {
-            mailbox_id: selected.mailbox_id.clone(),
+            mailbox_id: selected.mailbox_id,
             mailbox_name: "INBOX".to_string(),
             uid_validity: ImapUidValidity(9),
             highest_uid: Some(ImapUid(42)),
