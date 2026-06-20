@@ -18,6 +18,7 @@ export interface ReplyContext {
   replySubject: string
   forwardSubject: string
   quotedBody: string | null
+  forwardedBody: string | null
   inReplyTo: string | null
   references: string | null
 }

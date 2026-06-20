@@ -1,5 +1,9 @@
 use jmap_client::email;
-use posthaste_domain::{GatewayError, MessageId, ReplyContext};
+use posthaste_domain::{
+    format_forwarded_body, recipients_to_header, GatewayError, MessageId, ReplyContext,
+};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 use crate::compose::{addresses_to_recipients, prefix_subject};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
@@ -22,6 +26,8 @@ pub(crate) async fn fetch_reply_context(
         email::Property::From,
         email::Property::To,
         email::Property::Cc,
+        email::Property::SentAt,
+        email::Property::ReceivedAt,
         email::Property::MessageId,
         email::Property::References,
         email::Property::InReplyTo,
@@ -41,32 +47,53 @@ pub(crate) async fn fetch_reply_context(
     let email = emails
         .pop()
         .ok_or_else(|| GatewayError::Rejected("message not found".to_string()))?;
-    let quoted_body = email
+    let plain_body = email
         .text_body()
         .and_then(|parts| parts.first())
         .and_then(|part| part.part_id())
         .and_then(|part_id| email.body_value(part_id))
-        .map(|value| {
-            value
-                .value()
-                .lines()
-                .map(|line| format!("> {line}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
-    let to = email
+        .map(|value| value.value().to_string());
+    let quoted_body = plain_body.as_deref().map(quote_body);
+    let original_from = email
         .from()
         .map(addresses_to_recipients)
         .unwrap_or_default();
+    let original_to = email.to().map(addresses_to_recipients).unwrap_or_default();
+    let to = original_from.clone();
     let cc = email.cc().map(addresses_to_recipients).unwrap_or_default();
     let subject = email.subject().unwrap_or("(no subject)");
+    let date = email
+        .sent_at()
+        .or_else(|| email.received_at())
+        .and_then(format_timestamp);
+    let forwarded_body = Some(format_forwarded_body(
+        recipients_to_header(&original_from).as_deref(),
+        date.as_deref(),
+        Some(subject),
+        recipients_to_header(&original_to).as_deref(),
+        plain_body.as_deref().unwrap_or_default(),
+    ));
     Ok(ReplyContext {
         to,
         cc,
         reply_subject: prefix_subject("Re:", subject),
         forward_subject: prefix_subject("Fwd:", subject),
         quoted_body,
+        forwarded_body,
         in_reply_to: email.message_id().and_then(|ids| ids.first()).cloned(),
         references: email.references().map(|refs| refs.join(" ")),
     })
+}
+
+fn quote_body(body: &str) -> String {
+    body.lines()
+        .map(|line| format!("> {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_timestamp(timestamp: i64) -> Option<String> {
+    OffsetDateTime::from_unix_timestamp(timestamp)
+        .ok()
+        .and_then(|value| value.format(&Rfc3339).ok())
 }
