@@ -55,7 +55,7 @@ afterEach(() => {
 })
 
 describe('useDaemonEvents runtime adapter subscription', () => {
-  it('subscribes through the runtime adapter and dispatches domain events', async () => {
+  it('subscribes through the runtime session stream and dispatches notification events', async () => {
     const received: DomainEvent[] = []
     const listener = (receivedEvent: Event) => {
       received.push((receivedEvent as CustomEvent<DomainEvent>).detail)
@@ -65,29 +65,51 @@ describe('useDaemonEvents runtime adapter subscription', () => {
     try {
       const { unmount } = renderHook(() => useDaemonEvents(), { wrapper })
 
-      expect(runtimeAdapter.eventSubscriptionCalls).toEqual([
-        { request: { afterSeq: null } },
-      ])
-      runtimeAdapter.emitDomainEvent(event)
+      await waitFor(() =>
+        expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
+          { request: { sessionId: 'session-1', afterSeq: null } },
+        ]),
+      )
+      expect(runtimeAdapter.eventSubscriptionCalls).toEqual([])
+      runtimeAdapter.emitRuntimeFrame({
+        type: 'notification',
+        sessionSeq: 1,
+        kind: event.topic,
+        payload: event,
+      })
 
       await waitFor(() => expect(received).toEqual([event]))
-      expect(window.sessionStorage.getItem('mail:last-event-seq')).toBe('42')
+      expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
+        '1',
+      )
 
       unmount()
-      runtimeAdapter.emitDomainEvent({ ...event, seq: 43 })
+      await waitFor(() =>
+        expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
+          { sessionId: 'session-1', sourceId: undefined },
+        ]),
+      )
+      runtimeAdapter.emitRuntimeFrame({
+        type: 'notification',
+        sessionSeq: 2,
+        kind: event.topic,
+        payload: { ...event, seq: 43 },
+      })
       expect(received).toEqual([event])
     } finally {
       window.removeEventListener(MAIL_DOMAIN_EVENT_NAME, listener)
     }
   })
 
-  it('resumes from the stored event sequence', () => {
-    window.sessionStorage.setItem('mail:last-event-seq', '7')
+  it('resumes from the stored runtime frame sequence', async () => {
+    window.sessionStorage.setItem('mail:last-runtime-frame-seq', '7')
 
     renderHook(() => useDaemonEvents(), { wrapper })
 
-    expect(runtimeAdapter.eventSubscriptionCalls).toEqual([
-      { request: { afterSeq: 7 } },
-    ])
+    await waitFor(() =>
+      expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
+        { request: { sessionId: 'session-1', afterSeq: 7 } },
+      ]),
+    )
   })
 })
