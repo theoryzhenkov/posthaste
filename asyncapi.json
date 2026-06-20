@@ -82,17 +82,25 @@
             }
           },
           {
-            "name": "messageArrived",
-            "summary": "A new message arrived in a mailbox.",
+            "name": "messageUpdated",
+            "summary": "A message's metadata changed.",
             "payload": {
               "seq": 102,
               "accountId": "acct_personal",
-              "topic": "message.arrived",
+              "topic": "message.updated",
               "occurredAt": "2026-05-29T12:05:30Z",
               "mailboxId": "mbx_inbox",
               "messageId": "msg_abc123",
               "payload": {
-                "subject": "Lunch?"
+                "messageId": "msg_abc123",
+                "created": true,
+                "changes": {
+                  "keywords": true,
+                  "mailboxes": true,
+                  "arrived": true
+                },
+                "mailboxIds": ["mbx_inbox"],
+                "arrivedMailboxIds": ["mbx_inbox"]
               }
             }
           },
@@ -126,10 +134,7 @@
           "smart_mailbox.deleted",
           "smart_mailbox.reset",
           "message.updated",
-          "message.keywords_changed",
           "message.body_cached",
-          "message.mailboxes_changed",
-          "message.arrived",
           "mailbox.updated",
           "account.updated",
           "account.created",

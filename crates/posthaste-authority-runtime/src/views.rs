@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
-use posthaste_domain::{DomainEvent, EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED};
+use posthaste_domain::{DomainEvent, EVENT_TOPIC_MESSAGE_UPDATED};
 use posthaste_runtime_contract::{
     MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
     MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest, ReadWatermark,
@@ -138,7 +138,9 @@ impl ViewRegistry {
                         if !registry.view_exists(&view_id) {
                             break;
                         }
-                        if event.topic == EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED {
+                        if event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                            && event.payload["changes"]["keywords"] == true
+                        {
                             registry.send_recomputed_replace(&view_id).await;
                         }
                     }

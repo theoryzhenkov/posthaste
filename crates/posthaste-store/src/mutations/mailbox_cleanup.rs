@@ -45,7 +45,7 @@ pub(crate) fn delete_mailbox_and_track_projection_inputs(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     mailbox_id: &MailboxId,
-    events: &mut Vec<DomainEvent>,
+    events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
     let message_ids = tx
         .prepare(
@@ -91,17 +91,17 @@ pub(crate) fn delete_mailbox_and_track_projection_inputs(
 
     for message_id in message_ids {
         let mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, &message_id)?;
-        events.push(insert_event_tx(
-            tx,
-            account_id,
-            EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
+        events.record(
+            EVENT_TOPIC_MESSAGE_UPDATED,
             mailbox_ids.first(),
             Some(&message_id),
             json!({
                 "messageId": message_id.as_str(),
+                "changes": { "mailboxes": true },
                 "mailboxIds": mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+                "removedMailboxId": mailbox_id.as_str(),
             }),
-        )?);
+        )?;
     }
     Ok(())
 }

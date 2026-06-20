@@ -10,15 +10,8 @@ fn configured_secret() -> SecretStatus {
 
 #[test]
 fn message_event_topics_preserve_serialized_strings() {
-    assert_eq!(
-        EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
-        "message.keywords_changed"
-    );
+    assert_eq!(EVENT_TOPIC_MESSAGE_UPDATED, "message.updated");
     assert_eq!(EVENT_TOPIC_MESSAGE_BODY_CACHED, "message.body_cached");
-    assert_eq!(
-        EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
-        "message.mailboxes_changed"
-    );
 }
 
 #[test]

@@ -188,18 +188,22 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
         store.get_message_mailboxes(&account, &message_id)?,
         vec![archive_id]
     );
-    assert!(events
-        .iter()
-        .any(|event| event.topic == EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED));
+    assert!(events.iter().any(|event| {
+        event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+            && event.payload["changes"]["mailboxes"] == true
+            && event.payload["removedMailboxId"] == inbox_id.as_str()
+    }));
     assert_eq!(
         store
             .list_events(&EventFilter {
                 account_id: Some(account),
-                topic: Some(EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED.to_string()),
-                mailbox_id: Some(inbox_id),
+                topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
+                mailbox_id: None,
                 after_seq: None,
             })?
-            .len(),
+            .into_iter()
+            .filter(|event| event.payload["removedMailboxId"] == inbox_id.as_str())
+            .count(),
         1
     );
     Ok(())

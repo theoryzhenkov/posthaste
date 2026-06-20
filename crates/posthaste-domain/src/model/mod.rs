@@ -148,25 +148,10 @@ pub const EVENT_TOPIC_SMART_MAILBOX_RESET: &str = "smart_mailbox.reset";
 /// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_UPDATED: &str = "message.updated";
 
-/// Event topic emitted when message keywords change.
-///
-/// @spec docs/L1-sync#event-propagation
-pub const EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED: &str = "message.keywords_changed";
-
 /// Event topic emitted when a message body is cached locally.
 ///
 /// @spec docs/L1-sync#event-propagation
 pub const EVENT_TOPIC_MESSAGE_BODY_CACHED: &str = "message.body_cached";
-
-/// Event topic emitted when message mailbox membership changes.
-///
-/// @spec docs/L1-sync#event-propagation
-pub const EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED: &str = "message.mailboxes_changed";
-
-/// Event topic emitted when a new message arrives in a mailbox.
-///
-/// @spec docs/L1-sync#event-propagation
-pub const EVENT_TOPIC_MESSAGE_ARRIVED: &str = "message.arrived";
 
 /// Event topic emitted when a mailbox is created, updated, or deleted.
 ///
@@ -219,10 +204,7 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
     EVENT_TOPIC_SMART_MAILBOX_DELETED,
     EVENT_TOPIC_SMART_MAILBOX_RESET,
     EVENT_TOPIC_MESSAGE_UPDATED,
-    EVENT_TOPIC_MESSAGE_KEYWORDS_CHANGED,
     EVENT_TOPIC_MESSAGE_BODY_CACHED,
-    EVENT_TOPIC_MESSAGE_MAILBOXES_CHANGED,
-    EVENT_TOPIC_MESSAGE_ARRIVED,
     EVENT_TOPIC_MAILBOX_UPDATED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
     EVENT_TOPIC_ACCOUNT_CREATED,

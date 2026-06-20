@@ -13,5 +13,5 @@ pub(crate) use conversation::{
     refresh_conversation_projection_tx,
 };
 pub(crate) use delete::delete_message_tx;
-pub(crate) use events::insert_event_tx;
+pub(crate) use events::{insert_event_tx, EventRecorder};
 pub(crate) use mailbox_thread::refresh_thread_projection_tx;

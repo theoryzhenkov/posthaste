@@ -99,15 +99,15 @@ fn matches_event_applies_all_filters() {
     let event = DomainEvent {
         seq: 5,
         account_id: AccountId::from("primary"),
-        topic: EVENT_TOPIC_MESSAGE_ARRIVED.to_string(),
+        topic: EVENT_TOPIC_MESSAGE_UPDATED.to_string(),
         occurred_at: "2026-03-31T10:00:00Z".to_string(),
         mailbox_id: Some(MailboxId::from("inbox")),
         message_id: Some(MessageId::from("message-1")),
-        payload: json!({"messageId": "message-1"}),
+        payload: json!({"messageId": "message-1", "changes": {"arrived": true}}),
     };
     let matching_filter = EventFilter {
         account_id: Some(AccountId::from("primary")),
-        topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
+        topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
         mailbox_id: Some(MailboxId::from("inbox")),
         after_seq: Some(4),
     };
@@ -116,7 +116,7 @@ fn matches_event_applies_all_filters() {
         &event,
         &EventFilter {
             account_id: None,
-            topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: Some(MailboxId::from("inbox")),
             after_seq: Some(4),
         }
@@ -125,7 +125,7 @@ fn matches_event_applies_all_filters() {
         &event,
         &EventFilter {
             account_id: Some(AccountId::from("secondary")),
-            topic: Some(EVENT_TOPIC_MESSAGE_ARRIVED.to_string()),
+            topic: Some(EVENT_TOPIC_MESSAGE_UPDATED.to_string()),
             mailbox_id: Some(MailboxId::from("inbox")),
             after_seq: Some(4),
         }
