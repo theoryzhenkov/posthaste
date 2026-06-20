@@ -38,6 +38,16 @@ impl MailGateway for LiveImapSmtpGateway {
         imap_attachment_bytes_from_raw_mime(blob_id, raw_mime).map_err(imap_error_to_gateway)
     }
 
+    fn extract_cached_blob(
+        &self,
+        blob_id: &BlobId,
+        raw_mime: &[u8],
+    ) -> Result<Option<Vec<u8>>, GatewayError> {
+        imap_attachment_bytes_from_raw_mime(blob_id, raw_mime.to_vec())
+            .map(Some)
+            .map_err(imap_error_to_gateway)
+    }
+
     async fn set_keywords(
         &self,
         account_id: &AccountId,

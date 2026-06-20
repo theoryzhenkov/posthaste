@@ -90,3 +90,39 @@ fn apply_message_body_marks_body_cache_object_cached() -> Result<(), StoreError>
     assert_eq!(row.0, "cached");
     Ok(())
 }
+
+#[test]
+fn read_raw_message_returns_cached_raw_bytes() -> Result<(), StoreError> {
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    let message_id = MessageId::from("message-1");
+    setup_source(&store, &account, "Primary")?;
+    seed_messages(
+        &store,
+        &account,
+        vec![metadata_only_message(message_id.as_str(), "inbox")],
+        "state-1",
+    )?;
+
+    // No raw cached yet.
+    assert!(store.read_raw_message(&account, &message_id)?.is_none());
+
+    let raw = "From: a@example.test\r\nSubject: Hi\r\n\r\nBody";
+    store.apply_message_body(
+        &account,
+        &message_id,
+        &FetchedBody {
+            body_html: None,
+            body_text: Some("Body".to_string()),
+            attachments: Vec::new(),
+            raw_mime: Some(raw.to_string()),
+        },
+    )?;
+
+    let cached = store
+        .read_raw_message(&account, &message_id)?
+        .expect("cached raw bytes");
+    assert_eq!(cached, raw.as_bytes());
+    Ok(())
+}
