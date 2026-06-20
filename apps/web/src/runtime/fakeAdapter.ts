@@ -93,6 +93,13 @@ export function createFakeRuntimeAdapter(
         'runtime session message list view result',
       )
     },
+    closeRuntimeSessionView(request) {
+      calls.runtimeSessionViewCloseCalls.push({ ...request })
+      return resolveQueued(
+        queues.accountOkResults,
+        input?.defaultAccountOk ?? { ok: true },
+      )
+    },
     subscribeRuntimeFrames(request, handlers) {
       calls.runtimeFrameSubscriptionCalls.push({ request })
       runtimeFrameHandlers.add(handlers)

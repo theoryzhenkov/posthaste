@@ -17,6 +17,13 @@ export const runtimeStream = {
   openMessageListView(request: RuntimeSessionViewRequest) {
     return getRuntimeAdapter().openRuntimeSessionMessageListView(request)
   },
+  closeView(sessionId: string, viewId: string, sourceId?: string | null) {
+    return getRuntimeAdapter().closeRuntimeSessionView({
+      sessionId,
+      viewId,
+      sourceId,
+    })
+  },
   subscribe(
     request: RuntimeFrameSubscriptionRequest,
     handlers: RuntimeFrameHandlers,
