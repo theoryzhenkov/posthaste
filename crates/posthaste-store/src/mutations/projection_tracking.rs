@@ -14,9 +14,6 @@ pub(crate) fn track_applied_message_projection_inputs(
             .conversations
             .insert(previous_conversation_id.clone());
     }
-    for mailbox_id in before.mailboxes.iter().chain(message.mailbox_ids.iter()) {
-        affected.mailboxes.insert(mailbox_id.clone());
-    }
 }
 
 pub(crate) fn append_message_diff_events_tx(
@@ -97,7 +94,6 @@ pub(crate) fn delete_message_and_track_projection_inputs(
     message_id: &MessageId,
     affected: &mut ProjectionInputs,
 ) -> Result<(), StoreError> {
-    let prior_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     let thread_id = tx
         .query_row_cached(
             "SELECT thread_id FROM message WHERE account_id = ?1 AND id = ?2",
@@ -118,9 +114,6 @@ pub(crate) fn delete_message_and_track_projection_inputs(
         .flatten()
         .map(ConversationId);
     delete_message_tx(tx, account_id, message_id)?;
-    for mailbox_id in prior_mailboxes {
-        affected.mailboxes.insert(mailbox_id);
-    }
     if let Some(thread_id) = thread_id {
         affected.threads.insert(thread_id);
     }
@@ -134,7 +127,6 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     location: &ImapMessageLocationKey,
-    affected: &mut ProjectionInputs,
     events: &mut Vec<DomainEvent>,
 ) -> Result<(), StoreError> {
     let before = fetch_message_before_apply_tx(tx, account_id, &location.message_id)?;
@@ -177,9 +169,6 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
         return Ok(());
     }
 
-    for mailbox_id in previous_mailboxes.iter().chain(current_mailbox_set.iter()) {
-        affected.mailboxes.insert(mailbox_id.clone());
-    }
     events.push(insert_event_tx(
         tx,
         account_id,
