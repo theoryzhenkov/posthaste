@@ -27,3 +27,24 @@ tauri-check:
 # Optional graphical Linux Tauri smoke through tauri-playwright.
 tauri-smoke *args:
     bash tools/lab/tauri-playwright/smoke.sh {{ args }}
+
+# --- Profiling (offline store hot paths) -------------------------------------
+
+# CPU flamegraphs (pprof SVG + protobuf) and dhat heap profiles for each
+# offline store operation. Pass `--out <dir>` to control the artifact location.
+profile *args:
+    cargo run --release -p posthaste-bench --bin posthaste-profile -- {{ args }}
+
+# Criterion wall-clock benchmarks (HTML + JSON under target/criterion).
+bench *args:
+    cargo bench -p posthaste-bench --bench store_criterion -- {{ args }}
+
+# Deterministic iai-callgrind regression gate. Requires valgrind and a matching
+# iai-callgrind-runner (`cargo install iai-callgrind-runner --version 0.16.1`).
+bench-gate *args:
+    cargo bench -p posthaste-bench --bench store_iai -- {{ args }}
+
+# Local-only perf flamegraph for deep dives. Requires `perf` and cargo-flamegraph
+# (`cargo install flamegraph`) plus a relaxed kernel.perf_event_paranoid.
+flamegraph-perf *args:
+    cargo flamegraph -p posthaste-bench --bin posthaste-profile -- {{ args }}
