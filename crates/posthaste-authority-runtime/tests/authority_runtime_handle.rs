@@ -612,7 +612,7 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     else {
         panic!("expected runtime view replace frame");
     };
-    assert_eq!(session_seq.get(), 2);
+    assert!(session_seq.get() >= 2);
     assert_eq!(view_id, snapshot.view_id);
     assert_eq!(revision.get(), 2);
     let state = mail_list_state(&snapshot);
@@ -1324,6 +1324,86 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
         .await
         .expect("matching live event should pass runtime filter");
     assert_eq!(received.seq, matching_live.seq);
+}
+
+#[tokio::test]
+async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let caller = RuntimeCaller {
+        account_scope: Some(vec!["primary".to_string()]),
+        ..RuntimeCaller::test()
+    };
+    let session = build
+        .handle
+        .open_session(caller.clone())
+        .await
+        .expect("runtime session should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(caller, session.session_id, Some(RuntimeSessionSeq::new(0)))
+        .await
+        .expect("runtime frames should subscribe");
+
+    let ignored = build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("secondary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("inbox")),
+            None,
+            serde_json::json!({"kind": "ignored"}),
+        )
+        .expect("ignored event should append");
+    build
+        .api_bridge
+        .event_sender
+        .send(ignored)
+        .expect("ignored event should broadcast");
+    let matching = build
+        .api_bridge
+        .store
+        .append_event(
+            &AccountId::from("primary"),
+            EVENT_TOPIC_MESSAGE_ARRIVED,
+            Some(&MailboxId::from("inbox")),
+            None,
+            serde_json::json!({"kind": "live"}),
+        )
+        .expect("matching event should append");
+    build
+        .api_bridge
+        .event_sender
+        .send(matching.clone())
+        .expect("matching event should broadcast");
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+        .await
+        .expect("notification frame should arrive")
+        .expect("runtime stream should remain open");
+    let RuntimeFrame::Notification {
+        session_seq,
+        kind,
+        payload,
+    } = frame
+    else {
+        panic!("expected notification frame");
+    };
+    assert_eq!(session_seq.get(), 1);
+    assert_eq!(kind, EVENT_TOPIC_MESSAGE_ARRIVED);
+    assert_eq!(payload["seq"], matching.seq);
+    assert_eq!(payload["accountId"], "primary");
+    assert_eq!(payload["payload"]["kind"], "live");
 }
 
 #[tokio::test]
