@@ -40,6 +40,35 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1", features = ["v4"] }
 
+# Clippy policy: base `clippy::all` plus a hand-picked set of pedantic/nursery
+# lints that earned their keep in a one-time triage (2026-06). The pedantic and
+# nursery *groups* are deliberately left off — enabling them whole produces
+# thousands of doc/visibility/style warnings with little signal. Only the lints
+# below (real perf wins, footguns, and near-zero-false-positive modernizations)
+# are turned on. CI escalates these to `-D warnings`; local builds stay warn.
+[workspace.lints.clippy]
+# perf
+redundant_clone = "warn"
+assigning_clones = "warn"
+needless_collect = "warn"
+or_fun_call = "warn"
+implicit_clone = "warn"
+# footguns
+significant_drop_in_scrutinee = "warn"
+used_underscore_binding = "warn"
+# modernization (near-zero false positives)
+uninlined_format_args = "warn"
+manual_string_new = "warn"
+needless_raw_string_hashes = "warn"
+unused_async = "warn"
+needless_continue = "warn"
+collapsible_else_if = "warn"
+items_after_statements = "warn"
+# Deliberately NOT enabled after triage — their only hits are idiomatic here:
+#   option_option       — PATCH tristate fields (absent / explicit null / value)
+#   unnecessary_wraps   — axum SSE `Result<Event, Infallible>` stream signatures
+#   useless_let_if_seq  — noisy; sole hit was a false positive across a loop
+
 [profile.test]
 # Keep file/line information for panics and backtraces, but avoid full DWARF in
 # every integration-test executable. The full debug profile makes parallel

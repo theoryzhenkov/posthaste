@@ -160,7 +160,7 @@ impl LiveJmapGateway {
             .find(|mailbox| mailbox.role() == role)
             .and_then(|mailbox| mailbox.id().map(|id| MailboxId::from(id.to_string())))
             .ok_or_else(|| {
-                GatewayError::Rejected(format!("required {:?} mailbox not available", role))
+                GatewayError::Rejected(format!("required {role:?} mailbox not available"))
             })
     }
 

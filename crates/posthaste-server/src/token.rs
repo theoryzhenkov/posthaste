@@ -209,13 +209,13 @@ pub enum TokenError {
 ///
 /// @spec docs/eph/DESIGN-L1-capability-tokens
 pub fn verify_authenticity(presented: &str, root: &RootKey) -> Result<Vec<Caveat>, TokenError> {
-    let macaroon = Macaroon::deserialize(presented).map_err(|_| TokenError::Malformed)?;
-    let mut verifier = Verifier::default();
     // Satisfy ALL first-party caveats so `verify` checks the signature chain
     // only; the caveats are returned for independent enforcement.
     fn satisfy_all(_predicate: &ByteString) -> bool {
         true
     }
+    let macaroon = Macaroon::deserialize(presented).map_err(|_| TokenError::Malformed)?;
+    let mut verifier = Verifier::default();
     verifier.satisfy_general(satisfy_all);
     verifier
         .verify(&macaroon, root.macaroon_key(), Vec::new())

@@ -148,7 +148,7 @@ impl SessionRegistry {
         };
 
         let registry = self.clone();
-        let caller_scope = caller.account_scope.clone();
+        let caller_scope = caller.account_scope;
         let stream = async_stream::stream! {
             loop {
                 match receiver.recv().await {
@@ -440,7 +440,7 @@ impl SessionRegistry {
         };
         let frame = RuntimeFrame::Notification {
             session_seq: next_seq(session),
-            kind: event.topic.clone(),
+            kind: event.topic,
             payload,
         };
         let sender = session.frames.clone();

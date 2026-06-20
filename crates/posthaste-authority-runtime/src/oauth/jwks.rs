@@ -9,7 +9,8 @@ impl OAuthTokenService {
     ) -> Result<JwkSet, GatewayError> {
         let cache = OAUTH_JWKS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         if !force_refresh {
-            if let Some(cached) = cache.lock().await.get(profile.metadata_url).cloned() {
+            let cached = cache.lock().await.get(profile.metadata_url).cloned();
+            if let Some(cached) = cached {
                 if cached.expires_at > now {
                     return Ok(cached.jwks);
                 }

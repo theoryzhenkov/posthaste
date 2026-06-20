@@ -230,7 +230,7 @@ impl ConfigRepository for TomlConfigRepository {
         let now = now_iso8601();
         for mailbox in &defaults {
             let mut with_timestamp = mailbox.clone();
-            with_timestamp.updated_at = now.clone();
+            with_timestamp.updated_at.clone_from(&now);
             write_smart_mailbox_toml(&self.config_root, &with_timestamp)?;
         }
 
@@ -242,10 +242,10 @@ impl ConfigRepository for TomlConfigRepository {
                 .find(|m| m.id == default.id)
             {
                 *existing = default.clone();
-                existing.updated_at = now.clone();
+                existing.updated_at.clone_from(&now);
             } else {
                 let mut new = default.clone();
-                new.updated_at = now.clone();
+                new.updated_at.clone_from(&now);
                 snapshot.smart_mailboxes.push(new);
             }
         }

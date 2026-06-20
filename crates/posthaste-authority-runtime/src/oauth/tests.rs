@@ -4,7 +4,7 @@ use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use posthaste_domain::TransportSecurity;
 
-const TEST_RSA_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+const TEST_RSA_PRIVATE_KEY: &str = r"-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCptW7Vkr5e34U+
 tg+ktEDbz7DW+UsAqsLZGl9wgSjp06Y4zyUakTZXfifDaeaCGm/aCy+FCnhdiZ49
 zzXcASKqoHOHGd6ap/xdPhIbwF5QZSE6aX2pMGgJ/zMSn9uirfiAQMpDCikZOGf4
@@ -31,7 +31,7 @@ IgPBVorspot60TO6PquCvdx/ct85Td8Y1CRyD/3iVd6OI51EOEFI7B4plPybkjp3
 b6kcHjMRGGyc0rUmlID7GJDHoBzVs1oHQKyyrCPCKypvw3ZNzntWASN73imjTyV9
 bT/1ANJYOasdMeMHJxfTFCa0d2HR6JYy01mtiIgx4SN2u6za/H3xEaq96blpK2fV
 TaMgUWVodLXy+lMRbtUQ97M=
------END PRIVATE KEY-----"#;
+-----END PRIVATE KEY-----";
 
 fn signed_id_token(kid: &str, nonce: &str) -> (String, JwkSet) {
     let encoding_key = EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY.as_bytes()).expect("RSA key");

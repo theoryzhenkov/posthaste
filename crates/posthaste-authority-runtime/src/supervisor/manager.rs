@@ -76,7 +76,8 @@ impl AccountSupervisor {
 
     /// Stop the runtime task and remove the gateway for an account.
     pub async fn stop_account(&self, account_id: &AccountId) {
-        if let Some(runtime) = self.runtimes.write().await.remove(account_id.as_str()) {
+        let removed = self.runtimes.write().await.remove(account_id.as_str());
+        if let Some(runtime) = removed {
             ph_info!(
                 events::SUPERVISOR_ACCOUNT_RUNTIME_STOPPED,
                 account_id = %account_id,

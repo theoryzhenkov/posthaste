@@ -21,3 +21,6 @@ url = "2.5.8"
 
 [dev-dependencies]
 axum = { workspace = true }
+
+[lints]
+workspace = true

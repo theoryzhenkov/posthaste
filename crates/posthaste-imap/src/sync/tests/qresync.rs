@@ -200,7 +200,7 @@ fn changed_since_snapshot_state_preserves_stored_uid_and_advances_modseq() {
         updated_at: "2026-04-24T00:00:00Z".to_string(),
     };
     let snapshot = ImapChangedSinceSnapshot {
-        selected: selected.clone(),
+        selected,
         headers: Vec::new(),
         vanished_uids: Vec::new(),
         is_full_snapshot: false,

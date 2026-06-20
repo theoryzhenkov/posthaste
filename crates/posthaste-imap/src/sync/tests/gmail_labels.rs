@@ -119,7 +119,7 @@ fn gmail_label_observation_removes_stale_inbox_and_starred_state() {
         updated_at: "2026-04-25T00:00:00Z".to_string(),
     };
     let all_mail_location = ImapMessageLocation {
-        message_id: message_id.clone(),
+        message_id,
         ..header.location.clone()
     };
     let stale_location_keys = vec![inbox_location.key(), starred_location.key()];
@@ -137,8 +137,8 @@ fn gmail_label_observation_removes_stale_inbox_and_starred_state() {
         vec![header],
         Vec::new(),
         vec![
-            inbox_location.clone(),
-            starred_location.clone(),
+            inbox_location,
+            starred_location,
             all_mail_location,
         ],
         Vec::new(),
@@ -193,7 +193,7 @@ fn gmail_label_observation_preserves_all_mail_location_without_all_label() {
         ..header.location.clone()
     };
     let all_mail_location = ImapMessageLocation {
-        message_id: message_id.clone(),
+        message_id,
         mailbox_id: MailboxId::from("imap:mailbox:5b476d61696c5d2f416c6c204d61696c"),
         uid_validity: ImapUidValidity(8),
         uid: ImapUid(88),

@@ -90,7 +90,7 @@ where
         .iter()
         .find(|result| result.status != LabStatus::Passed)
         .map(|result| result.suite_id.clone());
-    let mut artifacts = declared_artifacts.clone();
+    let mut artifacts = declared_artifacts;
     for result in &suite_results {
         artifacts.push(result.stdout_path.clone());
         artifacts.push(result.stderr_path.clone());

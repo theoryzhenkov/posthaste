@@ -95,6 +95,9 @@ pub(crate) fn close_remembered_webview_window<R: Runtime>(app: &AppHandle<R>) {
 /// (and binds the shortcut), giving a single build with toggleable devtools
 /// instead of a separate DevTools bundle. A no-op when devtools are not
 /// compiled in.
+// `_window` is underscored because it is only used when devtools are compiled
+// in; under the `not(...)` cfg the body is empty and the argument is unused.
+#[allow(clippy::used_underscore_binding)]
 #[tauri::command]
 pub(crate) fn toggle_devtools(_window: tauri::WebviewWindow) {
     #[cfg(any(debug_assertions, feature = "devtools"))]

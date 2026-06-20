@@ -1248,6 +1248,9 @@ pub struct RuntimeShutdownHandle {
 }
 
 impl RuntimeShutdownHandle {
+    // Async by contract: shutdown is part of the runtime's async lifecycle
+    // (start/await, shutdown/await) and will await task joins as it grows.
+    #[allow(clippy::unused_async)]
     pub async fn shutdown(self) -> Result<(), AuthorityRuntimeShutdownError> {
         self.stopped.store(true, Ordering::SeqCst);
         Ok(())
