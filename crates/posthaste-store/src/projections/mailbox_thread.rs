@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 pub(crate) fn refresh_thread_projection_tx(
     tx: &Transaction<'_>,
@@ -21,13 +22,13 @@ pub(crate) fn refresh_thread_projection_tx(
         .collect::<Result<Vec<_>, _>>()
         .map_err(sql_to_store_error)?;
     if email_ids.is_empty() {
-        tx.execute(
+        tx.execute_cached(
             "DELETE FROM thread_view WHERE account_id = ?1 AND id = ?2",
             params![account_id.as_str(), thread_id.as_str()],
         )
         .map_err(sql_to_store_error)?;
     } else {
-        tx.execute(
+        tx.execute_cached(
             "INSERT INTO thread_view (account_id, id, email_ids)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(account_id, id) DO UPDATE SET email_ids = excluded.email_ids",

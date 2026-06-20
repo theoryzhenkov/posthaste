@@ -27,8 +27,8 @@ pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreE
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(sql_to_store_error)?;
-    // Hold all hot write-path statements (see `sql_cache`) without LRU eviction.
-    connection.set_prepared_statement_cache_capacity(64);
+    // Hold hot read/write statements (see `sql_cache`) without LRU eviction.
+    connection.set_prepared_statement_cache_capacity(256);
     Ok(())
 }
 

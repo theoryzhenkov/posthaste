@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_cache::CachedSql;
 
 /// Determines the conversation ID for a message from JMAP `threadId`.
 ///
@@ -13,7 +14,7 @@ pub(crate) fn assign_conversation_id_tx(
     message: &posthaste_domain::MessageRecord,
 ) -> Result<ConversationId, StoreError> {
     if let Some(conversation_id) = tx
-        .query_row(
+        .query_row_cached(
             "SELECT conversation_id
              FROM message
              WHERE account_id = ?1 AND thread_id = ?2 AND conversation_id IS NOT NULL
@@ -66,7 +67,7 @@ pub(crate) fn refresh_conversation_projection_tx(
         .map_err(sql_to_store_error)?;
 
     if rows.is_empty() {
-        tx.execute(
+        tx.execute_cached(
             "DELETE FROM conversation WHERE id = ?1",
             params![conversation_id.as_str()],
         )
@@ -84,7 +85,7 @@ pub(crate) fn refresh_conversation_projection_tx(
         .clone()
         .or_else(|| rows.iter().find_map(|row| row.3.clone()));
     let unread_count = rows.iter().filter(|row| row.5 == 0).count() as i64;
-    tx.execute(
+    tx.execute_cached(
         "INSERT INTO conversation (
             id, subject, normalized_subject, latest_received_at, latest_source_id,
             latest_message_id, message_count, unread_count
@@ -114,7 +115,7 @@ pub(crate) fn refresh_conversation_projection_tx(
 
 /// Removes conversation rows that have no linked messages.
 pub(crate) fn cleanup_orphan_conversations_tx(tx: &Transaction<'_>) -> Result<(), StoreError> {
-    tx.execute(
+    tx.execute_cached(
         "DELETE FROM conversation
          WHERE id NOT IN (SELECT DISTINCT conversation_id FROM conversation_message)",
         [],
