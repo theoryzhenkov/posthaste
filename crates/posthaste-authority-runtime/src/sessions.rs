@@ -3,17 +3,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
+use posthaste_domain::DomainEvent;
 use posthaste_runtime_contract::{
     RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeSession,
     RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame,
     ViewId, ViewSnapshot,
 };
 use tokio::sync::broadcast;
+use tokio::task::AbortHandle;
 
 use crate::views::ViewRegistry;
 
 pub(crate) struct SessionRegistry {
     views: Arc<ViewRegistry>,
+    event_sender: broadcast::Sender<DomainEvent>,
     sessions: Mutex<HashMap<RuntimeSessionId, StoredSession>>,
     next_session_id: AtomicU64,
 }
@@ -24,19 +27,24 @@ struct StoredSession {
     frames: broadcast::Sender<RuntimeFrame>,
     open_views: HashSet<ViewId>,
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
+    event_task: Option<AbortHandle>,
 }
 
 impl SessionRegistry {
-    pub(crate) fn new(views: Arc<ViewRegistry>) -> Self {
+    pub(crate) fn new(
+        views: Arc<ViewRegistry>,
+        event_sender: broadcast::Sender<DomainEvent>,
+    ) -> Self {
         Self {
             views,
+            event_sender,
             sessions: Mutex::new(HashMap::new()),
             next_session_id: AtomicU64::new(1),
         }
     }
 
     pub(crate) fn open_session(
-        &self,
+        self: &Arc<Self>,
         caller: RuntimeCaller,
     ) -> Result<RuntimeSession, RuntimeError> {
         let session_id = RuntimeSessionId::new(format!(
@@ -52,8 +60,18 @@ impl SessionRegistry {
                 frames,
                 open_views: HashSet::new(),
                 latest_snapshots: HashMap::new(),
+                event_task: None,
             },
         );
+        let event_task = self.spawn_notification_forwarder(session_id.clone());
+        if let Some(session) = self
+            .sessions
+            .lock()
+            .map_err(lock_error)?
+            .get_mut(&session_id)
+        {
+            session.event_task = Some(event_task);
+        }
         Ok(RuntimeSession { session_id })
     }
 
@@ -112,17 +130,20 @@ impl SessionRegistry {
         caller: RuntimeCaller,
         session_id: RuntimeSessionId,
     ) -> Result<(), RuntimeError> {
-        let open_views = {
+        let (open_views, event_task) = {
             let mut sessions = self.sessions.lock().map_err(lock_error)?;
             let session = sessions
                 .get(&session_id)
                 .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
             ensure_caller_matches_session(session, caller.account_scope.as_deref())?;
-            sessions
+            let session = sessions
                 .remove(&session_id)
-                .map(|session| session.open_views)
-                .unwrap_or_default()
+                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            (session.open_views, session.event_task)
         };
+        if let Some(event_task) = event_task {
+            event_task.abort();
+        }
         for view_id in open_views {
             let _ = self.views.close_view(&view_id);
         }
@@ -229,6 +250,28 @@ impl SessionRegistry {
         });
     }
 
+    fn spawn_notification_forwarder(self: &Arc<Self>, session_id: RuntimeSessionId) -> AbortHandle {
+        let registry = Arc::downgrade(self);
+        let mut receiver = self.event_sender.subscribe();
+        let task = tokio::spawn(async move {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        let Some(registry) = registry.upgrade() else {
+                            return;
+                        };
+                        if !registry.forward_notification(&session_id, event) {
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+        task.abort_handle()
+    }
+
     fn forward_view_frame(&self, session_id: &RuntimeSessionId, frame: ViewFrame) -> bool {
         let mut sessions = match self.sessions.lock().map_err(lock_error) {
             Ok(sessions) => sessions,
@@ -243,6 +286,32 @@ impl SessionRegistry {
         let sender = session.frames.clone();
         drop(sessions);
         let _ = sender.send(runtime_frame);
+        true
+    }
+
+    fn forward_notification(&self, session_id: &RuntimeSessionId, event: DomainEvent) -> bool {
+        let mut sessions = match self.sessions.lock().map_err(lock_error) {
+            Ok(sessions) => sessions,
+            Err(_) => return false,
+        };
+        let Some(session) = sessions.get_mut(session_id) else {
+            return false;
+        };
+        if !event_matches_session_scope(&event, session.account_scope.as_deref()) {
+            return true;
+        }
+        let payload = match serde_json::to_value(&event) {
+            Ok(payload) => payload,
+            Err(_) => return false,
+        };
+        let frame = RuntimeFrame::Notification {
+            session_seq: next_seq(session),
+            kind: event.topic.clone(),
+            payload,
+        };
+        let sender = session.frames.clone();
+        drop(sessions);
+        let _ = sender.send(frame);
         true
     }
 
@@ -341,6 +410,16 @@ fn view_frame_to_runtime(session: &mut StoredSession, frame: ViewFrame) -> Optio
 fn next_seq(session: &mut StoredSession) -> RuntimeSessionSeq {
     session.last_seq += 1;
     RuntimeSessionSeq::new(session.last_seq)
+}
+
+fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {
+    account_scope
+        .map(|scope| {
+            scope
+                .iter()
+                .any(|account_id| account_id == event.account_id.as_str())
+        })
+        .unwrap_or(true)
 }
 
 fn ensure_caller_matches_session(

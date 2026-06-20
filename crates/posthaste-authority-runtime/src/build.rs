@@ -240,7 +240,7 @@ pub async fn build_authority_runtime(
         mail_queries.clone(),
         event_sender.clone(),
     ));
-    let sessions = Arc::new(SessionRegistry::new(views.clone()));
+    let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
@@ -393,7 +393,10 @@ impl AuthorityRuntimeHandle {
             mail_queries.clone(),
             api_bridge.event_sender.clone(),
         ));
-        let sessions = Arc::new(SessionRegistry::new(views.clone()));
+        let sessions = Arc::new(SessionRegistry::new(
+            views.clone(),
+            api_bridge.event_sender.clone(),
+        ));
         let runtime_status = RuntimeStatus {
             lifecycle: RuntimeLifecycle::Ready,
             store: RuntimeStoreStatus {
