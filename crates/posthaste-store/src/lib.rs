@@ -21,7 +21,7 @@ mod sync_state;
 
 pub use crate::store::DatabaseStore;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
