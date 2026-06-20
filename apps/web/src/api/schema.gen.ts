@@ -1748,6 +1748,11 @@ export interface components {
         ReplyContext: {
             cc: components["schemas"]["Recipient"][];
             forwardSubject: string;
+            /**
+             * @description Forwarded message block: an attribution header (From/Date/Subject/To)
+             *     followed by the original body, unquoted. Used to seed a forward compose.
+             */
+            forwardedBody?: string | null;
             inReplyTo?: string | null;
             quotedBody?: string | null;
             references?: string | null;

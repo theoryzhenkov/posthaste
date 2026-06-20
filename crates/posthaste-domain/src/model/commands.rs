@@ -109,8 +109,59 @@ pub struct ReplyContext {
     pub reply_subject: String,
     pub forward_subject: String,
     pub quoted_body: Option<String>,
+    /// Forwarded message block: an attribution header (From/Date/Subject/To)
+    /// followed by the original body, unquoted. Used to seed a forward compose.
+    pub forwarded_body: Option<String>,
     pub in_reply_to: Option<String>,
     pub references: Option<String>,
+}
+
+/// Format a recipient list as a header value (`Name <email>, email, ...`).
+///
+/// Returns `None` when the list is empty so callers can omit the header line.
+pub fn recipients_to_header(recipients: &[Recipient]) -> Option<String> {
+    if recipients.is_empty() {
+        return None;
+    }
+    Some(
+        recipients
+            .iter()
+            .map(|recipient| match &recipient.name {
+                Some(name) if !name.trim().is_empty() => {
+                    format!("{} <{}>", name.trim(), recipient.email)
+                }
+                _ => recipient.email.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// Build the forwarded-message block seeded into a forward compose body.
+///
+/// Produces a Gmail-style attribution header followed by the original body. Any
+/// header line whose value is empty is omitted; the body is included verbatim.
+pub fn format_forwarded_body(
+    from: Option<&str>,
+    date: Option<&str>,
+    subject: Option<&str>,
+    to: Option<&str>,
+    body: &str,
+) -> String {
+    let mut block = String::from("---------- Forwarded message ----------\n");
+    for (label, value) in [
+        ("From", from),
+        ("Date", date),
+        ("Subject", subject),
+        ("To", to),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            block.push_str(&format!("{label}: {value}\n"));
+        }
+    }
+    block.push('\n');
+    block.push_str(body);
+    block
 }
 
 /// File attachment payload for an outgoing compose request.

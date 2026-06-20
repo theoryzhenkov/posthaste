@@ -32,7 +32,8 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
       }),
   })
   const isMessageBasedCompose = intent.kind !== 'new'
-  const requiresMessageContext = intent.kind === 'reply'
+  const requiresMessageContext =
+    intent.kind === 'reply' || intent.kind === 'forward'
   const replyContextQuery = useQuery({
     queryKey: requiresMessageContext
       ? ['reply-context', intent.sourceId, intent.messageId]

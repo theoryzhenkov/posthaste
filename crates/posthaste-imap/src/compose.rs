@@ -1,5 +1,7 @@
 use mail_parser::{Address, MessageParser};
-use posthaste_domain::{ImapMessageLocation, Recipient, ReplyContext};
+use posthaste_domain::{
+    format_forwarded_body, recipients_to_header, ImapMessageLocation, Recipient, ReplyContext,
+};
 
 use crate::{fetch_raw_message_by_location, ImapAdapterError, ImapConnectionConfig};
 
@@ -22,22 +24,33 @@ pub fn imap_reply_context_from_raw_mime(
         .parse(&raw_mime)
         .ok_or(ImapAdapterError::ParseMessageBody)?;
     let subject = parsed.subject().unwrap_or("(no subject)");
-    let quoted_body = parsed.body_text(0).map(|body| {
+    let plain_body = parsed.body_text(0);
+    let quoted_body = plain_body.as_ref().map(|body| {
         body.lines()
             .map(|line| format!("> {line}"))
             .collect::<Vec<_>>()
             .join("\n")
     });
+    let original_from = parsed
+        .from()
+        .map(addresses_to_recipients)
+        .unwrap_or_default();
+    let original_to = parsed.to().map(addresses_to_recipients).unwrap_or_default();
+    let forwarded_body = Some(format_forwarded_body(
+        recipients_to_header(&original_from).as_deref(),
+        parsed.date().map(|date| date.to_rfc3339()).as_deref(),
+        Some(subject),
+        recipients_to_header(&original_to).as_deref(),
+        plain_body.as_deref().unwrap_or_default(),
+    ));
 
     Ok(ReplyContext {
-        to: parsed
-            .from()
-            .map(addresses_to_recipients)
-            .unwrap_or_default(),
+        to: original_from,
         cc: parsed.cc().map(addresses_to_recipients).unwrap_or_default(),
         reply_subject: prefix_subject("Re:", subject),
         forward_subject: prefix_subject("Fwd:", subject),
         quoted_body,
+        forwarded_body,
         in_reply_to: parsed.message_id().map(str::to_string),
         references: parsed.references().as_text_list().map(|items| {
             items

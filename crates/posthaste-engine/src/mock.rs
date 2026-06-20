@@ -250,6 +250,7 @@ impl MailGateway for MockJmapGateway {
             reply_subject: format!("Re: {}", message.subject.clone().unwrap_or_default()),
             forward_subject: format!("Fwd: {}", message.subject.clone().unwrap_or_default()),
             quoted_body: message.body_text.clone(),
+            forwarded_body: message.body_text.clone(),
             in_reply_to: Some(format!("<{}@mock>", message.id.as_str())),
             references: Some(format!("<{}@mock>", message.id.as_str())),
         })

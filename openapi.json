@@ -5559,6 +5559,13 @@
           "forwardSubject": {
             "type": "string"
           },
+          "forwardedBody": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Forwarded message block: an attribution header (From/Date/Subject/To)\nfollowed by the original body, unquoted. Used to seed a forward compose."
+          },
           "inReplyTo": {
             "type": [
               "string",
