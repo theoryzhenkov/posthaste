@@ -88,9 +88,6 @@ pub(crate) fn set_keywords_tx(
     .map_err(sql_to_store_error)?;
 
     let mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
-    for mailbox_id in &mailboxes {
-        refresh_mailbox_counters_tx(tx, account_id, mailbox_id)?;
-    }
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     let assertion = posthaste_domain::MessageChangeAssertion::after(detail.summary.clone());
@@ -145,10 +142,6 @@ pub(crate) fn replace_mailboxes_tx(
 
     let previous_set: BTreeSet<_> = previous_mailboxes.iter().cloned().collect();
     let current_set: BTreeSet<_> = command.mailbox_ids.iter().cloned().collect();
-
-    for mailbox_id in previous_set.union(&current_set) {
-        refresh_mailbox_counters_tx(tx, account_id, mailbox_id)?;
-    }
 
     let mut events = Vec::new();
     events.push(insert_event_tx(
@@ -205,9 +198,6 @@ pub(crate) fn destroy_message_tx(
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     delete_message_tx(tx, account_id, message_id)?;
     refresh_thread_projection_tx(tx, account_id, &thread_id)?;
-    for mailbox_id in &previous_mailboxes {
-        refresh_mailbox_counters_tx(tx, account_id, mailbox_id)?;
-    }
     let event = insert_event_tx(
         tx,
         account_id,

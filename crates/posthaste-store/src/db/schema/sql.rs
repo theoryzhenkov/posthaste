@@ -290,4 +290,47 @@ pub(super) const SCHEMA_SQL: &str = "
                 INSERT INTO message_fts(rowid, subject, from_name, from_email, preview)
                 VALUES (new.rowid, new.subject, new.from_name, new.from_email, new.preview);
             END;
+
+            -- Incrementally maintain mailbox counters. This replaces expensive
+            -- full recounts after each changed mailbox with O(changed rows)
+            -- updates tied directly to the underlying membership/read-state
+            -- mutations.
+            CREATE TRIGGER IF NOT EXISTS mailbox_counters_message_mailbox_ai
+            AFTER INSERT ON message_mailbox BEGIN
+                UPDATE mailbox
+                   SET total_emails = total_emails + 1,
+                       unread_emails = unread_emails + CASE WHEN COALESCE((
+                           SELECT is_read FROM message
+                            WHERE account_id = new.account_id AND id = new.message_id
+                       ), 1) = 0 THEN 1 ELSE 0 END
+                 WHERE account_id = new.account_id AND id = new.mailbox_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS mailbox_counters_message_mailbox_ad
+            AFTER DELETE ON message_mailbox BEGIN
+                UPDATE mailbox
+                   SET total_emails = CASE WHEN total_emails > 0 THEN total_emails - 1 ELSE 0 END,
+                       unread_emails = CASE
+                           WHEN COALESCE((
+                               SELECT is_read FROM message
+                                WHERE account_id = old.account_id AND id = old.message_id
+                           ), 1) = 0 AND unread_emails > 0 THEN unread_emails - 1
+                           ELSE unread_emails
+                       END
+                 WHERE account_id = old.account_id AND id = old.mailbox_id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS mailbox_counters_message_read_au
+            AFTER UPDATE OF is_read ON message
+            WHEN old.is_read != new.is_read BEGIN
+                UPDATE mailbox
+                   SET unread_emails = CASE
+                       WHEN new.is_read = 0 THEN unread_emails + 1
+                       WHEN unread_emails > 0 THEN unread_emails - 1
+                       ELSE 0
+                   END
+                 WHERE account_id = new.account_id
+                   AND id IN (
+                       SELECT mailbox_id FROM message_mailbox
+                        WHERE account_id = new.account_id AND message_id = new.id
+                   );
+            END;
             ";

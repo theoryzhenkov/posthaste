@@ -45,7 +45,6 @@ pub(crate) fn delete_mailbox_and_track_projection_inputs(
     tx: &Transaction<'_>,
     account_id: &AccountId,
     mailbox_id: &MailboxId,
-    affected: &mut ProjectionInputs,
     events: &mut Vec<DomainEvent>,
 ) -> Result<(), StoreError> {
     let message_ids = tx
@@ -90,7 +89,6 @@ pub(crate) fn delete_mailbox_and_track_projection_inputs(
     )
     .map_err(sql_to_store_error)?;
 
-    affected.mailboxes.insert(mailbox_id.clone());
     for message_id in message_ids {
         let mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, &message_id)?;
         events.push(insert_event_tx(

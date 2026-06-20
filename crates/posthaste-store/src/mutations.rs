@@ -2,8 +2,8 @@ use super::*;
 use crate::cache::{ensure_body_cache_object_tx, BACKGROUND_RESCORE_PRIORITY};
 use crate::projections::{
     assign_conversation_id_tx, delete_message_tx, normalized_subject,
-    refresh_conversation_projection_tx, refresh_mailbox_counters_tx, refresh_thread_projection_tx,
-    replace_attachments_tx, upsert_body_tx,
+    refresh_conversation_projection_tx, refresh_thread_projection_tx, replace_attachments_tx,
+    upsert_body_tx,
 };
 use crate::query::{
     fetch_keywords_tx, fetch_mailbox_ids_tx, query_message_detail_tx, row_to_event,
