@@ -233,6 +233,92 @@ async fn runtime_session_stream_returns_collapsed_view_snapshot() {
 
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 #[tokio::test]
+async fn runtime_session_mutation_returns_receipt_and_collapsed_settlement() {
+    let harness = Harness::new();
+    harness.save_account("primary", "Primary", true);
+    harness.seed_source("primary", "Primary");
+    harness.seed_messages(
+        "primary",
+        "mb-inbox",
+        vec![message("em-001", "Subject", "mb-inbox")],
+    );
+    harness.start_account_runtime("primary").await;
+    let token = harness.scoped(&["action = read,tag", "account = primary"]);
+
+    let (session_status, session_body) = harness
+        .post_json(
+            &token,
+            "/v1/runtime/sessions?sourceId=primary",
+            serde_json::json!({}),
+        )
+        .await;
+    assert_eq!(session_status, StatusCode::OK, "{session_body}");
+    let session_id = session_body["sessionId"]
+        .as_str()
+        .expect("session id should serialize");
+
+    let (mutation_status, mutation_body) = harness
+        .post_json(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}/mutations?sourceId=primary"),
+            serde_json::json!({
+                "name": "message.setKeywords",
+                "clientMutationId": "client-1",
+                "args": {
+                    "sourceId": "primary",
+                    "messageId": "em-001",
+                    "command": {"add": ["$flagged"], "remove": []}
+                }
+            }),
+        )
+        .await;
+    assert_eq!(mutation_status, StatusCode::OK, "{mutation_body}");
+    assert_eq!(mutation_body["clientMutationId"], "client-1");
+    assert_eq!(mutation_body["name"], "message.setKeywords");
+    assert_eq!(mutation_body["state"], "confirmed");
+    let mutation_id = mutation_body["runtimeMutationId"]
+        .as_str()
+        .expect("runtime mutation id should serialize");
+
+    let (stream_status, frame) = harness
+        .get_text_frame(
+            &token,
+            &format!("/v1/runtime/sessions/{session_id}/stream?afterSeq=0&sourceId=primary"),
+        )
+        .await;
+    assert_eq!(stream_status, StatusCode::OK);
+    assert!(frame.contains(r#""type":"mutationSettlement""#), "{frame}");
+    assert!(
+        frame.contains(&format!(r#""mutationId":"{mutation_id}""#)),
+        "{frame}"
+    );
+    assert!(frame.contains(r#""status":"confirmed""#), "{frame}");
+    assert!(
+        frame.contains(r#""clientMutationId":"client-1""#),
+        "{frame}"
+    );
+
+    let tag_only_token = harness.scoped(&["action = tag", "account = primary"]);
+    let (tag_only_status, tag_only_body) = harness
+        .post_json(
+            &tag_only_token,
+            &format!("/v1/runtime/sessions/{session_id}/mutations?sourceId=primary"),
+            serde_json::json!({
+                "name": "message.setKeywords",
+                "clientMutationId": "client-2",
+                "args": {
+                    "sourceId": "primary",
+                    "messageId": "em-001",
+                    "command": {"add": ["$seen"], "remove": []}
+                }
+            }),
+        )
+        .await;
+    assert_eq!(tag_only_status, StatusCode::FORBIDDEN, "{tag_only_body}");
+}
+
+// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
+#[tokio::test]
 async fn read_account_list_enabled_ids_reference_still_drives_followup_reads() {
     let harness = Harness::new();
     harness.save_account("acct-a", "Account A", true);

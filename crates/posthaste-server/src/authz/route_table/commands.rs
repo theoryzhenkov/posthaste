@@ -17,6 +17,11 @@ pub(super) const ROUTES: &[Entry] = &[
     },
     Entry {
         method: "POST",
+        template: "/runtime/sessions/{session_id}/mutations",
+        authz: filter(Action::Tag, ResourceShape::account("sourceId")),
+    },
+    Entry {
+        method: "POST",
         template: "/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox",
         authz: gate(
             Action::Move,

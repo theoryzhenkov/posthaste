@@ -27,9 +27,11 @@ import type {
   RuntimeMessageCommandRequest,
   RuntimeMessagePageRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
+  RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
   RuntimeOpenSessionRequest,
   RuntimeResourceDescriptor,
+  RuntimeRunMutationRequest,
   RuntimeSession,
   RuntimeSessionViewCloseRequest,
   RuntimeSessionViewRequest,
@@ -57,6 +59,9 @@ export type ViewSubscriptionCall = {
 export type RuntimeFrameSubscriptionCall = {
   request: RuntimeFrameSubscriptionRequest
 }
+export type RuntimeMutationCall = {
+  request: RuntimeRunMutationRequest
+}
 export type OAuthStartCall = Omit<StartProviderOAuthInput, 'clientSecret'> & {
   hasClientSecret: boolean
 }
@@ -82,6 +87,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
   readonly runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
+  readonly runtimeMutationCalls: RuntimeMutationCall[]
   readonly viewOpenCalls: RuntimeMessagePageRequest[]
   readonly viewSubscriptionCalls: ViewSubscriptionCall[]
   readonly mailboxCalls: string[]
@@ -121,6 +127,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
     result: RuntimeOpenMessageListViewResult,
   ): void
   queueRuntimeSessionMessageListViewError(error: Error): void
+  queueRuntimeMutationReceipt(receipt: RuntimeMutationReceipt): void
+  queueRuntimeMutationError(error: Error): void
   queueOAuthStartResponse(response: StartOAuthResponse): void
   queueOAuthStartError(error: Error): void
   queueResourceBlob(blob: Blob): void
@@ -150,6 +158,7 @@ export type FakeCallRecords = {
   runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
   runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
+  runtimeMutationCalls: RuntimeMutationCall[]
   viewOpenCalls: RuntimeMessagePageRequest[]
   viewSubscriptionCalls: ViewSubscriptionCall[]
   mailboxCalls: string[]
@@ -175,6 +184,7 @@ export type FakeQueues = {
   openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   runtimeSessions: QueuedOutcome<RuntimeSession>[]
   runtimeSessionMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
+  runtimeMutations: QueuedOutcome<RuntimeMutationReceipt>[]
   oauthStartResponses: QueuedOutcome<StartOAuthResponse>[]
   reads: QueuedOutcome<ReadResponse>[]
   resources: QueuedOutcome<Blob>[]
@@ -195,6 +205,7 @@ export interface FakeRuntimeAdapterOptions {
   defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
   defaultRuntimeSession?: RuntimeSession
   defaultRuntimeSessionMessageListView?: RuntimeOpenMessageListViewResult
+  defaultRuntimeMutationReceipt?: RuntimeMutationReceipt
   defaultOAuthStartResponse?: StartOAuthResponse
   defaultReadResponse?: ReadResponse
   defaultSmartMailboxes?: SmartMailboxSummary[]
@@ -231,6 +242,7 @@ export function createFakeCallRecords(): FakeCallRecords {
     runtimeSessionViewOpenCalls: [],
     runtimeSessionViewCloseCalls: [],
     runtimeFrameSubscriptionCalls: [],
+    runtimeMutationCalls: [],
     viewOpenCalls: [],
     viewSubscriptionCalls: [],
     mailboxCalls: [],
@@ -259,6 +271,7 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.runtimeSessionViewOpenCalls.length = 0
   calls.runtimeSessionViewCloseCalls.length = 0
   calls.runtimeFrameSubscriptionCalls.length = 0
+  calls.runtimeMutationCalls.length = 0
   calls.viewOpenCalls.length = 0
   calls.viewSubscriptionCalls.length = 0
   calls.mailboxCalls.length = 0
@@ -285,6 +298,7 @@ export function createFakeQueues(): FakeQueues {
     openMessageListViews: [],
     runtimeSessions: [],
     runtimeSessionMessageListViews: [],
+    runtimeMutations: [],
     oauthStartResponses: [],
     reads: [],
     resources: [],
@@ -306,6 +320,7 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.openMessageListViews.length = 0
   queues.runtimeSessions.length = 0
   queues.runtimeSessionMessageListViews.length = 0
+  queues.runtimeMutations.length = 0
   queues.oauthStartResponses.length = 0
   queues.reads.length = 0
   queues.resources.length = 0

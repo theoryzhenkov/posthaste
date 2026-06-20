@@ -19,12 +19,34 @@ import type {
   VerificationResponse,
 } from '../api/types'
 import { getRuntimeAdapter } from './adapter'
+import { runtimeSessionClient } from './sessionClient'
 import type {
   RuntimeMessageCommandRequest,
   RuntimeMoveMessageToMailboxRoleRequest,
+  RuntimeMutationReceipt,
   RuntimeTriggerSyncRequest,
   RuntimeTriggerSyncResult,
 } from './types'
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isMessageCommandResult(value: unknown): value is MessageCommandResult {
+  return isObject(value) && Array.isArray(value.events)
+}
+
+function confirmedMessageCommandResult(
+  receipt: RuntimeMutationReceipt,
+): MessageCommandResult {
+  if (receipt.state === 'failed') {
+    throw new Error(receipt.error?.message ?? `${receipt.name} failed`)
+  }
+  if (!isMessageCommandResult(receipt.output)) {
+    throw new Error(`${receipt.name} did not return a message command result`)
+  }
+  return receipt.output
+}
 
 export const runtimeMutations = {
   accounts: {
@@ -68,10 +90,26 @@ export const runtimeMutations = {
     },
   },
   messages: {
-    command(
+    async command(
       request: RuntimeMessageCommandRequest,
     ): Promise<MessageCommandResult> {
-      return getRuntimeAdapter().runMessageCommand(request)
+      if (request.command.kind !== 'setKeywords') {
+        return getRuntimeAdapter().runMessageCommand(request)
+      }
+      const receipt = await runtimeSessionClient.runMutation({
+        name: 'message.setKeywords',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+          command: {
+            add: request.command.add,
+            remove: request.command.remove,
+          },
+        },
+        clientMutationId: request.clientMutationId,
+        sourceId: request.sourceId,
+      })
+      return confirmedMessageCommandResult(receipt)
     },
     moveToMailboxRole(
       request: RuntimeMoveMessageToMailboxRoleRequest,

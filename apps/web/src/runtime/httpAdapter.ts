@@ -43,6 +43,7 @@ import {
   previewAutomationRule,
   read,
   resetDefaultSmartMailboxes,
+  runRuntimeMutation,
   sendMessage,
   startProviderOAuth,
   triggerSync,
@@ -177,16 +178,28 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
     }
     return openRuntimeSessionView<
       RuntimeViewSnapshot<RuntimeMailListViewState>
-    >(
-      request.sessionId,
-      { descriptor },
-      { sourceId: sourceScope(request.view) },
-    )
+    >(request.sessionId, { descriptor }, { sourceId: request.sourceId })
   },
   closeRuntimeSessionView(request) {
     return closeRuntimeSessionView(request.sessionId, request.viewId, {
       sourceId: request.sourceId,
     })
+  },
+  runRuntimeMutation(request) {
+    if (!request.sessionId) {
+      return Promise.reject(new Error('runtime mutation requires a session id'))
+    }
+    return runRuntimeMutation(
+      request.sessionId,
+      {
+        sessionId: request.sessionId,
+        name: request.name,
+        args: request.args,
+        clientMutationId: request.clientMutationId,
+        context: request.context,
+      },
+      { sourceId: request.sourceId },
+    )
   },
   subscribeRuntimeFrames(request, handlers) {
     const controller = new AbortController()
