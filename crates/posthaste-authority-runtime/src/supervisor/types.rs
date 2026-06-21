@@ -27,8 +27,27 @@ pub(crate) struct SupervisorShared {
     pub(crate) event_sender: broadcast::Sender<DomainEvent>,
     pub(crate) gateways: RwLock<HashMap<String, SharedGateway>>,
     pub(crate) runtime_overviews: RwLock<HashMap<String, AccountRuntimeOverview>>,
+    pub(crate) runtime_generations: RwLock<HashMap<String, RuntimeGeneration>>,
+    pub(crate) known_accounts: RwLock<HashSet<String>>,
+    pub(crate) account_count: AtomicUsize,
     pub(crate) cache_resources: Mutex<CacheResourceGovernor>,
     pub(crate) poll_interval: Duration,
+}
+
+/// Monotonic identity for a spawned account runtime.
+///
+/// Async tasks capture the generation they were spawned with. Any delayed
+/// status/progress/push write from an older generation is ignored, preventing a
+/// stopped/restarted account task from overwriting the current runtime state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RuntimeGeneration(u64);
+
+impl RuntimeGeneration {
+    pub(crate) const INITIAL: Self = Self(0);
+
+    pub(crate) fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
 }
 
 /// A running account task and its command channel.

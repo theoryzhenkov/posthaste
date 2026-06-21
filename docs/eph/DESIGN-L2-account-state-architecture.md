@@ -35,23 +35,22 @@ These are written **sequentially, non-transactionally**, with no generation/vers
 ## 3. Symptom → cause map (evidence)
 
 ### Accounts/mail disappear after sync until restart
-- Message and smart-mailbox reads use `JOIN source_projection a ON a.source_id = m.account_id` (`store/read/messages.rs:16`, `smart_mailboxes/messages.rs:109`). The join is only for the display **name**, but it **gates message visibility**: if the projection row is missing/stale, the account's mail vanishes from every list, even though `message` rows exist.
-- Account CRUD writes config then projection non-atomically (`config_delegates.rs:35-63`); a corruption-rebuild (new auto-repair) starts with an empty `source_projection`. Restart re-runs `service.sync_source_projections()` (`build.rs:185`), repopulating the projection — which is exactly why a restart "fixes" it.
-- The account *overview* is config-backed (`account_reads.rs:56`) and stays, so what the user sees as "account disappeared" is its mail going blank.
+- **Fixed 2026-06-21:** message and smart-mailbox reads now use `LEFT JOIN source_projection` and fall back to `account_id` for display names. `source_projection` remains a repairable name projection, not a visibility gate.
+- Previous failure mode: a corruption-rebuild or non-atomic config/projection update could leave `source_projection` empty; inner joins then hid all messages for that account until restart re-ran projection sync.
+- The account *overview* is config-backed (`account_reads.rs`) and stayed visible, so what the user saw as "account disappeared" was its mail going blank.
 
 ### Mail doesn't arrive until the whole sync finishes
 - Sync is batch-oriented end to end: the gateway fetches **all** messages into one `SyncBatch` (JMAP `sync/email.rs`, IMAP `gateway/execution.rs` accumulator), the store applies it in **one SQLite transaction** (`commands.rs:33`, `store.rs:187`), and the supervisor publishes events **only after the whole sync returns** (`sync_flow.rs:169`).
 - Per-message `message.updated` events are created *inside* that transaction, so they're invisible until commit. The frontend already handles `message.updated` incrementally — it just never receives them until the end.
 
 ### Views don't update / state shown inconsistently
-- Main app holds `queryKeys.accounts` with **`enabled: false`** (`MailClient.tsx:78`); invalidating it does **not** refetch, so many status events leave the main settings list stale.
-- List renders from the `accounts` prop; the editor prefers `queryKeys.account(id)` — **two caches** that update at different times (`SettingsPanel.tsx:116`).
-- `account.status_changed` is patched **all-or-nothing**: any missing/extra payload field downgrades to invalidation (`domain-cache/accounts.ts:63`), which then doesn't refetch in the main app.
-- `set_runtime_overview` writes in-memory first and **swallows `append_event` failures** (`supervisor/shared.rs:132`), so status can change with no durable/broadcast event. Push-only changes don't emit `account.status_changed` at all.
-- Supervisor has **no generation guard**: `stop_account` aborts without awaiting (`manager.rs:77`) and progress writes are spawned async (`sync_flow.rs:18`), so a stale runtime can overwrite a newer one's status.
-- `RuntimeStatus.account_count` is computed **once** at startup and never updated (`build.rs:185`).
-- Editor form state initializes **once** and never resets on account change (`AccountEditor.tsx:71`, `editorKeys.ts`). Progress meter only renders when `status === 'syncing'`, hides `0` values via truthiness, and prints raw enum text (`helpers/accountStatus.ts:21`, `AccountHeaderMeta.tsx`).
-- Runtime + config fields share one `AccountOverview` DTO, so mutation-result merge, event patch, list fetch, detail fetch, and bootstrap hydration all race visibly.
+- **Fixed 2026-06-21:** `AccountOverview` now keeps config fields top-level and runtime state nested under `runtime`, so config mutations and status events no longer race through the same flat fields.
+- **Fixed 2026-06-21:** the main-app `queryKeys.accounts` query is observed, so invalidations refetch instead of becoming no-ops.
+- **Fixed 2026-06-21:** `account.status_changed` patching is tolerant/partial and writes into `account.runtime.*`.
+- **Fixed 2026-06-21:** `set_runtime_overview` appends durable status events before updating the in-memory runtime overview and logs append failures instead of silently swallowing them. Push transitions are represented in the status payload and push events remain durable side effects.
+- **Fixed 2026-06-21:** supervisor runtime writes carry a per-account generation guard, so stale progress/status writes from an aborted runtime are dropped.
+- **Fixed 2026-06-21:** `RuntimeStatus.account_count` is derived live from the supervisor-owned account set when a supervisor-backed runtime is in use.
+- **Fixed 2026-06-21:** progress display renders from `syncProgress` presence, handles `0` values, and humanizes status text. The account editor is keyed by account identity, so switching accounts resets form state without discarding edits during background refreshes.
 
 ## 4. Target design
 
@@ -73,26 +72,22 @@ Principle: **one authoritative model per concern, one read path, coherence enfor
    - Apply + commit + publish in increments (per mailbox or per N-message chunk) so mail appears progressively.
    - Preserve full-snapshot deletion correctness by splitting sync into **progressive upserts** (stream in, commit+event per chunk) followed by a **final reconciliation** pass that prunes messages absent from the complete remote ID set. Additions stream; deletions reconcile at the end.
 
-## 5. Phased plan
+## 5. Implementation status
 
-**Phase 1 — Stop the bleeding (low risk, high impact).**
+**Completed 2026-06-21**
 - `LEFT JOIN`/decouple message visibility from `source_projection`.
-- Make the main-app accounts query observed so invalidations refetch.
+- Nested runtime DTO: account config remains top-level, runtime state is `account.runtime`.
+- Main-app accounts query is observed so invalidations refetch.
 - Tolerant `account.status_changed` patching.
-- Fix progress-meter display bugs; humanize status text.
-- Reset editor form on account identity change.
-
-**Phase 2 — Supervisor coherence (medium).**
+- Config mutation results preserve live runtime state.
+- Progress/status display fixes.
 - Per-account generation/epoch guard against stale status writes.
-- Durable-first status events (incl. push); stop swallowing append failures.
-- Live `account_count`.
+- Durable-first status events and visible append-failure logging.
+- Live supervisor-backed `RuntimeStatus.account_count`.
 
-**Phase 3 — Incremental sync (larger, riskier).**
-- Progressive apply + final deletion reconciliation; commit+publish per chunk.
-
-**Phase 4 — Consolidate the account-state model (architectural).**
-- One normalized account read model with explicit config-vs-runtime separation, removing the special-case merge logic.
+**Remaining larger design item**
+- Incremental sync delivery: progressive apply + final deletion reconciliation; commit+publish per chunk.
 
 ## 6. Recommendation
 
-Start **Phase 1** immediately — it directly fixes "mail/accounts disappear" and "views don't update" with localized, low-risk changes, and it's independently shippable. Phases 2–4 follow once Phase 1 is validated. Phase 3 (incremental sync) is the one change that needs careful design review before implementation because of the deletion-reconciliation correctness boundary.
+The account-state architecture is now coherent enough for dogfood/private-beta use. The remaining account-state work should focus on incremental sync delivery, which needs careful design review because deletion reconciliation is the correctness boundary.
