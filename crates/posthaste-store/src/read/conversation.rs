@@ -53,14 +53,14 @@ impl ConversationReadStore for DatabaseStore {
         let connection = self.read_connection()?;
         let mut statement = connection
             .prepare_cached(
-                "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+                "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                         m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                         m.is_read, m.is_flagged
                  FROM conversation_message cm
                  JOIN message m
                    ON m.account_id = cm.account_id
                   AND m.id = cm.message_id
-                 JOIN source_projection a
+                 LEFT JOIN source_projection a
                    ON a.source_id = m.account_id
                  WHERE cm.conversation_id = ?1
                  ORDER BY m.received_at ASC, m.id ASC",

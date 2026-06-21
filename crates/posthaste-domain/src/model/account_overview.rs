@@ -241,6 +241,8 @@ pub struct AccountOverview {
     pub created_at: String,
     pub updated_at: String,
     pub is_default: bool,
-    #[serde(flatten)]
+    /// Volatile runtime state, owned by the account supervisor. Nested (not
+    /// flattened) so the UI can update config and runtime through independent
+    /// paths without the two racing inside one flat object.
     pub runtime: AccountRuntimeOverview,
 }

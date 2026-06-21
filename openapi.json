@@ -3697,68 +3697,66 @@
         }
       },
       "AccountOverview": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/AccountRuntimeOverview"
-          },
-          {
-            "type": "object",
-            "required": [
-              "id",
-              "name",
-              "emailPatterns",
-              "driver",
-              "enabled",
-              "appearance",
-              "connection",
-              "createdAt",
-              "updatedAt",
-              "isDefault"
-            ],
-            "properties": {
-              "appearance": {
-                "$ref": "#/components/schemas/AccountAppearance"
-              },
-              "connection": {
-                "$ref": "#/components/schemas/AccountConnectionOverview"
-              },
-              "createdAt": {
-                "type": "string"
-              },
-              "driver": {
-                "$ref": "#/components/schemas/AccountDriver"
-              },
-              "emailPatterns": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "fullName": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "id": {
-                "$ref": "#/components/schemas/AccountId"
-              },
-              "isDefault": {
-                "type": "boolean"
-              },
-              "name": {
-                "type": "string"
-              },
-              "updatedAt": {
-                "type": "string"
-              }
-            }
-          }
+        "type": "object",
+        "description": "Combined account config and runtime state returned by the API.\n\n@spec docs/L1-api#account-crud-lifecycle",
+        "required": [
+          "id",
+          "name",
+          "emailPatterns",
+          "driver",
+          "enabled",
+          "appearance",
+          "connection",
+          "createdAt",
+          "updatedAt",
+          "isDefault",
+          "runtime"
         ],
-        "description": "Combined account config and runtime state returned by the API.\n\n@spec docs/L1-api#account-crud-lifecycle"
+        "properties": {
+          "appearance": {
+            "$ref": "#/components/schemas/AccountAppearance"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/AccountConnectionOverview"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "driver": {
+            "$ref": "#/components/schemas/AccountDriver"
+          },
+          "emailPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/AccountId"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/AccountRuntimeOverview",
+            "description": "Volatile runtime state, owned by the account supervisor. Nested (not\nflattened) so the UI can update config and runtime through independent\npaths without the two racing inside one flat object."
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
       },
       "AccountRuntimeOverview": {
         "type": "object",

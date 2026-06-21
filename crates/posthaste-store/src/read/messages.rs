@@ -10,11 +10,11 @@ impl MessageListStore for DatabaseStore {
     ) -> Result<Vec<MessageSummary>, StoreError> {
         let connection = self.read_connection()?;
         let sql = if mailbox_id.is_some() {
-            "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+            "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
-             JOIN source_projection a
+             LEFT JOIN source_projection a
                ON a.source_id = m.account_id
              JOIN message_mailbox mm
                ON mm.account_id = m.account_id
@@ -22,11 +22,11 @@ impl MessageListStore for DatabaseStore {
              WHERE m.account_id = ?1 AND mm.mailbox_id = ?2
              ORDER BY m.received_at DESC"
         } else {
-            "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+            "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                     m.is_read, m.is_flagged
              FROM message m
-             JOIN source_projection a
+             LEFT JOIN source_projection a
                ON a.source_id = m.account_id
              WHERE m.account_id = ?1
              ORDER BY m.received_at DESC"
