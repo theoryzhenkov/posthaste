@@ -171,6 +171,8 @@ pub const SUPERVISOR_AUTOMATION_BACKFILL_COMPLETED: LogEvent =
     LogEvent::new("supervisor.automation_backfill.completed");
 pub const SUPERVISOR_AUTOMATION_BACKFILL_FAILED: LogEvent =
     LogEvent::new("supervisor.automation_backfill.failed");
+pub const SUPERVISOR_OUTBOX_FLUSH_FAILED: LogEvent =
+    LogEvent::new("supervisor.outbox.flush_failed");
 pub const SUPERVISOR_SYNC_COMPLETED: LogEvent = LogEvent::new("supervisor.sync.completed");
 pub const SUPERVISOR_SYNC_FAILED: LogEvent = LogEvent::new("supervisor.sync.failed");
 pub const SUPERVISOR_SYNC_STARTED: LogEvent = LogEvent::new("supervisor.sync.started");
