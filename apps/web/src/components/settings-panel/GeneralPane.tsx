@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '../ui/select'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
+import { UpdatesSection } from './UpdatesSection'
 
 export function GeneralPane({
   accounts,
@@ -70,6 +71,8 @@ export function GeneralPane({
           </Select>
         </div>
       </SettingsSection>
+
+      {isTauriRuntime() && <UpdatesSection />}
 
       {isTauriRuntime() && (
         <SettingsSection title="Developer">
