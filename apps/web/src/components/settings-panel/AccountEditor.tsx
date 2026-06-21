@@ -161,17 +161,16 @@ export function AccountEditor({
         }
       />
 
-      {existingAccount?.status === 'syncing' &&
-        existingAccount.syncProgress && (
-          <div className="-mt-4 mb-4">
-            <SyncProgressMeter account={existingAccount} />
-          </div>
-        )}
+      {existingAccount?.runtime.syncProgress && (
+        <div className="-mt-4 mb-4">
+          <SyncProgressMeter account={existingAccount} />
+        </div>
+      )}
 
-      {existingAccount?.lastSyncError && (
+      {existingAccount?.runtime.lastSyncError && (
         <div className="mt-4">
           <FeedbackBanner tone="error">
-            {existingAccount.lastSyncError}
+            {existingAccount.runtime.lastSyncError}
           </FeedbackBanner>
         </div>
       )}

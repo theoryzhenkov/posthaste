@@ -44,12 +44,14 @@ const account: AccountOverview = {
   createdAt: '2026-04-28T12:00:00Z',
   updatedAt: '2026-04-28T12:00:00Z',
   isDefault: true,
-  status: 'ready',
-  push: 'disabled',
-  lastSyncAt: null,
-  lastSyncError: null,
-  lastSyncErrorCode: null,
-  syncProgress: null,
+  runtime: {
+    status: 'ready',
+    push: 'disabled',
+    lastSyncAt: null,
+    lastSyncError: null,
+    lastSyncErrorCode: null,
+    syncProgress: null,
+  },
 }
 
 const fallbackAccount: AccountOverview = {

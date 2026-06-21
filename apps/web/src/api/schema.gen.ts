@@ -1071,7 +1071,7 @@ export interface components {
          *
          *     @spec docs/L1-api#account-crud-lifecycle
          */
-        AccountOverview: components["schemas"]["AccountRuntimeOverview"] & {
+        AccountOverview: {
             appearance: components["schemas"]["AccountAppearance"];
             connection: components["schemas"]["AccountConnectionOverview"];
             createdAt: string;
@@ -1082,6 +1082,12 @@ export interface components {
             id: components["schemas"]["AccountId"];
             isDefault: boolean;
             name: string;
+            /**
+             * @description Volatile runtime state, owned by the account supervisor. Nested (not
+             *     flattened) so the UI can update config and runtime through independent
+             *     paths without the two racing inside one flat object.
+             */
+            runtime: components["schemas"]["AccountRuntimeOverview"];
             updatedAt: string;
         };
         /**

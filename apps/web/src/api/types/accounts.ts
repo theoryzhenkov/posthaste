@@ -48,14 +48,31 @@ export interface AccountOverview {
   createdAt: string
   updatedAt: string
   isDefault: boolean
-  status:
-    | 'ready'
-    | 'syncing'
-    | 'degraded'
-    | 'authError'
-    | 'offline'
-    | 'disabled'
-  push: 'connected' | 'reconnecting' | 'unsupported' | 'disabled'
+  /**
+   * Volatile runtime state, owned by the account supervisor. Nested so the UI
+   * updates config and runtime through independent paths (config mutations vs
+   * status events) without the two racing inside one flat object.
+   */
+  runtime: AccountRuntime
+}
+
+export type AccountStatus =
+  | 'ready'
+  | 'syncing'
+  | 'degraded'
+  | 'authError'
+  | 'offline'
+  | 'disabled'
+
+export type PushStatus =
+  | 'connected'
+  | 'reconnecting'
+  | 'unsupported'
+  | 'disabled'
+
+export interface AccountRuntime {
+  status: AccountStatus
+  push: PushStatus
   lastSyncAt: string | null
   lastSyncError: string | null
   lastSyncErrorCode: string | null
