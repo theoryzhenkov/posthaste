@@ -189,6 +189,23 @@ pub(crate) async fn process_sync_trigger_inner(
             );
             shared.publish_events(&events);
             shared.mark_sync_success(&account_id, generation).await;
+            // Drain the local-first outbox now that the gateway is connected;
+            // queued offline mutations/drafts flush on each successful cycle.
+            if let Some(gateway) = connection.gateway() {
+                match shared
+                    .service
+                    .flush_account(&account_id, gateway.as_ref())
+                    .await
+                {
+                    Ok(settlement_events) => shared.publish_events(&settlement_events),
+                    Err(error) => ph_warn!(
+                        events::SUPERVISOR_OUTBOX_FLUSH_FAILED,
+                        account_id = %account_id,
+                        error = %error,
+                        "outbox flush failed after sync"
+                    ),
+                }
+            }
             if let Some(reply) = reply {
                 let _ = reply.send(Ok(event_count));
             }
