@@ -216,7 +216,10 @@ jobs:
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
           config="${config}}"
-          bun run tauri build --ci --no-sign --features devtools --bundles "${{ matrix.bundle_targets }}" --config "$config"
+          # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
+          # have no code-signing certs configured, so code signing is a no-op
+          # here regardless, while updater signatures (.sig) are now produced.
+          bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "$config"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
