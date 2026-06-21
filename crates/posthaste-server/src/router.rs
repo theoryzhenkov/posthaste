@@ -134,6 +134,18 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             post(api::send_message).layer(DefaultBodyLimit::max(SEND_MESSAGE_BODY_LIMIT_BYTES)),
         )
         .route(
+            "/sources/{source_id}/commands/save-draft",
+            post(api::save_draft).layer(DefaultBodyLimit::max(SEND_MESSAGE_BODY_LIMIT_BYTES)),
+        )
+        .route(
+            "/sources/{source_id}/commands/delete-draft",
+            post(api::delete_draft),
+        )
+        .route(
+            "/sources/{source_id}/operations",
+            get(api::list_pending_operations),
+        )
+        .route(
             "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),
         )

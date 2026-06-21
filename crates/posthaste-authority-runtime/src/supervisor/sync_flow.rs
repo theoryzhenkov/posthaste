@@ -106,6 +106,7 @@ pub(crate) async fn process_sync_trigger(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn process_sync_trigger_inner(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
