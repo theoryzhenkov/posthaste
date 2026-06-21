@@ -12,6 +12,8 @@ export const LOG_EVENTS = {
   paletteSearchCancelled: 'palette.search.cancelled',
   paletteSearchStale: 'palette.search.stale',
   resourceFetchError: 'resource.fetch.error',
+  updateCheckFailed: 'update.check.failed',
+  updateInstallFailed: 'update.install.failed',
 } as const
 
 export type LogEvent = (typeof LOG_EVENTS)[keyof typeof LOG_EVENTS]
