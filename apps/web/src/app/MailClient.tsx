@@ -224,7 +224,6 @@ export function MailClient({
       onOpenFocusedMessage={handlers.handleOpenFocusedMessage}
       onOpenSettings={handlers.handleOpenSettings}
       onPlaceholderAction={handlers.handlePlaceholderAction}
-      onPreviewSearch={handlers.handlePreviewSearch}
       onRejectSearchPreview={handlers.handleRejectSearchPreview}
       onReply={handlers.handleReply}
       onSearch={handlers.handleSearch}
