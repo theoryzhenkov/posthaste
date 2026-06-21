@@ -141,7 +141,8 @@
           "account.deleted",
           "account.status_changed",
           "push.connected",
-          "push.disconnected"
+          "push.disconnected",
+          "operation.settled"
         ]
       }
     }

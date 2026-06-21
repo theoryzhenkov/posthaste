@@ -9,6 +9,7 @@ mod commands;
 mod db;
 mod imap;
 mod mutations;
+mod outbox;
 mod projections;
 mod query;
 mod read;
@@ -41,13 +42,14 @@ use posthaste_domain::{
     ImapUid, ImapUidValidity, MailboxId, MailboxReadStore, MailboxRole, MailboxRoleOverrideStore,
     MailboxSummary, MessageCommandStore, MessageCursor, MessageDetail, MessageDetailStore,
     MessageId, MessageListStore, MessageMailboxStore, MessagePage, MessageSortField,
-    MessageSummary, RawMessageRef, Recipient, ReplaceMailboxesCommand, SenderAddressCacheStore,
-    SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
-    SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore, SourceProjectionStore,
-    StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore, SyncWriteStore, TagReadStore,
-    TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    MessageSummary, Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
+    OperationOutboxStore, OperationState, RawMessageRef, Recipient, ReplaceMailboxesCommand,
+    SenderAddressCacheStore, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
+    SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
+    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
+    EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use rusqlite::types::Value as SqlValue;
