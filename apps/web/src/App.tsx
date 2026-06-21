@@ -22,6 +22,7 @@ import { ActiveConnectionProvider } from './connection/useActiveConnection'
 import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from './desktop'
 import { isDeveloperToolsEnabled } from './developerTools'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
+import { useDesktopUpdates } from './hooks/useDesktopUpdates'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
 
 function DaemonEventBridge() {
@@ -75,6 +76,7 @@ export default function App() {
     isTauriRuntime() && routeState.kind !== 'none' && !isMainDesktopWindow()
 
   useDeveloperToolsShortcut()
+  useDesktopUpdates()
 
   return (
     <QueryClientProvider client={queryClient}>

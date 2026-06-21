@@ -4,6 +4,8 @@
   "windows": ["main", "settings", "message-*", "attachment-*", "compose-*"],
   "permissions": [
     "core:default",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

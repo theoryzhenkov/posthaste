@@ -202,9 +202,21 @@ jobs:
       - name: Build desktop bundles
         if: runner.os != 'macOS'
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           bun --cwd=apps/web run build
-          bun run tauri build --ci --no-sign --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null}}'
+          # Emit signed updater artifacts (.sig + macOS .app.tar.gz) only when the
+          # updater signing key is configured, so releases still build without it.
+          config='{"build":{"beforeBuildCommand":null}'
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            config="${config},\"bundle\":{\"createUpdaterArtifacts\":true}"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
+          fi
+          config="${config}}"
+          bun run tauri build --ci --no-sign --features devtools --bundles "${{ matrix.bundle_targets }}" --config "$config"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
@@ -215,6 +227,8 @@ jobs:
           POSTHASTE_APPLE_ID: ${{ secrets.APPLE_ID }}
           POSTHASTE_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           POSTHASTE_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           configure_notarization() {
             unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
@@ -252,12 +266,20 @@ jobs:
 
           bun --cwd=apps/web run build
           configure_notarization
+          # Emit signed updater artifacts only when the updater signing key is
+          # configured, so releases still build without it.
+          updater=""
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            updater='"createUpdaterArtifacts":true,'
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
+          fi
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
-            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"hardenedRuntime":true}}}'
+            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}}}"
           else
             echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
-            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config '{"build":{"beforeBuildCommand":null},"bundle":{"macOS":{"signingIdentity":"-","hardenedRuntime":false}}}'
+            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}}}"
           fi
 
       - name: Print sccache stats
@@ -288,7 +310,9 @@ jobs:
               -type f \( \
                 -name '*.AppImage' -o \
                 -name '*.dmg' -o \
-                -name '*.exe' \
+                -name '*.exe' -o \
+                -name '*.app.tar.gz' -o \
+                -name '*.sig' \
               \) 2>/dev/null
           )
           test -n "$(find "$out" -type f -print -quit)"
@@ -351,6 +375,15 @@ jobs:
           macOS dogfood builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
           Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
           EOF
+
+      - name: Generate updater manifest
+        shell: bash
+        run: |
+          if find release-assets -maxdepth 1 -name '*.sig' -print -quit | grep -q .; then
+            bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG"
+          else
+            echo "No updater signatures present; skipping latest.json (updater signing key not configured)."
+          fi
 
       - name: Generate checksums
         shell: bash

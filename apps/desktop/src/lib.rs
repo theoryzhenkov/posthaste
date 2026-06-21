@@ -57,7 +57,13 @@ compile_error!("PostHaste e2e-testing is Linux-only; macOS release smoke remains
 /// as `window.__POSTHASTE_PORT__` so the frontend can discover the backend.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        // Auto-update support: the updater checks the GitHub Releases manifest
+        // and the process plugin relaunches after an update is installed. Both
+        // are inert until the frontend invokes a check (see useDesktopUpdates).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
 
     let builder = builder.on_menu_event(|app, event| {
         if event.id().as_ref() == CLOSE_WINDOW_MENU_ID {
