@@ -56,7 +56,9 @@ fn compile_smart_mailbox_condition(
 ) -> Result<String, StoreError> {
     let fragment = match condition.field {
         SmartMailboxField::SourceId => compile_simple_field("m.account_id", condition, params)?,
-        SmartMailboxField::SourceName => compile_text_field("a.name", condition, params)?,
+        SmartMailboxField::SourceName => {
+            compile_text_field("COALESCE(a.name, m.account_id)", condition, params)?
+        }
         SmartMailboxField::MessageId => compile_simple_field("m.id", condition, params)?,
         SmartMailboxField::ThreadId => compile_simple_field("m.thread_id", condition, params)?,
         SmartMailboxField::ConversationId => {

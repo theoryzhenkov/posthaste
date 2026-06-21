@@ -107,7 +107,7 @@ pub(crate) fn query_conversations(
             SELECT
                 m.conversation_id,
                 m.account_id,
-                a.name AS account_name,
+                COALESCE(a.name, m.account_id) AS account_name,
                 m.id,
                 m.subject,
                 m.from_name,
@@ -119,7 +119,7 @@ pub(crate) fn query_conversations(
                 m.is_read,
                 m.is_flagged
             FROM message m
-            JOIN source_projection a
+            LEFT JOIN source_projection a
               ON a.source_id = m.account_id
             {where_clause}
         ),
