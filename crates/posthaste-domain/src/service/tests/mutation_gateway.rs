@@ -5,6 +5,12 @@ pub(super) struct MutationGateway {
     pub(super) batch: Option<SyncBatch>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
     pub(super) fetch_attempts: Mutex<Vec<MessageId>>,
+    /// Results returned by `save_draft`, popped front-first; empty falls back to
+    /// a generated provider id.
+    pub(super) save_draft_results: Mutex<Vec<Result<MessageId, GatewayError>>>,
+    /// Records the `replace` argument of each `save_draft` call.
+    pub(super) save_draft_calls: Mutex<Vec<Option<MessageId>>>,
+    pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
 }
 
 impl MutationGateway {
@@ -14,6 +20,9 @@ impl MutationGateway {
             batch: None,
             fetch_body_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
+            save_draft_results: Mutex::new(Vec::new()),
+            save_draft_calls: Mutex::new(Vec::new()),
+            delete_draft_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -23,6 +32,9 @@ impl MutationGateway {
             batch: Some(batch),
             fetch_body_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
+            save_draft_results: Mutex::new(Vec::new()),
+            save_draft_calls: Mutex::new(Vec::new()),
+            delete_draft_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -32,6 +44,9 @@ impl MutationGateway {
             batch: None,
             fetch_body_result: Mutex::new(Some(result)),
             fetch_attempts: Mutex::new(Vec::new()),
+            save_draft_results: Mutex::new(Vec::new()),
+            save_draft_calls: Mutex::new(Vec::new()),
+            delete_draft_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -149,6 +164,43 @@ impl MailGateway for MutationGateway {
         _request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
         Err(GatewayError::Rejected("unused".to_string()))
+    }
+
+    async fn save_draft(
+        &self,
+        _account_id: &AccountId,
+        _request: &SendMessageRequest,
+        replace: Option<&MessageId>,
+    ) -> Result<MessageId, GatewayError> {
+        let call_index = {
+            let mut calls = self
+                .save_draft_calls
+                .lock()
+                .expect("save draft calls poisoned");
+            calls.push(replace.cloned());
+            calls.len()
+        };
+        let mut results = self
+            .save_draft_results
+            .lock()
+            .expect("save draft results poisoned");
+        if results.is_empty() {
+            Ok(MessageId::from(format!("provider-draft-{call_index}")))
+        } else {
+            results.remove(0)
+        }
+    }
+
+    async fn delete_draft(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), GatewayError> {
+        self.delete_draft_calls
+            .lock()
+            .expect("delete draft calls poisoned")
+            .push(message_id.clone());
+        Ok(())
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
