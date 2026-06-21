@@ -632,6 +632,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/commands/delete-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete draft
+         * @description Enqueues a local-first draft deletion; flushed to the provider when connected.
+         */
+        post: operations["delete_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox": {
         parameters: {
             query?: never;
@@ -726,6 +746,26 @@ export interface paths {
          * @description Adds and/or removes JMAP keywords on a message.
          */
         post: operations["set_keywords"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sources/{source_id}/commands/save-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save draft
+         * @description Enqueues a local-first draft create/update; flushed to the provider Drafts mailbox when connected.
+         */
+        post: operations["save_draft"];
         delete?: never;
         options?: never;
         head?: never;
@@ -904,6 +944,26 @@ export interface paths {
          * @description Returns pre-computed reply/forward metadata (recipients, subjects, quoted body).
          */
         get: operations["get_reply_context"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sources/{source_id}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending operations
+         * @description Lists an account's non-terminal outbox operations (pending/failed work), oldest first.
+         */
+        get: operations["list_pending_operations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1397,6 +1457,10 @@ export interface components {
             position?: number | null;
             rule: components["schemas"]["SmartMailboxRule"];
         };
+        /** @description Request body for `POST /v1/sources/{source_id}/commands/delete-draft`. */
+        DeleteDraftRequest: {
+            draftId: string;
+        };
         /**
          * @description An ordered domain event stored in `event_log` and published via SSE.
          *
@@ -1579,6 +1643,87 @@ export interface components {
             snapshot: Record<string, never>;
             viewId: string;
         };
+        /**
+         * @description A single local-first command.
+         *
+         *     The same envelope is persisted and flushed at every tier. `id` provides
+         *     cross-tier idempotency; `depends_on` preserves per-entity ordering so a
+         *     `draft.update` never flushes before the `draft.create` it builds on.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         */
+        Operation: {
+            accountId: components["schemas"]["AccountId"];
+            /** Format: int32 */
+            attempts: number;
+            /**
+             * @description Optimistic-concurrency token captured when the op was enqueued, used to
+             *     detect drift at flush time. `None` for entity-creating ops.
+             */
+            baseCursor?: string | null;
+            createdAt: string;
+            dependsOn?: null | components["schemas"]["OperationId"];
+            entity: components["schemas"]["OperationEntity"];
+            id: components["schemas"]["OperationId"];
+            kind: components["schemas"]["OperationKind"];
+            lastError?: string | null;
+            /**
+             * @description Kind-specific payload (the wrapped command or draft body), as JSON so the
+             *     envelope stays uniform across op kinds and tiers.
+             */
+            payload: Record<string, never>;
+            state: components["schemas"]["OperationState"];
+            updatedAt: string;
+        };
+        /**
+         * @description The entity an operation targets.
+         *
+         *     `id` may be a client-minted temporary id until the entity is reconciled to a
+         *     provider id on first successful flush (see [`OperationSettlement::assigned_entity_id`]).
+         *
+         *     @spec docs/L1-outbox#temp-id-reconciliation
+         */
+        OperationEntity: {
+            id: string;
+            kind: components["schemas"]["OperationEntityKind"];
+        };
+        /**
+         * @description The kind of entity an operation targets.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         * @enum {string}
+         */
+        OperationEntityKind: "message" | "draft";
+        /**
+         * @description Client-minted, globally-stable identifier for an outbox operation.
+         *
+         *     Used as the idempotency key across every tier (client, runtime, and the
+         *     runtime's own record of what it has pushed to the provider). A tier must
+         *     never apply the same `OperationId` twice.
+         *
+         *     @spec docs/L1-outbox#idempotency
+         */
+        OperationId: string;
+        /**
+         * @description The kind of mutation an operation carries.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         * @enum {string}
+         */
+        OperationKind: "setKeywords" | "replaceMailboxes" | "destroy" | "draftCreate" | "draftUpdate" | "draftDelete" | "send";
+        /**
+         * @description Lifecycle state of an operation within a single tier's outbox.
+         *
+         *     ```text
+         *     pending ─▶ inflight ─▶ applied
+         *        ▲          │  │ └──▶ failed
+         *        └──────────┘  └────▶ conflicted ─▶ inflight (after resolution)
+         *     ```
+         *
+         *     @spec docs/L1-outbox#state-machine
+         * @enum {string}
+         */
+        OperationState: "pending" | "inflight" | "applied" | "conflicted" | "failed";
         /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *
@@ -1835,6 +1980,16 @@ export interface components {
         RuntimeSessionId: string;
         /** Format: int64 */
         RuntimeSessionSeq: number;
+        /** @description Request body for `POST /v1/sources/{source_id}/commands/save-draft`. */
+        SaveDraftRequest: {
+            /** @description The existing draft id when editing; omit for a brand-new draft. */
+            draftId?: string | null;
+            /**
+             * @description The draft content (same shape as a send request; all fields may be empty
+             *     while composing).
+             */
+            message: components["schemas"]["SendMessageRequest"];
+        };
         /**
          * @description Storage backend for account credentials.
          *
@@ -3656,6 +3811,42 @@ export interface operations {
             };
         };
     };
+    delete_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft deletion enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            /** @description Runtime unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     add_to_mailbox: {
         parameters: {
             query?: never;
@@ -3877,6 +4068,51 @@ export interface operations {
                 };
             };
             /** @description Gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    save_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft operation enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            /** @description Invalid draft request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Runtime unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4278,6 +4514,38 @@ export interface operations {
                 };
             };
             /** @description Gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    list_pending_operations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending operations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            /** @description Runtime unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

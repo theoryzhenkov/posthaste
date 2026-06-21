@@ -121,6 +121,132 @@ pub async fn send_message(
     Ok(Json(OkResponse { ok: true }))
 }
 
+/// Request body for `POST /v1/sources/{source_id}/commands/save-draft`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDraftRequest {
+    /// The existing draft id when editing; omit for a brand-new draft.
+    #[serde(default)]
+    pub draft_id: Option<String>,
+    /// The draft content (same shape as a send request; all fields may be empty
+    /// while composing).
+    pub message: SendMessageRequest,
+}
+
+/// Request body for `POST /v1/sources/{source_id}/commands/delete-draft`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteDraftRequest {
+    pub draft_id: String,
+}
+
+/// POST /v1/sources/{source_id}/commands/save-draft
+///
+/// @spec docs/L1-outbox#operation-model
+#[utoipa::path(
+    post,
+    path = "/v1/sources/{source_id}/commands/save-draft",
+    tag = "messages",
+    summary = "Save draft",
+    description = "Enqueues a local-first draft create/update; flushed to the provider Drafts mailbox when connected.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    request_body = SaveDraftRequest,
+    responses(
+        (status = 200, description = "Draft operation enqueued", body = Operation),
+        (status = 400, description = "Invalid draft request", body = ApiErrorBody),
+        (status = 503, description = "Runtime unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn save_draft(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Json(request): Json<SaveDraftRequest>,
+) -> Result<Json<Operation>, ApiError> {
+    if request
+        .message
+        .from
+        .as_ref()
+        .is_some_and(recipient_email_is_empty)
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            ApiErrorCode::InvalidCompose,
+            "sender email address cannot be empty",
+        ));
+    }
+    state
+        .runtime
+        .save_draft(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            request.draft_id.map(MessageId),
+            request.message,
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+/// POST /v1/sources/{source_id}/commands/delete-draft
+///
+/// @spec docs/L1-outbox#operation-model
+#[utoipa::path(
+    post,
+    path = "/v1/sources/{source_id}/commands/delete-draft",
+    tag = "messages",
+    summary = "Delete draft",
+    description = "Enqueues a local-first draft deletion; flushed to the provider when connected.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    request_body = DeleteDraftRequest,
+    responses(
+        (status = 200, description = "Draft deletion enqueued", body = Operation),
+        (status = 503, description = "Runtime unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn delete_draft(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+    Json(request): Json<DeleteDraftRequest>,
+) -> Result<Json<Operation>, ApiError> {
+    state
+        .runtime
+        .delete_draft(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(request.draft_id),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+/// GET /v1/sources/{source_id}/operations
+///
+/// @spec docs/L1-outbox#operation-model
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/operations",
+    tag = "messages",
+    summary = "List pending operations",
+    description = "Lists an account's non-terminal outbox operations (pending/failed work), oldest first.",
+    params(("source_id" = String, Path, description = "Source (account) identifier")),
+    responses(
+        (status = 200, description = "Pending operations", body = [Operation]),
+        (status = 503, description = "Runtime unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn list_pending_operations(
+    State(state): State<Arc<AppState>>,
+    Path(source_id): Path<String>,
+) -> Result<Json<Vec<Operation>>, ApiError> {
+    state
+        .runtime
+        .list_pending_operations(RuntimeCaller::api(), AccountId(source_id))
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
 pub(crate) fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), ApiError> {
     if request.from.as_ref().is_some_and(recipient_email_is_empty) {
         return Err(ApiError::new(

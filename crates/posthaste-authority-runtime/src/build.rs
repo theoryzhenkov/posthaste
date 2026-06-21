@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
-    EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId,
+    EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId, Operation,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
     ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
     SyncTrigger,
@@ -463,6 +463,25 @@ impl AuthorityRuntimeHandle {
         self.core.account_mutations.clone().ok_or_else(|| {
             RuntimeError::runtime_not_ready("account mutation runtime is not available")
         })
+    }
+
+    /// Nudge the account to sync so a just-enqueued draft operation flushes
+    /// promptly. Best-effort: if the account is offline the op stays queued and
+    /// flushes on the next connectivity window.
+    async fn trigger_draft_flush(&self, account_id: &AccountId) {
+        if let Err(error) = self
+            .core
+            .live_accounts
+            .trigger_account_sync(account_id, SyncTrigger::Manual)
+            .await
+        {
+            ph_warn!(
+                events::DRAFT_FOLLOWUP_SYNC_TRIGGER_FAILED,
+                source_id = %account_id,
+                error = %error,
+                "draft enqueued but follow-up sync trigger failed"
+            );
+        }
     }
 
     pub async fn create_oauth_account_from_exchange(
@@ -971,6 +990,43 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             );
         }
         Ok(())
+    }
+
+    async fn save_draft(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError> {
+        self.ensure_runtime_active()?;
+        let operation = self
+            .core
+            .service
+            .save_draft(&account_id, draft_id, request)?;
+        self.trigger_draft_flush(&account_id).await;
+        Ok(operation)
+    }
+
+    async fn delete_draft(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError> {
+        self.ensure_runtime_active()?;
+        let operation = self.core.service.delete_draft(&account_id, draft_id)?;
+        self.trigger_draft_flush(&account_id).await;
+        Ok(operation)
+    }
+
+    async fn list_pending_operations(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError> {
+        self.ensure_runtime_active()?;
+        Ok(self.core.service.list_pending_operations(&account_id)?)
     }
 
     async fn set_message_keywords(

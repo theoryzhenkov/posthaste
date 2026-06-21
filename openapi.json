@@ -2160,6 +2160,59 @@
         }
       }
     },
+    "/v1/sources/{source_id}/commands/delete-draft": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Delete draft",
+        "description": "Enqueues a local-first draft deletion; flushed to the provider when connected.",
+        "operationId": "delete_draft",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Draft deletion enqueued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox": {
       "post": {
         "tags": [
@@ -2499,6 +2552,69 @@
           },
           "503": {
             "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/commands/save-draft": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Save draft",
+        "description": "Enqueues a local-first draft create/update; flushed to the provider Drafts mailbox when connected.",
+        "operationId": "save_draft",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Draft operation enqueued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid draft request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -3149,6 +3265,52 @@
           },
           "503": {
             "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/operations": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "List pending operations",
+        "description": "Lists an account's non-terminal outbox operations (pending/failed work), oldest first.",
+        "operationId": "list_pending_operations",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending operations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Operation"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -4561,6 +4723,18 @@
           }
         }
       },
+      "DeleteDraftRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/sources/{source_id}/commands/delete-draft`.",
+        "required": [
+          "draftId"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string"
+          }
+        }
+      },
       "DomainEvent": {
         "type": "object",
         "description": "An ordered domain event stored in `event_log` and published via SSE.\n\n@spec docs/L1-sync#event-propagation\n@spec docs/L1-api#sse-event-stream",
@@ -5087,6 +5261,129 @@
             "type": "string"
           }
         }
+      },
+      "Operation": {
+        "type": "object",
+        "description": "A single local-first command.\n\nThe same envelope is persisted and flushed at every tier. `id` provides\ncross-tier idempotency; `depends_on` preserves per-entity ordering so a\n`draft.update` never flushes before the `draft.create` it builds on.\n\n@spec docs/L1-outbox#operation-model",
+        "required": [
+          "id",
+          "accountId",
+          "entity",
+          "kind",
+          "payload",
+          "state",
+          "attempts",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "accountId": {
+            "$ref": "#/components/schemas/AccountId"
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "baseCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optimistic-concurrency token captured when the op was enqueued, used to\ndetect drift at flush time. `None` for entity-creating ops."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "dependsOn": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OperationId",
+                "description": "The operation that must settle before this one (per-entity ordering)."
+              }
+            ]
+          },
+          "entity": {
+            "$ref": "#/components/schemas/OperationEntity"
+          },
+          "id": {
+            "$ref": "#/components/schemas/OperationId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OperationKind"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across op kinds and tiers."
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationEntity": {
+        "type": "object",
+        "description": "The entity an operation targets.\n\n`id` may be a client-minted temporary id until the entity is reconciled to a\nprovider id on first successful flush (see [`OperationSettlement::assigned_entity_id`]).\n\n@spec docs/L1-outbox#temp-id-reconciliation",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OperationEntityKind"
+          }
+        }
+      },
+      "OperationEntityKind": {
+        "type": "string",
+        "description": "The kind of entity an operation targets.\n\n@spec docs/L1-outbox#operation-model",
+        "enum": [
+          "message",
+          "draft"
+        ]
+      },
+      "OperationId": {
+        "type": "string",
+        "description": "Client-minted, globally-stable identifier for an outbox operation.\n\nUsed as the idempotency key across every tier (client, runtime, and the\nruntime's own record of what it has pushed to the provider). A tier must\nnever apply the same `OperationId` twice.\n\n@spec docs/L1-outbox#idempotency"
+      },
+      "OperationKind": {
+        "type": "string",
+        "description": "The kind of mutation an operation carries.\n\n@spec docs/L1-outbox#operation-model",
+        "enum": [
+          "setKeywords",
+          "replaceMailboxes",
+          "destroy",
+          "draftCreate",
+          "draftUpdate",
+          "draftDelete",
+          "send"
+        ]
+      },
+      "OperationState": {
+        "type": "string",
+        "description": "Lifecycle state of an operation within a single tier's outbox.\n\n```text\npending ─▶ inflight ─▶ applied\n   ▲          │  │ └──▶ failed\n   └──────────┘  └────▶ conflicted ─▶ inflight (after resolution)\n```\n\n@spec docs/L1-outbox#state-machine",
+        "enum": [
+          "pending",
+          "inflight",
+          "applied",
+          "conflicted",
+          "failed"
+        ]
       },
       "PatchAccountRequest": {
         "type": "object",
@@ -5907,6 +6204,26 @@
         "type": "integer",
         "format": "int64",
         "minimum": 0
+      },
+      "SaveDraftRequest": {
+        "type": "object",
+        "description": "Request body for `POST /v1/sources/{source_id}/commands/save-draft`.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "draftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The existing draft id when editing; omit for a brand-new draft."
+          },
+          "message": {
+            "$ref": "#/components/schemas/SendMessageRequest",
+            "description": "The draft content (same shape as a send request; all fields may be empty\nwhile composing)."
+          }
+        }
       },
       "SecretKind": {
         "type": "string",

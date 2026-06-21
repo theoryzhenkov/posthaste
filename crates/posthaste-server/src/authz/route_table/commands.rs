@@ -9,6 +9,21 @@ pub(super) const ROUTES: &[Entry] = &[
     },
     Entry {
         method: "POST",
+        template: "/sources/{source_id}/commands/save-draft",
+        authz: gate(Action::Send, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/commands/delete-draft",
+        authz: gate(Action::Send, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "GET",
+        template: "/sources/{source_id}/operations",
+        authz: gate(Action::Read, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "POST",
         template: "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
         authz: gate(
             Action::Tag,
