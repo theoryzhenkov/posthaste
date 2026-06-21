@@ -7,9 +7,10 @@ use crate::{
     ConversationSortField, ConversationView, EventFilter, FetchedBody, Identity,
     ImapMailboxSyncState, ImapMessageLocation, MailboxId, MailboxSummary, MessageCursor,
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
-    PushTransport, Recipient, ReplaceMailboxesCommand, ReplyContext, SecretRef, SecretStoreError,
-    SendMessageRequest, SetKeywordsCommand, SmartMailboxRule, SortDirection, SyncBatch, SyncCursor,
-    SyncObject, SyncProgress, SyncTrigger, TagSummary, ThreadId, ThreadView,
+    Operation, OperationId, OperationState, PushTransport, Recipient, ReplaceMailboxesCommand,
+    ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
+    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncTrigger,
+    TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 
@@ -34,6 +35,6 @@ pub use sync_store::{
     ImapSyncStateWriteStore, MessageMailboxStore, SyncStateStore, SyncWriteStore,
 };
 pub use write_store::{
-    AutomationBackfillStore, EventStore, MessageCommandStore, SenderAddressCacheStore,
-    SourceDataStore, SourceProjectionStore,
+    AutomationBackfillStore, EventStore, MessageCommandStore, OperationOutboxStore,
+    SenderAddressCacheStore, SourceDataStore, SourceProjectionStore,
 };

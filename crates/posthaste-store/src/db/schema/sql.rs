@@ -152,6 +152,22 @@ pub(super) const SCHEMA_SQL: &str = "
                 name TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS outbox_operation (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                entity_kind TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                base_cursor TEXT,
+                state TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                depends_on TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS automation_backfill_job (
                 account_id TEXT NOT NULL,
                 rule_fingerprint TEXT NOT NULL,
@@ -252,6 +268,8 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON message_attachment (account_id, blob_id);
             CREATE INDEX IF NOT EXISTS idx_event_log_lookup
                 ON event_log (account_id, topic, mailbox_id, seq);
+            CREATE INDEX IF NOT EXISTS idx_outbox_account_state
+                ON outbox_operation (account_id, state);
             CREATE INDEX IF NOT EXISTS idx_conversation_message_lookup
                 ON conversation_message (account_id, message_id);
             CREATE INDEX IF NOT EXISTS idx_automation_backfill_pending
