@@ -1,7 +1,5 @@
 import {
-  useEffect,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type UIEvent as ReactUIEvent,
@@ -20,7 +18,6 @@ import { CommandPaletteList } from './command-palette/CommandPaletteList'
 import {
   COMMAND_PANEL_STORAGE_KEY,
   commandPaletteEntryValue,
-  currentSearchableServerQuery,
   NO_COMMAND_PALETTE_SELECTION,
 } from './command-palette/model'
 import { useCommandPaletteSearch } from './command-palette/useCommandPaletteSearch'
@@ -37,7 +34,6 @@ interface CommandPaletteProps {
   onOpenSettings: (category?: SettingsCategory) => void
   onOpenShortcuts: () => void
   onPlaceholderAction: (label: string) => void
-  onRejectSearchPreview: () => void
   onReply: () => void
   onSelectMessage: (selection: MailSelection) => void
   onSelectSmartMailbox: (smartMailboxId: string, name: string) => void
@@ -46,7 +42,6 @@ interface CommandPaletteProps {
     mailboxId: string,
     name: string,
   ) => void
-  onPreviewSearch: (query: string) => void
   onToggleFlag: () => void
 }
 
@@ -59,8 +54,6 @@ export function CommandPalette({
   onOpenSettings,
   onOpenShortcuts,
   onPlaceholderAction,
-  onPreviewSearch,
-  onRejectSearchPreview,
   onReply,
   onSelectMessage,
   onSelectSmartMailbox,
@@ -68,51 +61,27 @@ export function CommandPalette({
   onToggleFlag,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
-  const hasPreviewedSearchRef = useRef(false)
   const { activeSelectedIndex, itemRows, search, selectedValue } =
     useCommandPaletteSearch({ hasSelectedMessage, query })
-
-  const serverQuery = currentSearchableServerQuery(query)
-  const messageProviderState = search.session.providerStates.get('messages')
-  const canPreviewSearch =
-    serverQuery.length > 0 &&
-    messageProviderState?.status === 'done' &&
-    messageProviderState.candidates.length > 0
-
-  useEffect(() => {
-    if (serverQuery.length > 0 || !hasPreviewedSearchRef.current) return
-    onRejectSearchPreview()
-    hasPreviewedSearchRef.current = false
-  }, [onRejectSearchPreview, serverQuery])
-
-  useEffect(() => {
-    if (!canPreviewSearch) return
-    hasPreviewedSearchRef.current = true
-    onPreviewSearch(serverQuery)
-  }, [canPreviewSearch, onPreviewSearch, serverQuery])
 
   function handleQueryChange(value: string) {
     setQuery(value)
     search.select(null)
   }
 
-  function rejectPreviewedSearch() {
-    if (!hasPreviewedSearchRef.current) return
-    onRejectSearchPreview()
-    hasPreviewedSearchRef.current = false
-  }
-
   function closeWithoutApplyingQuery() {
-    rejectPreviewedSearch()
     search.cancel()
     onClose()
   }
 
+  // The typed query never touches the underlying mail view while typing — it
+  // only filters palette candidates — so a selected message stays in scope. The
+  // mail-view filter is applied here, on Enter, and only when no palette item is
+  // highlighted (see handlePaletteKeyDown).
   function applyCurrentQuery() {
     const normalized = normalizeAppliedSearchQuery(query)
     if (!normalized || validateSearchQuery(query).state !== 'valid') return
     onApplySearch(normalized)
-    hasPreviewedSearchRef.current = false
     onClose()
   }
 
@@ -152,9 +121,6 @@ export function CommandPalette({
   const executeAction = usePaletteActions(paletteActionHandlers)
 
   function runEntry(entry: CommandPaletteEntry) {
-    if (entry.action.kind !== 'replace-query') {
-      rejectPreviewedSearch()
-    }
     executeAction(entry.action)
     if (entry.closeOnSelect !== false) {
       onClose()

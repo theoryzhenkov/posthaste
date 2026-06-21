@@ -133,14 +133,6 @@ export function useMailClientHandlers(input: {
     handlePlaceholderAction: (label: string) => {
       toast(`${label} is not available yet.`)
     },
-    handlePreviewSearch: (query: string) => {
-      setSearchQuery((current) => {
-        const normalized = normalizeValidAppliedSearchQuery(query)
-        return normalized === null || current === normalized
-          ? current
-          : normalized
-      })
-    },
     handleRejectSearchPreview: () => setSearchQuery(''),
     handleReply: compose.replyToSelectedMessage,
     handleSearch: applySearchQuery,

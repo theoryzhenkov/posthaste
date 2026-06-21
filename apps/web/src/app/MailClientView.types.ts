@@ -54,7 +54,6 @@ export interface MailClientViewProps {
     options?: { accountId?: string | null; smartMailboxId?: string | null },
   ) => void
   onPlaceholderAction: (label: string) => void
-  onPreviewSearch: (query: string) => void
   onRejectSearchPreview: () => void
   onReply: () => void
   onSearch: (query: string, append?: boolean) => void

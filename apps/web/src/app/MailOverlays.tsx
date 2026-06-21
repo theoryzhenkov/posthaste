@@ -75,8 +75,6 @@ function CommandPaletteOverlay(props: MailClientViewProps) {
         onOpenSettings={props.onOpenSettings}
         onOpenShortcuts={props.onShowShortcuts}
         onPlaceholderAction={props.onPlaceholderAction}
-        onPreviewSearch={props.onPreviewSearch}
-        onRejectSearchPreview={props.onRejectSearchPreview}
         onReply={props.onReply}
         onSelectMessage={props.onSelectMessageRef}
         onSelectSmartMailbox={props.onSelectSmartMailbox}
