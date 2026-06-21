@@ -19,6 +19,16 @@ depends:
 
 # Public beta readiness audit
 
+## 0. Update (2026-06-21)
+
+Since this audit, three of the called-out gaps have landed:
+
+- **Forward** is implemented end to end (`feat(compose): implement message forward`): backend `ReplyContext.forwarded_body` + frontend forwarded-block seeding and original-attachment re-attach. The forward-disabled UI gating is removed.
+- **Attachment download** no longer re-fetches the whole IMAP message per attachment (`perf(attachments): serve cached attachment bytes without refetch`): cached raw bytes are served via `extract_cached_blob`.
+- **Desktop auto-update** is wired (`tauri-plugin-updater` + GitHub Releases `latest.json`); activation requires adding the `TAURI_SIGNING_PRIVATE_KEY` CI secret. See `docs/eph/HOWTO-L2-desktop-auto-update`.
+
+The rows below are the original audit state and are retained for context.
+
 ## 1. Executive summary
 
 Posthaste is **not yet feature-complete for a broad public beta**. It is close enough for continued dogfood and a narrower private beta, but a public beta needs a small number of explicit product decisions and several hardening passes.
@@ -36,7 +46,7 @@ The recommended beta target should be: **safe for strangers to install as a seco
 | Public install/support path | Missing | Users cannot self-serve install, report bugs, or recover from failures. | Fill README/site install/support docs; document log locations, beta caveats, manual updates, and bug report template. |
 | Release artifact smoke | Partial/missing | Installers can publish without launch/install verification. | Add release workflow smoke for Linux package; document/manual-gate macOS/Windows smoke; inspect release artifacts for no lab bridge. |
 | macOS signing/notarization decision | Partial | Public macOS beta may hit Gatekeeper friction. | Either require Apple signing/notarization secrets and fail release without them, or explicitly label macOS builds as unsigned/ad-hoc beta. |
-| Forward feature decision | Missing | UI currently disables forward; if advertised, it is a blocker. | Either implement forward body/header/attachment behavior or hide/de-scope forward in beta copy. |
+| Forward feature decision | Done (2026-06-21) | UI previously disabled forward. | Implemented: forwarded body + original-attachment re-attach; UI gating removed. |
 | Runtime mail-list correctness if enabled | Partial/risky | Feature-gated runtime lists recompute only some updates and disable pagination/window extension. | Keep runtime mail-list feature flag off by default, or finish recompute triggers and pagination before beta. |
 | Compose/reply polish | Partial | Sending mail is a core trust path. | Decide beta scope: send + basic reply only, or implement reply-all attribution and draft/autosave basics. |
 | Provider matrix smoke | Unknown/partial | Public users will hit provider edge cases quickly. | Run and record live-provider smoke for Fastmail/Stalwart JMAP plus a limited IMAP/SMTP set. |
@@ -96,7 +106,7 @@ Highest UI/runtime blockers: **runtime list flag default**, **mutation settlemen
 | Artifact smoke | Missing/partial | Optional desktop lab smoke exists; not release-gated. | Add at least Linux packaged launch smoke before public beta. |
 | Release integrity | Partial | Checksums/GPG/cosign/attestations are wired but some are best-effort. | Decide which integrity checks are mandatory. |
 | Website releases page | Partial | Release page and generated content exist; beta warning exists. | Needs support/install/update copy. |
-| In-app updater | Missing | No updater found. | Manual update okay only with clear messaging. |
+| In-app updater | Done (2026-06-21) | Now wired via tauri-plugin-updater + GitHub Releases latest.json. | Activate by adding the TAURI_SIGNING_PRIVATE_KEY CI secret; see HOWTO-L2-desktop-auto-update. |
 | Release runbook | Missing/partial | Scripts exist, no single operator checklist found. | Write runbook before public beta. |
 
 Highest release blockers: **artifact smoke**, **macOS signing/notarization stance**, **install/support docs**, **release runbook**.
