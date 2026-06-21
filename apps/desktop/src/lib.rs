@@ -83,6 +83,7 @@ pub fn run() {
         client_connection::client_token_set,
         client_connection::client_token_delete,
         client_connection::client_local_daemon_read,
+        client_connection::request_database_repair,
         e2e::posthaste_e2e_result
     ]);
     #[cfg(not(feature = "e2e-testing"))]
@@ -96,7 +97,8 @@ pub fn run() {
         client_connection::client_token_get,
         client_connection::client_token_set,
         client_connection::client_token_delete,
-        client_connection::client_local_daemon_read
+        client_connection::client_local_daemon_read,
+        client_connection::request_database_repair
     ]);
 
     let builder = builder.setup(|app| {

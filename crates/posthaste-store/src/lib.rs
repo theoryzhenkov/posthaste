@@ -19,7 +19,7 @@ mod sql_cache;
 mod store;
 mod sync_state;
 
-pub use crate::store::DatabaseStore;
+pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -49,7 +49,7 @@ use posthaste_domain::{
     TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
-use posthaste_observability::{events, ph_debug, ph_info};
+use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
 use serde_json::{json, Value};
