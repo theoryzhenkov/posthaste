@@ -80,6 +80,25 @@ fn daemon_state_root() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".local").join("share").join("posthaste"))
 }
 
+/// Request a local-database repair on the next launch.
+///
+/// Writes the marker file the embedded server checks on open (mirrors
+/// `posthaste_store::REPAIR_MARKER_FILE`). On restart the corrupt database is
+/// quarantined and rebuilt from config; accounts and secrets are unaffected.
+/// The frontend calls this and then relaunches the app.
+#[tauri::command]
+pub fn request_database_repair() -> Result<(), String> {
+    let Some(state_root) = daemon_state_root() else {
+        return Err("cannot resolve the Posthaste data directory".to_string());
+    };
+    std::fs::create_dir_all(&state_root)
+        .map_err(|err| format!("cannot create {}: {err}", state_root.display()))?;
+    let marker = state_root.join(".repair-requested");
+    std::fs::write(&marker, b"")
+        .map_err(|err| format!("cannot write {}: {err}", marker.display()))?;
+    Ok(())
+}
+
 /// Read the connection-profile store as a raw JSON string, or `None` when the
 /// file does not exist yet (a fresh install). The frontend owns parsing so the
 /// version-tolerant schema lives in one place (TypeScript).

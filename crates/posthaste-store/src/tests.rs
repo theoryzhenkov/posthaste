@@ -187,5 +187,6 @@ mod message_snapshots;
 mod mutation_cursors;
 mod mutation_events;
 mod reads_events_integrity;
+mod repair;
 mod smart_mailboxes;
 mod tags_and_locations;

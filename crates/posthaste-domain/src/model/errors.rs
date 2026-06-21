@@ -30,6 +30,12 @@ pub enum StoreError {
     Conflict(String),
     #[error("storage failure: {0}")]
     Failure(String),
+    /// The SQLite database file is corrupt (e.g. "database disk image is
+    /// malformed"). Distinguished from a generic failure so callers can offer a
+    /// repair pathway: the store is a rebuildable projection, so the corrupt
+    /// file can be quarantined and recreated.
+    #[error("database corrupted: {0}")]
+    Corruption(String),
 }
 
 /// Unified error type surfaced by [`crate::MailService`] and mapped to HTTP status codes.
@@ -63,6 +69,7 @@ pub enum ServiceErrorKind {
     NotFound,
     Conflict,
     StorageFailure,
+    StorageCorrupted,
     ConfigValidation,
     ConfigIo,
     ConfigParse,
@@ -82,6 +89,7 @@ impl ServiceErrorKind {
             Self::NotFound => "not_found",
             Self::Conflict => "conflict",
             Self::StorageFailure => "storage_failure",
+            Self::StorageCorrupted => "storage_corrupted",
             Self::ConfigValidation => "config_validation",
             Self::ConfigIo => "config_io",
             Self::ConfigParse => "config_parse",
@@ -112,6 +120,7 @@ impl ServiceError {
                 ServiceErrorKind::Conflict
             }
             Self::Store(StoreError::Failure(_)) => ServiceErrorKind::StorageFailure,
+            Self::Store(StoreError::Corruption(_)) => ServiceErrorKind::StorageCorrupted,
             Self::Config(ConfigError::Validation(_)) => ServiceErrorKind::ConfigValidation,
             Self::Config(ConfigError::Io(_)) => ServiceErrorKind::ConfigIo,
             Self::Config(ConfigError::Parse(_)) => ServiceErrorKind::ConfigParse,

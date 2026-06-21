@@ -1,8 +1,23 @@
 use super::*;
 use crate::sql_cache::CachedSql;
 use std::ops::Deref;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_IDLE_READ_CONNECTIONS: usize = 4;
+
+/// Marker file (under the data root) that forces a database rebuild on the next
+/// open, used by the manual "repair local database" action.
+pub const REPAIR_MARKER_FILE: &str = ".repair-requested";
+
+/// Outcome of an automatic database repair performed during [`DatabaseStore::open_with_repair`].
+#[derive(Clone, Debug)]
+pub struct RepairReport {
+    /// Path the corrupt database files were moved to.
+    pub quarantined_path: PathBuf,
+    /// Human-readable reason the repair was triggered.
+    pub reason: String,
+}
 
 /// SQLite-backed store with a single serialized write connection and pooled
 /// read connections. Raw MIME bodies are stored as content-addressed files
@@ -46,12 +61,28 @@ impl Drop for ReadConnection<'_> {
 }
 
 impl DatabaseStore {
-    /// Opens (or creates) the SQLite database and data directory, runs schema
-    /// migrations, and returns a ready-to-use store.
+    /// Opens (or creates) the store, auto-repairing a corrupt database.
+    ///
+    /// Equivalent to [`DatabaseStore::open_with_repair`] but discards the repair
+    /// report. Prefer `open_with_repair` where the caller can surface the repair.
     pub fn open(
         db_path: impl Into<PathBuf>,
         data_root: impl Into<PathBuf>,
     ) -> Result<Self, StoreError> {
+        Self::open_with_repair(db_path, data_root).map(|(store, _)| store)
+    }
+
+    /// Opens (or creates) the store, quarantining and rebuilding the database
+    /// when it is corrupt or a repair was requested via the marker file.
+    ///
+    /// The SQLite database is a rebuildable projection (accounts live in config,
+    /// secrets in the keychain), so a corrupt file is moved aside and recreated
+    /// rather than blocking launch. Returns a [`RepairReport`] when a repair
+    /// happened so the caller can notify the user and trigger a re-sync.
+    pub fn open_with_repair(
+        db_path: impl Into<PathBuf>,
+        data_root: impl Into<PathBuf>,
+    ) -> Result<(Self, Option<RepairReport>), StoreError> {
         let db_path = db_path.into();
         let data_root = data_root.into();
         if let Some(parent) = db_path.parent() {
@@ -59,8 +90,43 @@ impl DatabaseStore {
         }
         fs::create_dir_all(&data_root).map_err(io_to_store_error)?;
 
-        let connection =
-            Connection::open(&db_path).map_err(|err| StoreError::Failure(err.to_string()))?;
+        let marker = data_root.join(REPAIR_MARKER_FILE);
+        let repair_requested = marker.exists();
+
+        let repair_reason = if repair_requested {
+            Some("manual repair requested".to_string())
+        } else {
+            match Self::try_open(&db_path, &data_root) {
+                Ok(store) => return Ok((store, None)),
+                Err(StoreError::Corruption(reason)) => Some(reason),
+                Err(other) => return Err(other),
+            }
+        };
+        let reason = repair_reason.expect("repair reason set on the repair path");
+
+        let quarantined_path = quarantine_database(&db_path)?;
+        let store = Self::try_open(&db_path, &data_root)?;
+        if repair_requested {
+            let _ = fs::remove_file(&marker);
+        }
+        ph_warn!(
+            events::DATABASE_CORRUPT_REPAIRED,
+            db_path = %db_path.display(),
+            quarantined = %quarantined_path.display(),
+            reason = %reason,
+            "database quarantined and rebuilt"
+        );
+        Ok((
+            store,
+            Some(RepairReport {
+                quarantined_path,
+                reason,
+            }),
+        ))
+    }
+
+    fn try_open(db_path: &Path, data_root: &Path) -> Result<Self, StoreError> {
+        let connection = Connection::open(db_path).map_err(sql_to_store_error)?;
         configure_connection(&connection)?;
         let mut connection = connection;
         init_schema(&mut connection)?;
@@ -71,8 +137,8 @@ impl DatabaseStore {
             "database store opened"
         );
         Ok(Self {
-            db_path,
-            data_root,
+            db_path: db_path.to_path_buf(),
+            data_root: data_root.to_path_buf(),
             write_connection: Mutex::new(connection),
             read_connections: Mutex::new(Vec::new()),
         })
@@ -183,4 +249,45 @@ impl DatabaseStore {
         .map_err(sql_to_store_error)?;
         Ok(())
     }
+}
+
+/// Moves the database and its WAL/SHM siblings aside to `<name>.corrupt-<unix>`.
+///
+/// Best effort: if a file cannot be renamed it is removed so a fresh database
+/// can be created in its place. A rebuildable projection prefers a clean restart
+/// over refusing to launch.
+fn quarantine_database(db_path: &Path) -> Result<PathBuf, StoreError> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let base_name = db_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("mail.sqlite");
+    let quarantined = db_path.with_file_name(format!("{base_name}.corrupt-{timestamp}"));
+
+    for suffix in ["", "-wal", "-shm"] {
+        let from = sibling_path(db_path, suffix);
+        if !from.exists() {
+            continue;
+        }
+        let to = sibling_path(&quarantined, suffix);
+        if fs::rename(&from, &to).is_err() {
+            let _ = fs::remove_file(&from);
+        }
+    }
+    Ok(quarantined)
+}
+
+/// Returns the path of a SQLite sibling file (`""`, `-wal`, `-shm`).
+fn sibling_path(path: &Path, suffix: &str) -> PathBuf {
+    if suffix.is_empty() {
+        return path.to_path_buf();
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    path.with_file_name(format!("{name}{suffix}"))
 }
