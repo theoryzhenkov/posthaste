@@ -21,6 +21,55 @@ fn draft_entity(id: &str) -> OperationEntity {
     }
 }
 
+#[test]
+fn save_draft_without_id_enqueues_a_create_with_a_temp_id() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let op = service
+        .save_draft(&account, None, draft_request("Hello"))
+        .expect("save draft");
+
+    assert_eq!(op.kind, OperationKind::DraftCreate);
+    assert_eq!(op.entity.kind, OperationEntityKind::Draft);
+    assert!(op.entity.id.starts_with("draft-local-"));
+    assert_eq!(op.state, OperationState::Pending);
+}
+
+#[test]
+fn save_draft_with_id_enqueues_an_update_ordered_after_pending_ops() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let create = service
+        .save_draft(&account, None, draft_request("Hello"))
+        .expect("create");
+    let draft_id = MessageId::from(create.entity.id.as_str());
+    let update = service
+        .save_draft(&account, Some(draft_id), draft_request("Edited"))
+        .expect("update");
+
+    assert_eq!(update.kind, OperationKind::DraftUpdate);
+    assert_eq!(update.entity.id, create.entity.id);
+    assert_eq!(update.depends_on.as_ref(), Some(&create.id));
+}
+
+#[test]
+fn delete_draft_enqueues_a_delete() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let op = service
+        .delete_draft(&account, MessageId::from("provider-7"))
+        .expect("delete draft");
+
+    assert_eq!(op.kind, OperationKind::DraftDelete);
+    assert_eq!(op.entity.id, "provider-7");
+}
+
 #[tokio::test]
 async fn flush_create_then_update_reconciles_temp_id_and_settles() {
     let account = AccountId::from("primary");

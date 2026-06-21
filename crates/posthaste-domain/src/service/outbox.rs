@@ -92,6 +92,67 @@ impl MailService {
         self.enqueue_operation(operation)
     }
 
+    /// Save a draft local-first: enqueue a draft create/update operation.
+    ///
+    /// `draft_id` is `None` for a brand-new draft (a temporary entity id is
+    /// minted and reconciled to the provider id on first flush) or the existing
+    /// draft's id for an edit. The optimistic draft lives in the outbox until it
+    /// flushes to the provider's Drafts mailbox; consumers render pending draft
+    /// operations to show it while offline.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    pub fn save_draft(
+        &self,
+        account_id: &AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, ServiceError> {
+        let (entity_id, kind) = match draft_id {
+            Some(id) => (id.to_string(), OperationKind::DraftUpdate),
+            None => (
+                format!("draft-local-{}", Id::generate()),
+                OperationKind::DraftCreate,
+            ),
+        };
+        let payload = serde_json::to_value(request).map_err(|error| {
+            ServiceError::from(GatewayError::Rejected(format!(
+                "failed to serialize draft request: {error}"
+            )))
+        })?;
+        self.queue_operation(
+            account_id,
+            OperationEntity {
+                kind: OperationEntityKind::Draft,
+                id: entity_id,
+            },
+            kind,
+            payload,
+            None,
+        )
+    }
+
+    /// Delete a draft local-first: enqueue a draft delete operation for the
+    /// draft's current id (temporary or provider-assigned).
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    pub fn delete_draft(
+        &self,
+        account_id: &AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, ServiceError> {
+        self.queue_operation(
+            account_id,
+            OperationEntity {
+                kind: OperationEntityKind::Draft,
+                id: draft_id.to_string(),
+            },
+            OperationKind::DraftDelete,
+            serde_json::json!({}),
+            None,
+        )
+    }
+
     /// Flush all flushable operations for an account to the provider, returning
     /// the `operation.settled` events to publish.
     ///
