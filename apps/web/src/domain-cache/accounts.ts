@@ -1,10 +1,15 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { AccountOverview, DomainEvent, SyncProgress } from '../api/types'
+import type {
+  AccountOverview,
+  AccountRuntime,
+  DomainEvent,
+  SyncProgress,
+} from '../api/types'
 import { queryKeys } from '../queryKeys'
 import { invalidateAccountReadModels } from './invalidations'
 
-function isAccountStatus(value: unknown): value is AccountOverview['status'] {
+function isAccountStatus(value: unknown): value is AccountRuntime['status'] {
   return (
     value === 'ready' ||
     value === 'syncing' ||
@@ -15,7 +20,7 @@ function isAccountStatus(value: unknown): value is AccountOverview['status'] {
   )
 }
 
-function isPushStatus(value: unknown): value is AccountOverview['push'] {
+function isPushStatus(value: unknown): value is AccountRuntime['push'] {
   return (
     value === 'connected' ||
     value === 'reconnecting' ||
@@ -60,50 +65,52 @@ function isSyncProgress(value: unknown): value is SyncProgress {
   )
 }
 
-function statusPatchFromPayload(payload: DomainEvent['payload']) {
-  if (!isAccountStatus(payload.status) || !isPushStatus(payload.push)) {
-    return null
+/**
+ * Build a partial runtime patch from an `account.status_changed` payload.
+ *
+ * Tolerant by design: every valid field present is applied; missing or
+ * malformed fields are simply skipped. This avoids the previous all-or-nothing
+ * behaviour where a single shape drift discarded the whole live update and fell
+ * back to a query invalidation that often did not refetch.
+ */
+function runtimePatchFromPayload(
+  payload: DomainEvent['payload'],
+): Partial<AccountRuntime> {
+  const patch: Partial<AccountRuntime> = {}
+  if (isAccountStatus(payload.status)) {
+    patch.status = payload.status
   }
-
-  if (payload.syncProgress !== null && !isSyncProgress(payload.syncProgress)) {
-    return null
+  if (isPushStatus(payload.push)) {
+    patch.push = payload.push
   }
-
-  if (
-    !isStringOrNull(payload.lastSyncAt) ||
-    !isStringOrNull(payload.lastSyncError) ||
-    !isStringOrNull(payload.lastSyncErrorCode)
-  ) {
-    return null
+  if (isStringOrNull(payload.lastSyncAt)) {
+    patch.lastSyncAt = payload.lastSyncAt
   }
-
-  return {
-    status: payload.status,
-    push: payload.push,
-    lastSyncAt: payload.lastSyncAt,
-    lastSyncError: payload.lastSyncError,
-    lastSyncErrorCode: payload.lastSyncErrorCode,
-    syncProgress: payload.syncProgress,
+  if (isStringOrNull(payload.lastSyncError)) {
+    patch.lastSyncError = payload.lastSyncError
   }
+  if (isStringOrNull(payload.lastSyncErrorCode)) {
+    patch.lastSyncErrorCode = payload.lastSyncErrorCode
+  }
+  if (payload.syncProgress === null || isSyncProgress(payload.syncProgress)) {
+    patch.syncProgress = payload.syncProgress
+  }
+  return patch
 }
 
-function mergeAccountRuntime(
+/**
+ * Apply a config-mutation result while preserving live runtime state.
+ *
+ * Config and runtime are separate concerns: a config mutation (rename, enable,
+ * appearance, ...) must not clobber the runtime state the event stream owns.
+ * Runtime is preserved from the current cache entry; the freshly-created
+ * account uses the result's runtime.
+ */
+function mergeConfigPreserveRuntime(
   current: AccountOverview | undefined,
   next: AccountOverview,
 ): AccountOverview {
-  if (!current || next.status !== 'syncing' || current.status === 'syncing') {
-    return next
-  }
-
-  return {
-    ...next,
-    status: current.status,
-    push: current.push,
-    lastSyncAt: current.lastSyncAt,
-    lastSyncError: current.lastSyncError,
-    lastSyncErrorCode: current.lastSyncErrorCode,
-    syncProgress: current.syncProgress,
-  }
+  return current ? { ...next, runtime: current.runtime } : next
 }
 
 export function mergeAccountOverview(
@@ -121,14 +128,14 @@ export function mergeAccountOverview(
       }
       return current.map((candidate) =>
         candidate.id === account.id
-          ? mergeAccountRuntime(candidate, account)
+          ? mergeConfigPreserveRuntime(candidate, account)
           : candidate,
       )
     },
   )
   queryClient.setQueryData<AccountOverview>(
     queryKeys.account(account.id),
-    (current) => mergeAccountRuntime(current, account),
+    (current) => mergeConfigPreserveRuntime(current, account),
   )
 }
 
@@ -159,21 +166,26 @@ export function applyAccountStatusPatch(
   accountId: string,
   payload: DomainEvent['payload'],
 ): boolean {
-  const patch = statusPatchFromPayload(payload)
-  if (!patch) {
+  const patch = runtimePatchFromPayload(payload)
+  if (Object.keys(patch).length === 0) {
     return false
   }
+
+  const applyRuntime = (account: AccountOverview): AccountOverview => ({
+    ...account,
+    runtime: { ...account.runtime, ...patch },
+  })
 
   queryClient.setQueryData<AccountOverview[]>(
     queryKeys.accounts,
     (current = []) =>
       current.map((account) =>
-        account.id === accountId ? { ...account, ...patch } : account,
+        account.id === accountId ? applyRuntime(account) : account,
       ),
   )
   queryClient.setQueryData<AccountOverview>(
     queryKeys.account(accountId),
-    (current) => (current ? { ...current, ...patch } : current),
+    (current) => (current ? applyRuntime(current) : current),
   )
   return true
 }

@@ -46,22 +46,24 @@ function accountOverview(
     createdAt: '2026-05-24T00:00:00Z',
     updatedAt: '2026-05-24T00:00:00Z',
     isDefault: false,
-    status: 'syncing',
-    push: 'connected',
-    lastSyncAt: null,
-    lastSyncError: null,
-    lastSyncErrorCode: null,
-    syncProgress: {
-      syncId: 'sync-1',
-      trigger: 'poll',
-      startedAt: '2026-05-24T00:01:00Z',
-      stage: 'fetching',
-      detail: 'Syncing messages',
-      mailboxName: 'Inbox',
-      mailboxIndex: 1,
-      mailboxCount: 2,
-      messageCount: 10,
-      totalCount: null,
+    runtime: {
+      status: 'syncing',
+      push: 'connected',
+      lastSyncAt: null,
+      lastSyncError: null,
+      lastSyncErrorCode: null,
+      syncProgress: {
+        syncId: 'sync-1',
+        trigger: 'poll',
+        startedAt: '2026-05-24T00:01:00Z',
+        stage: 'fetching',
+        detail: 'Syncing messages',
+        mailboxName: 'Inbox',
+        mailboxIndex: 1,
+        mailboxCount: 2,
+        messageCount: 10,
+        totalCount: null,
+      },
     },
     ...overrides,
   }
@@ -69,12 +71,24 @@ function accountOverview(
 
 describe('settings panel helper contracts', () => {
   // spec: docs/L1-api#account-crud-lifecycle
-  it('only displays sync progress while the account status is syncing', () => {
+  it('displays sync progress whenever progress is present, regardless of status', () => {
     expect(syncProgressLabel(accountOverview())).toBe(
       'Syncing messages · Inbox · 1/2 · 10 messages',
     )
 
-    expect(syncProgressLabel(accountOverview({ status: 'ready' }))).toBeNull()
+    // Progress is shown even when status has moved past syncing, as long as a
+    // progress object is present; it is only hidden when there is no progress.
+    const ready = accountOverview({
+      runtime: {
+        status: 'ready',
+        push: 'connected',
+        lastSyncAt: null,
+        lastSyncError: null,
+        lastSyncErrorCode: null,
+        syncProgress: null,
+      },
+    })
+    expect(syncProgressLabel(ready)).toBeNull()
   })
 })
 

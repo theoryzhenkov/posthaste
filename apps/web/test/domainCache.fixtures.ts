@@ -83,12 +83,14 @@ export function accountOverview(
     createdAt: '2026-04-28T12:00:00Z',
     updatedAt: '2026-04-28T12:00:00Z',
     isDefault: true,
-    status: 'ready',
-    push: 'connected',
-    lastSyncAt: '2026-04-28T12:00:00Z',
-    lastSyncError: null,
-    lastSyncErrorCode: null,
-    syncProgress: null,
+    runtime: {
+      status: 'ready',
+      push: 'connected',
+      lastSyncAt: '2026-04-28T12:00:00Z',
+      lastSyncError: null,
+      lastSyncErrorCode: null,
+      syncProgress: null,
+    },
     ...overrides,
   }
 }
