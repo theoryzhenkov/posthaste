@@ -434,6 +434,9 @@ impl AuthorityRuntimeHandle {
 
     fn current_status(&self) -> RuntimeStatus {
         let mut status = self.core.startup_status.clone();
+        if let Some(account_count) = self.core.live_accounts.account_count() {
+            status.account_count = account_count;
+        }
         if self.core.stopped.load(Ordering::SeqCst) {
             status.lifecycle = RuntimeLifecycle::Stopped;
         }

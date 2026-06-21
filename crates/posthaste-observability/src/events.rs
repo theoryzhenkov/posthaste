@@ -160,6 +160,8 @@ pub const SUPERVISOR_ACCOUNT_RUNTIME_STARTED: LogEvent =
     LogEvent::new("supervisor.account.runtime_started");
 pub const SUPERVISOR_ACCOUNT_RUNTIME_STOPPED: LogEvent =
     LogEvent::new("supervisor.account.runtime_stopped");
+pub const SUPERVISOR_ACCOUNT_STATUS_PERSIST_FAILED: LogEvent =
+    LogEvent::new("supervisor.account.status_persist_failed");
 pub const SUPERVISOR_CONNECTION_ESTABLISHED: LogEvent =
     LogEvent::new("supervisor.connection.established");
 pub const SUPERVISOR_CONNECTION_ESTABLISHING: LogEvent =

@@ -7,6 +7,7 @@ use super::*;
 pub(crate) async fn run_account_runtime(
     shared: Arc<SupervisorShared>,
     account: AccountSettings,
+    generation: RuntimeGeneration,
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
 ) {
     let account_id = account.id.clone();
@@ -22,8 +23,9 @@ pub(crate) async fn run_account_runtime(
     );
     cache_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     shared
-        .set_runtime_overview(
+        .set_runtime_overview_for_generation(
             &account_id,
+            generation,
             AccountRuntimeOverview {
                 status: AccountStatus::Offline,
                 push: PushStatus::Reconnecting,
@@ -36,6 +38,7 @@ pub(crate) async fn run_account_runtime(
     let _ = process_sync_trigger(
         &shared,
         &account,
+        generation,
         SyncTrigger::Startup,
         SyncMode::Incremental,
         &mut connection,
@@ -54,7 +57,7 @@ pub(crate) async fn run_account_runtime(
 
         tokio::select! {
             _ = interval.tick() => {
-                handle_poll_tick(&shared, &account, &mut connection).await;
+                handle_poll_tick(&shared, &account, generation, &mut connection).await;
                 interval = sync_poll_interval(shared.poll_interval);
             }
             _ = backfill_interval.tick() => {
@@ -75,13 +78,14 @@ pub(crate) async fn run_account_runtime(
                     &account,
                     &account_id,
                     &mut connection,
+                    generation,
                     command,
                 ).await {
                     interval = sync_poll_interval(shared.poll_interval);
                 }
             }
             Some(event) = next_push => {
-                if handle_push_event(&shared, &account, &account_id, &mut connection, event).await {
+                if handle_push_event(&shared, &account, &account_id, generation, &mut connection, event).await {
                     interval = sync_poll_interval(shared.poll_interval);
                 }
             }
@@ -92,11 +96,13 @@ pub(crate) async fn run_account_runtime(
 pub(crate) async fn handle_poll_tick(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
+    generation: RuntimeGeneration,
     connection: &mut AccountRuntimeConnectionState,
 ) {
     let _ = process_sync_trigger(
         shared,
         account,
+        generation,
         SyncTrigger::Poll,
         SyncMode::Incremental,
         connection,
@@ -135,6 +141,7 @@ pub(crate) async fn handle_runtime_command(
     account: &AccountSettings,
     account_id: &AccountId,
     connection: &mut AccountRuntimeConnectionState,
+    generation: RuntimeGeneration,
     command: RuntimeCommand,
 ) -> bool {
     match command {
@@ -143,14 +150,23 @@ pub(crate) async fn handle_runtime_command(
             mode,
             reply,
         } => {
-            let _ =
-                process_sync_trigger(shared, account, trigger, mode, connection, Some(reply)).await;
+            let _ = process_sync_trigger(
+                shared,
+                account,
+                generation,
+                trigger,
+                mode,
+                connection,
+                Some(reply),
+            )
+            .await;
             true
         }
         RuntimeCommand::TriggerOnly { trigger } => {
             let _ = process_sync_trigger(
                 shared,
                 account,
+                generation,
                 trigger,
                 SyncMode::Incremental,
                 connection,
@@ -180,6 +196,7 @@ pub(crate) async fn handle_push_event(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     account_id: &AccountId,
+    generation: RuntimeGeneration,
     connection: &mut AccountRuntimeConnectionState,
     event: PushStreamEvent,
 ) -> bool {
@@ -202,6 +219,7 @@ pub(crate) async fn handle_push_event(
             let _ = process_sync_trigger(
                 shared,
                 account,
+                generation,
                 SyncTrigger::Push,
                 SyncMode::Incremental,
                 connection,
@@ -218,7 +236,7 @@ pub(crate) async fn handle_push_event(
                 "push connected"
             );
             shared
-                .set_push_status(account_id, PushStatus::Connected)
+                .set_push_status(account_id, generation, PushStatus::Connected)
                 .await;
             false
         }
@@ -231,7 +249,7 @@ pub(crate) async fn handle_push_event(
                 "push disconnected"
             );
             shared
-                .handle_push_disconnect(account_id, &format!("{transport}: {reason}"))
+                .handle_push_disconnect(account_id, generation, &format!("{transport}: {reason}"))
                 .await;
             false
         }
@@ -244,7 +262,11 @@ pub(crate) async fn handle_push_event(
                 "push falling back"
             );
             shared
-                .handle_push_disconnect(account_id, &format!("falling back from {from} to {to}"))
+                .handle_push_disconnect(
+                    account_id,
+                    generation,
+                    &format!("falling back from {from} to {to}"),
+                )
                 .await;
             false
         }

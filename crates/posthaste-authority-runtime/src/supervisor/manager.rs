@@ -17,6 +17,9 @@ impl AccountSupervisor {
                 event_sender,
                 gateways: RwLock::new(HashMap::new()),
                 runtime_overviews: RwLock::new(HashMap::new()),
+                runtime_generations: RwLock::new(HashMap::new()),
+                known_accounts: RwLock::new(HashSet::new()),
+                account_count: AtomicUsize::new(0),
                 cache_resources: Mutex::new(CacheResourceGovernor::new(
                     Instant::now(),
                     CacheResourcePolicy::default(),
@@ -32,6 +35,8 @@ impl AccountSupervisor {
     /// without spawning a task.
     pub async fn start_account(&self, account: &AccountSettings) {
         self.stop_account(&account.id).await;
+        self.shared.register_account(&account.id).await;
+        let generation = self.shared.next_runtime_generation(&account.id).await;
         if !account.enabled {
             ph_info!(
                 events::SUPERVISOR_ACCOUNT_DISABLED,
@@ -64,7 +69,7 @@ impl AccountSupervisor {
         let span = info_span!("supervisor.runtime", account_id = %account_id);
         let handle = tokio::spawn(
             async move {
-                run_account_runtime(shared, account, command_rx).await;
+                run_account_runtime(shared, account, generation, command_rx).await;
             }
             .instrument(span),
         );
@@ -96,6 +101,8 @@ impl AccountSupervisor {
             "removing account"
         );
         self.stop_account(account_id).await;
+        self.shared.next_runtime_generation(account_id).await;
+        self.shared.unregister_account(account_id).await;
         self.shared
             .runtime_overviews
             .write()
@@ -182,6 +189,11 @@ impl AccountSupervisor {
         self.shared.runtime_overview(account_id).await
     }
 
+    /// Return the current number of accounts known to the supervisor.
+    pub fn account_count(&self) -> usize {
+        self.shared.account_count.load(Ordering::SeqCst)
+    }
+
     /// Return the live gateway for an account, if its runtime is connected.
     pub async fn gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
         self.shared.gateway(account_id).await
@@ -195,7 +207,7 @@ impl AccountSupervisor {
         &self,
         account: &AccountSettings,
     ) -> Result<AccountVerification, ServiceError> {
-        let conn = build_connection(account, &self.shared).await?;
+        let conn = build_connection(account, &self.shared, None).await?;
         let identity = conn.gateway.fetch_identity(&account.id).await.ok();
         Ok(AccountVerification {
             ok: true,

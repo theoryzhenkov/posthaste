@@ -10,6 +10,7 @@ pub(crate) fn sync_poll_interval(poll_interval: Duration) -> tokio::time::Interv
 pub(crate) fn sync_progress_reporter(
     shared: &Arc<SupervisorShared>,
     account_id: AccountId,
+    generation: RuntimeGeneration,
     sync_id: String,
     trigger: SyncTrigger,
     started_at: String,
@@ -19,7 +20,9 @@ pub(crate) fn sync_progress_reporter(
         let shared = shared.clone();
         let account_id = account_id.clone();
         tokio::spawn(async move {
-            shared.set_sync_progress(&account_id, Some(progress)).await;
+            shared
+                .set_sync_progress(&account_id, generation, Some(progress))
+                .await;
         });
     })
 }
@@ -81,6 +84,7 @@ pub(crate) async fn process_automation_backfill_batch(
 pub(crate) async fn process_sync_trigger(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
+    generation: RuntimeGeneration,
     trigger: SyncTrigger,
     mode: SyncMode,
     connection: &mut AccountRuntimeConnectionState,
@@ -95,14 +99,17 @@ pub(crate) async fn process_sync_trigger(
         trigger = trigger.as_str()
     );
 
-    process_sync_trigger_inner(shared, account, trigger, mode, connection, reply, sync_id)
-        .instrument(span)
-        .await
+    process_sync_trigger_inner(
+        shared, account, generation, trigger, mode, connection, reply, sync_id,
+    )
+    .instrument(span)
+    .await
 }
 
 pub(crate) async fn process_sync_trigger_inner(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
+    generation: RuntimeGeneration,
     trigger: SyncTrigger,
     mode: SyncMode,
     connection: &mut AccountRuntimeConnectionState,
@@ -124,6 +131,7 @@ pub(crate) async fn process_sync_trigger_inner(
     shared
         .set_sync_progress(
             &account_id,
+            generation,
             Some(SyncProgress {
                 sync_id: sync_id.clone(),
                 trigger: trigger.clone(),
@@ -139,12 +147,13 @@ pub(crate) async fn process_sync_trigger_inner(
         )
         .await;
 
-    let result = match ensure_connection(shared, account, connection).await {
+    let result = match ensure_connection(shared, account, generation, connection).await {
         Ok(()) => {
             if let AccountRuntimeConnectionState::Connected(connection) = connection {
                 let progress = sync_progress_reporter(
                     shared,
                     account_id.clone(),
+                    generation,
                     sync_id.clone(),
                     trigger.clone(),
                     started_at.clone(),
@@ -179,7 +188,7 @@ pub(crate) async fn process_sync_trigger_inner(
                 "sync completed"
             );
             shared.publish_events(&events);
-            shared.mark_sync_success(&account_id).await;
+            shared.mark_sync_success(&account_id, generation).await;
             if let Some(reply) = reply {
                 let _ = reply.send(Ok(event_count));
             }
@@ -207,7 +216,9 @@ pub(crate) async fn process_sync_trigger_inner(
             ) {
                 shared.publish_events(&[event]);
             }
-            shared.mark_sync_failure(&account_id, &error).await;
+            shared
+                .mark_sync_failure(&account_id, generation, &error)
+                .await;
             if let Some(reply) = reply {
                 let _ = reply.send(Err(error));
             }

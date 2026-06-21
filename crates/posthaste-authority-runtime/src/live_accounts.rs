@@ -15,6 +15,10 @@ use crate::supervisor::AccountSupervisor;
 /// spec: docs/backend/L3#supervisor-ownership-migration
 #[async_trait]
 pub trait LiveAccountRuntimeProvider: Send + Sync {
+    fn account_count(&self) -> Option<usize> {
+        None
+    }
+
     async fn gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError>;
 
     async fn sync_account_with_mode(
@@ -34,6 +38,10 @@ pub struct UnavailableLiveAccountRuntimeProvider;
 
 #[async_trait]
 impl LiveAccountRuntimeProvider for AccountSupervisor {
+    fn account_count(&self) -> Option<usize> {
+        Some(AccountSupervisor::account_count(self))
+    }
+
     async fn gateway(&self, account_id: &AccountId) -> Result<SharedGateway, ServiceError> {
         AccountSupervisor::gateway(self, account_id).await
     }
