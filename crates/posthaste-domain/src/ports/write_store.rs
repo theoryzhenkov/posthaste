@@ -55,6 +55,57 @@ pub trait EventStore: Send + Sync {
     ) -> Result<DomainEvent, StoreError>;
 }
 
+/// Durable local-first command outbox boundary (Tier 2: runtime <-> provider).
+///
+/// Operations are applied to the local store immediately and flushed to the
+/// provider later; this is their durable queue. `id` is the cross-tier
+/// idempotency key, so enqueue is idempotent and a tier never applies an id
+/// twice.
+///
+/// @spec docs/L1-outbox#operation-model
+pub trait OperationOutboxStore: Send + Sync {
+    /// Persist a new operation. Idempotent on [`Operation::id`]: re-enqueuing an
+    /// existing id returns the already-stored operation unchanged.
+    fn enqueue_operation(&self, operation: &Operation) -> Result<Operation, StoreError>;
+
+    /// Operations eligible for flushing (pending or conflicted) for an account,
+    /// in insertion order.
+    fn list_flushable_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError>;
+
+    /// All non-terminal operations for an account, in insertion order. Used to
+    /// hydrate optimistic state and surface pending/failed work to the UI.
+    fn list_pending_operations(&self, account_id: &AccountId)
+        -> Result<Vec<Operation>, StoreError>;
+
+    /// Fetch a single operation by id.
+    fn get_operation(&self, id: &OperationId) -> Result<Option<Operation>, StoreError>;
+
+    /// Update an operation's lifecycle state, bumping `updated_at` and recording
+    /// `attempts` / `last_error`.
+    fn update_operation_state(
+        &self,
+        id: &OperationId,
+        state: OperationState,
+        attempts: u32,
+        last_error: Option<&str>,
+    ) -> Result<(), StoreError>;
+
+    /// Rewrite a temporary entity id to its reconciled provider id across all of
+    /// an account's operations (temp-id reconciliation after first flush).
+    fn reconcile_operation_entity_id(
+        &self,
+        account_id: &AccountId,
+        from_entity_id: &str,
+        to_entity_id: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Remove an operation after it has settled and been propagated downstream.
+    fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError>;
+}
+
 /// Account/source projection maintenance boundary.
 pub trait SourceProjectionStore: Send + Sync {
     /// Create or update the source projection row for sidebar display.

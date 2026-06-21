@@ -188,6 +188,13 @@ pub const EVENT_TOPIC_PUSH_CONNECTED: &str = "push.connected";
 /// @spec docs/L2-transport#push-transport
 pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 
+/// Event topic emitted when an outbox operation reaches a terminal outcome
+/// (applied, conflicted, or failed) so a downstream tier can settle its
+/// optimistic state. Payload is an [`OperationSettlement`].
+///
+/// @spec docs/L1-outbox#settlement
+pub const EVENT_TOPIC_OPERATION_SETTLED: &str = "operation.settled";
+
 /// Every event topic the server emits, in declaration order.
 ///
 /// Single source of truth for the documented topic set: the committed
@@ -212,6 +219,7 @@ pub const ALL_EVENT_TOPICS: &[&str] = &[
     EVENT_TOPIC_ACCOUNT_STATUS_CHANGED,
     EVENT_TOPIC_PUSH_CONNECTED,
     EVENT_TOPIC_PUSH_DISCONNECTED,
+    EVENT_TOPIC_OPERATION_SETTLED,
 ];
 
 mod account_overview;
@@ -221,6 +229,7 @@ mod commands;
 mod conversations;
 mod errors;
 mod messages;
+mod outbox;
 mod records;
 mod smart_mailboxes;
 mod sync;
@@ -232,6 +241,7 @@ pub use commands::*;
 pub use conversations::*;
 pub use errors::*;
 pub use messages::*;
+pub use outbox::*;
 pub use records::*;
 pub use smart_mailboxes::*;
 pub use sync::*;

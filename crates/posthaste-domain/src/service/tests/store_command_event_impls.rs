@@ -123,6 +123,85 @@ impl SourceDataStore for TestStore {
     }
 }
 
+impl OperationOutboxStore for TestStore {
+    fn enqueue_operation(&self, operation: &Operation) -> Result<Operation, StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        if !ops.iter().any(|existing| existing.id == operation.id) {
+            ops.push(operation.clone());
+        }
+        ops.iter()
+            .find(|existing| existing.id == operation.id)
+            .cloned()
+            .ok_or_else(|| StoreError::Failure("operation not persisted".to_string()))
+    }
+
+    fn list_flushable_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops
+            .iter()
+            .filter(|op| &op.account_id == account_id && op.state.is_flushable())
+            .cloned()
+            .collect())
+    }
+
+    fn list_pending_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops
+            .iter()
+            .filter(|op| &op.account_id == account_id && !op.state.is_terminal())
+            .cloned()
+            .collect())
+    }
+
+    fn get_operation(&self, id: &OperationId) -> Result<Option<Operation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops.iter().find(|op| &op.id == id).cloned())
+    }
+
+    fn update_operation_state(
+        &self,
+        id: &OperationId,
+        state: OperationState,
+        attempts: u32,
+        last_error: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        if let Some(op) = ops.iter_mut().find(|op| &op.id == id) {
+            op.state = state;
+            op.attempts = attempts;
+            op.last_error = last_error.map(str::to_string);
+        }
+        Ok(())
+    }
+
+    fn reconcile_operation_entity_id(
+        &self,
+        account_id: &AccountId,
+        from_entity_id: &str,
+        to_entity_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        for op in ops.iter_mut() {
+            if &op.account_id == account_id && op.entity.id == from_entity_id {
+                op.entity.id = to_entity_id.to_string();
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError> {
+        let mut ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        ops.retain(|op| &op.id != id);
+        Ok(())
+    }
+}
+
 impl SenderAddressCacheStore for TestStore {
     fn list_sender_address_cache(&self) -> Result<Vec<CachedSenderAddress>, StoreError> {
         Ok(Vec::new())
