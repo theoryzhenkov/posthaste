@@ -1,7 +1,21 @@
-import type { AccountOverview } from '../../../api/types'
+import type { AccountOverview, AccountRuntime } from '../../../api/types'
+
+const STATUS_LABELS: Record<AccountRuntime['status'], string> = {
+  ready: 'Ready',
+  syncing: 'Syncing',
+  degraded: 'Degraded',
+  authError: 'Authentication error',
+  offline: 'Offline',
+  disabled: 'Disabled',
+}
+
+/** Human-readable label for an account status (avoids showing raw enum text). */
+export function statusLabel(status: AccountRuntime['status']): string {
+  return STATUS_LABELS[status]
+}
 
 /** Map account status to Tailwind color classes for the status badge. */
-export function statusTone(status: AccountOverview['status']): string {
+export function statusTone(status: AccountRuntime['status']): string {
   switch (status) {
     case 'ready':
       return 'text-emerald-700 border-emerald-500/30 bg-emerald-500/10'
@@ -19,8 +33,11 @@ export function statusTone(status: AccountOverview['status']): string {
 }
 
 export function syncProgressLabel(account: AccountOverview): string | null {
-  const progress = account.syncProgress
-  if (account.status !== 'syncing' || !progress) {
+  const progress = account.runtime.syncProgress
+  // Show progress whenever it exists, not only while status is exactly
+  // `syncing`: a stale-but-present progress is still informative, and gating on
+  // status hid legitimate updates.
+  if (!progress) {
     return null
   }
 
@@ -28,7 +45,7 @@ export function syncProgressLabel(account: AccountOverview): string | null {
   if (progress.mailboxName) {
     parts.push(progress.mailboxName)
   }
-  if (progress.mailboxIndex && progress.mailboxCount) {
+  if (progress.mailboxIndex !== null && progress.mailboxCount !== null) {
     parts.push(`${progress.mailboxIndex}/${progress.mailboxCount}`)
   }
   if (progress.messageCount !== null) {
@@ -39,8 +56,12 @@ export function syncProgressLabel(account: AccountOverview): string | null {
 }
 
 export function syncProgressPercent(account: AccountOverview): number | null {
-  const progress = account.syncProgress
-  if (!progress?.mailboxIndex || !progress.mailboxCount) {
+  const progress = account.runtime.syncProgress
+  if (
+    progress?.mailboxIndex === null ||
+    progress?.mailboxIndex === undefined ||
+    !progress.mailboxCount
+  ) {
     return null
   }
 

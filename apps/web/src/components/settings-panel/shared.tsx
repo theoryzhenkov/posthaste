@@ -1,6 +1,7 @@
 /** Reusable form and display primitives for the settings panel. */
 
-import type { AccountOverview } from '../../api/types'
+import type { AccountRuntime } from '../../api/types'
+import { statusLabel } from './helpers/accountStatus'
 import { cn } from '../../lib/utils'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '../ui/button'
@@ -214,7 +215,7 @@ export function Field({
   )
 }
 
-const STATUS_DOT_COLOR: Record<AccountOverview['status'], string> = {
+const STATUS_DOT_COLOR: Record<AccountRuntime['status'], string> = {
   ready: 'bg-emerald-500',
   syncing: 'bg-blue-500',
   degraded: 'bg-amber-500',
@@ -228,13 +229,13 @@ export function StatusDot({
   status,
   className,
 }: {
-  status: AccountOverview['status']
+  status: AccountRuntime['status']
   className?: string
 }) {
   return (
     <span
       aria-hidden
-      title={status}
+      title={statusLabel(status)}
       className={cn(
         'inline-block h-2 w-2 shrink-0 rounded-full',
         STATUS_DOT_COLOR[status],

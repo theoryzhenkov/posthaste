@@ -75,10 +75,12 @@ export function MailClient({
   const operations = useOperations()
 
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()
+  // Observed (not `enabled: false`): the bootstrap read seeds this cache, but
+  // the query must be live so account read-model invalidations (status events,
+  // sync completion) actually refetch instead of leaving the main app stale.
   const accountsQuery = useQuery({
     queryKey: queryKeys.accounts,
     queryFn: runtimeViews.accounts.list,
-    enabled: false,
   })
   const accounts = useMemo(() => accountsQuery.data ?? [], [accountsQuery.data])
   const enabledAccounts = useMemo(

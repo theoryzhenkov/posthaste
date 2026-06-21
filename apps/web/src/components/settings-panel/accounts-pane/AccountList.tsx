@@ -85,7 +85,7 @@ function AccountListRow({
           <span className="truncate text-[13px] font-medium text-foreground">
             {label}
           </span>
-          <StatusDot status={account.status} className="size-1.5" />
+          <StatusDot status={account.runtime.status} className="size-1.5" />
           {isDefault && (
             <span
               className="shrink-0 rounded-sm bg-background/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground"

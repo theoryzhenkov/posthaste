@@ -1,4 +1,5 @@
 import type { ExistingAccountEditorModel } from '../accountEditorModel'
+import { statusLabel } from '../helpers/accountStatus'
 import { StatusDot } from '../shared'
 import { authLabel, providerLabel } from './labels'
 
@@ -9,10 +10,8 @@ export function AccountHeaderMeta({
 }) {
   return (
     <>
-      <StatusDot status={model.account.status} className="size-1.5" />
-      <span className="font-mono uppercase tracking-[0.12em]">
-        {model.account.status}
-      </span>
+      <StatusDot status={model.account.runtime.status} className="size-1.5" />
+      <span>{statusLabel(model.account.runtime.status)}</span>
       <span aria-hidden>·</span>
       <span>{providerLabel(model.account.connection.providerKind)}</span>
       <span aria-hidden>·</span>
