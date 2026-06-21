@@ -25,6 +25,7 @@ mod body_cache_worker;
 mod cache_rescore;
 mod message_mutation_cursors;
 mod message_mutation_retries;
+mod outbox;
 mod smart_mailboxes;
 mod source_cleanup;
 mod sync_cache_candidates;
