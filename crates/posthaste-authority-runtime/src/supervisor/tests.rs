@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountTransportSettings, ProviderHint, PushNotification, SecretRef, SecretStoreError,
-    RFC3339_EPOCH,
+    AccountTransportSettings, EventFilter, ProviderHint, PushNotification, SecretRef,
+    SecretStoreError, RFC3339_EPOCH,
 };
 use posthaste_store::DatabaseStore;
 
@@ -85,6 +85,9 @@ fn test_shared(account: &AccountSettings) -> Arc<SupervisorShared> {
         event_sender,
         gateways: RwLock::new(HashMap::new()),
         runtime_overviews: RwLock::new(HashMap::new()),
+        runtime_generations: RwLock::new(HashMap::new()),
+        known_accounts: RwLock::new(HashSet::new()),
+        account_count: AtomicUsize::new(0),
         cache_resources: Mutex::new(CacheResourceGovernor::new(
             Instant::now(),
             CacheResourcePolicy::default(),
@@ -136,6 +139,102 @@ fn sync_failure_stage_classifies_non_connection_failures_as_sync() {
     assert_eq!(sync_failure_stage(&state_mismatch), "sync");
 }
 
+// spec: docs/L1-sync#event-propagation
+#[tokio::test]
+async fn stale_runtime_generation_cannot_overwrite_current_runtime_status() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let stale_generation = shared.next_runtime_generation(&account.id).await;
+    let current_generation = shared.next_runtime_generation(&account.id).await;
+
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            current_generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Ready,
+                push: PushStatus::Connected,
+                ..Default::default()
+            },
+        )
+        .await;
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            stale_generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Offline,
+                push: PushStatus::Reconnecting,
+                last_sync_error: Some("stale".to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(overview.status, AccountStatus::Ready);
+    assert_eq!(overview.push, PushStatus::Connected);
+    assert_eq!(overview.last_sync_error, None);
+}
+
+// spec: docs/runtime/L2#runtime-health
+#[tokio::test]
+async fn supervisor_account_count_tracks_known_accounts() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+
+    assert_eq!(shared.account_count.load(Ordering::SeqCst), 0);
+    shared.register_account(&account.id).await;
+    assert_eq!(shared.account_count.load(Ordering::SeqCst), 1);
+    shared.register_account(&account.id).await;
+    assert_eq!(shared.account_count.load(Ordering::SeqCst), 1);
+    shared.unregister_account(&account.id).await;
+    assert_eq!(shared.account_count.load(Ordering::SeqCst), 0);
+}
+
+// spec: docs/L1-sync#event-propagation
+#[tokio::test]
+async fn push_only_runtime_transition_emits_account_status_changed() {
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Ready,
+                push: PushStatus::Reconnecting,
+                ..Default::default()
+            },
+        )
+        .await;
+    shared
+        .set_runtime_overview_for_generation(
+            &account.id,
+            generation,
+            AccountRuntimeOverview {
+                status: AccountStatus::Ready,
+                push: PushStatus::Connected,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let events = shared
+        .store
+        .list_events(&EventFilter {
+            account_id: Some(account.id.clone()),
+            topic: Some(EVENT_TOPIC_ACCOUNT_STATUS_CHANGED.to_string()),
+            mailbox_id: None,
+            after_seq: None,
+        })
+        .expect("events should list");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1].payload["push"], "connected");
+}
+
 // spec: docs/L1-sync#sync-loop
 #[tokio::test]
 async fn checkpoint_only_push_notification_triggers_sync() {
@@ -159,10 +258,12 @@ async fn checkpoint_only_push_notification_triggers_sync() {
         checkpoint: Some("event-42".to_string()),
     };
 
+    let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
         &shared,
         &account,
         &account.id,
+        generation,
         &mut connection,
         PushStreamEvent::Notification(notification),
     )
@@ -201,10 +302,12 @@ async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync
         checkpoint: None,
     };
 
+    let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
         &shared,
         &account,
         &account.id,
+        generation,
         &mut connection,
         PushStreamEvent::Notification(notification),
     )
@@ -248,10 +351,12 @@ async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
         checkpoint: None,
     };
 
+    let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
         &shared,
         &account,
         &account.id,
+        generation,
         &mut connection,
         PushStreamEvent::Notification(notification),
     )

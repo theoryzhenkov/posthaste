@@ -5,6 +5,7 @@ use super::*;
 pub(crate) async fn ensure_connection(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
+    generation: RuntimeGeneration,
     connection: &mut AccountRuntimeConnectionState,
 ) -> Result<(), ServiceError> {
     if connection.is_connected() {
@@ -15,7 +16,7 @@ pub(crate) async fn ensure_connection(
         account_id = %account.id,
         "establishing connection"
     );
-    let conn = build_connection(account, shared).await?;
+    let conn = build_connection(account, shared, Some(generation)).await?;
     shared.set_gateway(&account.id, conn.gateway.clone()).await;
     connection.set_connected(conn);
     ph_info!(
@@ -33,6 +34,7 @@ pub(crate) async fn ensure_connection(
 pub(crate) async fn build_connection(
     account: &AccountSettings,
     shared: &Arc<SupervisorShared>,
+    generation: Option<RuntimeGeneration>,
 ) -> Result<AccountConnection, ServiceError> {
     match account.driver {
         AccountDriver::Mock => Ok(AccountConnection {
@@ -182,9 +184,11 @@ pub(crate) async fn build_connection(
                         account_id = %account.id,
                         "IMAP IDLE advertised but no selectable mailbox is available"
                     );
-                    shared
-                        .set_push_status(&account.id, PushStatus::Unsupported)
-                        .await;
+                    if let Some(generation) = generation {
+                        shared
+                            .set_push_status(&account.id, generation, PushStatus::Unsupported)
+                            .await;
+                    }
                     None
                 }
             } else {
@@ -193,9 +197,11 @@ pub(crate) async fn build_connection(
                     account_id = %account.id,
                     "IMAP IDLE unavailable; using periodic poll only"
                 );
-                shared
-                    .set_push_status(&account.id, PushStatus::Unsupported)
-                    .await;
+                if let Some(generation) = generation {
+                    shared
+                        .set_push_status(&account.id, generation, PushStatus::Unsupported)
+                        .await;
+                }
                 None
             };
             Ok(AccountConnection {
