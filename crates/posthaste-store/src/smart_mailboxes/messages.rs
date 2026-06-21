@@ -12,7 +12,7 @@ pub(crate) fn count_smart_mailbox_messages(
     let sql = format!(
         "SELECT COUNT(*), SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END)
          FROM message m
-         JOIN source_projection a ON a.source_id = m.account_id
+         LEFT JOIN source_projection a ON a.source_id = m.account_id
          WHERE ({where_clause})"
     );
     connection
@@ -35,11 +35,11 @@ pub(crate) fn query_messages_by_rule(
     let mut params = Vec::new();
     let where_clause = compile_smart_mailbox_rule(rule, &mut params)?;
     let sql = format!(
-        "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+        "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                 m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                 m.is_read, m.is_flagged
          FROM message m
-         JOIN source_projection a ON a.source_id = m.account_id
+         LEFT JOIN source_projection a ON a.source_id = m.account_id
          WHERE ({where_clause})
          ORDER BY m.received_at DESC"
     );
@@ -92,7 +92,7 @@ pub(crate) fn query_message_page(
             SELECT
                 m.id,
                 m.account_id,
-                a.name,
+                COALESCE(a.name, m.account_id) AS name,
                 m.thread_id,
                 m.conversation_id,
                 m.subject,
@@ -107,7 +107,7 @@ pub(crate) fn query_message_page(
                 {sort_key} AS sort_key,
                 m.account_id || char(31) || m.id AS tie_key
             FROM message m
-            JOIN source_projection a
+            LEFT JOIN source_projection a
               ON a.source_id = m.account_id
             {where_clause}
         )
@@ -180,11 +180,11 @@ pub(crate) fn query_messages_by_rule_sorted(
         SortDirection::Asc => "ASC",
     };
     let sql = format!(
-        "SELECT m.id, m.account_id, a.name, m.thread_id, m.conversation_id, m.subject,
+        "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                 m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
                 m.is_read, m.is_flagged
          FROM message m
-         JOIN source_projection a ON a.source_id = m.account_id
+         LEFT JOIN source_projection a ON a.source_id = m.account_id
          WHERE ({where_clause})
          ORDER BY {sort_key} {dir}, m.account_id {dir}, m.id {dir}"
     );
@@ -224,7 +224,7 @@ fn message_sort_key_expr(sort_field: MessageSortField) -> &'static str {
         MessageSortField::Date => "m.received_at",
         MessageSortField::From => "LOWER(COALESCE(m.from_name, m.from_email, ''))",
         MessageSortField::Subject => "LOWER(COALESCE(m.subject, ''))",
-        MessageSortField::Source => "LOWER(a.name)",
+        MessageSortField::Source => "LOWER(COALESCE(a.name, m.account_id))",
         MessageSortField::Flagged => "m.is_flagged",
         MessageSortField::Attachment => "m.has_attachment",
     }

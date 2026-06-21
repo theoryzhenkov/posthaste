@@ -189,4 +189,5 @@ mod mutation_events;
 mod reads_events_integrity;
 mod repair;
 mod smart_mailboxes;
+mod source_visibility;
 mod tags_and_locations;
