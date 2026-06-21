@@ -29,7 +29,11 @@ manifest and verified against a bundled public key before install.
 - **Release**: the `release.yml` desktop build emits signed updater artifacts
   (`.sig`, plus the macOS `.app.tar.gz`) **only when the signing key is present**
   (`createUpdaterArtifacts` is injected via `--config`, not hardcoded, so
-  releases still build without it). The publish job runs
+  releases still build without it). The Linux/Windows builds must **not** pass
+  `tauri build --no-sign`: that flag also skips *updater* signing (the bundler
+  logs `Updater signing is skipped due to --no-sign flag`), which silently drops
+  those platforms from `latest.json`. Code signing is a no-op on Linux/Windows
+  here anyway (no certs configured). The publish job runs
   `tools/release/generate-updater-manifest.sh` to assemble `latest.json` from the
   collected `.sig` files and uploads it with the release.
 
