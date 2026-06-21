@@ -1,0 +1,160 @@
+name: Warm release cache
+
+# Releases build on `v*` tags, and GitHub Actions caches written during a tag
+# run are scoped to that tag — the next tag cannot restore them. A tag run can,
+# however, restore caches from the default branch. This workflow continuously
+# warms the exact sccache + rust-cache keys that `release.yml` uses, on `main`,
+# so release builds restore a hot cache instead of recompiling the dependency
+# tree from scratch (previously ~0% sccache hit rate).
+#
+# Cadence: nightly (keeps GHA caches from being evicted between releases) plus
+# whenever dependency manifests change (when a cold rebuild would otherwise be
+# unavoidable). Build commands, toolchain, OS matrix, cache keys, and system
+# dependencies mirror `release.yml`; keep them in sync.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - ".cargo/config.toml"
+      - ".github/workflows/warm-release-cache.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: warm-release-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  warm-serve:
+    name: Warm serve ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-serve-${{ matrix.platform }}
+          cache-on-failure: true
+          # Only the default branch should write the canonical cache that tag
+          # runs restore. This workflow only runs on main, but be explicit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Linux serve dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libssl-dev \
+            mold \
+            pkg-config
+
+      # The serve binary does not embed the frontend (it serves it at runtime),
+      # so a frontend build is unnecessary here. Compile only the Rust artifacts
+      # to populate the cache `release.yml`'s `cargo build --release --bin
+      # posthaste` will restore.
+      - name: Warm release binary compilation
+        run: cargo build --release --bin posthaste
+
+      - name: Print sccache stats
+        if: always()
+        run: sccache --show-stats || true
+
+  warm-desktop:
+    name: Warm desktop ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-desktop-${{ matrix.platform }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            mold \
+            patchelf \
+            wget
+
+      # `tauri::generate_context!` embeds `frontendDist` (../web/dist) at compile
+      # time, so the dist must exist for the desktop crate to compile. Its exact
+      # content only affects the final crate; the heavy dependency tree caches
+      # regardless. Compile the Rust graph directly (no bundling) to warm the
+      # cache `tauri build` will restore.
+      - name: Build frontend (required for compile-time asset embedding)
+        run: bun --cwd=apps/web run build
+
+      - name: Warm release desktop compilation
+        run: cargo build --release -p posthaste-desktop --features devtools
+
+      - name: Print sccache stats
+        if: always()
+        run: sccache --show-stats || true
