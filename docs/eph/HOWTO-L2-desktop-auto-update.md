@@ -53,10 +53,38 @@ and no `latest.json`, so installed apps simply never see an update.
 4. Cut a release as usual. Verify the release contains `latest.json` and the
    per-platform `.sig` (and macOS `.app.tar.gz`) assets.
 
+## Manual check
+
+Settings → General → Updates has a **Check for updates** button (desktop only).
+It reuses the same helpers as the launch check (`src/desktopUpdates.ts`) and
+reports "up to date" explicitly. The launch check is silent unless an update is
+found.
+
+## Channels (single channel for now)
+
+The app ships a **single rolling channel**: the endpoint points at
+`releases/latest/download/latest.json`, and releases are marked `make_latest`,
+so every installed build updates to the newest release.
+
+A stable/beta split is intentionally deferred. Tauri v2 has **no `{{channel}}`
+endpoint variable** (only `{{current_version}}`, `{{target}}`, `{{arch}}`), and
+the JavaScript `check()` cannot switch endpoints at runtime. Proper channels
+therefore require either:
+
+- a Rust command that builds `app.updater_builder().endpoints([channel_url])`
+  per the user's channel setting and drives check/download/install from Rust, or
+- per-channel manifests hosted at stable URLs (e.g. a fixed `updater`-tagged
+  release whose `stable.json` / `beta.json` assets CI clobbers each build, or
+  manifests served from `posthaste.theor.net`), since GitHub's `/latest/` only
+  resolves to non-prerelease releases.
+
+Add this once the base updater is proven in a release.
+
 ## Scope and limitations
 
 - macOS auto-update covers the arm64 (`darwin-aarch64`) build only, matching the
   single-arch dmg currently distributed. Intel macOS users update manually.
-- Updates are check-on-launch; there is no periodic background check yet.
+- Updates are check-on-launch plus the manual button; no periodic background
+  check yet.
 - Rotating the key requires shipping a new public key in `tauri.conf.json`;
   clients on the old key cannot verify updates signed by a new key.
