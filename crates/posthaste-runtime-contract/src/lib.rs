@@ -16,7 +16,7 @@ use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, EventFilter,
     Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId, MessageSummary,
-    ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    Operation, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
     ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
     SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
     SyncMode, TagSummary, ValidationError,
@@ -1011,6 +1011,38 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError>;
+
+    /// Save a draft local-first, returning the enqueued operation. `draft_id` is
+    /// `None` for a new draft or the existing draft's id for an edit.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn save_draft(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError>;
+
+    /// Delete a draft local-first, returning the enqueued operation.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn delete_draft(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError>;
+
+    /// List an account's non-terminal outbox operations (pending/failed work),
+    /// oldest first, for optimistic hydration and pending/failed UI.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn list_pending_operations(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError>;
 
     async fn set_message_keywords(
         &self,

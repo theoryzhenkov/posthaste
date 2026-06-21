@@ -71,6 +71,8 @@ pub const SEND_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("send.followup_sync_trigger_failed");
 pub const SEND_SENDER_CACHE_UPDATE_FAILED: LogEvent =
     LogEvent::new("send.sender_cache_update_failed");
+pub const DRAFT_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
+    LogEvent::new("draft.followup_sync_trigger_failed");
 
 pub const JMAP_EMAIL_DELTA_COMPLETED: LogEvent = LogEvent::new("jmap.email.delta.completed");
 pub const JMAP_EMAIL_DELTA_STARTED: LogEvent = LogEvent::new("jmap.email.delta.started");
