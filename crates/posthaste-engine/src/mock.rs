@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use posthaste_domain::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MutationOutcome, PushTransport, Recipient, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
+    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
 
 mod samples;
@@ -262,6 +262,71 @@ impl MailGateway for MockJmapGateway {
         _account_id: &AccountId,
         _request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    /// Store a draft message and return a deterministic created id. When
+    /// `replace` is set, the prior draft is removed first (create-new +
+    /// destroy-old), mirroring the live gateway.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn save_draft(
+        &self,
+        _account_id: &AccountId,
+        request: &SendMessageRequest,
+        replace: Option<&MessageId>,
+    ) -> Result<MessageId, GatewayError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        if let Some(replace) = replace {
+            state.messages.retain(|message| &message.id != replace);
+        }
+        bump_revision(&mut state);
+        let new_id = MessageId::from(format!("draft-created-{}", state.revision));
+        state.messages.push(MessageRecord {
+            id: new_id.clone(),
+            source_thread_id: ThreadId::from(new_id.as_str()),
+            remote_blob_id: None,
+            subject: Some(request.subject.clone()),
+            from_name: request.from.as_ref().and_then(|from| from.name.clone()),
+            from_email: request.from.as_ref().map(|from| from.email.clone()),
+            to: request.to.clone(),
+            preview: Some(request.body.clone()),
+            received_at: "2026-03-31T10:00:00Z".to_string(),
+            has_attachment: !request.attachments.is_empty(),
+            size: request.body.len() as i64,
+            mailbox_ids: Vec::new(),
+            keywords: vec!["$draft".to_string()],
+            body_html: None,
+            body_text: Some(request.body.clone()),
+            raw_mime: None,
+            rfc_message_id: Some(format!("<{}@mock>", new_id.as_str())),
+            in_reply_to: request.in_reply_to.clone(),
+            references: request
+                .references
+                .as_ref()
+                .map(|references| references.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default(),
+        });
+        Ok(new_id)
+    }
+
+    /// Remove a draft message by id.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn delete_draft(
+        &self,
+        _account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), GatewayError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
+        state.messages.retain(|message| &message.id != message_id);
+        bump_revision(&mut state);
         Ok(())
     }
 

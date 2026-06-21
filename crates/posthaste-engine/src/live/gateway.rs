@@ -155,6 +155,33 @@ impl MailGateway for LiveJmapGateway {
         crate::live_compose::send_message(self, account_id, request_data).await
     }
 
+    /// Persist a draft to the Drafts mailbox via `Email/set`, returning the
+    /// created provider Email id. `replace` destroys the prior draft in the same
+    /// request (JMAP emails are immutable; update = create-new + destroy-old).
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/L1-jmap#methods-used
+    async fn save_draft(
+        &self,
+        account_id: &AccountId,
+        request_data: &SendMessageRequest,
+        replace: Option<&MessageId>,
+    ) -> Result<MessageId, GatewayError> {
+        crate::live_compose::save_draft(self, account_id, request_data, replace).await
+    }
+
+    /// Destroy a draft message from the Drafts mailbox via `Email/set`.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    /// @spec docs/L1-jmap#methods-used
+    async fn delete_draft(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), GatewayError> {
+        crate::live_compose::delete_draft(self, account_id, message_id).await
+    }
+
     /// Return available push transports, preferring WebSocket over SSE.
     ///
     /// @spec docs/L2-transport#pushtransport
