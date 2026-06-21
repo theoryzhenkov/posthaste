@@ -104,6 +104,7 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
         .service
         .download_blob(
             &AccountId::from("jmap"),
+            &MessageId::from("jmap-message-1"),
             &jmap_detail.attachments[0].blob_id,
             &jmap_gateway,
         )
@@ -113,6 +114,7 @@ async fn imap_and_jmap_sync_and_lazy_body_project_equivalent_message_details() {
         .service
         .download_blob(
             &AccountId::from("imap"),
+            &imap_message_id,
             &imap_detail.attachments[0].blob_id,
             &imap_gateway,
         )
