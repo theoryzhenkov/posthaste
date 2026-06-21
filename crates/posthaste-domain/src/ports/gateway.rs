@@ -119,6 +119,39 @@ pub trait MailGateway: Send + Sync {
         request: &SendMessageRequest,
     ) -> Result<(), GatewayError>;
 
+    /// Persist a draft to the provider's Drafts mailbox, returning the new
+    /// message id. When `replace` is set, the prior draft message is removed
+    /// (drafts are immutable in JMAP, so an update is create-new + destroy-old).
+    ///
+    /// Default transport behaviour rejects draft writes; JMAP and IMAP override.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn save_draft(
+        &self,
+        _account_id: &AccountId,
+        _request: &SendMessageRequest,
+        _replace: Option<&MessageId>,
+    ) -> Result<MessageId, GatewayError> {
+        Err(GatewayError::Rejected(
+            "draft writes are not supported by this transport".to_string(),
+        ))
+    }
+
+    /// Delete a draft message from the provider's Drafts mailbox.
+    ///
+    /// Default transport behaviour rejects draft deletion; JMAP and IMAP override.
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    async fn delete_draft(
+        &self,
+        _account_id: &AccountId,
+        _message_id: &MessageId,
+    ) -> Result<(), GatewayError> {
+        Err(GatewayError::Rejected(
+            "draft deletion is not supported by this transport".to_string(),
+        ))
+    }
+
     /// Return available push transports ordered by preference (WS first, then SSE).
     ///
     /// @spec docs/L2-transport#new-abstractions

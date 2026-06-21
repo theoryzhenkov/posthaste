@@ -3,17 +3,20 @@ use std::sync::Arc;
 use posthaste_observability::{events, ph_warn};
 use serde_json::json;
 
+use crate::{now_iso8601, GatewayError, Id};
 use crate::{
     AccountId, AccountSettings, AppSettings, AutomationBackfillStore, CacheStore, CommandResult,
     ConfigDiff, ConfigRepository, ConversationCursor, ConversationId, ConversationPage,
     ConversationReadStore, ConversationSortField, ConversationView, EventStore, Identity,
     MailGateway, MailStore, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
     MessageCursor, MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore,
-    MessagePage, MessageSortField, MessageSummary, SendMessageRequest, ServiceError,
+    MessagePage, MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind,
+    OperationId, OperationKind, OperationOutboxStore, OperationOutcome, OperationSettlement,
+    OperationState, ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
     SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
     SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore, SyncMode,
     SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary, ThreadId,
-    ThreadView, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    ThreadView, EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
@@ -24,6 +27,7 @@ mod gateway_ops;
 mod mailbox_queries;
 mod message_queries;
 mod mutation;
+mod outbox;
 mod smart_mailbox_queries;
 mod sync_ops;
 #[cfg(test)]
@@ -53,6 +57,7 @@ pub struct MailService {
     source_data: Arc<dyn SourceDataStore>,
     cache_store: Arc<dyn CacheStore>,
     automation_backfills: Arc<dyn AutomationBackfillStore>,
+    outbox: Arc<dyn OperationOutboxStore>,
 }
 
 impl MailService {
@@ -77,7 +82,8 @@ impl MailService {
             source_projections: store.clone(),
             source_data: store.clone(),
             cache_store: store.clone(),
-            automation_backfills: store,
+            automation_backfills: store.clone(),
+            outbox: store,
         }
     }
 }

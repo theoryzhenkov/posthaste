@@ -154,7 +154,9 @@ impl OperationOutboxStore for TestStore {
         let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         Ok(ops
             .iter()
-            .filter(|op| &op.account_id == account_id && !op.state.is_terminal())
+            .filter(|op| {
+                &op.account_id == account_id && !matches!(op.state, OperationState::Applied)
+            })
             .cloned()
             .collect())
     }
