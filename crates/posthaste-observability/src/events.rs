@@ -57,6 +57,7 @@ pub const CONFIG_DEFAULT_INITIALIZED: LogEvent = LogEvent::new("config.default_i
 pub const CONFIG_BOOTSTRAP_IMPORTED: LogEvent = LogEvent::new("config.bootstrap_imported");
 pub const CONFIG_INITIALIZED: LogEvent = LogEvent::new("config.initialized");
 pub const DATABASE_OPENED: LogEvent = LogEvent::new("database.opened");
+pub const DATABASE_CORRUPT_REPAIRED: LogEvent = LogEvent::new("database.corrupt.repaired");
 pub const DAEMON_EVENT_MALFORMED: LogEvent = LogEvent::new("daemon.event.malformed");
 pub const DESKTOP_BACKEND_STARTED: LogEvent = LogEvent::new("desktop.backend.started");
 pub const FRONTEND_CONSOLE_OUTPUT: LogEvent = LogEvent::new("frontend.console.output");

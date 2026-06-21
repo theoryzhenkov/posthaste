@@ -3956,6 +3956,7 @@
           "secret_unavailable",
           "secret_unsupported",
           "storage_failure",
+          "storage_corrupted",
           "config_validation",
           "config_io",
           "config_parse"
@@ -5668,6 +5669,7 @@
           "secret_unavailable",
           "secret_unsupported",
           "storage_failure",
+          "storage_corrupted",
           "config_validation",
           "config_io",
           "config_parse",

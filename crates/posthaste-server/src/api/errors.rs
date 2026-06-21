@@ -48,6 +48,7 @@ pub enum ApiErrorCode {
     SecretUnavailable,
     SecretUnsupported,
     StorageFailure,
+    StorageCorrupted,
     ConfigValidation,
     ConfigIo,
     ConfigParse,
@@ -67,6 +68,7 @@ impl From<ServiceErrorKind> for ApiErrorCode {
             ServiceErrorKind::NotFound => Self::NotFound,
             ServiceErrorKind::Conflict => Self::Conflict,
             ServiceErrorKind::StorageFailure => Self::StorageFailure,
+            ServiceErrorKind::StorageCorrupted => Self::StorageCorrupted,
             ServiceErrorKind::ConfigValidation => Self::ConfigValidation,
             ServiceErrorKind::ConfigIo => Self::ConfigIo,
             ServiceErrorKind::ConfigParse => Self::ConfigParse,
@@ -197,6 +199,10 @@ fn runtime_error_status_code(code: &RuntimeErrorCode) -> (StatusCode, ApiErrorCo
             StatusCode::INTERNAL_SERVER_ERROR,
             ApiErrorCode::StorageFailure,
         ),
+        RuntimeErrorCode::StorageCorrupted => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiErrorCode::StorageCorrupted,
+        ),
         RuntimeErrorCode::ConfigIo => (StatusCode::INTERNAL_SERVER_ERROR, ApiErrorCode::ConfigIo),
         RuntimeErrorCode::TransportDisconnected | RuntimeErrorCode::Internal => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -219,6 +225,7 @@ fn service_error_status(kind: ServiceErrorKind) -> StatusCode {
         | ServiceErrorKind::ConfigParse => StatusCode::BAD_REQUEST,
         ServiceErrorKind::CannotCalculateChanges
         | ServiceErrorKind::StorageFailure
+        | ServiceErrorKind::StorageCorrupted
         | ServiceErrorKind::ConfigIo => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

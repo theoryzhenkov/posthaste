@@ -2,7 +2,12 @@ use super::*;
 use std::time::Duration;
 
 const SQLITE_CACHE_SIZE_KIB: i64 = -65_536;
-const SQLITE_MMAP_SIZE_BYTES: i64 = 256 * 1024 * 1024;
+// Memory-mapped I/O is disabled. An mmap'd write that cannot complete (disk
+// pressure, the file changing under another process, an I/O error) bypasses
+// SQLite's normal error handling and can tear a page, corrupting the database
+// ("database disk image is malformed"). The page cache above already covers the
+// read-heavy workload; mmap is not worth the corruption risk for a local cache.
+const SQLITE_MMAP_SIZE_BYTES: i64 = 0;
 
 /// Configures WAL journal mode, foreign-key enforcement, and read-heavy cache tuning.
 pub(crate) fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -62,9 +67,25 @@ pub(crate) fn bool_to_i64(value: bool) -> i64 {
     }
 }
 
-/// Wraps a rusqlite error into `StoreError::Failure`.
+/// Wraps a rusqlite error into a `StoreError`, distinguishing database
+/// corruption so callers can offer a repair pathway.
 pub(crate) fn sql_to_store_error(err: rusqlite::Error) -> StoreError {
-    StoreError::Failure(err.to_string())
+    if is_corruption_error(&err) {
+        StoreError::Corruption(err.to_string())
+    } else {
+        StoreError::Failure(err.to_string())
+    }
+}
+
+/// Returns true when a rusqlite error indicates a corrupt or non-database file
+/// (`SQLITE_CORRUPT` / `SQLITE_NOTADB`).
+pub(crate) fn is_corruption_error(err: &rusqlite::Error) -> bool {
+    use rusqlite::ErrorCode;
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(e, _)
+            if matches!(e.code, ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase)
+    )
 }
 
 /// Wraps an I/O error into `StoreError::Failure`.
