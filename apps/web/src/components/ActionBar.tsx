@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { NotificationsButton } from './NotificationsButton'
 import { TrafficLightInset, WINDOW_TITLEBAR_HEIGHT } from './WindowChrome'
 
 interface ActionBarProps {
@@ -247,6 +248,7 @@ export function ActionBar({
       >
         ?
       </button>
+      <NotificationsButton />
       <button
         type="button"
         className={cn(

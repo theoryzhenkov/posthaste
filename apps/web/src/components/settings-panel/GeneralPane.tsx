@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '../ui/select'
 import { SettingsPage, SettingsPageHeader, SettingsSection } from './shared'
+import { TroubleshootingSection } from './TroubleshootingSection'
 import { UpdatesSection } from './UpdatesSection'
 
 export function GeneralPane({
@@ -73,6 +74,8 @@ export function GeneralPane({
       </SettingsSection>
 
       {isTauriRuntime() && <UpdatesSection />}
+
+      {isTauriRuntime() && <TroubleshootingSection />}
 
       {isTauriRuntime() && (
         <SettingsSection title="Developer">

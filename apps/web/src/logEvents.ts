@@ -11,6 +11,7 @@ export const LOG_EVENTS = {
   paletteProviderFailed: 'palette.provider.failed',
   paletteSearchCancelled: 'palette.search.cancelled',
   paletteSearchStale: 'palette.search.stale',
+  databaseRepairFailed: 'database.repair.failed',
   resourceFetchError: 'resource.fetch.error',
   updateCheckFailed: 'update.check.failed',
   updateInstallFailed: 'update.install.failed',
