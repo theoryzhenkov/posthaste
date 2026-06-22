@@ -932,6 +932,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/messages/{message_id}/draft-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get draft content
+         * @description Returns compose-ready content for resuming an existing draft, including Cc/Bcc when cached raw MIME is available.
+         */
+        get: operations["get_draft_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/messages/{message_id}/reply-context": {
         parameters: {
             query?: never;
@@ -1476,6 +1496,22 @@ export interface components {
             /** Format: int64 */
             seq: number;
             topic: string;
+        };
+        /**
+         * @description Compose-ready content parsed from an existing provider draft.
+         *
+         *     Unlike [`MessageDetail`], this preserves all compose recipient fields that
+         *     are present in the cached raw MIME, including Cc and Bcc.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         */
+        DraftContent: {
+            bcc: components["schemas"]["Recipient"][];
+            body: string;
+            cc: components["schemas"]["Recipient"][];
+            from?: null | components["schemas"]["Recipient"];
+            subject: string;
+            to: components["schemas"]["Recipient"][];
         };
         /**
          * @description Product API readiness response.
@@ -4471,6 +4507,49 @@ export interface operations {
                 };
             };
             /** @description Account gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    get_draft_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Message identifier */
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftContent"];
+                };
+            };
+            /** @description Message not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Gateway unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

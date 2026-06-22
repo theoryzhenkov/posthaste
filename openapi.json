@@ -3214,6 +3214,68 @@
         }
       }
     },
+    "/v1/sources/{source_id}/messages/{message_id}/draft-content": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get draft content",
+        "description": "Returns compose-ready content for resuming an existing draft, including Cc/Bcc when cached raw MIME is available.",
+        "operationId": "get_draft_content",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sources/{source_id}/messages/{message_id}/reply-context": {
       "get": {
         "tags": [
@@ -4781,6 +4843,53 @@
           },
           "topic": {
             "type": "string"
+          }
+        }
+      },
+      "DraftContent": {
+        "type": "object",
+        "description": "Compose-ready content parsed from an existing provider draft.\n\nUnlike [`MessageDetail`], this preserves all compose recipient fields that\nare present in the cached raw MIME, including Cc and Bcc.\n\n@spec docs/L1-outbox#operation-model",
+        "required": [
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "bcc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "body": {
+            "type": "string"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
+          },
+          "from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Recipient"
+              }
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recipient"
+            }
           }
         }
       },

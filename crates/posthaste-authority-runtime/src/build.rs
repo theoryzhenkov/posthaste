@@ -1153,6 +1153,23 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         Ok(result)
     }
 
+    async fn get_draft_content(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<posthaste_domain::DraftContent, RuntimeError> {
+        self.ensure_runtime_active()?;
+        let gateway = self.optional_gateway(&account_id).await;
+        let result = self
+            .core
+            .service
+            .get_draft_content(&account_id, &message_id, gateway.as_deref())
+            .await?;
+        self.publish_events(&result.events);
+        Ok(result.content)
+    }
+
     async fn get_message_attachment(
         &self,
         _caller: RuntimeCaller,

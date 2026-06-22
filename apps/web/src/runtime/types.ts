@@ -9,6 +9,7 @@ import type {
   CreateAccountInput,
   DomainEvent,
   CreateSmartMailboxInput,
+  DraftContent,
   Mailbox,
   MessageCommand,
   MessageCommandResult,
@@ -378,6 +379,7 @@ export interface RuntimeAdapter {
   fetchOAuthRedirectUri(): string
   fetchSettings(): Promise<AppSettings>
   fetchReplyContext(request: RuntimeReplyContextRequest): Promise<ReplyContext>
+  fetchDraftContent(request: RuntimeReplyContextRequest): Promise<DraftContent>
   fetchResourceBlob(
     descriptor: RuntimeResourceDescriptor,
     options?: RuntimeResourceFetchOptions,

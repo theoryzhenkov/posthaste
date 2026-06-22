@@ -52,10 +52,49 @@ pub fn synthesize_plain_text_raw_mime(
     subject: &str,
     body_text: Option<&str>,
 ) -> String {
-    format!(
-        "From: {from_header}\r\nSubject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",
-        body_text.unwrap_or("")
+    synthesize_plain_text_raw_mime_with_recipients(
+        Some(from_header),
+        &[],
+        &[],
+        &[],
+        subject,
+        body_text,
     )
+}
+
+/// Builds a minimal RFC 2822 message including compose-recipient headers.
+///
+/// Used for provider APIs (notably JMAP) that fetch structured body fields but
+/// do not provide raw RFC822 bytes. Preserving Cc/Bcc here lets draft resumption
+/// reconstruct the compose form from the cached raw MIME.
+///
+/// @spec docs/L1-compose#mime-structures
+pub fn synthesize_plain_text_raw_mime_with_recipients(
+    from_header: Option<&str>,
+    to: &[Recipient],
+    cc: &[Recipient],
+    bcc: &[Recipient],
+    subject: &str,
+    body_text: Option<&str>,
+) -> String {
+    let mut headers = String::new();
+    if let Some(from_header) = from_header.filter(|value| !value.trim().is_empty()) {
+        headers.push_str(&format!("From: {from_header}\r\n"));
+    }
+    if let Some(value) = recipients_to_header(to) {
+        headers.push_str(&format!("To: {value}\r\n"));
+    }
+    if let Some(value) = recipients_to_header(cc) {
+        headers.push_str(&format!("Cc: {value}\r\n"));
+    }
+    if let Some(value) = recipients_to_header(bcc) {
+        headers.push_str(&format!("Bcc: {value}\r\n"));
+    }
+    headers.push_str(&format!(
+        "Subject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}\r\n",
+        body_text.unwrap_or("")
+    ));
+    headers
 }
 
 /// Returns the current UTC time formatted as an RFC 3339 string.

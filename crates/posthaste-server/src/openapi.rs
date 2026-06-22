@@ -53,6 +53,7 @@ use utoipa::OpenApi;
         crate::api::messages::compose::get_identity,
         crate::api::messages::compose::list_sender_addresses,
         crate::api::messages::compose::get_reply_context,
+        crate::api::messages::compose::get_draft_content,
         crate::api::messages::compose::send_message,
         crate::api::messages::compose::save_draft,
         crate::api::messages::compose::delete_draft,

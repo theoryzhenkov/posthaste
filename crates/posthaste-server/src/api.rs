@@ -19,15 +19,15 @@ use posthaste_domain::{
     AccountId, AccountOverview, AccountSettings, AddToMailboxCommand, AppSettings, AutomationRule,
     CachePolicy, CachedSenderAddress, CommandResult, ConversationCursor, ConversationId,
     ConversationPage, ConversationSortField, ConversationSummary, ConversationView, DomainEvent,
-    EventFilter, Id, Identity, ImapTransportSettings, MailboxId, MailboxRole, MailboxSummary,
-    MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField,
-    MessageSummary, Operation, ProviderAuthKind, ProviderHint, Recipient, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef, SecretStatus, SecretStorage,
-    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
-    SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
-    SmartMailboxId, SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode,
-    SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings, SortDirection, SyncMode,
-    TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
+    DraftContent, EventFilter, Id, Identity, ImapTransportSettings, MailboxId, MailboxRole,
+    MailboxSummary, MessageAttachment, MessageCursor, MessageDetail, MessageId, MessagePage,
+    MessageSortField, MessageSummary, Operation, ProviderAuthKind, ProviderHint, Recipient,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SecretKind, SecretRef,
+    SecretStatus, SecretStorage, SendMessageRequest, ServiceError, ServiceErrorKind,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup,
+    SmartMailboxGroupOperator, SmartMailboxId, SmartMailboxOperator, SmartMailboxRule,
+    SmartMailboxRuleNode, SmartMailboxSummary, SmartMailboxValue, SmtpTransportSettings,
+    SortDirection, SyncMode, TagSummary, EVENT_TOPIC_ACCOUNT_CREATED, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_ACCOUNT_UPDATED,
 };
 use posthaste_runtime_contract::{
@@ -86,11 +86,12 @@ pub use message_commands::{
     add_to_mailbox, destroy_message, remove_from_mailbox, replace_mailboxes, set_keywords,
 };
 pub use messages::{
-    delete_draft, get_conversation, get_identity, get_message, get_message_attachment,
-    get_reply_context, list_conversations, list_pending_operations, list_sender_addresses,
-    list_source_messages, save_draft, search_messages, send_message, ConversationPageResponse,
-    DeleteDraftRequest, GetAttachmentQuery, ListConversationsQuery, ListSmartMailboxMessagesQuery,
-    ListSourceMessagesQuery, MessagePageResponse, SaveDraftRequest, SearchMessagesQuery,
+    delete_draft, get_conversation, get_draft_content, get_identity, get_message,
+    get_message_attachment, get_reply_context, list_conversations, list_pending_operations,
+    list_sender_addresses, list_source_messages, save_draft, search_messages, send_message,
+    ConversationPageResponse, DeleteDraftRequest, GetAttachmentQuery, ListConversationsQuery,
+    ListSmartMailboxMessagesQuery, ListSourceMessagesQuery, MessagePageResponse, SaveDraftRequest,
+    SearchMessagesQuery,
 };
 pub use read_calls::{
     read, AccountIdSelector, AccountListReadResult, MailboxListReadResult, ReadCall, ReadCallArgs,
