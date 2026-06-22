@@ -23,6 +23,7 @@ mod automation;
 mod body_cache_budget;
 mod body_cache_worker;
 mod cache_rescore;
+mod identity_fallback;
 mod message_mutation_cursors;
 mod message_mutation_retries;
 mod outbox;
