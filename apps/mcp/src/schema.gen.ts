@@ -632,6 +632,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/commands/delete-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete draft
+         * @description Enqueues a local-first draft deletion; flushed to the provider when connected.
+         */
+        post: operations["delete_draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/commands/messages/{message_id}/add-to-mailbox": {
         parameters: {
             query?: never;
@@ -726,6 +746,26 @@ export interface paths {
          * @description Adds and/or removes JMAP keywords on a message.
          */
         post: operations["set_keywords"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sources/{source_id}/commands/save-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save draft
+         * @description Enqueues a local-first draft create/update; flushed to the provider Drafts mailbox when connected.
+         */
+        post: operations["save_draft"];
         delete?: never;
         options?: never;
         head?: never;
@@ -892,6 +932,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/messages/{message_id}/draft-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get draft content
+         * @description Returns compose-ready content for resuming an existing draft, including Cc/Bcc when cached raw MIME is available.
+         */
+        get: operations["get_draft_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/messages/{message_id}/reply-context": {
         parameters: {
             query?: never;
@@ -904,6 +964,26 @@ export interface paths {
          * @description Returns pre-computed reply/forward metadata (recipients, subjects, quoted body).
          */
         get: operations["get_reply_context"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sources/{source_id}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending operations
+         * @description Lists an account's non-terminal outbox operations (pending/failed work), oldest first.
+         */
+        get: operations["list_pending_operations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1071,7 +1151,7 @@ export interface components {
          *
          *     @spec docs/L1-api#account-crud-lifecycle
          */
-        AccountOverview: components["schemas"]["AccountRuntimeOverview"] & {
+        AccountOverview: {
             appearance: components["schemas"]["AccountAppearance"];
             connection: components["schemas"]["AccountConnectionOverview"];
             createdAt: string;
@@ -1082,6 +1162,12 @@ export interface components {
             id: components["schemas"]["AccountId"];
             isDefault: boolean;
             name: string;
+            /**
+             * @description Volatile runtime state, owned by the account supervisor. Nested (not
+             *     flattened) so the UI can update config and runtime through independent
+             *     paths without the two racing inside one flat object.
+             */
+            runtime: components["schemas"]["AccountRuntimeOverview"];
             updatedAt: string;
         };
         /**
@@ -1158,7 +1244,7 @@ export interface components {
          *     @spec docs/L1-api#error-code-mapping
          * @enum {string}
          */
-        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse";
+        ApiErrorCode: "invalid_query" | "invalid_cursor" | "invalid_limit" | "invalid_mailbox" | "invalid_compose" | "invalid_secret" | "invalid_provider" | "invalid_account" | "invalid_account_logo" | "invalid_oauth_request" | "invalid_oauth_callback" | "oauth_denied" | "invalid_grant" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "not_found" | "conflict" | "internal_error" | "unauthorized" | "forbidden" | "gateway_unavailable" | "auth_error" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse";
         /**
          * @description Global application settings shared across all accounts.
          *
@@ -1391,6 +1477,10 @@ export interface components {
             position?: number | null;
             rule: components["schemas"]["SmartMailboxRule"];
         };
+        /** @description Request body for `POST /v1/sources/{source_id}/commands/delete-draft`. */
+        DeleteDraftRequest: {
+            draftId: string;
+        };
         /**
          * @description An ordered domain event stored in `event_log` and published via SSE.
          *
@@ -1406,6 +1496,22 @@ export interface components {
             /** Format: int64 */
             seq: number;
             topic: string;
+        };
+        /**
+         * @description Compose-ready content parsed from an existing provider draft.
+         *
+         *     Unlike [`MessageDetail`], this preserves all compose recipient fields that
+         *     are present in the cached raw MIME, including Cc and Bcc.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         */
+        DraftContent: {
+            bcc: components["schemas"]["Recipient"][];
+            body: string;
+            cc: components["schemas"]["Recipient"][];
+            from?: null | components["schemas"]["Recipient"];
+            subject: string;
+            to: components["schemas"]["Recipient"][];
         };
         /**
          * @description Product API readiness response.
@@ -1573,6 +1679,81 @@ export interface components {
             snapshot: Record<string, never>;
             viewId: string;
         };
+        /**
+         * @description A single local-first command.
+         *
+         *     `id` provides runtime/provider idempotency. `depends_on` preserves draft
+         *     chains only; state assertions coalesce instead of depending on earlier
+         *     assertions.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         */
+        Operation: {
+            accountId: components["schemas"]["AccountId"];
+            /** Format: int32 */
+            attempts: number;
+            createdAt: string;
+            dependsOn?: null | components["schemas"]["OperationId"];
+            entity: components["schemas"]["OperationEntity"];
+            id: components["schemas"]["OperationId"];
+            kind: components["schemas"]["OperationKind"];
+            lastError?: string | null;
+            /**
+             * @description Kind-specific payload (the wrapped command or draft body), as JSON so the
+             *     envelope stays uniform across kinds.
+             */
+            payload: Record<string, never>;
+            state: components["schemas"]["OperationState"];
+            updatedAt: string;
+        };
+        /**
+         * @description The entity an operation targets.
+         *
+         *     `id` may be a client-minted temporary id until the entity is reconciled to a
+         *     provider id on first successful flush (see [`OperationSettlement::assigned_entity_id`]).
+         *
+         *     @spec docs/L1-outbox#temp-id-reconciliation
+         */
+        OperationEntity: {
+            id: string;
+            kind: components["schemas"]["OperationEntityKind"];
+        };
+        /**
+         * @description The kind of entity an operation targets.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         * @enum {string}
+         */
+        OperationEntityKind: "message" | "draft";
+        /**
+         * @description Runtime-minted, globally-stable identifier for an outbox operation.
+         *
+         *     Used as the idempotency key for the runtime/provider boundary. The
+         *     runtime must never push the same settled `OperationId` twice.
+         *
+         *     @spec docs/L1-outbox#idempotency
+         */
+        OperationId: string;
+        /**
+         * @description The kind of mutation an operation carries.
+         *
+         *     @spec docs/L1-outbox#operation-model
+         * @enum {string}
+         */
+        OperationKind: "setKeywords" | "replaceMailboxes" | "destroy" | "draftCreate" | "draftUpdate" | "draftDelete" | "send";
+        /**
+         * @description Lifecycle state of an operation within the runtime/provider outbox.
+         *
+         *     ```text
+         *     pending ─▶ inflight ─▶ applied
+         *        ▲          │  └──▶ failed
+         *        └──────────┘
+         *     ```
+         *
+         *     @spec docs/L1-outbox#state-machine
+         * @enum {string}
+         */
+        OperationState: "pending" | "inflight" | "applied" | "failed";
         /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *
@@ -1748,6 +1929,11 @@ export interface components {
         ReplyContext: {
             cc: components["schemas"]["Recipient"][];
             forwardSubject: string;
+            /**
+             * @description Forwarded message block: an attribution header (From/Date/Subject/To)
+             *     followed by the original body, unquoted. Used to seed a forward compose.
+             */
+            forwardedBody?: string | null;
             inReplyTo?: string | null;
             quotedBody?: string | null;
             references?: string | null;
@@ -1768,7 +1954,7 @@ export interface components {
         /** @enum {string} */
         RuntimeCoverageKind: "complete" | "partial" | "unknown";
         /** @enum {string} */
-        RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
+        RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
         RuntimeFrame: {
             revision: components["schemas"]["ViewRevision"];
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
@@ -1824,6 +2010,16 @@ export interface components {
         RuntimeSessionId: string;
         /** Format: int64 */
         RuntimeSessionSeq: number;
+        /** @description Request body for `POST /v1/sources/{source_id}/commands/save-draft`. */
+        SaveDraftRequest: {
+            /** @description The existing draft id when editing; omit for a brand-new draft. */
+            draftId?: string | null;
+            /**
+             * @description The draft content (same shape as a send request; all fields may be empty
+             *     while composing).
+             */
+            message: components["schemas"]["SendMessageRequest"];
+        };
         /**
          * @description Storage backend for account credentials.
          *
@@ -3645,6 +3841,42 @@ export interface operations {
             };
         };
     };
+    delete_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft deletion enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            /** @description Runtime unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     add_to_mailbox: {
         parameters: {
             query?: never;
@@ -3866,6 +4098,51 @@ export interface operations {
                 };
             };
             /** @description Gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    save_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft operation enqueued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            /** @description Invalid draft request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Runtime unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4234,6 +4511,49 @@ export interface operations {
             };
         };
     };
+    get_draft_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Message identifier */
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftContent"];
+                };
+            };
+            /** @description Message not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     get_reply_context: {
         parameters: {
             query?: never;
@@ -4267,6 +4587,38 @@ export interface operations {
                 };
             };
             /** @description Gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    list_pending_operations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending operations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            /** @description Runtime unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
