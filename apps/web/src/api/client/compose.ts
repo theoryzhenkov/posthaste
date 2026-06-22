@@ -4,7 +4,9 @@ import type {
   CachedSenderAddress,
   Identity,
   OkResponse,
+  Operation,
   ReplyContext,
+  SaveDraftInput,
   SendMessageInput,
 } from '../types'
 
@@ -38,4 +40,35 @@ export async function sendMessage(
     'POST',
     input,
   )
+}
+
+/** @spec docs/L1-outbox#operation-model */
+export async function saveDraft(
+  sourceId: string,
+  input: SaveDraftInput,
+): Promise<Operation> {
+  return jsonRequest<Operation>(
+    `/sources/${sourceId}/commands/save-draft`,
+    'POST',
+    input,
+  )
+}
+
+/** @spec docs/L1-outbox#operation-model */
+export async function deleteDraft(
+  sourceId: string,
+  draftId: string,
+): Promise<Operation> {
+  return jsonRequest<Operation>(
+    `/sources/${sourceId}/commands/delete-draft`,
+    'POST',
+    { draftId },
+  )
+}
+
+/** @spec docs/L1-outbox#operation-model */
+export async function listPendingOperations(
+  sourceId: string,
+): Promise<Operation[]> {
+  return request<Operation[]>(`/sources/${sourceId}/operations`)
 }

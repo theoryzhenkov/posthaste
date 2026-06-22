@@ -44,6 +44,9 @@ import {
   read,
   resetDefaultSmartMailboxes,
   runRuntimeMutation,
+  saveDraft,
+  deleteDraft,
+  listPendingOperations,
   sendMessage,
   startProviderOAuth,
   triggerSync,
@@ -490,6 +493,15 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   sendMessage({ sourceId, input }) {
     return sendMessage(sourceId, input)
+  },
+  saveDraft({ sourceId, input }) {
+    return saveDraft(sourceId, input)
+  },
+  deleteDraft({ sourceId, draftId }) {
+    return deleteDraft(sourceId, draftId)
+  },
+  listPendingOperations(sourceId) {
+    return listPendingOperations(sourceId)
   },
   startProviderOAuth(input) {
     return startProviderOAuth(input)
