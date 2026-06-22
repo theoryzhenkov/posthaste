@@ -3487,6 +3487,130 @@
         }
       }
     },
+    "/v1/sources/{source_id}/operations/{operation_id}": {
+      "delete": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Discard an outbox operation",
+        "description": "Removes a queued or failed outbox operation (a user escape hatch for a dead op). In-flight operations cannot be discarded.",
+        "operationId": "discard_operation",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "description": "Outbox operation identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation is in-flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sources/{source_id}/operations/{operation_id}/retry": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Retry a failed outbox operation",
+        "description": "Re-arms a failed outbox operation to pending so the next flush re-attempts it. Only failed operations can be retried.",
+        "operationId": "retry_operation",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "description": "Outbox operation identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation re-armed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operation is not failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Runtime unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/views": {
       "post": {
         "tags": [

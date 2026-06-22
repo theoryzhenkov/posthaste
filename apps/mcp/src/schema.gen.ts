@@ -1012,6 +1012,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Discard an outbox operation
+         * @description Removes a queued or failed outbox operation (a user escape hatch for a dead op). In-flight operations cannot be discarded.
+         */
+        delete: operations["discard_operation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sources/{source_id}/operations/{operation_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed outbox operation
+         * @description Re-arms a failed outbox operation to pending so the next flush re-attempts it. Only failed operations can be retried.
+         */
+        post: operations["retry_operation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/views": {
         parameters: {
             query?: never;
@@ -4714,6 +4754,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            /** @description Runtime unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    discard_operation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Outbox operation identifier */
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation discarded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Operation is in-flight */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Runtime unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    retry_operation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Outbox operation identifier */
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation re-armed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Operation is not failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
             /** @description Runtime unavailable */

@@ -7,7 +7,7 @@
  *
  * @spec docs/L1-outbox#operation-model
  */
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { Operation, OperationKind, OperationState } from '@/api/types'
 import { queryKeys } from '@/queryKeys'
@@ -15,6 +15,8 @@ import { runtimeMutations } from '@/runtime/mutations'
 import { runtimeViews } from '@/runtime/views'
 
 import { SettingsSection } from './shared'
+
+type OutboxEntry = { accountId: string; operation: Operation }
 
 const KIND_LABELS: Record<OperationKind, string> = {
   setKeywords: 'Flag change',
@@ -56,9 +58,30 @@ export function OutboxSection() {
     })),
   })
 
-  const operations: Operation[] = operationQueries.flatMap(
-    (query) => query.data ?? [],
+  const queryClient = useQueryClient()
+  const entries: OutboxEntry[] = operationQueries.flatMap((query, index) =>
+    (query.data ?? []).map((operation) => ({
+      accountId: accountIds[index],
+      operation,
+    })),
   )
+
+  const refresh = (accountId: string) =>
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.pendingOperations(accountId),
+    })
+  const discard = (accountId: string, operationId: string) => {
+    void runtimeMutations.messages
+      .discardOperation(accountId, operationId)
+      .then(() => refresh(accountId))
+      .catch(() => {})
+  }
+  const retry = (accountId: string, operationId: string) => {
+    void runtimeMutations.messages
+      .retryOperation(accountId, operationId)
+      .then(() => refresh(accountId))
+      .catch(() => {})
+  }
 
   return (
     <SettingsSection title="Outbox">
@@ -66,13 +89,13 @@ export function OutboxSection() {
         Changes made while offline are queued here and sent when your accounts
         reconnect.
       </p>
-      {operations.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="mt-3 text-[13px] text-muted-foreground">
           Nothing queued.
         </p>
       ) : (
         <ul className="mt-3 flex flex-col gap-2">
-          {operations.map((operation) => (
+          {entries.map(({ accountId, operation }) => (
             <li
               key={operation.id}
               className="flex items-start justify-between gap-3 rounded-md border border-border/70 px-3 py-2"
@@ -87,11 +110,34 @@ export function OutboxSection() {
                   </p>
                 ) : null}
               </div>
-              <span
-                className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE_TONE[operation.state]}`}
-              >
-                {STATE_LABELS[operation.state]}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                {operation.state === 'failed' ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-muted"
+                    onClick={() => retry(accountId, operation.id)}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+                {operation.state === 'failed' ||
+                operation.state === 'pending' ? (
+                  <button
+                    type="button"
+                    aria-label="Discard operation"
+                    title="Discard"
+                    className="rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                    onClick={() => discard(accountId, operation.id)}
+                  >
+                    ✕
+                  </button>
+                ) : null}
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE_TONE[operation.state]}`}
+                >
+                  {STATE_LABELS[operation.state]}
+                </span>
+              </div>
             </li>
           ))}
         </ul>

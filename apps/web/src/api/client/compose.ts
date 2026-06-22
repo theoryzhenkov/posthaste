@@ -83,3 +83,25 @@ export async function listPendingOperations(
 ): Promise<Operation[]> {
   return request<Operation[]>(`/sources/${sourceId}/operations`)
 }
+
+/** @spec docs/L1-outbox#operation-model */
+export async function discardOperation(
+  sourceId: string,
+  operationId: string,
+): Promise<void> {
+  await jsonRequest<{ ok: true }>(
+    `/sources/${sourceId}/operations/${encodeURIComponent(operationId)}`,
+    'DELETE',
+  )
+}
+
+/** @spec docs/L1-outbox#operation-model */
+export async function retryOperation(
+  sourceId: string,
+  operationId: string,
+): Promise<void> {
+  await jsonRequest<{ ok: true }>(
+    `/sources/${sourceId}/operations/${encodeURIComponent(operationId)}/retry`,
+    'POST',
+  )
+}

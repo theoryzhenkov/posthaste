@@ -6,7 +6,8 @@ pub(crate) mod listing;
 mod types;
 
 pub use compose::{
-    delete_draft, get_draft_content, get_identity, get_reply_context, list_pending_operations,
+    delete_draft, discard_operation, get_draft_content, get_identity, get_reply_context,
+    list_pending_operations, retry_operation,
     list_sender_addresses, save_draft, send_message, DeleteDraftRequest, SaveDraftRequest,
 };
 pub use detail::{get_conversation, get_message, get_message_attachment};

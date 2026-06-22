@@ -441,6 +441,8 @@ export interface RuntimeAdapter {
   saveDraft(request: RuntimeSaveDraftRequest): Promise<Operation>
   deleteDraft(request: RuntimeDeleteDraftRequest): Promise<Operation>
   listPendingOperations(sourceId: string): Promise<Operation[]>
+  discardOperation(sourceId: string, operationId: string): Promise<void>
+  retryOperation(sourceId: string, operationId: string): Promise<void>
   startProviderOAuth(
     input: StartProviderOAuthInput,
   ): Promise<StartOAuthResponse>

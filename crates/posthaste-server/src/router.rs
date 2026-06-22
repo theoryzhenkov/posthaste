@@ -154,6 +154,14 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             get(api::list_pending_operations),
         )
         .route(
+            "/sources/{source_id}/operations/{operation_id}",
+            axum::routing::delete(api::discard_operation),
+        )
+        .route(
+            "/sources/{source_id}/operations/{operation_id}/retry",
+            post(api::retry_operation),
+        )
+        .route(
             "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
             post(api::set_keywords),
         )
