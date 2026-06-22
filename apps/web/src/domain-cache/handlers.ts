@@ -4,7 +4,7 @@ import type { DomainEvent } from '../api/types'
 import { EVENT_TOPICS, isDomainEventTopic } from '../domainVocabulary'
 import type { DomainEventTopic } from '../domainVocabulary'
 import { queryKeys } from '../queryKeys'
-import { applyAccountStatusPatch, removeAccountOverview } from './accounts'
+import { removeAccountOverview } from './accounts'
 import {
   invalidateAccountReadModels,
   invalidateAccountRuntimeReadModels,
@@ -86,10 +86,10 @@ const eventHandlers = {
       invalidateAccountReadModels(client, event.accountId)
     })
   },
-  [EVENT_TOPICS.AccountStatusChanged]: (queryClient, event) => {
-    if (!applyAccountStatusPatch(queryClient, event.accountId, event.payload)) {
-      invalidateAccountRuntimeReadModels(queryClient, event.accountId)
-    }
+  [EVENT_TOPICS.AccountStatusChanged]: () => {
+    // Account status is served through the accountStatus view (queryKeys.accounts
+    // re-served on every account event), so the renderer no longer patches it
+    // here. Doing so per status delta would also storm refetches during a sync.
   },
   [EVENT_TOPICS.AccountUpdated]: (queryClient, event) => {
     applyResourceInvalidationsOrFallback(queryClient, event, (client) => {
