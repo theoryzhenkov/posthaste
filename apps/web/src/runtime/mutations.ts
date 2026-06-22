@@ -50,6 +50,31 @@ function confirmedMessageCommandResult(
   return receipt.output
 }
 
+/// Map a low-level message command to its runtime named mutation, or null for
+/// commands that have no named mutation yet (legacy adapter fallback).
+function namedMessageMutation(
+  request: RuntimeMessageCommandRequest,
+): { name: string; args: Record<string, unknown> } | null {
+  const command = request.command
+  switch (command.kind) {
+    case 'setKeywords':
+      return {
+        name: 'message.setKeywords',
+        args: { command: { add: command.add, remove: command.remove } },
+      }
+    case 'replaceMailboxes':
+      return {
+        name: 'message.replaceMailboxes',
+        args: { mailboxIds: command.mailboxIds },
+      }
+    case 'destroy':
+      return { name: 'message.destroy', args: {} }
+    case 'addToMailbox':
+    case 'removeFromMailbox':
+      return null
+  }
+}
+
 export const runtimeMutations = {
   accounts: {
     create(input: CreateAccountInput): Promise<AccountOverview> {
@@ -95,28 +120,39 @@ export const runtimeMutations = {
     async command(
       request: RuntimeMessageCommandRequest,
     ): Promise<MessageCommandResult> {
-      if (request.command.kind !== 'setKeywords') {
+      // Route message commands through the runtime named-mutation pipeline
+      // (Phase 5a). `addToMailbox`/`removeFromMailbox` are not emitted by the
+      // action layer; they keep the legacy adapter path until they have named
+      // mutations.
+      const named = namedMessageMutation(request)
+      if (!named) {
         return getRuntimeAdapter().runMessageCommand(request)
       }
       const receipt = await runtimeSessionClient.runMutation({
-        name: 'message.setKeywords',
+        name: named.name,
         args: {
           sourceId: request.sourceId,
           messageId: request.messageId,
-          command: {
-            add: request.command.add,
-            remove: request.command.remove,
-          },
+          ...named.args,
         },
         clientMutationId: request.clientMutationId,
         sourceId: request.sourceId,
       })
       return confirmedMessageCommandResult(receipt)
     },
-    moveToMailboxRole(
+    async moveToMailboxRole(
       request: RuntimeMoveMessageToMailboxRoleRequest,
     ): Promise<MessageCommandResult> {
-      return getRuntimeAdapter().moveMessageToMailboxRole(request)
+      const receipt = await runtimeSessionClient.runMutation({
+        name: 'message.moveToRole',
+        args: {
+          sourceId: request.sourceId,
+          messageId: request.messageId,
+          role: request.role,
+        },
+        sourceId: request.sourceId,
+      })
+      return confirmedMessageCommandResult(receipt)
     },
     send(request: {
       sourceId: string
