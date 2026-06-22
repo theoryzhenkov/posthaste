@@ -231,9 +231,9 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
 
     harness
         .service
-        .send_message(
+        .enqueue_send(
             &AccountId::from("jmap-stalwart"),
-            &SendMessageRequest {
+            SendMessageRequest {
                 from: Some(Recipient {
                     name: Some("Dev Account".to_string()),
                     email: stalwart.email(),
@@ -250,10 +250,13 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 references: None,
                 attachments: Vec::new(),
             },
-            &jmap_gateway,
         )
+        .expect("JMAP send should queue");
+    harness
+        .service
+        .flush_account(&AccountId::from("jmap-stalwart"), &jmap_gateway)
         .await
-        .expect("JMAP send should succeed");
+        .expect("JMAP send should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     assert_eq!(
@@ -269,9 +272,9 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
 
     harness
         .service
-        .send_message(
+        .enqueue_send(
             &AccountId::from("imap-stalwart"),
-            &SendMessageRequest {
+            SendMessageRequest {
                 from: Some(Recipient {
                     name: Some("Dev Account".to_string()),
                     email: stalwart.email(),
@@ -288,10 +291,13 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 references: None,
                 attachments: Vec::new(),
             },
-            &imap_gateway,
         )
+        .expect("SMTP send should queue");
+    harness
+        .service
+        .flush_account(&AccountId::from("imap-stalwart"), &imap_gateway)
         .await
-        .expect("SMTP send should succeed");
+        .expect("SMTP send should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     assert_eq!(

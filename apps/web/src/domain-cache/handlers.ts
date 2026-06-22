@@ -148,19 +148,16 @@ const eventHandlers = {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
   },
   [EVENT_TOPICS.OperationSettled]: (_queryClient, event) => {
-    // Surface only failures/conflicts; a successful flush settles silently.
+    // Surface only failures; a successful flush settles silently.
     const outcome = payloadString(event.payload, 'outcome')
-    if (outcome !== 'failed' && outcome !== 'conflicted') {
+    if (outcome !== 'failed') {
       return
     }
     const id = payloadString(event.payload, 'id') ?? event.accountId
     const detail = payloadString(event.payload, 'error')
     pushNotification({
-      severity: outcome === 'failed' ? 'error' : 'warning',
-      title:
-        outcome === 'failed'
-          ? "Couldn't save a change to the server"
-          : 'A queued change needs attention',
+      severity: 'error',
+      title: "Couldn't save a change to the server",
       message: detail ?? undefined,
       dedupeKey: `operation.settled:${id}`,
     })

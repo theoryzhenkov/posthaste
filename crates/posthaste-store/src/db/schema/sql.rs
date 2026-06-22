@@ -166,7 +166,6 @@ pub(super) const SCHEMA_SQL: &str = "
                 entity_id TEXT NOT NULL,
                 kind TEXT NOT NULL,
                 payload TEXT NOT NULL,
-                base_cursor TEXT,
                 state TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT,

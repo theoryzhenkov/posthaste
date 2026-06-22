@@ -64,12 +64,7 @@ export type OperationKind =
   | 'send'
 
 /** @spec docs/L1-outbox#state-machine */
-export type OperationState =
-  | 'pending'
-  | 'inflight'
-  | 'applied'
-  | 'conflicted'
-  | 'failed'
+export type OperationState = 'pending' | 'inflight' | 'applied' | 'failed'
 
 /** @spec docs/L1-outbox#operation-model */
 export type OperationEntityKind = 'message' | 'draft'
@@ -87,7 +82,6 @@ export interface Operation {
   entity: OperationEntity
   kind: OperationKind
   payload: unknown
-  baseCursor: string | null
   state: OperationState
   attempts: number
   lastError: string | null
@@ -105,7 +99,7 @@ export interface SaveDraftInput {
 /** Settlement payload carried by the `operation.settled` event. @spec docs/L1-outbox#settlement */
 export interface OperationSettlement {
   id: string
-  outcome: 'applied' | 'conflicted' | 'failed'
+  outcome: 'applied' | 'failed'
   assignedEntityId: string | null
   error: string | null
 }

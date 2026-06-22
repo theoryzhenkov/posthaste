@@ -1682,9 +1682,9 @@ export interface components {
         /**
          * @description A single local-first command.
          *
-         *     The same envelope is persisted and flushed at every tier. `id` provides
-         *     cross-tier idempotency; `depends_on` preserves per-entity ordering so a
-         *     `draft.update` never flushes before the `draft.create` it builds on.
+         *     `id` provides runtime/provider idempotency. `depends_on` preserves draft
+         *     chains only; state assertions coalesce instead of depending on earlier
+         *     assertions.
          *
          *     @spec docs/L1-outbox#operation-model
          */
@@ -1692,11 +1692,6 @@ export interface components {
             accountId: components["schemas"]["AccountId"];
             /** Format: int32 */
             attempts: number;
-            /**
-             * @description Optimistic-concurrency token captured when the op was enqueued, used to
-             *     detect drift at flush time. `None` for entity-creating ops.
-             */
-            baseCursor?: string | null;
             createdAt: string;
             dependsOn?: null | components["schemas"]["OperationId"];
             entity: components["schemas"]["OperationEntity"];
@@ -1705,7 +1700,7 @@ export interface components {
             lastError?: string | null;
             /**
              * @description Kind-specific payload (the wrapped command or draft body), as JSON so the
-             *     envelope stays uniform across op kinds and tiers.
+             *     envelope stays uniform across kinds.
              */
             payload: Record<string, never>;
             state: components["schemas"]["OperationState"];
@@ -1731,11 +1726,10 @@ export interface components {
          */
         OperationEntityKind: "message" | "draft";
         /**
-         * @description Client-minted, globally-stable identifier for an outbox operation.
+         * @description Runtime-minted, globally-stable identifier for an outbox operation.
          *
-         *     Used as the idempotency key across every tier (client, runtime, and the
-         *     runtime's own record of what it has pushed to the provider). A tier must
-         *     never apply the same `OperationId` twice.
+         *     Used as the idempotency key for the runtime/provider boundary. The
+         *     runtime must never push the same settled `OperationId` twice.
          *
          *     @spec docs/L1-outbox#idempotency
          */
@@ -1748,18 +1742,18 @@ export interface components {
          */
         OperationKind: "setKeywords" | "replaceMailboxes" | "destroy" | "draftCreate" | "draftUpdate" | "draftDelete" | "send";
         /**
-         * @description Lifecycle state of an operation within a single tier's outbox.
+         * @description Lifecycle state of an operation within the runtime/provider outbox.
          *
          *     ```text
          *     pending ─▶ inflight ─▶ applied
-         *        ▲          │  │ └──▶ failed
-         *        └──────────┘  └────▶ conflicted ─▶ inflight (after resolution)
+         *        ▲          │  └──▶ failed
+         *        └──────────┘
          *     ```
          *
          *     @spec docs/L1-outbox#state-machine
          * @enum {string}
          */
-        OperationState: "pending" | "inflight" | "applied" | "conflicted" | "failed";
+        OperationState: "pending" | "inflight" | "applied" | "failed";
         /**
          * @description Request body for `PATCH /v1/accounts/{account_id}`. Omitted fields are preserved.
          *

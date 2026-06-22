@@ -57,9 +57,9 @@ pub trait EventStore: Send + Sync {
 
 /// Durable local-first command outbox boundary (Tier 2: runtime <-> provider).
 ///
-/// Operations are applied to the local store immediately and flushed to the
-/// provider later; this is their durable queue. `id` is the cross-tier
-/// idempotency key, so enqueue is idempotent and a tier never applies an id
+/// Operations are reflected through a read-time overlay and flushed to the
+/// provider later; this is their durable queue. `id` is the runtime/provider
+/// idempotency key, so enqueue is idempotent and a settled id is never pushed
 /// twice.
 ///
 /// @spec docs/L1-outbox#operation-model
@@ -68,8 +68,8 @@ pub trait OperationOutboxStore: Send + Sync {
     /// existing id returns the already-stored operation unchanged.
     fn enqueue_operation(&self, operation: &Operation) -> Result<Operation, StoreError>;
 
-    /// Operations eligible for flushing (pending or conflicted) for an account,
-    /// in insertion order.
+    /// Operations eligible for flushing (pending) for an account, in insertion
+    /// order.
     fn list_flushable_operations(
         &self,
         account_id: &AccountId,
