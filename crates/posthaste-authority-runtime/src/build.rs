@@ -638,7 +638,11 @@ impl AuthorityRuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mutation_id = match self.core.sessions.accept_mutation(caller, request, history)? {
+        let mutation_id = match self
+            .core
+            .sessions
+            .accept_mutation(caller, request, history)?
+        {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
@@ -1124,7 +1128,6 @@ fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
         RuntimeLifecycle::Stopping => "stopping",
         RuntimeLifecycle::Stopped => "stopped",
     }
-
 }
 
 #[async_trait]
@@ -1412,7 +1415,6 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             }
         }
     }
-
 
     async fn open_view(
         &self,
