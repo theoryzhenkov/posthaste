@@ -4,6 +4,7 @@ import type {
   RuntimeMessagePageRequest,
   RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
+  RuntimeOpenViewResult,
   RuntimeRunMutationRequest,
   RuntimeSession,
   RuntimeUnsubscribe,
@@ -161,6 +162,21 @@ export const runtimeSessionClient = {
     const result = await runtimeStream.openMessageListView({
       sessionId: session.sessionId,
       view: request,
+      sourceId: activeTransportSourceId(),
+    })
+    openViewIds.add(result.viewId)
+    return result
+  },
+
+  async openView<TData = unknown>(request: {
+    family: string
+    payload: unknown
+    sourceId?: string | null
+  }): Promise<RuntimeOpenViewResult<TData>> {
+    const session = await ensureSession(request.sourceId)
+    const result = await runtimeStream.openView<TData>({
+      sessionId: session.sessionId,
+      descriptor: { family: request.family, payload: request.payload },
       sourceId: activeTransportSourceId(),
     })
     openViewIds.add(result.viewId)

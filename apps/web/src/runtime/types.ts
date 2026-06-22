@@ -220,6 +220,15 @@ export interface RuntimeSessionViewCloseRequest {
   sourceId?: string | null
 }
 
+/// Open any runtime view family by descriptor (messageDetail, conversation, …).
+/// `openRuntimeSessionMessageListView` stays specialized for the typed mail-list
+/// page result; this is the generic single-object path.
+export interface RuntimeSessionObjectViewRequest {
+  sessionId: string
+  descriptor: { family: string; payload: unknown }
+  sourceId?: string | null
+}
+
 export interface RuntimeRunMutationRequest {
   sessionId?: string | null
   name: string
@@ -232,6 +241,11 @@ export interface RuntimeRunMutationRequest {
 export interface RuntimeOpenMessageListViewResult {
   viewId: string
   snapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
+}
+
+export interface RuntimeOpenViewResult<TData = unknown> {
+  viewId: string
+  snapshot: RuntimeViewSnapshot<TData>
 }
 
 export interface RuntimeViewSubscriptionRequest {
@@ -349,6 +363,9 @@ export interface RuntimeAdapter {
   openRuntimeSessionMessageListView(
     request: RuntimeSessionViewRequest,
   ): Promise<RuntimeOpenMessageListViewResult>
+  openRuntimeSessionView(
+    request: RuntimeSessionObjectViewRequest,
+  ): Promise<RuntimeOpenViewResult>
   closeRuntimeSessionView(
     request: RuntimeSessionViewCloseRequest,
   ): Promise<OkResponse>

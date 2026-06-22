@@ -109,6 +109,18 @@ export function createFakeRuntimeAdapter(
         'runtime session message list view result',
       )
     },
+    openRuntimeSessionView(request) {
+      calls.runtimeSessionObjectViewOpenCalls.push({
+        sessionId: request.sessionId,
+        descriptor: request.descriptor,
+        sourceId: request.sourceId,
+      })
+      return resolveQueuedOptional(
+        queues.runtimeSessionViews,
+        input?.defaultRuntimeSessionView,
+        'runtime session view result',
+      )
+    },
     closeRuntimeSessionView(request) {
       calls.runtimeSessionViewCloseCalls.push({ ...request })
       return resolveQueued(
