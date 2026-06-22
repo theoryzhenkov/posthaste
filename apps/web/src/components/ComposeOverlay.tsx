@@ -14,6 +14,7 @@ import { ComposeBodyEditor } from './compose-overlay/ComposeBodyEditor'
 import { ComposeFields } from './compose-overlay/ComposeFields'
 import { ComposeFooter } from './compose-overlay/ComposeFooter'
 import { ComposeHeader } from './compose-overlay/ComposeHeader'
+import { useComposeAutosave } from './compose-overlay/useComposeAutosave'
 import { useComposeFormState } from './compose-overlay/useComposeFormState'
 import { useComposeQueries } from './compose-overlay/useComposeQueries'
 import { useDisplayedFromOptions } from './compose-overlay/useDisplayedFromOptions'
@@ -65,11 +66,22 @@ export function ComposeOverlay({
         ? `${queries.identityQuery.data.name} <${queries.identityQuery.data.email}>`
         : (queries.identityQuery.data?.email ?? 'Loading sender...')
 
+  const autosave = useComposeAutosave({
+    form: formState.form,
+    ready: !isPreparingMessage,
+    hasUserEdited: formState.hasUserEdited,
+    resetKey: formState.formResetKey,
+    intentKind: intent.kind,
+    replyContext: queries.replyContextQuery.data,
+    resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
+  })
+
   const { handleSubmit, isSending } = useComposeSubmission({
     form: formState.form,
     intentKind: intent.kind,
     isPreparingMessage,
     onClose,
+    onSent: autosave.discardDraft,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
     setErrorMessage: formState.setErrorMessage,

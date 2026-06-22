@@ -20,6 +20,7 @@ export function useComposeSubmission({
   intentKind,
   isPreparingMessage,
   onClose,
+  onSent,
   replyContext,
   resolveSubmissionSourceId,
   setErrorMessage,
@@ -29,6 +30,7 @@ export function useComposeSubmission({
   intentKind: ComposeIntent['kind']
   isPreparingMessage: boolean
   onClose: () => void
+  onSent?: () => void | Promise<void>
   replyContext: ReplyContext | undefined
   resolveSubmissionSourceId: (from: Recipient | null) => string
   setErrorMessage: (message: string | null) => void
@@ -39,6 +41,8 @@ export function useComposeSubmission({
     mutationFn: (variables: { sourceId: string; input: SendMessageInput }) =>
       runtimeMutations.messages.send(variables),
     onSuccess: async (_result, variables) => {
+      // Discard the autosaved draft now that the message has been sent.
+      await onSent?.()
       await invalidateComposeSendReadModels(queryClient, variables.sourceId)
       toast('Message sent')
       onClose()
