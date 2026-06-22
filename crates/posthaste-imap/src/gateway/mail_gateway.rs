@@ -131,6 +131,23 @@ impl MailGateway for LiveImapSmtpGateway {
         send_message_via_smtp(self, request).await
     }
 
+    async fn save_draft(
+        &self,
+        account_id: &AccountId,
+        request: &SendMessageRequest,
+        replace: Option<&MessageId>,
+    ) -> Result<MessageId, GatewayError> {
+        save_imap_draft(self, account_id, request, replace).await
+    }
+
+    async fn delete_draft(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<(), GatewayError> {
+        delete_imap_draft(self, account_id, message_id).await
+    }
+
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {
         Vec::new()
     }
