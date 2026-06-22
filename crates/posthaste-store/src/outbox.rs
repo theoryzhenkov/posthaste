@@ -195,6 +195,22 @@ impl OperationOutboxStore for DatabaseStore {
         )
     }
 
+    fn list_unsettled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let connection = self.read_connection()?;
+        collect_operations(
+            &connection,
+            &format!(
+                "SELECT {OPERATION_COLUMNS} FROM outbox_operation
+                 WHERE account_id = ?1 AND state != 'failed'
+                 ORDER BY rowid ASC"
+            ),
+            account_id,
+        )
+    }
+
     fn get_operation(&self, id: &OperationId) -> Result<Option<Operation>, StoreError> {
         let connection = self.read_connection()?;
         let mut statement = connection

@@ -151,23 +151,11 @@ pub(crate) async fn process_sync_trigger_inner(
     let result = match ensure_connection(shared, account, generation, connection).await {
         Ok(()) => {
             if let AccountRuntimeConnectionState::Connected(connection) = connection {
-                // Local-first operations must be pushed before a pull sync.
-                // Otherwise the pull can reapply the provider's pre-mutation
-                // state over the optimistic local projection, causing visible
-                // state blinking until the later outbox flush converges.
-                match shared
-                    .service
-                    .flush_account(&account_id, connection.gateway.as_ref())
-                    .await
-                {
-                    Ok(settlement_events) => shared.publish_events(&settlement_events),
-                    Err(error) => ph_warn!(
-                        events::SUPERVISOR_OUTBOX_FLUSH_FAILED,
-                        account_id = %account_id,
-                        error = %error,
-                        "outbox flush failed before sync"
-                    ),
-                }
+                // The flush → observe → retire cycle is owned by
+                // `sync_account_with_mode`: it flushes pending local-first ops
+                // before the pull and retires confirmed assertions after it.
+                //
+                // @spec docs/replication/L1#convergence-cycle
                 let progress = sync_progress_reporter(
                     shared,
                     account_id.clone(),
@@ -207,23 +195,6 @@ pub(crate) async fn process_sync_trigger_inner(
             );
             shared.publish_events(&events);
             shared.mark_sync_success(&account_id, generation).await;
-            // Drain again after sync because automation/backfill may enqueue
-            // local-first operations while applying the synced batch.
-            if let Some(gateway) = connection.gateway() {
-                match shared
-                    .service
-                    .flush_account(&account_id, gateway.as_ref())
-                    .await
-                {
-                    Ok(settlement_events) => shared.publish_events(&settlement_events),
-                    Err(error) => ph_warn!(
-                        events::SUPERVISOR_OUTBOX_FLUSH_FAILED,
-                        account_id = %account_id,
-                        error = %error,
-                        "outbox flush failed after sync"
-                    ),
-                }
-            }
             if let Some(reply) = reply {
                 let _ = reply.send(Ok(event_count));
             }

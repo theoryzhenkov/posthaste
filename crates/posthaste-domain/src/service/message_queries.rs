@@ -335,7 +335,7 @@ impl MailService {
         account_id: &AccountId,
     ) -> Result<Vec<Operation>, ServiceError> {
         self.outbox
-            .list_pending_operations(account_id)
+            .list_unsettled_operations(account_id)
             .map_err(ServiceError::from)
             .map(|operations| {
                 operations
@@ -345,7 +345,9 @@ impl MailService {
                             && operation.kind.is_state_assertion()
                             && matches!(
                                 operation.state,
-                                OperationState::Pending | OperationState::Inflight
+                                OperationState::Pending
+                                    | OperationState::Inflight
+                                    | OperationState::Applied
                             )
                     })
                     .collect()

@@ -93,6 +93,61 @@ fn flushable_lists_pending_and_inflight_in_insertion_order() -> Result<(), Store
 }
 
 #[test]
+fn applied_op_is_unsettled_for_overlay_but_excluded_from_pending() -> Result<(), StoreError> {
+    // A flushed message assertion rests in `applied`: the read overlay folds it
+    // (list_unsettled), but it is not shown as pending/UI work (list_pending),
+    // until a sync retires it.
+    //
+    // @spec docs/replication/L1#retire-on-confirmation
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+
+    store.enqueue_operation(&operation(
+        "op-1",
+        "message-1",
+        OperationKind::ReplaceMailboxes,
+        OperationState::Applied,
+    ))?;
+    store.enqueue_operation(&operation(
+        "op-2",
+        "message-2",
+        OperationKind::SetKeywords,
+        OperationState::Pending,
+    ))?;
+    store.enqueue_operation(&operation(
+        "op-3",
+        "message-3",
+        OperationKind::Destroy,
+        OperationState::Failed,
+    ))?;
+
+    let unsettled = store.list_unsettled_operations(&account)?;
+    let unsettled_ids: Vec<&str> = unsettled.iter().map(|op| op.id.as_str()).collect();
+    assert_eq!(
+        unsettled_ids,
+        vec!["op-1", "op-2"],
+        "overlay folds pending + applied"
+    );
+
+    let pending = store.list_pending_operations(&account)?;
+    let pending_ids: Vec<&str> = pending.iter().map(|op| op.id.as_str()).collect();
+    assert_eq!(
+        pending_ids,
+        vec!["op-2", "op-3"],
+        "applied is excluded from pending"
+    );
+
+    // Retire the applied op (convergence) and it leaves both views.
+    store.remove_operation(&OperationId::from("op-1"))?;
+    assert!(store
+        .list_unsettled_operations(&account)?
+        .iter()
+        .all(|op| op.id.as_str() != "op-1"));
+    Ok(())
+}
+
+#[test]
 fn update_state_records_attempts_and_error() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
