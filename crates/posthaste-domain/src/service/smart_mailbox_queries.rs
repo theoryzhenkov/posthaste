@@ -35,15 +35,11 @@ impl MailService {
     /// @spec docs/L1-api#smart-mailboxes
     pub fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, ServiceError> {
         let mailboxes = self.config.list_smart_mailboxes()?;
-        let fold_counts = self.any_pending_message_assertion()?;
         let mut summaries = Vec::with_capacity(mailboxes.len());
         for mailbox in mailboxes {
-            let (unread, total) = if fold_counts {
-                self.folded_rule_counts(&mailbox.rule)?
-            } else {
-                self.smart_mailboxes
-                    .query_smart_mailbox_counts(&mailbox.rule)?
-            };
+            // Lazy unoptimized counts (folded over the overlay); see
+            // `count_messages_by_rule`.
+            let (unread, total) = self.folded_rule_counts(&mailbox.rule)?;
             summaries.push(SmartMailboxSummary {
                 id: mailbox.id,
                 name: mailbox.name,
@@ -122,15 +118,15 @@ impl MailService {
         &self,
         rule: &SmartMailboxRule,
     ) -> Result<(i64, i64), ServiceError> {
-        // Fast path: with no pending message assertions the stored projection is
-        // authoritative, so a SQL count avoids enumerating every message.
-        if self.any_pending_message_assertion()? {
-            self.folded_rule_counts(rule)
-        } else {
-            self.smart_mailboxes
-                .query_smart_mailbox_counts(rule)
-                .map_err(Into::into)
-        }
+        // Counts are computed lazily by folding the overlay over matching
+        // messages — unoptimized and always one path (the SQL fast-path and the
+        // any-pending gate are gone). Precise counts are rarely needed;
+        // incremental materialized counters (updated per operation, accounting
+        // for smart-mailbox membership and actions) are a deliberate later
+        // refinement.
+        //
+        // @spec docs/replication/L1#derived-not-replicated
+        self.folded_rule_counts(rule)
     }
 
     /// `(unread, total)` for a rule computed over the read-time overlay.
@@ -139,16 +135,6 @@ impl MailService {
         let total = messages.len() as i64;
         let unread = messages.iter().filter(|message| !message.is_read).count() as i64;
         Ok((unread, total))
-    }
-
-    /// Whether any enabled source has pending message assertions in the outbox.
-    fn any_pending_message_assertion(&self) -> Result<bool, ServiceError> {
-        for account in self.config.list_sources()? {
-            if !self.overlay_operations(&account.id)?.is_empty() {
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 
     /// Messages matching an explicit smart mailbox rule with explicit ordering.
