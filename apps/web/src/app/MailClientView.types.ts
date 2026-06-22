@@ -5,7 +5,6 @@ import type { ResizablePanelGroup } from '@/components/ui/resizable'
 import type { ComposeIntent } from '@/composeIntent'
 import type { EmailActions } from '@/hooks/useEmailActions'
 import type { MailSelection } from '@/mailState'
-import type { OperationsContextValue } from '@/operationsContext'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SettingsSurfaceCategory, SurfaceDescriptor } from '@/surfaces'
 import type { SidebarSelection } from '@/components/Sidebar'
@@ -29,7 +28,6 @@ export interface MailClientViewProps {
   isSettingsSurfaceOpen: boolean
   isTagEditorOpen: boolean
   messageDefaultLayout: LayoutValue
-  operations: OperationsContextValue
   preparedSearchQuery: PreparedServerSearchQuery
   searchQuery: string
   selectedMessage: MailSelection | null

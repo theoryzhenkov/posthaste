@@ -19,7 +19,6 @@ import { syncLogger } from '../logger'
 import { LOG_EVENTS } from '../logEvents'
 import type { DomainEvent } from '../api/types'
 import { applyDomainEvent } from '../domainCache'
-import { shouldSuppressLocalEcho } from '../mailState'
 import { runtimeSessionClient } from '../runtime/sessionClient'
 
 /** `sessionStorage` key for the last processed runtime frame sequence number. */
@@ -87,11 +86,8 @@ export function useDaemonEvents() {
             return
           }
           const payload = frame.payload
-
-          if (shouldSuppressLocalEcho(payload)) {
-            return
-          }
-
+          // The renderer holds no optimistic overlay, so every runtime event is
+          // authoritative and always applies — there is no local echo to drop.
           applyDomainEvent(queryClient, payload)
           dispatchDomainEvent(payload)
         },
