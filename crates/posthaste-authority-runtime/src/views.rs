@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
-use posthaste_domain::{AccountId, DomainEvent, MessageId, EVENT_TOPIC_MESSAGE_UPDATED};
+use posthaste_domain::{
+    AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_MESSAGE_UPDATED,
+};
 use posthaste_runtime_contract::{
     MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
     MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest, ReadWatermark,
@@ -30,6 +32,9 @@ enum ViewKind {
         source_id: String,
         message_id: String,
     },
+    Conversation {
+        conversation_id: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -37,6 +42,12 @@ enum ViewKind {
 struct MessageDetailDescriptor {
     source_id: String,
     message_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationDescriptor {
+    conversation_id: String,
 }
 
 pub(crate) struct ViewRegistry {
@@ -322,16 +333,16 @@ impl ViewRegistry {
                 let data = serde_json::to_value(detail).map_err(|error| {
                     RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                 })?;
-                (
-                    data,
-                    Some(ReadWatermark {
-                        value: "local".to_string(),
-                    }),
-                    RuntimeCoverage {
-                        kind: RuntimeCoverageKind::Complete,
-                        details: Value::Null,
-                    },
-                )
+                (data, local_watermark(), complete_coverage())
+            }
+            ViewKind::Conversation { conversation_id } => {
+                let conversation = self
+                    .mail_queries
+                    .conversation(&ConversationId::from(conversation_id.clone()))?;
+                let data = serde_json::to_value(conversation).map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                })?;
+                (data, local_watermark(), complete_coverage())
             }
         };
         Ok(ViewSnapshot {
@@ -373,9 +384,33 @@ fn parse_view_kind(descriptor: &ViewDescriptor) -> Result<ViewKind, RuntimeError
                 message_id: descriptor.message_id,
             })
         }
+        "conversation" => {
+            let descriptor: ConversationDescriptor =
+                serde_json::from_value(descriptor.payload.clone()).map_err(|error| {
+                    RuntimeError::invalid_descriptor(format!(
+                        "invalid conversation descriptor: {error}"
+                    ))
+                })?;
+            Ok(ViewKind::Conversation {
+                conversation_id: descriptor.conversation_id,
+            })
+        }
         other => Err(RuntimeError::invalid_descriptor(format!(
             "unsupported view family '{other}'"
         ))),
+    }
+}
+
+fn local_watermark() -> Option<ReadWatermark> {
+    Some(ReadWatermark {
+        value: "local".to_string(),
+    })
+}
+
+fn complete_coverage() -> RuntimeCoverage {
+    RuntimeCoverage {
+        kind: RuntimeCoverageKind::Complete,
+        details: Value::Null,
     }
 }
 
@@ -395,6 +430,9 @@ fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
             event.account_id.as_str() == source_id
                 && event.message_id.as_ref().map(MessageId::as_str) == Some(message_id.as_str())
         }
+        // Conversations are derived from messages; recompute on any message
+        // update and let the data-equality check suppress no-op replacements.
+        ViewKind::Conversation { .. } => true,
     }
 }
 
@@ -415,6 +453,10 @@ fn validate_kind_account_scope(
         ViewKind::MessageDetail { source_id, .. } => {
             account_scope.is_empty() || account_scope.iter().any(|id| id == source_id)
         }
+        // The conversation id is opaque (it does not name an account); access is
+        // gated at the API capability layer. A finer runtime-side scope check
+        // would require reading the conversation first.
+        ViewKind::Conversation { .. } => true,
     };
     if in_scope {
         return Ok(());
