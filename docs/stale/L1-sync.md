@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Sync loop, state tokens, sync batch writes, mailbox reconciliation, event log"
-modified: 2026-06-20
-reviewed: 2026-06-20
+modified: 2026-06-22
+reviewed: 2026-06-22
 depends:
   - path: docs/L0-providers
   - path: docs/L0-sync
@@ -228,6 +228,31 @@ When `replace_all_mailboxes` is true, the store compares the current local mailb
 
 When `replace_all_messages` is true, the store performs the same reconciliation for messages. This prevents deleted or expunged remote email from surviving locally after an `Email/changes` cursor gets too old for the server to calculate.
 
+### Progressive delivery and final reconciliation
+
+A full sync is **delivered progressively** rather than as one fetch-all /
+apply-all / publish-all batch. The gateway yields the sync as a stream of chunks
+(per mailbox, with a soft cap that splits very large mailboxes). Each chunk is an
+upsert-only `SyncBatch` (`replace_all_messages: false`) that the store applies
+and commits in its own transaction, after which the supervisor publishes that
+chunk's events immediately. Mail therefore appears in the UI as the sync
+progresses, and the `accountStatus` view's `syncProgress` advances per chunk,
+instead of everything arriving at once on commit of a single transaction.
+
+Because upserts stream out of order, **deletions cannot be inferred mid-stream**
+— a message absent from chunk *k* may appear in chunk *k+1*. A progressive full
+sync therefore ends with one **final reconciliation pass**: it prunes local
+messages (and mailboxes) absent from the **complete** remote ID set gathered
+across all chunks, in a final transaction — the same comparison
+`replace_all_*` performs today, deferred to the end. Additions and updates
+stream; deletions reconcile once, last.
+
+A sync that **fails mid-stream** keeps the chunks it already committed and
+published (progress, not loss) and **does not** run the reconciliation pass, so a
+partial view is never wrongly pruned; the next full sync reconciles. Incremental
+(delta/`changes`-based) syncs already carry explicit removals and skip the
+reconciliation pass.
+
 IMAP sync batches also carry `imap_mailbox_states`,
 `imap_message_locations`, and `deleted_imap_message_locations`. Upserted
 locations are full rows; deleted locations are identity keys without row metadata.
@@ -313,7 +338,7 @@ This matters because the frontend keeps many pages cached while live updates kee
 
 A coalesced message metadata payload carries a `changes` object for changed facets (`keywords`, `mailboxes`, `arrived`) plus relevant post-state fields such as `keywords`, `mailboxIds`, and `arrivedMailboxIds`. Consumers that previously needed separate keyword, mailbox, or arrival topics inspect these payload facets instead.
 
-These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. Event payloads include a `resources` array when the changed resource can be expressed generically. SSE is a transport for durable resource-change facts, not a procedural frontend command channel. A successful sync appends `sync.completed` with the trigger, mode, batch counts, and sync/message/mailbox resources. Settings writes append `settings.updated`; smart mailbox config writes append `smart_mailbox.*`; config reload appends `config.reloaded`. Separate desktop windows consume the same backend stream, map resources to read-model invalidations, then refetch authoritative state through REST.
+Under progressive delivery these events are inserted into `event_log` and published **per committed chunk**, not only after the whole sync returns, so the renderer applies them incrementally as mail arrives. These events are inserted into `event_log` and also published over the local broadcast channel used by `/v1/events`. Event payloads include a `resources` array when the changed resource can be expressed generically. SSE is a transport for durable resource-change facts, not a procedural frontend command channel. A successful sync appends `sync.completed` with the trigger, mode, batch counts, and sync/message/mailbox resources. Settings writes append `settings.updated`; smart mailbox config writes append `smart_mailbox.*`; config reload appends `config.reloaded`. Separate desktop windows consume the same backend stream, map resources to read-model invalidations, then refetch authoritative state through REST.
 
 Account runtime transitions emit `account.status_changed`. Its payload includes
 `status`, `push`, `lastSyncAt`, `lastSyncError`, `lastSyncErrorCode`, and
@@ -374,6 +399,8 @@ The important sync failure mode is `cannotCalculateChanges`. That is not treated
 | conversation-derived | MUST | Conversation summaries are derived from local message projections using JMAP threadId for JMAP sources |
 | event-log-ordered | MUST | Local domain events are ordered by `event_log.seq` and replayable via `afterSeq` |
 | transaction-scope | MUST | apply_sync_batch executes within a single SQLite transaction |
+| sync-progressive-delivery | MUST | A full sync applies, commits, and publishes upsert-only chunks progressively (per mailbox), so mail and sync progress surface as the sync runs rather than only on a final commit |
+| sync-deletion-reconciliation | MUST | A progressive full sync prunes local messages/mailboxes absent from the complete remote ID set in one final reconciliation pass; a sync that fails mid-stream keeps committed chunks and skips reconciliation |
 | automation-backfill-durable | MUST | Automation backfill progress is stored in SQLite and completed jobs for the same rule fingerprint do not rerun after restart |
 | sync-progress-runtime | SHOULD | Running account syncs expose compact user-facing progress and clear it on success or failure |
 | cache-priority-size-aware | SHOULD | Optional body, raw-message, and attachment cache candidates are prioritized by manual utility divided by size cost |
