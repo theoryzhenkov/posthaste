@@ -2,22 +2,24 @@
  * React hook exposing the mail actions used across surfaces (toggle read/flag,
  * set tags, archive, trash, move to inbox, delete permanently).
  *
- * This is a thin adapter over the operation runner ({@link useOperations}):
- * each method builds a {@link MailOperation} and hands it to `run`, which
- * applies the optimistic cache patch, sends the command, and — for moves and
- * deletes — records an undoable history entry. Undo restores a message to the
- * mailbox it was captured in (not a hardcoded Inbox), so the destination is
- * always correct.
+ * Each method submits a runtime named mutation directly. The renderer keeps no
+ * optimistic overlay or undo history of its own: the runtime applies the
+ * mutation, the optimistic/authoritative state flows back through view frames
+ * and domain-event cache updates, and undo is the runtime-owned `mutation.undo`
+ * stack (so a move toast's "Undo" reverses the last action).
  *
  * @spec docs/L1-ui#data-fetching
- * @spec docs/L1-ui#undo-system
+ * @spec docs/runtime/L2#mutation-pipeline-and-catalog
  */
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import type {
   KnownMailboxRole,
+  MessageCommand,
   MessageDetail,
   MessageSummary,
+  SourceMessageRef,
 } from '../api/types'
 import {
   MAILBOX_ROLES,
@@ -25,19 +27,13 @@ import {
   SYSTEM_KEYWORDS,
 } from '../domainVocabulary'
 import { deriveKeywordState, mailKeys, type MailSelection } from '../mailState'
-import {
-  destroyOp,
-  moveToMailboxRoleOp,
-  setKeywordsOp,
-  type OperationTarget,
-} from '../operations'
-import { useOperations } from '../operationsContext'
-import type { SourceMessageRef } from '../api/types'
+import { runtimeMutations } from '../runtime/mutations'
+import { runtimeSessionClient } from '../runtime/sessionClient'
 
-/** Message reference augmented with optional keyword fields for optimistic patching. */
+/** Message reference augmented with optional keyword fields for state derivation. */
 type ReadToggleTarget = MailSelection &
   Partial<Pick<MessageSummary, 'isFlagged' | 'isRead' | 'keywords'>>
-/** Message reference augmented with optional keyword fields for optimistic patching. */
+/** Message reference augmented with optional keyword fields for state derivation. */
 type FlagToggleTarget = MailSelection &
   Partial<Pick<MessageSummary, 'isFlagged' | 'isRead' | 'keywords'>>
 
@@ -125,44 +121,85 @@ function uniqueUserTags(tags: string[]): string[] {
   return unique
 }
 
-/**
- * Build an {@link OperationTarget} for a keyword action from a message that
- * already carries its conversation id (list rows and selections both do), so
- * the runner need not re-resolve it.
- */
-function keywordTarget(
-  message: ReadToggleTarget | FlagToggleTarget | MessageSummary,
-): OperationTarget {
-  return {
-    ...toSourceMessageRef(message),
-    conversationId: message.conversationId,
-  }
+/** Reverse the most recent action through the runtime's undo stack. */
+function undoLastRuntimeMutation(sourceId: string) {
+  void runtimeSessionClient
+    .runMutation({ name: 'mutation.undo', args: {}, sourceId })
+    .catch(() => {})
 }
 
 /**
- * Provides optimistic email action methods. Keyword changes (`toggleRead`,
- * `markRead`, `toggleFlag`, `setUserTags`) run optimistically and silently;
- * moves (`archive`, `trash`, `moveToInbox`) are optimistic and undoable;
- * `deletePermanently` is optimistic and irreversible.
+ * Provides email action methods backed by runtime named mutations. Keyword
+ * changes (`toggleRead`, `markRead`, `toggleFlag`, `setUserTags`) run silently;
+ * moves (`archive`, `trash`, `moveToInbox`) toast with an Undo that calls the
+ * runtime undo; `deletePermanently` is irreversible (no Undo).
  *
  * @spec docs/L1-ui#data-fetching
- * @spec docs/L1-ui#undo-system
  */
 export function useEmailActions() {
   const queryClient = useQueryClient()
-  const operations = useOperations()
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const pendingRef = useRef(0)
+  const [isPending, setIsPending] = useState(false)
+
+  const setPending = useCallback((delta: number) => {
+    pendingRef.current = Math.max(0, pendingRef.current + delta)
+    setIsPending(pendingRef.current > 0)
+  }, [])
+
+  const dispatch = useCallback(
+    (input: {
+      run: () => Promise<unknown>
+      /** Toast copy shown on success; omitted for silent keyword changes. */
+      label?: string
+      /** When set, the toast offers Undo via the runtime undo stack. */
+      undoSourceId?: string
+    }) => {
+      setErrorMessage(null)
+      setPending(1)
+      void input
+        .run()
+        .then(() => {
+          if (!input.label) {
+            return
+          }
+          toast(
+            input.label,
+            input.undoSourceId
+              ? {
+                  action: {
+                    label: 'Undo',
+                    onClick: () => undoLastRuntimeMutation(input.undoSourceId!),
+                  },
+                  duration: 5000,
+                }
+              : { duration: 5000 },
+          )
+        })
+        .catch((error: unknown) => {
+          setErrorMessage(
+            error instanceof Error ? error.message : 'Operation failed',
+          )
+        })
+        .finally(() => setPending(-1))
+    },
+    [setPending],
+  )
 
   const moveToRole = useCallback(
-    (
-      target: SourceMessageRef,
-      role: KnownMailboxRole,
-      label: string,
-      undoLabel?: string,
-    ) => {
-      // conversationId is left for the runner to resolve once.
-      operations.run(moveToMailboxRoleOp(target, role, label, undoLabel))
+    (target: SourceMessageRef, role: KnownMailboxRole, label: string) => {
+      dispatch({
+        label,
+        run: () =>
+          runtimeMutations.messages.moveToMailboxRole({
+            messageId: target.messageId,
+            role,
+            sourceId: target.sourceId,
+          }),
+        undoSourceId: target.sourceId,
+      })
     },
-    [operations],
+    [dispatch],
   )
 
   const runKeywords = useCallback(
@@ -173,9 +210,21 @@ export function useEmailActions() {
       if (delta.add.length === 0 && delta.remove.length === 0) {
         return
       }
-      operations.run(setKeywordsOp(keywordTarget(message), delta))
+      const target = toSourceMessageRef(message)
+      dispatch({
+        run: () =>
+          runtimeMutations.messages.command({
+            command: {
+              kind: 'setKeywords',
+              add: delta.add,
+              remove: delta.remove,
+            } satisfies MessageCommand,
+            messageId: target.messageId,
+            sourceId: target.sourceId,
+          }),
+      })
     },
-    [operations],
+    [dispatch],
   )
 
   return {
@@ -224,12 +273,17 @@ export function useEmailActions() {
     moveToInbox: (target: SourceMessageRef) =>
       moveToRole(target, MAILBOX_ROLES.Inbox, 'Moved to Inbox'),
     deletePermanently: (target: SourceMessageRef) =>
-      // conversationId is left for the runner to resolve once.
-      operations.run(destroyOp(target, 'Permanently deleted')),
-    clearError: () => {
-      operations.clearError()
-    },
-    errorMessage: operations.errorMessage,
-    isPending: operations.isPending,
+      dispatch({
+        label: 'Permanently deleted',
+        run: () =>
+          runtimeMutations.messages.command({
+            command: { kind: 'destroy' } satisfies MessageCommand,
+            messageId: target.messageId,
+            sourceId: target.sourceId,
+          }),
+      }),
+    clearError: () => setErrorMessage(null),
+    errorMessage,
+    isPending,
   }
 }

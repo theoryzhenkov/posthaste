@@ -24,7 +24,7 @@ import {
 } from '@/labReadiness'
 import { useMailNavigationReadBootstrap } from '@/mailboxNavigationReadModels'
 import { mailKeys, type MailSelection } from '@/mailState'
-import { useOperations } from '@/operationsContext'
+import { useRuntimeUndoRedo } from '@/hooks/useRuntimeUndoRedo'
 import { queryClient } from '@/app/queryClient'
 import { queryKeys } from '@/queryKeys'
 import { runtimeMutations } from '@/runtime/mutations'
@@ -72,7 +72,7 @@ export function MailClient({
   )
   const theme = useDesignTheme()
   const actions = useEmailActions()
-  const operations = useOperations()
+  const undoRedo = useRuntimeUndoRedo()
 
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()
   // Observed (not `enabled: false`): the bootstrap read seeds this cache, but
@@ -172,11 +172,11 @@ export function MailClient({
     onOpenFocusedMessage: handlers.handleOpenFocusedMessage,
     onOpenSettings: handlers.handleOpenSettingsShortcut,
     onOpenTagEditor: handlers.handleOpenTagEditor,
-    onRedo: operations.redo,
+    onRedo: undoRedo.redo,
     onReply: handlers.handleReply,
     onToggleFlag: handlers.handleToggleFlag,
     onToggleShortcuts: handlers.handleToggleShortcuts,
-    onUndo: operations.undo,
+    onUndo: undoRedo.undo,
     searchQuery,
     selectedMessage,
   })
@@ -206,7 +206,6 @@ export function MailClient({
       isSettingsSurfaceOpen={isSettingsSurfaceOpen}
       isTagEditorOpen={isTagEditorOpen}
       messageDefaultLayout={layout.messageDefaultLayout}
-      operations={operations}
       preparedSearchQuery={preparedSearchQuery}
       searchQuery={searchQuery}
       selectedMessage={selectedMessage}
