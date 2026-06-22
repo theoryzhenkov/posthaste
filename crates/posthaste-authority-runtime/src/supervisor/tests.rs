@@ -235,6 +235,116 @@ async fn push_only_runtime_transition_emits_account_status_changed() {
     assert_eq!(events[1].payload["push"], "connected");
 }
 
+fn sync_progress(stage: SyncProgressStage) -> SyncProgress {
+    SyncProgress {
+        sync_id: "sync-1".to_string(),
+        trigger: SyncTrigger::Manual,
+        started_at: "2026-04-29T00:00:00Z".to_string(),
+        stage,
+        detail: String::new(),
+        mailbox_name: None,
+        mailbox_index: None,
+        mailbox_count: None,
+        message_count: None,
+        total_count: None,
+    }
+}
+
+// spec: docs/L1-sync#event-propagation
+#[tokio::test]
+async fn late_sync_progress_does_not_revive_syncing_after_success() {
+    // Regression for the stuck-"syncing" bug: a sync-progress write that lands
+    // after the sync settled must not revive `Syncing` over the terminal
+    // `Ready`. The guard runs against committed state under the lock, so the
+    // late Storing write is dropped.
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            Some(sync_progress(SyncProgressStage::Connecting)),
+        )
+        .await;
+    shared.mark_sync_success(&account.id, generation).await;
+    // A late reporter write arriving after success:
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            Some(sync_progress(SyncProgressStage::Storing)),
+        )
+        .await;
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(overview.status, AccountStatus::Ready);
+    assert!(overview.sync_progress.is_none());
+
+    let events = shared
+        .store
+        .list_events(&EventFilter {
+            account_id: Some(account.id.clone()),
+            topic: Some(EVENT_TOPIC_ACCOUNT_STATUS_CHANGED.to_string()),
+            mailbox_id: None,
+            after_seq: None,
+        })
+        .expect("events should list");
+    assert_eq!(
+        events.last().expect("a status event").payload["status"],
+        "ready",
+        "the last delivered status must be the terminal ready, not a revived syncing",
+    );
+}
+
+// spec: docs/L1-sync#event-propagation
+#[tokio::test]
+async fn concurrent_progress_writes_cannot_clobber_sync_success() {
+    // Many sync-progress writes racing the sync-success write must always
+    // settle on `Ready`: the atomic read-modify-write means a write that runs
+    // before success is overwritten by it, and one that runs after is dropped
+    // by the guard. The previous non-atomic RMW could let a stale-read progress
+    // write clobber `Ready` with `Syncing`.
+    let account = test_account("primary");
+    let shared = test_shared(&account);
+    let generation = shared.next_runtime_generation(&account.id).await;
+    shared
+        .set_sync_progress(
+            &account.id,
+            generation,
+            Some(sync_progress(SyncProgressStage::Connecting)),
+        )
+        .await;
+
+    let mut handles = Vec::new();
+    for _ in 0..50 {
+        let shared = shared.clone();
+        let account_id = account.id.clone();
+        handles.push(tokio::spawn(async move {
+            shared
+                .set_sync_progress(
+                    &account_id,
+                    generation,
+                    Some(sync_progress(SyncProgressStage::Storing)),
+                )
+                .await;
+        }));
+    }
+    shared.mark_sync_success(&account.id, generation).await;
+    for handle in handles {
+        handle.await.expect("progress task should not panic");
+    }
+
+    let overview = shared.runtime_overview(&account.id).await;
+    assert_eq!(
+        overview.status,
+        AccountStatus::Ready,
+        "no concurrent progress write may revive syncing after success",
+    );
+    assert!(overview.sync_progress.is_none());
+}
+
 // spec: docs/L1-sync#sync-loop
 #[tokio::test]
 async fn checkpoint_only_push_notification_triggers_sync() {

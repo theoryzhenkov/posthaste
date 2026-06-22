@@ -80,23 +80,28 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         progress: Option<SyncProgress>,
     ) {
-        let mut current = self.runtime_overview(account_id).await;
-        match progress {
-            Some(progress) => {
-                if !matches!(progress.stage, SyncProgressStage::Connecting)
-                    && !matches!(current.status, AccountStatus::Syncing)
-                {
-                    return;
+        self.update_runtime_overview(account_id, Some(generation), move |current| {
+            match progress {
+                Some(progress) => {
+                    // Guarded against the committed overview under the lock: a
+                    // late sync-progress write arriving after the sync settled
+                    // (status no longer Syncing) is dropped, so it cannot revive
+                    // a stale Syncing over a terminal Ready/failed status.
+                    if !matches!(progress.stage, SyncProgressStage::Connecting)
+                        && !matches!(current.status, AccountStatus::Syncing)
+                    {
+                        return false;
+                    }
+                    current.sync_progress = Some(progress);
+                    current.status = AccountStatus::Syncing;
                 }
-                current.sync_progress = Some(progress);
-                current.status = AccountStatus::Syncing;
+                None => {
+                    current.sync_progress = None;
+                }
             }
-            None => {
-                current.sync_progress = None;
-            }
-        }
-        self.set_runtime_overview_for_generation(account_id, generation, current)
-            .await;
+            true
+        })
+        .await;
     }
 
     /// Update only the push status, preserving other overview fields.
@@ -106,10 +111,11 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         push: PushStatus,
     ) {
-        let mut current = self.runtime_overview(account_id).await;
-        current.push = push;
-        self.set_runtime_overview_for_generation(account_id, generation, current)
-            .await;
+        self.update_runtime_overview(account_id, Some(generation), move |current| {
+            current.push = push;
+            true
+        })
+        .await;
     }
 
     /// Record a successful sync: set status to Ready, clear error, update timestamp.
@@ -118,19 +124,20 @@ impl SupervisorShared {
         account_id: &AccountId,
         generation: RuntimeGeneration,
     ) {
-        let mut current = self.runtime_overview(account_id).await;
-        current.status = AccountStatus::Ready;
-        current.last_sync_at = time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .ok();
-        current.last_sync_error = None;
-        current.last_sync_error_code = None;
-        current.sync_progress = None;
-        if matches!(current.push, PushStatus::Disabled) {
-            current.push = PushStatus::Reconnecting;
-        }
-        self.set_runtime_overview_for_generation(account_id, generation, current)
-            .await;
+        self.update_runtime_overview(account_id, Some(generation), |current| {
+            current.status = AccountStatus::Ready;
+            current.last_sync_at = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok();
+            current.last_sync_error = None;
+            current.last_sync_error_code = None;
+            current.sync_progress = None;
+            if matches!(current.push, PushStatus::Disabled) {
+                current.push = PushStatus::Reconnecting;
+            }
+            true
+        })
+        .await;
     }
 
     /// Record a sync failure: derive status from error type, store error details.
@@ -140,22 +147,23 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         error: &ServiceError,
     ) {
-        let mut current = self.runtime_overview(account_id).await;
-        current.status = match error {
-            ServiceError::Gateway(GatewayError::Auth) => AccountStatus::AuthError,
-            ServiceError::Gateway(GatewayError::Network(_))
-            | ServiceError::Gateway(GatewayError::Unavailable(_))
-            | ServiceError::Secret(_) => AccountStatus::Offline,
-            _ => AccountStatus::Degraded,
-        };
-        current.last_sync_error = Some(error.to_string());
-        current.last_sync_error_code = Some(error.code().to_string());
-        current.sync_progress = None;
-        if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
-            current.push = PushStatus::Reconnecting;
-        }
-        self.set_runtime_overview_for_generation(account_id, generation, current)
-            .await;
+        self.update_runtime_overview(account_id, Some(generation), |current| {
+            current.status = match error {
+                ServiceError::Gateway(GatewayError::Auth) => AccountStatus::AuthError,
+                ServiceError::Gateway(GatewayError::Network(_))
+                | ServiceError::Gateway(GatewayError::Unavailable(_))
+                | ServiceError::Secret(_) => AccountStatus::Offline,
+                _ => AccountStatus::Degraded,
+            };
+            current.last_sync_error = Some(error.to_string());
+            current.last_sync_error_code = Some(error.code().to_string());
+            current.sync_progress = None;
+            if !matches!(current.push, PushStatus::Unsupported | PushStatus::Disabled) {
+                current.push = PushStatus::Reconnecting;
+            }
+            true
+        })
+        .await;
     }
 
     /// Handle a push stream disconnect: emit event and set push status to Reconnecting.
@@ -193,8 +201,11 @@ impl SupervisorShared {
         account_id: &AccountId,
         overview: AccountRuntimeOverview,
     ) {
-        self.set_runtime_overview_inner(account_id, None, overview)
-            .await;
+        self.update_runtime_overview(account_id, None, move |current| {
+            *current = overview;
+            true
+        })
+        .await;
     }
 
     pub(crate) async fn set_runtime_overview_for_generation(
@@ -203,15 +214,28 @@ impl SupervisorShared {
         generation: RuntimeGeneration,
         overview: AccountRuntimeOverview,
     ) {
-        self.set_runtime_overview_inner(account_id, Some(generation), overview)
-            .await;
+        self.update_runtime_overview(account_id, Some(generation), move |current| {
+            *current = overview;
+            true
+        })
+        .await;
     }
 
-    async fn set_runtime_overview_inner(
+    /// Atomically read-modify-write an account's runtime overview under the
+    /// overviews write lock. The `update` closure receives the current overview
+    /// (default if absent) and returns whether to commit; it runs while the
+    /// lock is held, so any guard inside it sees committed state. This prevents
+    /// a stale read from clobbering a concurrent write — e.g. a late spawned
+    /// sync-progress update reviving `Syncing` after `mark_sync_success` settled
+    /// `Ready`, which left accounts wedged in "syncing" until a manual sync.
+    /// Emits status/push change events on commit.
+    ///
+    /// @spec docs/L1-sync#event-propagation
+    async fn update_runtime_overview(
         &self,
         account_id: &AccountId,
         generation: Option<RuntimeGeneration>,
-        overview: AccountRuntimeOverview,
+        update: impl FnOnce(&mut AccountRuntimeOverview) -> bool,
     ) {
         let generations = self.runtime_generations.read().await;
         if let Some(expected) = generation {
@@ -225,6 +249,10 @@ impl SupervisorShared {
 
         let mut overviews = self.runtime_overviews.write().await;
         let previous = overviews.get(account_id.as_str()).cloned();
+        let mut overview = previous.clone().unwrap_or_default();
+        if !update(&mut overview) {
+            return;
+        }
 
         let mut side_effects = Vec::new();
         if previous.as_ref().map(|item| &item.status) != Some(&overview.status)
