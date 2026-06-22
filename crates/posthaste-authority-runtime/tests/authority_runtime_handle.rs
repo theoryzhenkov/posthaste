@@ -1159,7 +1159,10 @@ async fn runtime_session_view_extends_its_window_in_place() {
     assert_eq!(extended.revision.get(), snapshot.revision.get() + 1);
     let grown = mail_list_state(&extended);
     assert_eq!(grown.rows.len(), 2, "window grew to include the second row");
-    assert!(!grown.continuation.has_after, "no rows past the full window");
+    assert!(
+        !grown.continuation.has_after,
+        "no rows past the full window"
+    );
 
     // The extend is broadcast as a ViewReplace to subscribers too.
     let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
