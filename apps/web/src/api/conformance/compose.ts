@@ -1,8 +1,10 @@
 import type {
   Identity,
   OkResponse,
+  Operation,
   Recipient,
   ReplyContext,
+  SaveDraftInput,
   SendMessageInput,
 } from '../types'
 import type { AssertTrue, Conforms, Wire } from './core'
@@ -16,3 +18,7 @@ export type _SendMessageInput = AssertTrue<
   Conforms<SendMessageInput, Wire['SendMessageRequest']>
 >
 export type _OkResponse = AssertTrue<Conforms<OkResponse, Wire['OkResponse']>>
+export type _Operation = AssertTrue<Conforms<Operation, Wire['Operation']>>
+export type _SaveDraftInput = AssertTrue<
+  Conforms<SaveDraftInput, Wire['SaveDraftRequest']>
+>

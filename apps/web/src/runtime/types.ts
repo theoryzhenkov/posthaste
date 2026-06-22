@@ -17,10 +17,12 @@ import type {
   MessageSortField,
   MessageSummary,
   OkResponse,
+  Operation,
   PatchMailboxInput,
   ReadRequest,
   ReplyContext,
   ReadResponse,
+  SaveDraftInput,
   SendMessageInput,
   SmartMailbox,
   SmartMailboxSummary,
@@ -301,6 +303,16 @@ export interface RuntimeSendMessageRequest {
   input: SendMessageInput
 }
 
+export interface RuntimeSaveDraftRequest {
+  sourceId: string
+  input: SaveDraftInput
+}
+
+export interface RuntimeDeleteDraftRequest {
+  sourceId: string
+  draftId: string
+}
+
 export interface RuntimeMoveMessageToMailboxRoleRequest {
   sourceId: string
   messageId: string
@@ -391,6 +403,9 @@ export interface RuntimeAdapter {
     request: RuntimeMoveMessageToMailboxRoleRequest,
   ): Promise<MessageCommandResult>
   sendMessage(request: RuntimeSendMessageRequest): Promise<OkResponse>
+  saveDraft(request: RuntimeSaveDraftRequest): Promise<Operation>
+  deleteDraft(request: RuntimeDeleteDraftRequest): Promise<Operation>
+  listPendingOperations(sourceId: string): Promise<Operation[]>
   startProviderOAuth(
     input: StartProviderOAuthInput,
   ): Promise<StartOAuthResponse>

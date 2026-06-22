@@ -8,7 +8,9 @@ import type {
   Mailbox,
   MessageCommandResult,
   OkResponse,
+  Operation,
   PatchMailboxInput,
+  SaveDraftInput,
   SendMessageInput,
   SmartMailbox,
   SmartMailboxSummary,
@@ -121,6 +123,21 @@ export const runtimeMutations = {
       input: SendMessageInput
     }): Promise<OkResponse> {
       return getRuntimeAdapter().sendMessage(request)
+    },
+    saveDraft(request: {
+      sourceId: string
+      input: SaveDraftInput
+    }): Promise<Operation> {
+      return getRuntimeAdapter().saveDraft(request)
+    },
+    deleteDraft(request: {
+      sourceId: string
+      draftId: string
+    }): Promise<Operation> {
+      return getRuntimeAdapter().deleteDraft(request)
+    },
+    listPendingOperations(sourceId: string): Promise<Operation[]> {
+      return getRuntimeAdapter().listPendingOperations(sourceId)
     },
   },
   oauth: {
