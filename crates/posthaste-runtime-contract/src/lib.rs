@@ -14,12 +14,12 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, EventFilter,
-    Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId, MessageSummary,
-    Operation, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand,
-    SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings,
-    SyncMode, TagSummary, ValidationError,
+    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, DraftContent,
+    EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId,
+    MessageSummary, Operation, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
+    SmtpTransportSettings, SyncMode, TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -950,6 +950,13 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<ReplyContext, RuntimeError>;
+
+    async fn get_draft_content(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<DraftContent, RuntimeError>;
 
     async fn query_mail_page(
         &self,

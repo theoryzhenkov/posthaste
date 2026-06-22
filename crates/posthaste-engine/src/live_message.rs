@@ -1,6 +1,7 @@
 use jmap_client::email;
 use posthaste_domain::{
-    synthesize_plain_text_raw_mime, BlobId, FetchedBody, GatewayError, MessageAttachment, MessageId,
+    synthesize_plain_text_raw_mime_with_recipients, BlobId, FetchedBody, GatewayError,
+    MessageAttachment, MessageId,
 };
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
@@ -20,9 +21,14 @@ pub(crate) async fn fetch_message_body(
     let get_request = request.get_email().ids([message_id.as_str()]).properties([
         email::Property::Id,
         email::Property::Attachments,
+        email::Property::Bcc,
         email::Property::BodyValues,
+        email::Property::Cc,
+        email::Property::From,
         email::Property::HtmlBody,
+        email::Property::Subject,
         email::Property::TextBody,
+        email::Property::To,
     ]);
     get_request
         .arguments()
@@ -63,10 +69,24 @@ pub(crate) async fn fetch_message_body(
     let from_header = email
         .from()
         .and_then(|addresses| addresses.first())
-        .map(|address| address.email().to_string())
-        .unwrap_or_else(|| "unknown@example.invalid".to_string());
-    let raw_mime = synthesize_plain_text_raw_mime(
-        from_header.as_str(),
+        .map(|address| address.email().to_string());
+    let to = email
+        .to()
+        .map(crate::compose::addresses_to_recipients)
+        .unwrap_or_default();
+    let cc = email
+        .cc()
+        .map(crate::compose::addresses_to_recipients)
+        .unwrap_or_default();
+    let bcc = email
+        .bcc()
+        .map(crate::compose::addresses_to_recipients)
+        .unwrap_or_default();
+    let raw_mime = synthesize_plain_text_raw_mime_with_recipients(
+        from_header.as_deref(),
+        &to,
+        &cc,
+        &bcc,
         email.subject().unwrap_or("(no subject)"),
         body_text.as_deref(),
     );

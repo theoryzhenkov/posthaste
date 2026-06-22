@@ -1,4 +1,5 @@
 import type {
+  DraftContent,
   Identity,
   OkResponse,
   Operation,
@@ -13,6 +14,9 @@ export type _Identity = AssertTrue<Conforms<Identity, Wire['Identity']>>
 export type _Recipient = AssertTrue<Conforms<Recipient, Wire['Recipient']>>
 export type _ReplyContext = AssertTrue<
   Conforms<ReplyContext, Wire['ReplyContext']>
+>
+export type _DraftContent = AssertTrue<
+  Conforms<DraftContent, Wire['DraftContent']>
 >
 export type _SendMessageInput = AssertTrue<
   Conforms<SendMessageInput, Wire['SendMessageRequest']>

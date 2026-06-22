@@ -7,16 +7,18 @@ use crate::{now_iso8601, GatewayError, Id};
 use crate::{
     AccountId, AccountSettings, AppSettings, AutomationBackfillStore, CacheStore, CommandResult,
     ConfigDiff, ConfigRepository, ConversationCursor, ConversationId, ConversationPage,
-    ConversationReadStore, ConversationSortField, ConversationView, EventStore, Identity,
-    MailGateway, MailStore, MailboxId, MailboxReadStore, MailboxSummary, MessageCommandStore,
-    MessageCursor, MessageDetailStore, MessageId, MessageListStore, MessageMailboxStore,
-    MessagePage, MessageSortField, MessageSummary, Operation, OperationEntity, OperationEntityKind,
-    OperationId, OperationKind, OperationOutboxStore, OperationOutcome, OperationSettlement,
-    OperationState, ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    ConversationReadStore, ConversationSortField, ConversationView, DraftContent,
+    DraftContentResult, EventStore, Identity, MailGateway, MailStore, MailboxId, MailboxReadStore,
+    MailboxSummary, MessageCommandStore, MessageCursor, MessageDetailStore, MessageId,
+    MessageListStore, MessageMailboxStore, MessagePage, MessageSortField, MessageSummary,
+    Operation, OperationEntity, OperationEntityKind, OperationId, OperationKind,
+    OperationOutboxStore, OperationOutcome, OperationSettlement, OperationState, Recipient,
+    ReplaceMailboxesCommand, SendMessageRequest, ServiceError, SetKeywordsCommand,
     SharedConfigRepository, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxStore,
-    SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore, SyncMode,
-    SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary, ThreadId,
-    ThreadView, EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    SmartMailboxSummary, SortDirection, SourceDataStore, SourceProjectionStore, StoreError,
+    SyncMode, SyncObject, SyncStateStore, SyncTrigger, SyncWriteStore, TagReadStore, TagSummary,
+    ThreadId, ThreadView, EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED,
+    EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 

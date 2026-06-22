@@ -118,4 +118,12 @@ pub(super) const ROUTES: &[Entry] = &[
             ResourceShape::account_message("source_id", "message_id"),
         ),
     },
+    Entry {
+        method: "GET",
+        template: "/sources/{source_id}/messages/{message_id}/draft-content",
+        authz: gate(
+            Action::Read,
+            ResourceShape::account_message("source_id", "message_id"),
+        ),
+    },
 ];

@@ -4,6 +4,7 @@ import type {
   CachedSenderAddress,
   ConversationPage,
   ConversationView,
+  DraftContent,
   Identity,
   Mailbox,
   MessageDetail,
@@ -41,6 +42,9 @@ export const runtimeViews = {
     },
     replyContext(request: RuntimeReplyContextRequest): Promise<ReplyContext> {
       return getRuntimeAdapter().fetchReplyContext(request)
+    },
+    draftContent(request: RuntimeReplyContextRequest): Promise<DraftContent> {
+      return getRuntimeAdapter().fetchDraftContent(request)
     },
     senderAddresses(): Promise<CachedSenderAddress[]> {
       return getRuntimeAdapter().fetchSenderAddresses()

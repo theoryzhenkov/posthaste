@@ -4123,6 +4123,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
+ "mail-parser",
  "posthaste-observability",
  "serde",
  "serde_json",

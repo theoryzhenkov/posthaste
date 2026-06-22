@@ -31,7 +31,16 @@ export function useComposeFormState({
   replyContext,
 }: {
   composeKey: string
-  draftSeed: { to: string; subject: string; body: string } | undefined
+  draftSeed:
+    | {
+        from: string
+        to: string
+        cc: string
+        bcc: string
+        subject: string
+        body: string
+      }
+    | undefined
   forwardAttachments: ComposeAttachment[]
   identity: Identity | undefined
   intentKind: ComposeIntent['kind']
@@ -42,13 +51,12 @@ export function useComposeFormState({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const initialForm = useMemo<ComposeForm>(() => {
     if (intentKind === 'draft') {
-      // cc/bcc are not restored: the synced draft exposes only `to`.
       return draftSeed
         ? {
-            from: '',
+            from: draftSeed.from,
             to: draftSeed.to,
-            cc: '',
-            bcc: '',
+            cc: draftSeed.cc,
+            bcc: draftSeed.bcc,
             subject: draftSeed.subject,
             body: draftSeed.body,
             attachments: [],
