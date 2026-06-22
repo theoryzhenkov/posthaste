@@ -20,12 +20,14 @@ import { useActiveConnection } from './connection/connectionContext'
 import { ActiveConnectionProvider } from './connection/useActiveConnection'
 import { isMainDesktopWindow, isTauriRuntime, toggleDevtools } from './desktop'
 import { isDeveloperToolsEnabled } from './developerTools'
+import { useAccountsView } from './hooks/useAccountsView'
 import { useDaemonEvents } from './hooks/useDaemonEvents'
 import { useDesktopUpdates } from './hooks/useDesktopUpdates'
 import { useSurfaceRouteState } from './hooks/useSurfaceRouting'
 
 function DaemonEventBridge() {
   useDaemonEvents()
+  useAccountsView()
   return null
 }
 
