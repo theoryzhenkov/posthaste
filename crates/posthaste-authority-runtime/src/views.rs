@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use posthaste_domain::{
-    AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, ConversationId, DomainEvent, MessageId, EVENT_TOPIC_ACCOUNT_CREATED,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_ACCOUNT_UPDATED,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_runtime_contract::{
     MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
@@ -17,6 +19,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
+use crate::account_reads::AccountReadService;
 use crate::mail_queries::MailQueryService;
 
 /// The parsed, family-specific identity of a runtime view. The registry is
@@ -35,6 +38,11 @@ enum ViewKind {
     Conversation {
         conversation_id: String,
     },
+    /// Folded account overview(s): `None` serves the full account list, `Some`
+    /// serves one account. @spec docs/runtime/L2#account-status-views
+    AccountStatus {
+        account_id: Option<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -50,8 +58,16 @@ struct ConversationDescriptor {
     conversation_id: String,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AccountStatusDescriptor {
+    #[serde(default)]
+    account_id: Option<String>,
+}
+
 pub(crate) struct ViewRegistry {
     mail_queries: Arc<MailQueryService>,
+    account_reads: Arc<AccountReadService>,
     event_sender: broadcast::Sender<DomainEvent>,
     views: Mutex<HashMap<ViewId, StoredView>>,
     next_view_id: AtomicU64,
@@ -69,10 +85,12 @@ struct StoredView {
 impl ViewRegistry {
     pub(crate) fn new(
         mail_queries: Arc<MailQueryService>,
+        account_reads: Arc<AccountReadService>,
         event_sender: broadcast::Sender<DomainEvent>,
     ) -> Self {
         Self {
             mail_queries,
+            account_reads,
             event_sender,
             views: Mutex::new(HashMap::new()),
             next_view_id: AtomicU64::new(1),
@@ -388,6 +406,31 @@ impl ViewRegistry {
                 })?;
                 (data, local_watermark(), complete_coverage())
             }
+            ViewKind::AccountStatus { account_id } => {
+                let data = match account_id {
+                    Some(account_id) => {
+                        let overview = self
+                            .account_reads
+                            .get_account(AccountId::from(account_id.clone()))
+                            .await
+                            .map_err(account_read_error)?;
+                        serde_json::to_value(overview).map_err(|error| {
+                            RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                        })?
+                    }
+                    None => {
+                        let list = self
+                            .account_reads
+                            .list_accounts()
+                            .await
+                            .map_err(account_read_error)?;
+                        serde_json::to_value(list.items).map_err(|error| {
+                            RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                        })?
+                    }
+                };
+                (data, local_watermark(), complete_coverage())
+            }
         };
         Ok(ViewSnapshot {
             view_id,
@@ -439,6 +482,21 @@ fn parse_view_kind(descriptor: &ViewDescriptor) -> Result<ViewKind, RuntimeError
                 conversation_id: descriptor.conversation_id,
             })
         }
+        "accountStatus" => {
+            // An empty/absent payload is the all-accounts variant.
+            let descriptor: AccountStatusDescriptor = if descriptor.payload.is_null() {
+                AccountStatusDescriptor::default()
+            } else {
+                serde_json::from_value(descriptor.payload.clone()).map_err(|error| {
+                    RuntimeError::invalid_descriptor(format!(
+                        "invalid accountStatus descriptor: {error}"
+                    ))
+                })?
+            };
+            Ok(ViewKind::AccountStatus {
+                account_id: descriptor.account_id,
+            })
+        }
         other => Err(RuntimeError::invalid_descriptor(format!(
             "unsupported view family '{other}'"
         ))),
@@ -458,6 +516,10 @@ fn grow_message_window(request: &mut MailQueryRequest, count: usize) {
     }
 }
 
+fn account_read_error(error: posthaste_domain::ServiceError) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+}
+
 fn local_watermark() -> Option<ReadWatermark> {
     Some(ReadWatermark {
         value: "local".to_string(),
@@ -475,21 +537,38 @@ fn complete_coverage() -> RuntimeCoverage {
 /// mailList recomputes when message membership/ordering may change (keyword
 /// assertions); messageDetail recomputes on any update to its own message.
 fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
-    if event.topic != EVENT_TOPIC_MESSAGE_UPDATED {
-        return false;
-    }
     match kind {
-        ViewKind::MailList(_) => event.payload["changes"]["keywords"] == true,
+        ViewKind::MailList(_) => {
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                && event.payload["changes"]["keywords"] == true
+        }
         ViewKind::MessageDetail {
             source_id,
             message_id,
         } => {
-            event.account_id.as_str() == source_id
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                && event.account_id.as_str() == source_id
                 && event.message_id.as_ref().map(MessageId::as_str) == Some(message_id.as_str())
         }
         // Conversations are derived from messages; recompute on any message
         // update and let the data-equality check suppress no-op replacements.
-        ViewKind::Conversation { .. } => true,
+        ViewKind::Conversation { .. } => event.topic == EVENT_TOPIC_MESSAGE_UPDATED,
+        // Account config + runtime status events; the all-accounts variant
+        // recomputes on any account event, the per-account variant on its own.
+        // Data-equality suppression elides no-op recomputes.
+        ViewKind::AccountStatus { account_id } => {
+            let is_account_event = matches!(
+                event.topic.as_str(),
+                EVENT_TOPIC_ACCOUNT_STATUS_CHANGED
+                    | EVENT_TOPIC_ACCOUNT_CREATED
+                    | EVENT_TOPIC_ACCOUNT_UPDATED
+                    | EVENT_TOPIC_ACCOUNT_DELETED
+            );
+            is_account_event
+                && account_id
+                    .as_ref()
+                    .is_none_or(|id| event.account_id.as_str() == id)
+        }
     }
 }
 
@@ -514,6 +593,14 @@ fn validate_kind_account_scope(
         // gated at the API capability layer. A finer runtime-side scope check
         // would require reading the conversation first.
         ViewKind::Conversation { .. } => true,
+        // The all-accounts view is global (settings shows every account); a
+        // per-account view must be in scope.
+        ViewKind::AccountStatus { account_id } => match account_id {
+            None => true,
+            Some(account_id) => {
+                account_scope.is_empty() || account_scope.iter().any(|id| id == account_id)
+            }
+        },
     };
     if in_scope {
         return Ok(());
