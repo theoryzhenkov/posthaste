@@ -38,30 +38,3 @@ export type KeywordState = Pick<
   MessageSummary,
   'isFlagged' | 'isRead' | 'keywords'
 >
-
-/** Before/after pair for an optimistic keyword mutation. */
-export type KeywordPatch = {
-  next: KeywordState
-  previous: KeywordState
-}
-
-/**
- * The full mutable JMAP state of a message that any mail operation can change
- * and later restore. Capturing this before-image is what lets undo be a single
- * generic "restore to previous state" primitive instead of per-operation logic.
- * @spec docs/L1-ui#undo-system
- */
-export type MutableState = {
-  mailboxIds: string[]
-  keywords: string[]
-}
-
-export type ReconcileOptions = {
-  allowHeuristicFlagClear?: boolean
-}
-
-/** Result of applying an optimistic keyword patch to the cache. */
-export type CachePatchResult = {
-  incomplete: boolean
-  snapshots: QuerySnapshot[]
-}
