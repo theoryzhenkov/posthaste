@@ -35,6 +35,7 @@ import {
   fetchSmartMailboxMessages,
   fetchSmartMailboxes,
   fetchSourceMessages,
+  extendRuntimeSessionView,
   openRuntimeSession,
   openRuntimeSessionView,
   openView,
@@ -190,6 +191,13 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
       { descriptor: request.descriptor },
       { sourceId: request.sourceId },
     )
+  },
+  extendRuntimeSessionView(request) {
+    return extendRuntimeSessionView<
+      RuntimeViewSnapshot<RuntimeMailListViewState>
+    >(request.sessionId, request.viewId, request.count, {
+      sourceId: request.sourceId,
+    })
   },
   closeRuntimeSessionView(request) {
     return closeRuntimeSessionView(request.sessionId, request.viewId, {

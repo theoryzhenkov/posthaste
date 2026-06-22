@@ -1004,6 +1004,16 @@ pub trait RuntimeCore: Send + Sync {
         view_id: ViewId,
     ) -> Result<(), RuntimeError>;
 
+    /// Grow an open windowed session view by `count` rows, returning the
+    /// extended snapshot (also broadcast as a `ViewReplace` frame).
+    async fn extend_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        view_id: ViewId,
+        count: usize,
+    ) -> Result<ViewSnapshot, RuntimeError>;
+
     async fn run_mutation(
         &self,
         caller: RuntimeCaller,

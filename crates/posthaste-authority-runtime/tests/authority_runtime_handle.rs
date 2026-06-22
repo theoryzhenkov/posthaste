@@ -200,10 +200,14 @@ fn seed_single_message_batch(
 }
 
 fn mail_list_descriptor(query: &str) -> ViewDescriptor {
+    mail_list_descriptor_with_limit(query, 10)
+}
+
+fn mail_list_descriptor_with_limit(query: &str, limit: usize) -> ViewDescriptor {
     let request = MailQueryRequest {
         query: query.to_string(),
         presentation: MailPresentationRequest::Messages {
-            limit: Some(10),
+            limit: Some(limit),
             cursor: None,
             sort_field: MessageSortField::Date,
             sort_direction: SortDirection::Desc,
@@ -1083,6 +1087,130 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
         )
         .await;
     assert!(unknown.is_err(), "unknown mutation names are rejected");
+}
+
+#[tokio::test]
+async fn runtime_session_view_extends_its_window_in_place() {
+    // A windowed mailList view grows in place: extend re-queries the larger
+    // window, keeps the same view id, and broadcasts a ViewReplace.
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("runtime-extend-account"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    // Open with a one-row window so the second seeded message is past it.
+    let snapshot = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            mail_list_descriptor_with_limit("in:runtime-extend-account/inbox", 1),
+        )
+        .await
+        .expect("session view should open");
+    let opened = mail_list_state(&snapshot);
+    assert_eq!(opened.rows.len(), 1);
+    assert!(opened.continuation.has_after, "more rows past the window");
+
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+
+    let extended = build
+        .handle
+        .extend_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            snapshot.view_id.clone(),
+            5,
+        )
+        .await
+        .expect("view should extend");
+    assert_eq!(
+        extended.view_id, snapshot.view_id,
+        "extend keeps the same view id"
+    );
+    assert_eq!(extended.revision.get(), snapshot.revision.get() + 1);
+    let grown = mail_list_state(&extended);
+    assert_eq!(grown.rows.len(), 2, "window grew to include the second row");
+    assert!(!grown.continuation.has_after, "no rows past the full window");
+
+    // The extend is broadcast as a ViewReplace to subscribers too.
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("runtime replace frame should arrive");
+    let RuntimeFrame::ViewReplace {
+        view_id, snapshot, ..
+    } = frame
+    else {
+        panic!("expected a view replace frame");
+    };
+    assert_eq!(view_id, snapshot.view_id);
+    assert_eq!(mail_list_state(&snapshot).rows.len(), 2);
+
+    // Extending a non-windowed view family is rejected.
+    let detail = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            ViewDescriptor {
+                family: "messageDetail".to_string(),
+                payload: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "message-1",
+                }),
+            },
+        )
+        .await
+        .expect("detail view should open");
+    let rejected = build
+        .handle
+        .extend_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            detail.view_id,
+            5,
+        )
+        .await;
+    assert!(rejected.is_err(), "non-windowed views reject extension");
 }
 
 /// Read whether `message_id` shows as flagged in the account's inbox view

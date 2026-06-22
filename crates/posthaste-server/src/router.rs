@@ -110,6 +110,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             axum::routing::delete(api::runtime_stream::close_runtime_session_view),
         )
         .route(
+            "/runtime/sessions/{session_id}/views/{view_id}/extend",
+            post(api::runtime_stream::extend_runtime_session_view),
+        )
+        .route(
             "/runtime/sessions/{session_id}/mutations",
             post(api::runtime_stream::run_runtime_session_mutation),
         )

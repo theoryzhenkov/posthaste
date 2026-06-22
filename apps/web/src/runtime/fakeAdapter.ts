@@ -121,6 +121,14 @@ export function createFakeRuntimeAdapter(
         'runtime session view result',
       )
     },
+    extendRuntimeSessionView(request) {
+      calls.runtimeSessionViewExtendCalls.push({ ...request })
+      return resolveQueuedOptional(
+        queues.runtimeSessionViewExtends,
+        input?.defaultRuntimeSessionViewExtend,
+        'runtime session view extend result',
+      )
+    },
     closeRuntimeSessionView(request) {
       calls.runtimeSessionViewCloseCalls.push({ ...request })
       return resolveQueued(

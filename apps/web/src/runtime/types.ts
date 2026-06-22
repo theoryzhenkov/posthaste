@@ -220,6 +220,13 @@ export interface RuntimeSessionViewCloseRequest {
   sourceId?: string | null
 }
 
+export interface RuntimeSessionViewExtendRequest {
+  sessionId: string
+  viewId: string
+  count: number
+  sourceId?: string | null
+}
+
 /// Open any runtime view family by descriptor (messageDetail, conversation, …).
 /// `openRuntimeSessionMessageListView` stays specialized for the typed mail-list
 /// page result; this is the generic single-object path.
@@ -366,6 +373,9 @@ export interface RuntimeAdapter {
   openRuntimeSessionView(
     request: RuntimeSessionObjectViewRequest,
   ): Promise<RuntimeOpenViewResult>
+  extendRuntimeSessionView(
+    request: RuntimeSessionViewExtendRequest,
+  ): Promise<RuntimeOpenMessageListViewResult>
   closeRuntimeSessionView(
     request: RuntimeSessionViewCloseRequest,
   ): Promise<OkResponse>

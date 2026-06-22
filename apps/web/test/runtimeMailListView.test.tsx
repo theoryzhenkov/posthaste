@@ -93,6 +93,33 @@ function mailListSnapshot(
   }
 }
 
+function mailListSnapshotRows(
+  revision: number,
+  rows: MessageSummary[],
+  hasAfter: boolean,
+): RuntimeViewSnapshot<RuntimeMailListViewState> {
+  const base = mailListSnapshot(revision, rows[0])
+  return {
+    ...base,
+    revision,
+    data: {
+      ...base.data,
+      rows: rows.map((row) => ({
+        rowKey: `${row.sourceId}:${row.id}`,
+        resourceRef: null,
+        projection: row,
+        orderKey: row.id,
+      })),
+      continuation: {
+        beforeCursor: null,
+        afterCursor: hasAfter ? 'cursor-1' : null,
+        hasBefore: false,
+        hasAfter,
+      },
+    },
+  }
+}
+
 function wrapper({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -196,6 +223,71 @@ describe('useRuntimeMailListView', () => {
         { sessionId: 'session-1', sourceId: 'primary' },
       ]),
     )
+  })
+
+  it('grows the window in place via the runtime extend operation', async () => {
+    const queryKey = queryKeys.messages(
+      { kind: 'source-mailbox', sourceId: 'primary', mailboxId: 'inbox' },
+      undefined,
+      { columnId: 'date', direction: 'desc' },
+    )
+    const secondMessage: MessageSummary = { ...message, id: 'm2' }
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeSessionMessageListView({
+      viewId: 'view-1',
+      snapshot: mailListSnapshotRows(1, [message], true),
+    })
+    runtimeAdapter.queueRuntimeSessionViewExtend({
+      viewId: 'view-1',
+      snapshot: mailListSnapshotRows(2, [message, secondMessage], false),
+    })
+
+    // Stable references so the hook effect doesn't re-run on state updates
+    // (memoized by the caller in the app).
+    const hookInput = {
+      enabled: true,
+      operation: {
+        operationId: 'op_1',
+        operationKind: 'mail.list',
+        operationSource: 'test',
+        sessionId: 'session_1',
+      },
+      preparedSearchQuery: {
+        query: undefined,
+        validation: { state: 'valid' as const },
+        isBlocked: false,
+      },
+      queryKey,
+      selectedView: {
+        kind: 'source-mailbox' as const,
+        sourceId: 'primary',
+        mailboxId: 'inbox',
+      },
+      sort: { columnId: 'date', direction: 'desc' as const },
+    }
+    const { result } = renderHook(() => useRuntimeMailListView(hookInput), {
+      wrapper,
+    })
+
+    await waitFor(() => expect(result.current.hasMore).toBe(true))
+
+    result.current.loadMore()
+
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [message, secondMessage], nextCursor: null }],
+        pageParams: [null],
+      }),
+    )
+    expect(result.current.hasMore).toBe(false)
+    expect(runtimeAdapter.runtimeSessionViewExtendCalls).toEqual([
+      {
+        sessionId: 'session-1',
+        viewId: 'view-1',
+        count: 100,
+        sourceId: 'primary',
+      },
+    ])
   })
 
   it('shares the renderer runtime stream with notification subscribers', async () => {

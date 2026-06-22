@@ -1542,6 +1542,109 @@
         }
       }
     },
+    "/v1/runtime/sessions/{session_id}/views/{view_id}/extend": {
+      "post": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Extend a runtime session view window",
+        "description": "Grows an open windowed view (e.g. mailList) by the requested row count and returns the extended snapshot, also broadcast as a viewReplace RuntimeFrame.",
+        "operationId": "extend_runtime_session_view",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Runtime session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view_id",
+            "in": "path",
+            "description": "Runtime view id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendRuntimeSessionViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The extended view snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenRuntimeSessionViewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "View does not support window extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown runtime session or view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sender-addresses": {
       "get": {
         "tags": [
@@ -4890,6 +4993,19 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          }
+        }
+      },
+      "ExtendRuntimeSessionViewRequest": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of additional rows to grow the view's window by.",
+            "minimum": 0
           }
         }
       },

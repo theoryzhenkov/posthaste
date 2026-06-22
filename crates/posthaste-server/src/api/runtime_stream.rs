@@ -32,6 +32,13 @@ pub struct OpenRuntimeSessionViewResponse {
     pub snapshot: ViewSnapshot,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtendRuntimeSessionViewRequest {
+    /// Number of additional rows to grow the view's window by.
+    pub count: usize,
+}
+
 #[utoipa::path(
     post,
     path = "/v1/runtime/sessions",
@@ -199,6 +206,48 @@ pub async fn close_runtime_session_view(
         .await
         .map_err(ApiError::from_runtime_error)?;
     Ok(Json(OkResponse { ok: true }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/runtime/sessions/{session_id}/views/{view_id}/extend",
+    tag = "runtime",
+    summary = "Extend a runtime session view window",
+    description = "Grows an open windowed view (e.g. mailList) by the requested row count and returns the extended snapshot, also broadcast as a viewReplace RuntimeFrame.",
+    params(
+        ("session_id" = String, Path, description = "Runtime session id"),
+        ("view_id" = String, Path, description = "Runtime view id"),
+        RuntimeSessionQuery
+    ),
+    request_body = ExtendRuntimeSessionViewRequest,
+    responses(
+        (status = 200, description = "The extended view snapshot", body = OpenRuntimeSessionViewResponse),
+        (status = 400, description = "View does not support window extension", body = ApiErrorBody),
+        (status = 401, description = "Unauthorized", body = ApiErrorBody),
+        (status = 404, description = "Unknown runtime session or view", body = ApiErrorBody),
+        (status = 500, description = "Internal error", body = ApiErrorBody)
+    )
+)]
+pub async fn extend_runtime_session_view(
+    State(state): State<Arc<AppState>>,
+    Path((session_id, view_id)): Path<(String, String)>,
+    Query(query): Query<RuntimeSessionQuery>,
+    Json(request): Json<ExtendRuntimeSessionViewRequest>,
+) -> Result<Json<OpenRuntimeSessionViewResponse>, ApiError> {
+    let snapshot = state
+        .runtime
+        .extend_session_view(
+            runtime_caller(query.source_id.as_deref()),
+            RuntimeSessionId::new(session_id),
+            ViewId::new(view_id),
+            request.count,
+        )
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    Ok(Json(OpenRuntimeSessionViewResponse {
+        view_id: snapshot.view_id.clone(),
+        snapshot,
+    }))
 }
 
 #[utoipa::path(
