@@ -56,6 +56,44 @@ fn save_draft_with_id_enqueues_an_update_ordered_after_pending_ops() {
     assert_eq!(update.depends_on.as_ref(), Some(&create.id));
 }
 
+#[tokio::test]
+async fn stable_draft_key_reuses_provider_id_across_flush() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let key = MessageId::from("draft-local-stable");
+
+    // First save creates; flushing assigns a provider id and updates the alias.
+    service
+        .save_draft(&account, Some(key.clone()), draft_request("Hello"))
+        .expect("create");
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("first flush");
+
+    // Editing with the SAME stable key targets the provider draft (an update),
+    // not a brand-new create -- this is what prevents duplicate drafts.
+    let edit = service
+        .save_draft(&account, Some(key), draft_request("Edited"))
+        .expect("edit");
+    assert_eq!(edit.kind, OperationKind::DraftUpdate);
+    assert_eq!(edit.entity.id, "provider-draft-1");
+
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("second flush");
+
+    // Provider saw exactly one create then one replace of the assigned id.
+    let calls = gateway.save_draft_calls.lock().unwrap();
+    assert_eq!(
+        calls.as_slice(),
+        &[None, Some(MessageId::from("provider-draft-1"))]
+    );
+}
+
 #[test]
 fn delete_draft_enqueues_a_delete() {
     let account = AccountId::from("primary");

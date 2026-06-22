@@ -98,11 +98,22 @@ model so both tiers agree:
 ## Temp-id reconciliation
 
 An entity created offline (only `draftCreate` creates an entity) has no provider
-id. The client mints a temporary `entity.id`; on the first successful flush the
-provider returns the real id, the runtime emits the assignment in the operation
-settlement, and `reconcile_operation_entity_id` rewrites every queued op for that
-account from the temp id to the provider id (so dependent `draftUpdate` / `send`
-ops target the right entity).
+id. On the first successful flush the provider returns the real id, the runtime
+emits the assignment in the operation settlement, and
+`reconcile_operation_entity_id` rewrites every still-queued op for that account
+from the temp id to the provider id (so dependent `draftUpdate` / `send` ops
+target the right entity).
+
+Queued-op reconciliation is not enough on its own: a draft can flush (and its
+ops be pruned) between edits, after which the client would no longer know the
+provider id. So drafts also use a **durable client-key alias**
+(`draft_alias`): the client picks one stable `draftKey` per compose session and
+sends it on every save. The runtime maps `draftKey -> current entity id` (the
+temp id before the first flush, the provider id after) and updates the alias on
+each draft settlement (`update_draft_alias_entity`). `save_draft` resolves the
+key to the live entity id (creating on first use, updating thereafter), so
+repeated edits update one provider draft instead of creating duplicates. The
+alias is dropped on `delete_draft`.
 
 ## Settlement
 

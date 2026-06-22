@@ -202,6 +202,65 @@ impl OperationOutboxStore for TestStore {
         ops.retain(|op| &op.id != id);
         Ok(())
     }
+
+    fn resolve_draft_entity(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let aliases = self.draft_aliases.lock().expect("alias lock poisoned");
+        Ok(aliases
+            .iter()
+            .find(|(account, key, _)| account == account_id.as_str() && key == draft_key)
+            .map(|(_, _, entity)| entity.clone()))
+    }
+
+    fn set_draft_alias(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+        entity_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut aliases = self.draft_aliases.lock().expect("alias lock poisoned");
+        if let Some(row) = aliases
+            .iter_mut()
+            .find(|(account, key, _)| account == account_id.as_str() && key == draft_key)
+        {
+            row.2 = entity_id.to_string();
+        } else {
+            aliases.push((
+                account_id.to_string(),
+                draft_key.to_string(),
+                entity_id.to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn update_draft_alias_entity(
+        &self,
+        account_id: &AccountId,
+        from_entity_id: &str,
+        to_entity_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut aliases = self.draft_aliases.lock().expect("alias lock poisoned");
+        for row in aliases.iter_mut() {
+            if row.0 == account_id.as_str() && row.2 == from_entity_id {
+                row.2 = to_entity_id.to_string();
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_draft_alias(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<(), StoreError> {
+        let mut aliases = self.draft_aliases.lock().expect("alias lock poisoned");
+        aliases.retain(|(account, key, _)| !(account == account_id.as_str() && key == draft_key));
+        Ok(())
+    }
 }
 
 impl SenderAddressCacheStore for TestStore {
