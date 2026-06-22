@@ -239,6 +239,7 @@ pub async fn build_authority_runtime(
     ));
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
+        account_reads.clone(),
         event_sender.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
@@ -474,6 +475,7 @@ impl AuthorityRuntimeHandle {
         ));
         let views = Arc::new(ViewRegistry::new(
             mail_queries.clone(),
+            account_reads.clone(),
             api_bridge.event_sender.clone(),
         ));
         let sessions = Arc::new(SessionRegistry::new(

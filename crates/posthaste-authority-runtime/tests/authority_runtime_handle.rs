@@ -1216,6 +1216,102 @@ async fn runtime_session_view_extends_its_window_in_place() {
     assert!(rejected.is_err(), "non-windowed views reject extension");
 }
 
+#[tokio::test]
+async fn runtime_account_status_view_serves_and_recomputes() {
+    // The accountStatus view serves the folded account list and recomputes +
+    // broadcasts a ViewReplace when the account set changes.
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let first = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("acct-status-1"),
+        )
+        .await
+        .expect("first account should create");
+
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+    let snapshot = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            ViewDescriptor {
+                family: "accountStatus".to_string(),
+                payload: serde_json::Value::Null,
+            },
+        )
+        .await
+        .expect("account status view should open");
+    let items = snapshot.data.as_array().expect("account list payload");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], first.id.as_str());
+    assert!(
+        items[0].get("runtime").is_some(),
+        "overview folds runtime status"
+    );
+
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+
+    // Adding a second account recomputes the all-accounts view.
+    build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("acct-status-2"),
+        )
+        .await
+        .expect("second account should create");
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription
+                .live
+                .next()
+                .await
+                .expect("runtime stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("account status replace frame should arrive");
+    let RuntimeFrame::ViewReplace {
+        view_id, snapshot, ..
+    } = frame
+    else {
+        panic!("expected a view replace frame");
+    };
+    assert_eq!(view_id, snapshot.view_id);
+    assert_eq!(
+        snapshot.data.as_array().expect("account list").len(),
+        2,
+        "the view now serves both accounts"
+    );
+}
+
 /// Read whether `message_id` shows as flagged in the account's inbox view
 /// (folded current state), for asserting undo/redo effects end-to-end.
 async fn inbox_message_flagged(
