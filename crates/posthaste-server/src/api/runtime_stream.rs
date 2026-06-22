@@ -206,7 +206,7 @@ pub async fn close_runtime_session_view(
     path = "/v1/runtime/sessions/{session_id}/mutations",
     tag = "runtime",
     summary = "Run a runtime mutation",
-    description = "Submits a named mutation to a runtime session. The initial slice supports message.setKeywords and emits mutationSettlement RuntimeFrame values on the session stream.",
+    description = "Submits a named mutation to a runtime session (message read/flag/tags/move/archive/trash/restore/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.",
     params(
         ("session_id" = String, Path, description = "Runtime session id"),
         RuntimeSessionQuery

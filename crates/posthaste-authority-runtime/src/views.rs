@@ -3,18 +3,41 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
-use posthaste_domain::{DomainEvent, EVENT_TOPIC_MESSAGE_UPDATED};
+use posthaste_domain::{AccountId, DomainEvent, MessageId, EVENT_TOPIC_MESSAGE_UPDATED};
 use posthaste_runtime_contract::{
     MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
     MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest, ReadWatermark,
     RuntimeCoverage, RuntimeCoverageKind, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
     ViewDescriptor, ViewFrame, ViewId, ViewLifecycle, ViewRevision, ViewSnapshot,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
 use crate::mail_queries::MailQueryService;
+
+/// The parsed, family-specific identity of a runtime view. The registry is
+/// generic over families: each carries what `build_snapshot` and the event
+/// pump need, so adding a family is a new variant rather than new registry
+/// machinery.
+///
+/// @spec docs/runtime/L2#view-descriptors
+#[derive(Clone)]
+enum ViewKind {
+    MailList(MailQueryRequest),
+    MessageDetail {
+        source_id: String,
+        message_id: String,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageDetailDescriptor {
+    source_id: String,
+    message_id: String,
+}
 
 pub(crate) struct ViewRegistry {
     mail_queries: Arc<MailQueryService>,
@@ -26,7 +49,7 @@ pub(crate) struct ViewRegistry {
 #[derive(Clone)]
 struct StoredView {
     descriptor: ViewDescriptor,
-    request: MailQueryRequest,
+    kind: ViewKind,
     snapshot: ViewSnapshot,
     frames: broadcast::Sender<ViewFrame>,
     event_task: Option<AbortHandle>,
@@ -50,8 +73,8 @@ impl ViewRegistry {
         descriptor: ViewDescriptor,
         account_scope: Option<&[String]>,
     ) -> Result<ViewSnapshot, RuntimeError> {
-        let request = mail_list_request(&descriptor)?;
-        validate_request_account_scope(&request, account_scope)?;
+        let kind = parse_view_kind(&descriptor)?;
+        validate_kind_account_scope(&kind, account_scope)?;
         let view_id = ViewId::new(format!(
             "view-{}",
             self.next_view_id.fetch_add(1, Ordering::Relaxed)
@@ -60,7 +83,7 @@ impl ViewRegistry {
             .build_snapshot(
                 view_id.clone(),
                 descriptor.clone(),
-                &request,
+                &kind,
                 ViewRevision::new(1),
             )
             .await?;
@@ -69,7 +92,7 @@ impl ViewRegistry {
             view_id.clone(),
             StoredView {
                 descriptor,
-                request,
+                kind,
                 snapshot: snapshot.clone(),
                 frames,
                 event_task: None,
@@ -89,7 +112,7 @@ impl ViewRegistry {
         account_scope: Option<&[String]>,
     ) -> Result<RuntimeViewSubscription, RuntimeError> {
         let current = self.current_view(&view_id)?;
-        validate_request_account_scope(&current.request, account_scope)?;
+        validate_kind_account_scope(&current.kind, account_scope)?;
         let catch_up = if after_revision == Some(current.snapshot.revision) {
             None
         } else {
@@ -135,12 +158,10 @@ impl ViewRegistry {
                         let Some(registry) = registry.upgrade() else {
                             break;
                         };
-                        if !registry.view_exists(&view_id) {
+                        let Ok(view) = registry.current_view(&view_id) else {
                             break;
-                        }
-                        if event.topic == EVENT_TOPIC_MESSAGE_UPDATED
-                            && event.payload["changes"]["keywords"] == true
-                        {
+                        };
+                        if event_affects_view(&view.kind, &event) {
                             registry.send_recomputed_replace(&view_id).await;
                         }
                     }
@@ -235,7 +256,7 @@ impl ViewRegistry {
             .build_snapshot(
                 view_id.clone(),
                 current.descriptor.clone(),
-                &current.request,
+                &current.kind,
                 next_revision,
             )
             .await?;
@@ -255,7 +276,7 @@ impl ViewRegistry {
             .build_snapshot(
                 view_id.clone(),
                 current.descriptor.clone(),
-                &current.request,
+                &current.kind,
                 next_revision,
             )
             .await?;
@@ -272,21 +293,55 @@ impl ViewRegistry {
         &self,
         view_id: ViewId,
         descriptor: ViewDescriptor,
-        request: &MailQueryRequest,
+        kind: &ViewKind,
         revision: ViewRevision,
     ) -> Result<ViewSnapshot, RuntimeError> {
-        let page = self.mail_queries.query_mail_page(request.clone()).await?;
-        let state = mail_list_state(request, page)?;
+        let (data, read_watermark, coverage) = match kind {
+            ViewKind::MailList(request) => {
+                let page = self.mail_queries.query_mail_page(request.clone()).await?;
+                let state = mail_list_state(request, page)?;
+                let read_watermark = state.read_watermark.clone();
+                let coverage = state.coverage.clone();
+                let data = serde_json::to_value(state).map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                })?;
+                (data, read_watermark, coverage)
+            }
+            ViewKind::MessageDetail {
+                source_id,
+                message_id,
+            } => {
+                let detail = self
+                    .mail_queries
+                    .message_detail(
+                        &AccountId::from(source_id.clone()),
+                        &MessageId::from(message_id.clone()),
+                    )
+                    .await?
+                    .ok_or_else(|| RuntimeError::not_found("message not found"))?;
+                let data = serde_json::to_value(detail).map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
+                })?;
+                (
+                    data,
+                    Some(ReadWatermark {
+                        value: "local".to_string(),
+                    }),
+                    RuntimeCoverage {
+                        kind: RuntimeCoverageKind::Complete,
+                        details: Value::Null,
+                    },
+                )
+            }
+        };
         Ok(ViewSnapshot {
             view_id,
             descriptor,
             revision,
             lifecycle: ViewLifecycle::Ready,
-            read_watermark: state.read_watermark.clone(),
-            coverage: state.coverage.clone(),
-            data: serde_json::to_value(state).map_err(|error| {
-                RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
-            })?,
+            read_watermark,
+            coverage,
+            data,
             pending_mutations: Vec::new(),
             error: None,
         })
@@ -297,34 +352,75 @@ fn lock_error<T>(_error: T) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::Internal, "view registry lock poisoned")
 }
 
-fn mail_list_request(descriptor: &ViewDescriptor) -> Result<MailQueryRequest, RuntimeError> {
-    if descriptor.family != "mailList" {
-        return Err(RuntimeError::invalid_descriptor(format!(
-            "unsupported view family '{}'",
-            descriptor.family
-        )));
+/// Parse a view descriptor into its family-specific [`ViewKind`].
+fn parse_view_kind(descriptor: &ViewDescriptor) -> Result<ViewKind, RuntimeError> {
+    match descriptor.family.as_str() {
+        "mailList" => {
+            let request = serde_json::from_value(descriptor.payload.clone()).map_err(|error| {
+                RuntimeError::invalid_descriptor(format!("invalid mailList descriptor: {error}"))
+            })?;
+            Ok(ViewKind::MailList(request))
+        }
+        "messageDetail" => {
+            let descriptor: MessageDetailDescriptor =
+                serde_json::from_value(descriptor.payload.clone()).map_err(|error| {
+                    RuntimeError::invalid_descriptor(format!(
+                        "invalid messageDetail descriptor: {error}"
+                    ))
+                })?;
+            Ok(ViewKind::MessageDetail {
+                source_id: descriptor.source_id,
+                message_id: descriptor.message_id,
+            })
+        }
+        other => Err(RuntimeError::invalid_descriptor(format!(
+            "unsupported view family '{other}'"
+        ))),
     }
-    serde_json::from_value(descriptor.payload.clone()).map_err(|error| {
-        RuntimeError::invalid_descriptor(format!("invalid mailList descriptor: {error}"))
-    })
 }
 
-fn validate_request_account_scope(
-    request: &MailQueryRequest,
+/// Whether a domain event should trigger a recompute for a view of this kind.
+/// mailList recomputes when message membership/ordering may change (keyword
+/// assertions); messageDetail recomputes on any update to its own message.
+fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
+    if event.topic != EVENT_TOPIC_MESSAGE_UPDATED {
+        return false;
+    }
+    match kind {
+        ViewKind::MailList(_) => event.payload["changes"]["keywords"] == true,
+        ViewKind::MessageDetail {
+            source_id,
+            message_id,
+        } => {
+            event.account_id.as_str() == source_id
+                && event.message_id.as_ref().map(MessageId::as_str) == Some(message_id.as_str())
+        }
+    }
+}
+
+fn validate_kind_account_scope(
+    kind: &ViewKind,
     account_scope: Option<&[String]>,
 ) -> Result<(), RuntimeError> {
     let Some(account_scope) = account_scope else {
         return Ok(());
     };
-    if account_scope.is_empty()
-        || account_scope
-            .iter()
-            .any(|source_id| mail_query_contains_source_scope(&request.query, source_id))
-    {
+    let in_scope = match kind {
+        ViewKind::MailList(request) => {
+            account_scope.is_empty()
+                || account_scope
+                    .iter()
+                    .any(|source_id| mail_query_contains_source_scope(&request.query, source_id))
+        }
+        ViewKind::MessageDetail { source_id, .. } => {
+            account_scope.is_empty() || account_scope.iter().any(|id| id == source_id)
+        }
+    };
+    if in_scope {
         return Ok(());
     }
     Err(RuntimeError::invalid_descriptor(
-        "mailList descriptor is outside the caller account scope",
+        "view descriptor is outside the caller account scope",
     ))
 }
 

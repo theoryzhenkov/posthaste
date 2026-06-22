@@ -407,7 +407,7 @@ export interface paths {
         put?: never;
         /**
          * Run a runtime mutation
-         * @description Submits a named mutation to a runtime session. The initial slice supports message.setKeywords and emits mutationSettlement RuntimeFrame values on the session stream.
+         * @description Submits a named mutation to a runtime session (message read/flag/tags/move/archive/trash/restore/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.
          */
         post: operations["run_runtime_session_mutation"];
         delete?: never;
