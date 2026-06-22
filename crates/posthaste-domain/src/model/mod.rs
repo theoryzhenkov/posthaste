@@ -189,8 +189,8 @@ pub const EVENT_TOPIC_PUSH_CONNECTED: &str = "push.connected";
 pub const EVENT_TOPIC_PUSH_DISCONNECTED: &str = "push.disconnected";
 
 /// Event topic emitted when an outbox operation reaches a terminal outcome
-/// (applied, conflicted, or failed) so a downstream tier can settle its
-/// optimistic state. Payload is an [`OperationSettlement`].
+/// (applied or failed) so a downstream tier can settle its optimistic state.
+/// Payload is an [`OperationSettlement`].
 ///
 /// @spec docs/L1-outbox#settlement
 pub const EVENT_TOPIC_OPERATION_SETTLED: &str = "operation.settled";

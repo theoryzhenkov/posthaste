@@ -1,7 +1,8 @@
 use crate::{
     AccountId, AddToMailboxCommand, CommandResult, GatewayError, MailboxId, MessageId,
     OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, SyncObject,
+    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 
 use super::MailService;
@@ -14,10 +15,6 @@ impl MailService {
         kind: OperationKind,
         payload: serde_json::Value,
     ) -> Result<crate::Operation, ServiceError> {
-        let base_cursor = self
-            .sync_state
-            .get_cursor(account_id, SyncObject::Message)?
-            .map(|cursor| cursor.provider_state());
         self.queue_operation(
             account_id,
             OperationEntity {
@@ -26,42 +23,70 @@ impl MailService {
             },
             kind,
             payload,
-            base_cursor,
         )
     }
 
     fn remove_operation_after_local_failure(
         &self,
         operation: &crate::Operation,
-        error: crate::StoreError,
+        error: ServiceError,
     ) -> ServiceError {
         let _ = self.outbox.remove_operation(&operation.id);
-        error.into()
+        error
     }
 
-    fn queue_then_apply_message_operation<F>(
+    fn queue_then_emit_message_operation(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         kind: OperationKind,
         payload: serde_json::Value,
-        apply: F,
-    ) -> Result<CommandResult, ServiceError>
-    where
-        F: FnOnce() -> Result<CommandResult, crate::StoreError>,
-    {
+        event_payload: serde_json::Value,
+    ) -> Result<CommandResult, ServiceError> {
+        // Validate the synced projection knows this message. Some tests and
+        // lightweight callers only implement mailbox state, not full detail.
+        let projected_mailboxes = self
+            .message_mailboxes
+            .get_message_mailboxes(account_id, message_id)?;
+        let base_detail = self
+            .message_detail_reader
+            .get_message_detail(account_id, message_id)?;
         let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
-        match apply() {
-            Ok(result) => Ok(result),
-            Err(error) => Err(self.remove_operation_after_local_failure(&operation, error)),
-        }
+        let detail = match base_detail {
+            Some(detail) => match self.apply_message_overlay(account_id, detail) {
+                Ok(detail) => detail,
+                Err(error) => {
+                    return Err(self.remove_operation_after_local_failure(&operation, error))
+                }
+            },
+            None => None,
+        };
+        let event = match self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            detail
+                .as_ref()
+                .and_then(|detail| detail.summary.mailbox_ids.first())
+                .or_else(|| projected_mailboxes.first()),
+            Some(message_id),
+            event_payload,
+        ) {
+            Ok(event) => event,
+            Err(error) => {
+                return Err(self
+                    .remove_operation_after_local_failure(&operation, ServiceError::from(error)));
+            }
+        };
+        Ok(CommandResult {
+            detail,
+            events: vec![event],
+        })
     }
 
     /// Add/remove JMAP keywords on a message, local-first.
     ///
-    /// Applies the local projection immediately and enqueues provider flush via
-    /// the shared outbox. The returned `CommandResult` preserves the historical
-    /// API/UI contract while `/operations` exposes the durable pending work.
+    /// Enqueues a state assertion and reflects it through the read-time overlay;
+    /// the authoritative projection remains sync-owned.
     ///
     /// @spec docs/L1-api#message-commands
     /// @spec docs/L1-outbox#operation-model
@@ -77,15 +102,15 @@ impl MailService {
                 "failed to serialize keyword command: {error}"
             )))
         })?;
-        self.queue_then_apply_message_operation(
+        self.queue_then_emit_message_operation(
             account_id,
             message_id,
             OperationKind::SetKeywords,
             payload,
-            || {
-                self.message_commands
-                    .set_keywords(account_id, message_id, None, command)
-            },
+            serde_json::json!({
+                "messageId": message_id.as_str(),
+                "changes": { "keywords": true },
+            }),
         )
     }
 
@@ -105,15 +130,25 @@ impl MailService {
                 "failed to serialize mailbox command: {error}"
             )))
         })?;
-        self.queue_then_apply_message_operation(
+        self.queue_then_emit_message_operation(
             account_id,
             message_id,
             OperationKind::ReplaceMailboxes,
             payload,
-            || {
-                self.message_commands
-                    .replace_mailboxes(account_id, message_id, None, command)
-            },
+            serde_json::json!({
+                "messageId": message_id.as_str(),
+                "changes": { "mailboxes": true, "arrived": true },
+                "mailboxIds": command
+                    .mailbox_ids
+                    .iter()
+                    .map(MailboxId::as_str)
+                    .collect::<Vec<_>>(),
+                "arrivedMailboxIds": command
+                    .mailbox_ids
+                    .iter()
+                    .map(MailboxId::as_str)
+                    .collect::<Vec<_>>(),
+            }),
         )
     }
 
@@ -126,13 +161,8 @@ impl MailService {
         message_id: &MessageId,
         command: &AddToMailboxCommand,
     ) -> Result<CommandResult, ServiceError> {
-        let mut mailbox_ids = self
-            .message_mailboxes
-            .get_message_mailboxes(account_id, message_id)?;
-        if !mailbox_ids
-            .iter()
-            .any(|mailbox_id| mailbox_id == &command.mailbox_id)
-        {
+        let mut mailbox_ids = self.list_message_mailboxes_with_overlay(account_id, message_id)?;
+        if !mailbox_ids.contains(&command.mailbox_id) {
             mailbox_ids.push(command.mailbox_id.clone());
         }
         self.replace_mailboxes(
@@ -143,7 +173,7 @@ impl MailService {
         .await
     }
 
-    /// Remove a message from a single mailbox.
+    /// Remove a message from a mailbox (idempotent: no-op if absent).
     ///
     /// @spec docs/L1-api#message-commands
     pub async fn remove_from_mailbox(
@@ -153,10 +183,9 @@ impl MailService {
         command: &RemoveFromMailboxCommand,
     ) -> Result<CommandResult, ServiceError> {
         let mailbox_ids: Vec<MailboxId> = self
-            .message_mailboxes
-            .get_message_mailboxes(account_id, message_id)?
+            .list_message_mailboxes_with_overlay(account_id, message_id)?
             .into_iter()
-            .filter(|mailbox_id| mailbox_id != &command.mailbox_id)
+            .filter(|id| id != &command.mailbox_id)
             .collect();
         self.replace_mailboxes(
             account_id,
@@ -176,15 +205,31 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<CommandResult, ServiceError> {
-        self.queue_then_apply_message_operation(
+        self.queue_then_emit_message_operation(
             account_id,
             message_id,
             OperationKind::Destroy,
             serde_json::json!({}),
-            || {
-                self.message_commands
-                    .destroy_message(account_id, message_id, None)
-            },
+            serde_json::json!({ "messageId": message_id.as_str(), "deleted": true }),
         )
+    }
+
+    fn list_message_mailboxes_with_overlay(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Vec<MailboxId>, ServiceError> {
+        let Some(detail) = self
+            .message_detail_reader
+            .get_message_detail(account_id, message_id)?
+            .and_then(|detail| self.apply_message_overlay(account_id, detail).transpose())
+            .transpose()?
+        else {
+            return Err(ServiceError::from(StoreError::NotFound(format!(
+                "message:{}",
+                message_id.as_str()
+            ))));
+        };
+        Ok(detail.summary.mailbox_ids)
     }
 }

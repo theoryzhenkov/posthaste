@@ -960,12 +960,11 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
-        self.core
-            .service
-            .send_message(&account_id, &request, gateway.as_ref())
-            .await?;
-        if let Some(sender) = &request.from {
+        // Local-first: queue the send and flush it to the provider on the next
+        // connectivity window; no live gateway is required to accept it.
+        let sender = request.from.clone();
+        self.core.service.enqueue_send(&account_id, request)?;
+        if let Some(sender) = &sender {
             if let Err(error) = self.core.store.remember_sender_address(&account_id, sender) {
                 ph_warn!(
                     events::SEND_SENDER_CACHE_UPDATE_FAILED,
@@ -976,19 +975,9 @@ impl RuntimeCore for AuthorityRuntimeHandle {
                 );
             }
         }
-        if let Err(error) = self
-            .core
-            .live_accounts
-            .trigger_account_sync(&account_id, SyncTrigger::Manual)
-            .await
-        {
-            ph_warn!(
-                events::SEND_FOLLOWUP_SYNC_TRIGGER_FAILED,
-                source_id = %account_id,
-                error = %error,
-                "send accepted but follow-up sync trigger failed"
-            );
-        }
+        // `trigger_outbox_flush` nudges a sync that drains the queued send (and
+        // pulls the provider's Sent copy on the following cycle).
+        self.trigger_outbox_flush(&account_id).await;
         Ok(())
     }
 

@@ -9,7 +9,7 @@ import {
 import { createQueryClient } from './domainCache.fixtures'
 
 function settlementEvent(
-  outcome: 'applied' | 'conflicted' | 'failed',
+  outcome: 'applied' | 'failed',
   error: string | null = null,
 ): DomainEvent {
   return {

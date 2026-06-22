@@ -34,19 +34,4 @@ impl MailService {
             .await
             .map_err(Into::into)
     }
-
-    /// Send an email via the gateway.
-    ///
-    /// @spec docs/L1-jmap#methods-used
-    pub async fn send_message(
-        &self,
-        account_id: &AccountId,
-        request: &SendMessageRequest,
-        gateway: &dyn MailGateway,
-    ) -> Result<(), ServiceError> {
-        gateway
-            .send_message(account_id, request)
-            .await
-            .map_err(Into::into)
-    }
 }

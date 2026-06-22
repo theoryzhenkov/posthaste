@@ -15,7 +15,6 @@ fn operation(id: &str, entity_id: &str, kind: OperationKind, state: OperationSta
         },
         kind,
         payload: json!({ "subject": "Hi" }),
-        base_cursor: None,
         state,
         attempts: 0,
         last_error: None,
@@ -51,7 +50,7 @@ fn enqueue_is_idempotent_on_operation_id() -> Result<(), StoreError> {
 }
 
 #[test]
-fn flushable_lists_pending_and_conflicted_in_insertion_order() -> Result<(), StoreError> {
+fn flushable_lists_pending_and_inflight_in_insertion_order() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
     let account = AccountId::from("primary");
@@ -72,12 +71,18 @@ fn flushable_lists_pending_and_conflicted_in_insertion_order() -> Result<(), Sto
         "op-3",
         "draft-2",
         OperationKind::DraftCreate,
-        OperationState::Conflicted,
+        OperationState::Inflight,
+    ))?;
+    store.enqueue_operation(&operation(
+        "op-4",
+        "draft-3",
+        OperationKind::DraftCreate,
+        OperationState::Failed,
     ))?;
 
     let flushable = store.list_flushable_operations(&account)?;
     let ids: Vec<&str> = flushable.iter().map(|op| op.id.as_str()).collect();
-    // op-2 is applied (terminal) so excluded; order follows insertion.
+    // op-2 is applied and op-4 is failed, so both are excluded; order follows insertion.
     assert_eq!(ids, vec!["op-1", "op-3"]);
     Ok(())
 }

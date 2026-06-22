@@ -11,6 +11,8 @@ pub(super) struct MutationGateway {
     /// Records the `replace` argument of each `save_draft` call.
     pub(super) save_draft_calls: Mutex<Vec<Option<MessageId>>>,
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
+    /// Subjects of each `send_message` call, in order.
+    pub(super) send_calls: Mutex<Vec<String>>,
 }
 
 impl MutationGateway {
@@ -23,6 +25,7 @@ impl MutationGateway {
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
+            send_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -35,6 +38,7 @@ impl MutationGateway {
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
+            send_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -47,6 +51,7 @@ impl MutationGateway {
             save_draft_results: Mutex::new(Vec::new()),
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
+            send_calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -161,9 +166,13 @@ impl MailGateway for MutationGateway {
     async fn send_message(
         &self,
         _account_id: &AccountId,
-        _request: &SendMessageRequest,
+        request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        Err(GatewayError::Rejected("unused".to_string()))
+        self.send_calls
+            .lock()
+            .expect("send calls poisoned")
+            .push(request.subject.clone());
+        Ok(())
     }
 
     async fn save_draft(
