@@ -220,6 +220,13 @@ fn mail_list_state(snapshot: &posthaste_runtime_contract::ViewSnapshot) -> MailL
     serde_json::from_value(snapshot.data.clone()).expect("snapshot data should be mail list state")
 }
 
+fn message_detail_descriptor(source_id: &str, message_id: &str) -> ViewDescriptor {
+    ViewDescriptor {
+        family: "messageDetail".to_string(),
+        payload: serde_json::json!({ "sourceId": source_id, "messageId": message_id }),
+    }
+}
+
 fn scoped_test_caller(source_id: &str) -> RuntimeCaller {
     let mut caller = RuntimeCaller::test();
     caller.account_scope = Some(vec![source_id.to_string()]);
@@ -812,6 +819,160 @@ async fn runtime_mutation_streams_settlement_frames() {
         .expect("duplicate mutation should return existing receipt");
     assert_eq!(duplicate.runtime_mutation_id, Some(mutation_id));
     assert_eq!(duplicate.state, MutationSettlementState::Confirmed);
+}
+
+// spec: docs/runtime/L1#view-operation
+#[tokio::test]
+async fn message_detail_view_replaces_snapshot_after_keyword_event() {
+    // The messageDetail view family serves the overlay-folded detail and pushes
+    // a replacement when its own message changes — the read surface the renderer
+    // subscribes to instead of patching a local cache.
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("detail-account"),
+        )
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            message_detail_descriptor(account.id.as_str(), "message-1"),
+        )
+        .await
+        .expect("message detail view should open");
+    assert_eq!(snapshot.revision.get(), 1);
+    assert_eq!(snapshot.data["id"], "message-1");
+    assert_eq!(snapshot.data["isFlagged"], false);
+
+    let mut subscription = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("view should subscribe");
+    assert!(subscription.catch_up.is_none());
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+        .await
+        .expect("view frame should arrive")
+        .expect("view stream should remain open");
+    let ViewFrame::Replace { snapshot } = frame else {
+        panic!("expected replace frame");
+    };
+    assert_eq!(snapshot.revision.get(), 2);
+    assert_eq!(snapshot.data["id"], "message-1");
+    assert_eq!(snapshot.data["isFlagged"], true);
+}
+
+// spec: docs/runtime/L2#mutation-pipeline-and-catalog
+#[tokio::test]
+async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
+    // A catalog mutation beyond setKeywords routes to its handle action and
+    // settles confirmed (read/flag/move/destroy all share this path).
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("runtime-readstate-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    let receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id.clone()),
+                name: "message.setReadState".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "read": true
+                }),
+                client_mutation_id: ClientMutationId::new("read-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("setReadState mutation should run");
+    assert_eq!(receipt.name, "message.setReadState");
+    assert_eq!(receipt.state, MutationSettlementState::Confirmed);
+    assert_eq!(receipt.output["events"].as_array().unwrap().len(), 1);
+
+    let unknown = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id),
+                name: "message.nonsense".to_string(),
+                args: serde_json::json!({}),
+                client_mutation_id: ClientMutationId::new("bad-1"),
+                context: None,
+            },
+        )
+        .await;
+    assert!(unknown.is_err(), "unknown mutation names are rejected");
 }
 
 #[tokio::test]

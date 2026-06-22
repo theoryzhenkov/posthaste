@@ -4,8 +4,8 @@ mod visibility;
 use std::sync::Arc;
 
 use posthaste_domain::{
-    ConversationCursor, ConversationPage, ConversationSortField, MailService, MessageCursor,
-    MessagePage, MessageSortField, SortDirection,
+    AccountId, ConversationCursor, ConversationPage, ConversationSortField, MailService,
+    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, SortDirection,
 };
 use posthaste_runtime_contract::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, RuntimeError,
@@ -24,6 +24,23 @@ impl MailQueryService {
             service,
             supervisor,
         }
+    }
+
+    /// The overlay-folded local message detail for a runtime `messageDetail`
+    /// view. No gateway is passed, so this is a pure local read (the projection
+    /// with pending assertions folded), never a provider fetch.
+    ///
+    /// @spec docs/replication/L1#retire-on-confirmation
+    pub(crate) async fn message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        let result = self
+            .service
+            .get_message_detail(account_id, message_id, None)
+            .await?;
+        Ok(result.detail)
     }
 
     pub(crate) async fn query_mail_page(
