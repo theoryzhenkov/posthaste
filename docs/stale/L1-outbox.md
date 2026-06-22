@@ -12,6 +12,12 @@ dependents: []
 
 # Command outbox domain -- L1
 
+> **Superseded by [`docs/replication/L1`](../replication/L1.md) (2026-06-22).** The
+> outbox is one channel of a coherent link; the current model (optimistic
+> up-channel, authoritative down-channel, confirmation-watermark convergence,
+> composed across client/runtime/backend) lives in the replication domain. This
+> legacy doc describes the prior single-tier outbox and is retained for history.
+
 Mutations are **local-first**: a command is recorded as an operation and reflected
 in reads immediately, then flushed to the provider when it is reachable. This
 replaces the previous provider-first ordering, where a mutation required the
