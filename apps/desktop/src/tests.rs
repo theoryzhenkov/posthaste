@@ -34,7 +34,12 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
     );
     assert_eq!(
         json_array_strings(&capability, "permissions"),
-        vec!["core:default", "opener:allow-open-url"]
+        vec![
+            "core:default",
+            "opener:allow-open-url",
+            "updater:default",
+            "process:allow-restart",
+        ]
     );
     assert!(
         capability.get("remote").is_none(),
@@ -45,7 +50,6 @@ fn default_capability_is_limited_to_posthaste_windows_and_minimal_plugins() {
     let forbidden_prefixes = [
         "fs:",
         "shell:",
-        "process:",
         "http:",
         "clipboard-manager:",
         "global-shortcut:",

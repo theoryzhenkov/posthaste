@@ -82,7 +82,10 @@ impl MailService {
             }
         }
 
-        events.extend(self.flush_account(account_id, gateway).await?);
+        events.extend(
+            self.flush_account_and_reconcile(account_id, gateway)
+                .await?,
+        );
         Ok((events, has_more))
     }
 }

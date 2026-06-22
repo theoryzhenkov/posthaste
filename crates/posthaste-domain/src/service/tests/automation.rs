@@ -94,7 +94,21 @@ async fn automation_backfill_processes_one_bounded_batch() {
         ..Default::default()
     });
     let service = MailService::new(store.clone(), config);
-    let gateway = MutationGateway::with_revision(1);
+    let gateway = MutationGateway::with_sync_batch(
+        1,
+        SyncBatch {
+            mailboxes: Vec::new(),
+            messages: Vec::new(),
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
+            replace_all_messages: false,
+            cursors: Vec::new(),
+        },
+    );
 
     let (_events, has_more) = service
         .backfill_automation_rules_batch(&account_id, &gateway, 1)
