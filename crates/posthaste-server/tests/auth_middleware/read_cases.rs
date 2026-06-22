@@ -21,6 +21,23 @@ async fn flag_on_openapi_doc_succeeds_without_token() {
     assert_eq!(status, StatusCode::OK);
 }
 
+#[tokio::test]
+async fn flag_on_oauth_callback_succeeds_without_token() {
+    // The provider's browser redirect lands on /oauth/callback with no bearer
+    // token (and no app-controlled Origin); it is authenticated by the `state`
+    // param, so the auth perimeter must let it through. Regression: enabling
+    // require_auth by default started 401ing this loopback redirect.
+    let app = build_app(build_state(true));
+    let status = status_of(
+        app,
+        get_request("/v1/oauth/callback?state=abc&code=xyz")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
 // -- Browser-loadable reads authenticate via the Authorization header --
 //
 // The SSE stream (fetchEventSource), account logos and message attachments are

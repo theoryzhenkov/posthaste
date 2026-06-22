@@ -17,6 +17,13 @@ fn exempt_path_check_handles_the_v1_nest_prefix() {
     assert!(is_exempt_path("/v1/asyncapi.json"));
     assert!(is_exempt_path("/v1/health"));
     assert!(is_exempt_path("/health"));
+    // The OAuth loopback callback is the provider's browser redirect: it
+    // cannot carry a bearer token and is authenticated by the `state` param.
+    assert!(is_exempt_path("/v1/oauth/callback"));
+    assert!(is_exempt_path("/oauth/callback"));
+    // The OAuth *start* endpoints are app-initiated (token-bearing) and must
+    // stay behind auth.
+    assert!(!is_exempt_path("/v1/oauth/start"));
     // Everything else requires an authentic token in the Authorization
     // header — including the previously query-token routes (events, logos,
     // attachments), which now authenticate via header (fetch/blob fetch).
