@@ -20,10 +20,6 @@ export {
   deriveKeywordState,
   mergeMessageDetail,
 } from './mail-state/keywords'
-export {
-  recordLocalMutationEvents,
-  shouldSuppressLocalEcho,
-} from './mail-state/localEcho'
 export { findConversationIdForMessage } from './mail-state/lookup'
 export { applyMailboxPatch } from './mail-state/mailboxes'
 export {

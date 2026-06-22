@@ -14,7 +14,6 @@ import { queryClient } from './app/queryClient'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { FocusedSurfaceDocument } from './components/FocusedSurface'
 import { InvalidSurfaceDocument } from './components/InvalidSurface'
-import { OperationsProvider } from './components/OperationsProvider'
 import { DesignThemeProvider } from './components/ThemeProvider'
 import { ConnectionScreen } from './connection/ConnectionScreen'
 import { useActiveConnection } from './connection/connectionContext'
@@ -86,20 +85,18 @@ export default function App() {
             key={isStandaloneSurface ? 'standalone' : 'mail'}
           />
           <ErrorBoundary label="app-root" fallback={renderAppRootError}>
-            <OperationsProvider>
-              <ConnectionGate>
-                {isStandaloneSurface && routeSurface ? (
-                  <FocusedSurfaceDocument surface={routeSurface} />
-                ) : isStandaloneSurface && invalidSurfaceRoute ? (
-                  <InvalidSurfaceDocument route={invalidSurfaceRoute} />
-                ) : (
-                  <MailClient
-                    invalidSurfaceRoute={invalidSurfaceRoute}
-                    routeSurface={routeSurface}
-                  />
-                )}
-              </ConnectionGate>
-            </OperationsProvider>
+            <ConnectionGate>
+              {isStandaloneSurface && routeSurface ? (
+                <FocusedSurfaceDocument surface={routeSurface} />
+              ) : isStandaloneSurface && invalidSurfaceRoute ? (
+                <InvalidSurfaceDocument route={invalidSurfaceRoute} />
+              ) : (
+                <MailClient
+                  invalidSurfaceRoute={invalidSurfaceRoute}
+                  routeSurface={routeSurface}
+                />
+              )}
+            </ConnectionGate>
           </ErrorBoundary>
           <Toaster
             position="bottom-center"
