@@ -59,12 +59,18 @@ async fn sync_applies_matching_automation_tag() {
         .await
         .expect("sync should apply action");
 
-    assert_eq!(
-        *store
+    assert!(
+        store
             .keyword_adds
             .lock()
-            .expect("keyword adds lock poisoned"),
-        vec![(MessageId::from("message-1"), vec!["newsletter".to_string()])]
+            .expect("keyword adds lock poisoned")
+            .is_empty(),
+        "automation assertions do not mutate the authoritative projection",
+    );
+    assert_eq!(
+        *gateway.revision.lock().expect("revision lock poisoned"),
+        2,
+        "post-sync outbox flush applied the automation assertion to the provider",
     );
 }
 
@@ -96,11 +102,17 @@ async fn automation_backfill_processes_one_bounded_batch() {
         .expect("backfill should apply one bounded batch");
 
     assert!(has_more);
-    assert_eq!(
-        *store
+    assert!(
+        store
             .keyword_adds
             .lock()
-            .expect("keyword adds lock poisoned"),
-        vec![(MessageId::from("message-1"), vec!["newsletter".to_string()])]
+            .expect("keyword adds lock poisoned")
+            .is_empty(),
+        "automation assertions do not mutate the authoritative projection",
+    );
+    assert_eq!(
+        *gateway.revision.lock().expect("revision lock poisoned"),
+        2,
+        "backfill outbox flush applied one automation assertion to the provider",
     );
 }

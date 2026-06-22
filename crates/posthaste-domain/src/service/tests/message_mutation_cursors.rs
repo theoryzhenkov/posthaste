@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn consecutive_keyword_mutations_keep_local_cursor_and_queue_base_cursor() {
+async fn consecutive_keyword_assertions_keep_local_cursor_and_do_not_chain() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let config = Arc::new(TestConfig::default());
@@ -42,12 +42,12 @@ async fn consecutive_keyword_mutations_keep_local_cursor_and_queue_base_cursor()
     let pending = service
         .list_pending_operations(&account)
         .expect("pending operations should list");
-    assert_eq!(pending.len(), 2);
-    assert!(pending
-        .iter()
-        .all(|op| op.kind == OperationKind::SetKeywords));
-    assert!(pending
-        .iter()
-        .all(|op| op.base_cursor.as_deref() == Some("message-1")));
-    assert_eq!(pending[1].depends_on.as_ref(), Some(&pending[0].id));
+    // The two keyword assertions coalesce into a single merged op.
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].kind, OperationKind::SetKeywords);
+    assert!(pending[0].depends_on.is_none());
+    let command =
+        serde_json::from_value::<SetKeywordsCommand>(pending[0].payload.clone()).expect("payload");
+    assert!(command.add.is_empty(), "flag then unflag nets no additions");
+    assert_eq!(command.remove, vec!["$flagged".to_string()]);
 }

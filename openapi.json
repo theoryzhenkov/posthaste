@@ -5373,7 +5373,7 @@
       },
       "Operation": {
         "type": "object",
-        "description": "A single local-first command.\n\nThe same envelope is persisted and flushed at every tier. `id` provides\ncross-tier idempotency; `depends_on` preserves per-entity ordering so a\n`draft.update` never flushes before the `draft.create` it builds on.\n\n@spec docs/L1-outbox#operation-model",
+        "description": "A single local-first command.\n\n`id` provides runtime/provider idempotency. `depends_on` preserves draft\nchains only; state assertions coalesce instead of depending on earlier\nassertions.\n\n@spec docs/L1-outbox#operation-model",
         "required": [
           "id",
           "accountId",
@@ -5394,13 +5394,6 @@
             "format": "int32",
             "minimum": 0
           },
-          "baseCursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optimistic-concurrency token captured when the op was enqueued, used to\ndetect drift at flush time. `None` for entity-creating ops."
-          },
           "createdAt": {
             "type": "string"
           },
@@ -5411,7 +5404,7 @@
               },
               {
                 "$ref": "#/components/schemas/OperationId",
-                "description": "The operation that must settle before this one (per-entity ordering)."
+                "description": "The operation that must settle before this one (draft-chain ordering)."
               }
             ]
           },
@@ -5432,7 +5425,7 @@
           },
           "payload": {
             "type": "object",
-            "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across op kinds and tiers."
+            "description": "Kind-specific payload (the wrapped command or draft body), as JSON so the\nenvelope stays uniform across kinds."
           },
           "state": {
             "$ref": "#/components/schemas/OperationState"
@@ -5468,7 +5461,7 @@
       },
       "OperationId": {
         "type": "string",
-        "description": "Client-minted, globally-stable identifier for an outbox operation.\n\nUsed as the idempotency key across every tier (client, runtime, and the\nruntime's own record of what it has pushed to the provider). A tier must\nnever apply the same `OperationId` twice.\n\n@spec docs/L1-outbox#idempotency"
+        "description": "Runtime-minted, globally-stable identifier for an outbox operation.\n\nUsed as the idempotency key for the runtime/provider boundary. The\nruntime must never push the same settled `OperationId` twice.\n\n@spec docs/L1-outbox#idempotency"
       },
       "OperationKind": {
         "type": "string",
@@ -5485,12 +5478,11 @@
       },
       "OperationState": {
         "type": "string",
-        "description": "Lifecycle state of an operation within a single tier's outbox.\n\n```text\npending ─▶ inflight ─▶ applied\n   ▲          │  │ └──▶ failed\n   └──────────┘  └────▶ conflicted ─▶ inflight (after resolution)\n```\n\n@spec docs/L1-outbox#state-machine",
+        "description": "Lifecycle state of an operation within the runtime/provider outbox.\n\n```text\npending ─▶ inflight ─▶ applied\n   ▲          │  └──▶ failed\n   └──────────┘\n```\n\n@spec docs/L1-outbox#state-machine",
         "enum": [
           "pending",
           "inflight",
           "applied",
-          "conflicted",
           "failed"
         ]
       },

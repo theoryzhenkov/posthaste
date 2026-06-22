@@ -2,11 +2,41 @@ use super::*;
 
 impl MailboxReadStore for TestStore {
     fn list_mailboxes(&self, _account_id: &AccountId) -> Result<Vec<MailboxSummary>, StoreError> {
-        self.list_mailboxes_error
-            .as_ref()
-            .map_or(Ok(Vec::new()), |error| {
-                Err(StoreError::Failure(error.clone()))
-            })
+        if let Some(error) = self.list_mailboxes_error.as_ref() {
+            return Err(StoreError::Failure(error.clone()));
+        }
+        // Derive base (unfolded) counts from the projected rule page so the
+        // overlay delta can be applied on top in tests, mirroring production.
+        let messages = self.rule_page.lock().expect("rule page lock poisoned");
+        let counts = |mailbox: &str| {
+            let total = messages
+                .iter()
+                .filter(|m| m.mailbox_ids.iter().any(|id| id.as_str() == mailbox))
+                .count() as i64;
+            let unread = messages
+                .iter()
+                .filter(|m| m.mailbox_ids.iter().any(|id| id.as_str() == mailbox) && !m.is_read)
+                .count() as i64;
+            (unread, total)
+        };
+        let (inbox_unread, inbox_total) = counts("inbox");
+        let (archive_unread, archive_total) = counts("archive");
+        Ok(vec![
+            MailboxSummary {
+                id: MailboxId::from("inbox"),
+                name: "Inbox".to_string(),
+                role: Some("inbox".to_string()),
+                unread_emails: inbox_unread,
+                total_emails: inbox_total,
+            },
+            MailboxSummary {
+                id: MailboxId::from("archive"),
+                name: "Archive".to_string(),
+                role: Some("archive".to_string()),
+                unread_emails: archive_unread,
+                total_emails: archive_total,
+            },
+        ])
     }
 }
 
@@ -26,9 +56,16 @@ impl MessageListStore for TestStore {
     fn list_messages(
         &self,
         _account_id: &AccountId,
-        _mailbox_id: Option<&MailboxId>,
+        mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError> {
-        Ok(Vec::new())
+        let messages = self.rule_page.lock().expect("rule page lock poisoned");
+        Ok(messages
+            .iter()
+            .filter(|summary| {
+                mailbox_id.is_none_or(|mailbox_id| summary.mailbox_ids.contains(mailbox_id))
+            })
+            .cloned()
+            .collect())
     }
 
     fn list_message_page(

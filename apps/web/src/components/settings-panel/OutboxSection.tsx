@@ -30,7 +30,6 @@ const STATE_TONE: Record<OperationState, string> = {
   pending: 'text-amber-700 border-amber-500/30 bg-amber-500/10',
   inflight: 'text-blue-700 border-blue-500/30 bg-blue-500/10',
   applied: 'text-emerald-700 border-emerald-500/30 bg-emerald-500/10',
-  conflicted: 'text-orange-700 border-orange-500/30 bg-orange-500/10',
   failed: 'text-rose-700 border-rose-500/30 bg-rose-500/10',
 }
 
@@ -38,7 +37,6 @@ const STATE_LABELS: Record<OperationState, string> = {
   pending: 'Queued',
   inflight: 'Sending',
   applied: 'Done',
-  conflicted: 'Conflict',
   failed: 'Failed',
 }
 

@@ -122,7 +122,6 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
-            None,
         )
         .expect("queue create");
     service
@@ -131,7 +130,6 @@ async fn flush_create_then_update_reconciles_temp_id_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftUpdate,
             serde_json::to_value(draft_request("Hello, edited")).unwrap(),
-            None,
         )
         .expect("queue update");
 
@@ -177,7 +175,6 @@ async fn transient_failure_keeps_op_pending_and_stops_draining() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
-            None,
         )
         .expect("queue create");
 
@@ -213,7 +210,6 @@ async fn permanent_failure_marks_op_failed_and_settles() {
             draft_entity("draft-temp"),
             OperationKind::DraftCreate,
             serde_json::to_value(draft_request("Hello")).unwrap(),
-            None,
         )
         .expect("queue create");
 
@@ -231,6 +227,119 @@ async fn permanent_failure_marks_op_failed_and_settles() {
 }
 
 #[tokio::test]
+async fn failed_draft_predecessor_cancels_dependent_update() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("invalid draft".to_string())));
+
+    service
+        .queue_operation(
+            &account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftCreate,
+            serde_json::to_value(draft_request("Hello")).unwrap(),
+        )
+        .expect("queue create");
+    service
+        .queue_operation(
+            &account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftUpdate,
+            serde_json::to_value(draft_request("Hello again")).unwrap(),
+        )
+        .expect("queue update");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush returns ok");
+
+    assert_eq!(events.len(), 2);
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 2);
+    assert!(pending
+        .iter()
+        .all(|operation| operation.state == OperationState::Failed));
+    assert_eq!(
+        gateway.save_draft_calls.lock().unwrap().len(),
+        1,
+        "dependent update must not flush after create failure",
+    );
+}
+
+#[tokio::test]
+async fn enqueue_send_queues_then_flushes_once() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    let send = service
+        .enqueue_send(&account, draft_request("Outgoing"))
+        .expect("send queues");
+    assert_eq!(send.kind, OperationKind::Send);
+    assert_eq!(send.state, OperationState::Pending);
+    assert!(send.entity.id.starts_with("send-"));
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush ok");
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        *gateway.send_calls.lock().unwrap(),
+        vec!["Outgoing".to_string()]
+    );
+    assert!(service
+        .list_pending_operations(&account)
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn interrupted_inflight_send_is_not_resent() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+
+    // Simulate a send that began flushing and was interrupted by a crash: the
+    // op is durably `inflight` before the process restarts.
+    let send = service
+        .queue_operation(
+            &account,
+            draft_entity("send-1"),
+            OperationKind::Send,
+            serde_json::to_value(draft_request("Outgoing")).unwrap(),
+        )
+        .expect("queue send");
+    store
+        .update_operation_state(&send.id, OperationState::Inflight, 1, None)
+        .expect("mark inflight");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush returns ok");
+
+    assert_eq!(events.len(), 1);
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, OperationState::Failed);
+    assert!(pending[0]
+        .last_error
+        .as_deref()
+        .is_some_and(|error| error.contains("not retried")));
+}
+
+#[tokio::test]
 async fn delete_draft_flushes_and_settles() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::default());
@@ -243,7 +352,6 @@ async fn delete_draft_flushes_and_settles() {
             draft_entity("provider-7"),
             OperationKind::DraftDelete,
             serde_json::json!({}),
-            None,
         )
         .expect("queue delete");
 
