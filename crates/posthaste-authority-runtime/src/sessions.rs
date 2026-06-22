@@ -264,6 +264,33 @@ impl SessionRegistry {
         Ok(snapshot)
     }
 
+    /// Extend an open windowed view's window. The recompute broadcasts a
+    /// `ViewReplace` through the view forwarder (which refreshes
+    /// `latest_snapshots`); the grown snapshot is also returned for the request.
+    ///
+    /// @spec docs/runtime/L2#view-operation-flow
+    pub(crate) async fn extend_view(
+        self: &Arc<Self>,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        view_id: ViewId,
+        count: usize,
+    ) -> Result<ViewSnapshot, RuntimeError> {
+        let session_scope = self.session_scope(&session_id, caller.account_scope.as_deref())?;
+        {
+            let sessions = self.sessions.lock().map_err(lock_error)?;
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+            if !session.open_views.contains(&view_id) {
+                return Err(RuntimeError::not_found("view is not open in this session"));
+            }
+        }
+        self.views
+            .extend_view(&view_id, count, session_scope.as_deref())
+            .await
+    }
+
     pub(crate) fn close_view(
         &self,
         caller: RuntimeCaller,

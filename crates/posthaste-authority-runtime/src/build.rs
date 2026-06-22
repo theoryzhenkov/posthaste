@@ -1376,6 +1376,20 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         self.core.sessions.close_view(caller, session_id, view_id)
     }
 
+    async fn extend_session_view(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        view_id: ViewId,
+        count: usize,
+    ) -> Result<posthaste_runtime_contract::ViewSnapshot, RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core
+            .sessions
+            .extend_view(caller, session_id, view_id, count)
+            .await
+    }
+
     async fn run_mutation(
         &self,
         caller: RuntimeCaller,

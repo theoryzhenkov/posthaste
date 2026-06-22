@@ -183,6 +183,19 @@ export const runtimeSessionClient = {
     return result
   },
 
+  async extendMessageListView(
+    viewId: string,
+    count: number,
+  ): Promise<RuntimeOpenMessageListViewResult> {
+    const session = await ensureSession(activeSessionSourceId)
+    return runtimeStream.extendView({
+      sessionId: session.sessionId,
+      viewId,
+      count,
+      sourceId: activeTransportSourceId(),
+    })
+  },
+
   async runMutation(
     request: RuntimeSessionMutationRequest,
   ): Promise<RuntimeMutationReceipt> {

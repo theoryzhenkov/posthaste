@@ -476,6 +476,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/runtime/sessions/{session_id}/views/{view_id}/extend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Extend a runtime session view window
+         * @description Grows an open windowed view (e.g. mailList) by the requested row count and returns the extended snapshot, also broadcast as a viewReplace RuntimeFrame.
+         */
+        post: operations["extend_runtime_session_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sender-addresses": {
         parameters: {
             query?: never;
@@ -1513,6 +1533,10 @@ export interface components {
             subject: string;
             to: components["schemas"]["Recipient"][];
         };
+        ExtendRuntimeSessionViewRequest: {
+            /** @description Number of additional rows to grow the view's window by. */
+            count: number;
+        };
         /**
          * @description Product API readiness response.
          *
@@ -1993,6 +2017,12 @@ export interface components {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "notification";
+        } | {
+            canRedo: boolean;
+            canUndo: boolean;
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "mutationHistory";
         } | {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
@@ -3436,6 +3466,73 @@ export interface operations {
                 };
             };
             /** @description Unknown runtime session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    extend_runtime_session_view: {
+        parameters: {
+            query?: {
+                sourceId?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Runtime session id */
+                session_id: string;
+                /** @description Runtime view id */
+                view_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtendRuntimeSessionViewRequest"];
+            };
+        };
+        responses: {
+            /** @description The extended view snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRuntimeSessionViewResponse"];
+                };
+            };
+            /** @description View does not support window extension */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Unknown runtime session or view */
             404: {
                 headers: {
                     [name: string]: unknown;
