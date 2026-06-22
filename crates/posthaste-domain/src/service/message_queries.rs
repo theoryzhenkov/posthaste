@@ -92,14 +92,46 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    /// Fetch a single conversation with all its messages, or 404.
+    /// Fetch a single conversation with all its messages, folded over the
+    /// read-time overlay so pending keyword/mailbox/destroy assertions are
+    /// reflected. Thread membership is unaffected by mailbox/keyword changes,
+    /// so folding each message summary in place is sufficient (a destroyed
+    /// message drops out).
+    ///
+    /// Conversation-list envelope aggregates (unread/flagged counts) are a
+    /// separate, harder case (re-derivation over folded membership) and are
+    /// not folded here yet — they converge on the next sync.
+    ///
+    /// @spec docs/replication/L1#retire-on-confirmation
     pub fn get_conversation(
         &self,
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, ServiceError> {
-        self.conversation_reader
+        let view = self
+            .conversation_reader
             .get_conversation(conversation_id)?
-            .not_found("conversation", conversation_id.as_str())
+            .not_found("conversation", conversation_id.as_str())?;
+        let Some(account_id) = view
+            .messages
+            .first()
+            .map(|message| message.source_id.clone())
+        else {
+            return Ok(view);
+        };
+        let operations = self.overlay_operations(&account_id)?;
+        if operations.is_empty() {
+            return Ok(view);
+        }
+        let mut folded = Vec::with_capacity(view.messages.len());
+        for message in view.messages {
+            if let Some(message) = apply_operations_to_summary(message, &operations)? {
+                folded.push(message);
+            }
+        }
+        Ok(ConversationView {
+            messages: folded,
+            ..view
+        })
     }
 
     /// Fetch all messages in a thread, or 404.

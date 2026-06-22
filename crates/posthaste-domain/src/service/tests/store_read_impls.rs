@@ -58,6 +58,9 @@ impl MessageListStore for TestStore {
         _account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, StoreError> {
+        if let Some(error) = &self.messages_error {
+            return Err(StoreError::Failure(error.clone()));
+        }
         let messages = self.rule_page.lock().expect("rule page lock poisoned");
         Ok(messages
             .iter()
@@ -177,7 +180,11 @@ impl ConversationReadStore for TestStore {
         &self,
         _conversation_id: &ConversationId,
     ) -> Result<Option<ConversationView>, StoreError> {
-        Ok(None)
+        Ok(self
+            .conversation_view
+            .lock()
+            .expect("conversation view lock poisoned")
+            .clone())
     }
 }
 

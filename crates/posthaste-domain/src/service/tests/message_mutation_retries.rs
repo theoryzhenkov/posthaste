@@ -373,6 +373,56 @@ async fn stale_local_cursor_does_not_conflict_message_assertion_flush() {
 }
 
 #[tokio::test]
+async fn get_conversation_folds_pending_assertions_over_its_messages() {
+    // A conversation read folds the overlay over its messages so a pending
+    // archive/keyword/destroy assertion is reflected (the gap where
+    // get_conversation read raw projection).
+    //
+    // @spec docs/replication/L1#retire-on-confirmation
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    *store
+        .conversation_view
+        .lock()
+        .expect("conversation view lock") = Some(ConversationView {
+        id: ConversationId::from("conv-1"),
+        subject: Some("Hi".to_string()),
+        messages: vec![sample_message_summary("message-1", Vec::new())],
+    });
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    let view = service
+        .get_conversation(&ConversationId::from("conv-1"))
+        .expect("conversation reads");
+    assert_eq!(
+        view.messages[0].mailbox_ids,
+        vec![MailboxId::from("inbox")],
+        "no overlay -> projection state",
+    );
+
+    service
+        .replace_mailboxes(
+            &account,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+
+    let view = service
+        .get_conversation(&ConversationId::from("conv-1"))
+        .expect("conversation reads");
+    assert_eq!(view.messages.len(), 1);
+    assert_eq!(
+        view.messages[0].mailbox_ids,
+        vec![MailboxId::from("archive")],
+        "pending archive assertion folds into the conversation",
+    );
+}
+
+#[tokio::test]
 async fn flush_rests_message_assertion_in_applied_and_overlay_keeps_folding() {
     // Retire-on-confirmation: a flushed message assertion is accepted by the
     // provider but stays folded by the read overlay until a sync observes its
