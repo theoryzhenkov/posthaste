@@ -187,6 +187,12 @@ export type RuntimeFrame<TData = unknown> =
       state: RuntimeMutationSettlementState
     }
   | { type: 'notification'; sessionSeq: number; kind: string; payload: unknown }
+  | {
+      type: 'mutationHistory'
+      sessionSeq: number
+      canUndo: boolean
+      canRedo: boolean
+    }
   | { type: 'heartbeat'; sessionSeq: number }
 
 export interface RuntimeSession {

@@ -358,6 +358,16 @@ pub enum RuntimeFrame {
         #[cfg_attr(feature = "openapi", schema(value_type = Object))]
         payload: Value,
     },
+    /// Undo/redo availability for the session's history stack, emitted whenever
+    /// the stack changes so the renderer can drive undo/redo button state.
+    MutationHistory {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "canUndo")]
+        can_undo: bool,
+        #[serde(rename = "canRedo")]
+        can_redo: bool,
+    },
     Heartbeat {
         #[serde(rename = "sessionSeq")]
         session_seq: RuntimeSessionSeq,
@@ -372,6 +382,7 @@ impl RuntimeFrame {
             | Self::ViewError { session_seq, .. }
             | Self::ViewClosed { session_seq, .. }
             | Self::MutationSettlement { session_seq, .. }
+            | Self::MutationHistory { session_seq, .. }
             | Self::Notification { session_seq, .. }
             | Self::Heartbeat { session_seq } => *session_seq,
         }

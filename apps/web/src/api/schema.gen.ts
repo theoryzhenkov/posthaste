@@ -1994,6 +1994,12 @@ export interface components {
             /** @enum {string} */
             type: "notification";
         } | {
+            canRedo: boolean;
+            canUndo: boolean;
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "mutationHistory";
+        } | {
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
             /** @enum {string} */
             type: "heartbeat";
