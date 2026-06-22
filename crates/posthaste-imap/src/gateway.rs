@@ -39,6 +39,7 @@ use crate::{
 /// The first implementation performs conservative full metadata snapshots.
 /// Mutations use conservative IMAP commands where implemented and reject
 /// unsupported command surfaces with typed gateway errors.
+mod draft;
 mod execution;
 mod identity;
 mod mail_gateway;
@@ -52,6 +53,7 @@ mod utils;
 
 pub use types::LiveImapSmtpGateway;
 
+use draft::{delete_imap_draft, save_imap_draft};
 use execution::{execute_mailbox_plans, MailboxPlanExecutionContext};
 use identity::{
     imap_sync_plan_name, missing_location_identities, missing_location_identities_from_uids,
