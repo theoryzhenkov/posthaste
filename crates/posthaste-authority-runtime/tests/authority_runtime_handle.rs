@@ -903,6 +903,116 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
     assert_eq!(snapshot.data["isFlagged"], true);
 }
 
+// spec: docs/runtime/L1#view-operation
+#[tokio::test]
+async fn conversation_view_replaces_snapshot_after_keyword_event() {
+    // The conversation view family serves the overlay-folded conversation and
+    // recomputes when a message changes.
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mock_account_mutation("conv-account"))
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+
+    // Resolve message-1's conversation id from a list snapshot.
+    let list = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor("in:conv-account/inbox"),
+        )
+        .await
+        .expect("mail list view should open");
+    let list_state = mail_list_state(&list);
+    let row = list_state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == "message-1")
+        .expect("message-1 row");
+    let conversation_id = row.projection["conversationId"]
+        .as_str()
+        .expect("row carries a conversation id")
+        .to_string();
+
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            ViewDescriptor {
+                family: "conversation".to_string(),
+                payload: serde_json::json!({ "conversationId": conversation_id }),
+            },
+        )
+        .await
+        .expect("conversation view should open");
+    assert_eq!(snapshot.revision.get(), 1);
+    let message = snapshot.data["messages"]
+        .as_array()
+        .expect("conversation messages")
+        .iter()
+        .find(|message| message["id"] == "message-1")
+        .expect("message-1 in conversation");
+    assert_eq!(message["isFlagged"], false);
+
+    let mut subscription = build
+        .handle
+        .subscribe_view(
+            RuntimeCaller::test(),
+            snapshot.view_id.clone(),
+            Some(snapshot.revision),
+        )
+        .await
+        .expect("view should subscribe");
+    assert!(subscription.catch_up.is_none());
+
+    let result = build
+        .api_bridge
+        .store
+        .set_keywords(
+            &account.id,
+            &MessageId::from("message-1"),
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("keyword command should write");
+    for event in result.events {
+        build
+            .api_bridge
+            .event_sender
+            .send(event)
+            .expect("event should broadcast");
+    }
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+        .await
+        .expect("view frame should arrive")
+        .expect("view stream should remain open");
+    let ViewFrame::Replace { snapshot } = frame else {
+        panic!("expected replace frame");
+    };
+    let message = snapshot.data["messages"]
+        .as_array()
+        .expect("conversation messages")
+        .iter()
+        .find(|message| message["id"] == "message-1")
+        .expect("message-1 in conversation");
+    assert_eq!(message["isFlagged"], true);
+}
+
 // spec: docs/runtime/L2#mutation-pipeline-and-catalog
 #[tokio::test]
 async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
