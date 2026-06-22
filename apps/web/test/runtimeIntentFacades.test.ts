@@ -102,7 +102,7 @@ describe('runtime intent facades', () => {
     unsubscribeRuntime()
 
     expect(fake.accountCalls).toBe(1)
-    expect(fake.runtimeMutationCalls).toHaveLength(1)
+    expect(fake.runtimeMutationCalls).toHaveLength(2)
     expect(fake.runtimeMutationCalls[0].request).toMatchObject({
       sessionId: 'session-1',
       sourceId: 'primary',
@@ -118,10 +118,15 @@ describe('runtime intent facades', () => {
         'client_mutation_',
       ),
     ).toBe(true)
+    // Role moves now route through the named-mutation pipeline too.
+    expect(fake.runtimeMutationCalls[1].request).toMatchObject({
+      sessionId: 'session-1',
+      sourceId: 'primary',
+      name: 'message.moveToRole',
+      args: { sourceId: 'primary', messageId: 'm1', role: 'archive' },
+    })
     expect(fake.messageCommandCalls).toEqual([])
-    expect(fake.messageRoleMoveCalls).toEqual([
-      { sourceId: 'primary', messageId: 'm1', role: 'archive' },
-    ])
+    expect(fake.messageRoleMoveCalls).toEqual([])
     expect(fake.resourceCalls).toEqual([
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
     ])
