@@ -9,16 +9,10 @@ import {
   invalidateSmartMailboxMutationReadModels,
   invalidateSyncStartedReadModels,
 } from '../src/domainCache'
-import {
-  applyKeywordPatch,
-  deriveKeywordState,
-  mailKeys,
-  type MailSelection,
-} from '../src/mailState'
+import { mailKeys } from '../src/mailState'
 import { queryKeys } from '../src/queryKeys'
 import {
   accountOverview,
-  cachedMessage,
   createQueryClient,
   messageSummary,
   seedMessageList,
@@ -124,47 +118,5 @@ describe('frontend domain cache contracts', () => {
       name: 'Renamed Primary',
       runtime: current.runtime,
     })
-  })
-
-  // spec: docs/L0-testing#frontend-state-contracts
-  it('keeps optimistic keyword changes visible across mailbox smart mailbox and tag views', () => {
-    const queryClient = createQueryClient()
-    const message = messageSummary()
-    const mailboxView = queryKeys.messages({
-      kind: 'source-mailbox',
-      sourceId: 'primary',
-      mailboxId: 'inbox',
-    })
-    const smartMailboxView = queryKeys.messages({
-      kind: 'smart-mailbox',
-      id: 'sm-work',
-    })
-    const tagView = queryKeys.messages(
-      {
-        kind: 'source-mailbox',
-        sourceId: 'primary',
-        mailboxId: 'inbox',
-      },
-      'tag:work',
-    )
-    seedMessageList(queryClient, mailboxView, message)
-    seedMessageList(queryClient, smartMailboxView, message)
-    seedMessageList(queryClient, tagView, message)
-
-    const selection: MailSelection = {
-      conversationId: 'conversation-1',
-      sourceId: 'primary',
-      messageId: 'message-1',
-    }
-    applyKeywordPatch(queryClient, selection, {
-      previous: deriveKeywordState([]),
-      next: deriveKeywordState(['work']),
-    })
-
-    expect(cachedMessage(queryClient, mailboxView)?.keywords).toEqual(['work'])
-    expect(cachedMessage(queryClient, smartMailboxView)?.keywords).toEqual([
-      'work',
-    ])
-    expect(cachedMessage(queryClient, tagView)?.keywords).toEqual(['work'])
   })
 })

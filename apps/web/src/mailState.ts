@@ -14,26 +14,12 @@ export {
   readConversationIds,
   upsertConversationSummaries,
 } from './mail-state/conversations'
-export { applyKeywordEventPatch } from './mail-state/keywordEvents'
-export {
-  applyKeywordPatch,
-  deriveKeywordState,
-  mergeMessageDetail,
-} from './mail-state/keywords'
+export { deriveKeywordState, mergeMessageDetail } from './mail-state/keywords'
 export { findConversationIdForMessage } from './mail-state/lookup'
-export { applyMailboxPatch } from './mail-state/mailboxes'
-export {
-  captureMutableState,
-  diffMutableState,
-} from './mail-state/mutableState'
-export { restoreSnapshots } from './mail-state/snapshots'
 export type {
-  CachePatchResult,
   ConversationPageSlice,
-  KeywordPatch,
   KeywordState,
   MailSelection,
   MailViewSelection,
-  MutableState,
   QuerySnapshot,
 } from './mail-state/types'
