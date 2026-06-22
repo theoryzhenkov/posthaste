@@ -4,8 +4,9 @@ mod visibility;
 use std::sync::Arc;
 
 use posthaste_domain::{
-    AccountId, ConversationCursor, ConversationPage, ConversationSortField, MailService,
-    MessageCursor, MessageDetail, MessageId, MessagePage, MessageSortField, SortDirection,
+    AccountId, ConversationCursor, ConversationId, ConversationPage, ConversationSortField,
+    ConversationView, MailService, MessageCursor, MessageDetail, MessageId, MessagePage,
+    MessageSortField, SortDirection,
 };
 use posthaste_runtime_contract::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, RuntimeError,
@@ -41,6 +42,17 @@ impl MailQueryService {
             .get_message_detail(account_id, message_id, None)
             .await?;
         Ok(result.detail)
+    }
+
+    /// The overlay-folded conversation (its messages with pending assertions
+    /// folded) for a runtime `conversation` view.
+    ///
+    /// @spec docs/replication/L1#retire-on-confirmation
+    pub(crate) fn conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        Ok(self.service.get_conversation(conversation_id)?)
     }
 
     pub(crate) async fn query_mail_page(
