@@ -1,143 +1,120 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandResult, GatewayError, MailGateway, MessageId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand,
-    SyncObject,
+    AccountId, AddToMailboxCommand, CommandResult, GatewayError, MailboxId, MessageId,
+    OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, SyncObject,
 };
 
 use super::MailService;
 
-/// Internal enum dispatching message mutations through a shared code path.
-#[derive(Clone, Copy)]
-enum MessageMutation<'a> {
-    SetKeywords(&'a SetKeywordsCommand),
-    ReplaceMailboxes(&'a ReplaceMailboxesCommand),
-    Destroy,
-}
-
 impl MailService {
-    /// Apply a message mutation: send to gateway with optimistic concurrency,
-    /// then persist locally with the returned cursor.
-    ///
-    /// @spec docs/L1-sync#conflict-model
-    async fn apply_message_mutation(
+    fn queue_message_operation(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-        mutation: MessageMutation<'_>,
-        gateway: &dyn MailGateway,
-    ) -> Result<CommandResult, ServiceError> {
-        let expected_state = self
+        kind: OperationKind,
+        payload: serde_json::Value,
+    ) -> Result<crate::Operation, ServiceError> {
+        let base_cursor = self
             .sync_state
-            .get_cursor(account_id, SyncObject::Message)?;
-        let expected_provider_state = expected_state
-            .as_ref()
+            .get_cursor(account_id, SyncObject::Message)?
             .map(|cursor| cursor.provider_state());
-        let mutation_result = match mutation {
-            MessageMutation::SetKeywords(command) => {
-                gateway
-                    .set_keywords(
-                        account_id,
-                        message_id,
-                        expected_provider_state.as_deref(),
-                        command,
-                    )
-                    .await
-            }
-            MessageMutation::ReplaceMailboxes(command) => {
-                gateway
-                    .replace_mailboxes(
-                        account_id,
-                        message_id,
-                        expected_provider_state.as_deref(),
-                        &command.mailbox_ids,
-                    )
-                    .await
-            }
-            MessageMutation::Destroy => {
-                gateway
-                    .destroy_message(account_id, message_id, expected_provider_state.as_deref())
-                    .await
-            }
-        };
-        let outcome = match mutation_result {
-            Ok(outcome) => outcome,
-            Err(GatewayError::StateMismatch) => {
-                self.refresh_after_message_state_mismatch(account_id, gateway)
-                    .await?;
-                return Err(GatewayError::StateMismatch.into());
-            }
-            Err(error) => return Err(error.into()),
-        };
-
-        match mutation {
-            MessageMutation::SetKeywords(command) => self.message_commands.set_keywords(
-                account_id,
-                message_id,
-                outcome.cursor.as_ref(),
-                command,
-            ),
-            MessageMutation::ReplaceMailboxes(command) => self.message_commands.replace_mailboxes(
-                account_id,
-                message_id,
-                outcome.cursor.as_ref(),
-                command,
-            ),
-            MessageMutation::Destroy => self.message_commands.destroy_message(
-                account_id,
-                message_id,
-                outcome.cursor.as_ref(),
-            ),
-        }
-        .map_err(Into::into)
+        self.queue_operation(
+            account_id,
+            OperationEntity {
+                kind: OperationEntityKind::Message,
+                id: message_id.to_string(),
+            },
+            kind,
+            payload,
+            base_cursor,
+        )
     }
 
-    async fn refresh_after_message_state_mismatch(
+    fn remove_operation_after_local_failure(
+        &self,
+        operation: &crate::Operation,
+        error: crate::StoreError,
+    ) -> ServiceError {
+        let _ = self.outbox.remove_operation(&operation.id);
+        error.into()
+    }
+
+    fn queue_then_apply_message_operation<F>(
         &self,
         account_id: &AccountId,
-        gateway: &dyn MailGateway,
-    ) -> Result<(), ServiceError> {
-        let cursors = self.sync_state.get_sync_cursors(account_id)?;
-        let batch = gateway.sync(account_id, &cursors, None).await?;
-        self.sync_writer.apply_sync_batch(account_id, &batch)?;
-        Ok(())
+        message_id: &MessageId,
+        kind: OperationKind,
+        payload: serde_json::Value,
+        apply: F,
+    ) -> Result<CommandResult, ServiceError>
+    where
+        F: FnOnce() -> Result<CommandResult, crate::StoreError>,
+    {
+        let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
+        match apply() {
+            Ok(result) => Ok(result),
+            Err(error) => Err(self.remove_operation_after_local_failure(&operation, error)),
+        }
     }
 
-    /// Add/remove JMAP keywords on a message.
+    /// Add/remove JMAP keywords on a message, local-first.
+    ///
+    /// Applies the local projection immediately and enqueues provider flush via
+    /// the shared outbox. The returned `CommandResult` preserves the historical
+    /// API/UI contract while `/operations` exposes the durable pending work.
     ///
     /// @spec docs/L1-api#message-commands
+    /// @spec docs/L1-outbox#operation-model
+    #[allow(clippy::unused_async)]
     pub async fn set_keywords(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         command: &SetKeywordsCommand,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        self.apply_message_mutation(
+        let payload = serde_json::to_value(command).map_err(|error| {
+            ServiceError::from(GatewayError::Rejected(format!(
+                "failed to serialize keyword command: {error}"
+            )))
+        })?;
+        self.queue_then_apply_message_operation(
             account_id,
             message_id,
-            MessageMutation::SetKeywords(command),
-            gateway,
+            OperationKind::SetKeywords,
+            payload,
+            || {
+                self.message_commands
+                    .set_keywords(account_id, message_id, None, command)
+            },
         )
-        .await
     }
 
-    /// Atomically replace all mailbox memberships for a message.
+    /// Atomically replace all mailbox memberships for a message, local-first.
     ///
     /// @spec docs/L1-api#message-commands
+    /// @spec docs/L1-outbox#operation-model
+    #[allow(clippy::unused_async)]
     pub async fn replace_mailboxes(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
         command: &ReplaceMailboxesCommand,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        self.apply_message_mutation(
+        let payload = serde_json::to_value(command).map_err(|error| {
+            ServiceError::from(GatewayError::Rejected(format!(
+                "failed to serialize mailbox command: {error}"
+            )))
+        })?;
+        self.queue_then_apply_message_operation(
             account_id,
             message_id,
-            MessageMutation::ReplaceMailboxes(command),
-            gateway,
+            OperationKind::ReplaceMailboxes,
+            payload,
+            || {
+                self.message_commands
+                    .replace_mailboxes(account_id, message_id, None, command)
+            },
         )
-        .await
     }
 
     /// Add a message to a mailbox (idempotent: no-op if already present).
@@ -148,7 +125,6 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &AddToMailboxCommand,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         let mut mailbox_ids = self
             .message_mailboxes
@@ -163,7 +139,6 @@ impl MailService {
             account_id,
             message_id,
             &ReplaceMailboxesCommand { mailbox_ids },
-            gateway,
         )
         .await
     }
@@ -176,9 +151,8 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &RemoveFromMailboxCommand,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        let mailbox_ids = self
+        let mailbox_ids: Vec<MailboxId> = self
             .message_mailboxes
             .get_message_mailboxes(account_id, message_id)?
             .into_iter()
@@ -188,21 +162,29 @@ impl MailService {
             account_id,
             message_id,
             &ReplaceMailboxesCommand { mailbox_ids },
-            gateway,
         )
         .await
     }
 
-    /// Permanently delete a message.
+    /// Permanently delete a message, local-first.
     ///
     /// @spec docs/L1-api#message-commands
+    /// @spec docs/L1-outbox#operation-model
+    #[allow(clippy::unused_async)]
     pub async fn destroy_message(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
-        self.apply_message_mutation(account_id, message_id, MessageMutation::Destroy, gateway)
-            .await
+        self.queue_then_apply_message_operation(
+            account_id,
+            message_id,
+            OperationKind::Destroy,
+            serde_json::json!({}),
+            || {
+                self.message_commands
+                    .destroy_message(account_id, message_id, None)
+            },
+        )
     }
 }

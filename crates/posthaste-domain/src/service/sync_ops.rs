@@ -88,6 +88,18 @@ impl MailService {
         };
         let action_count = action_events.len();
         events.extend(action_events);
+        match self.flush_account(account_id, gateway).await {
+            Ok(settlement_events) => events.extend(settlement_events),
+            Err(error) => {
+                ph_warn!(
+                    events::DOMAIN_AUTOMATION_POST_SYNC_FAILED,
+                    account_id = %account_id,
+                    error = %error,
+                    "post-sync automation outbox flush failed after sync batch commit"
+                );
+                post_commit_errors.push(error.code().to_string());
+            }
+        }
         let sync_event = self.events.append_event(
         account_id,
         EVENT_TOPIC_SYNC_COMPLETED,
