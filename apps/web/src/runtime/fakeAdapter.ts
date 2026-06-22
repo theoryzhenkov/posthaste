@@ -294,6 +294,15 @@ export function createFakeRuntimeAdapter(
     sendMessage() {
       return unsupported('send message result')
     },
+    saveDraft() {
+      return unsupported('save draft result')
+    },
+    deleteDraft() {
+      return unsupported('delete draft result')
+    },
+    listPendingOperations() {
+      return Promise.resolve([])
+    },
     startProviderOAuth(oauthInput) {
       calls.oauthStartCalls.push({
         provider: oauthInput.provider,
