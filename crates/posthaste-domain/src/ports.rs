@@ -9,7 +9,8 @@ use crate::{
     MessageDetail, MessageId, MessagePage, MessageSortField, MessageSummary, MutationOutcome,
     Operation, OperationId, OperationState, PushTransport, Recipient, ReplaceMailboxesCommand,
     ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
-    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncTrigger,
+    SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
+    SyncTrigger,
     TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
@@ -24,7 +25,7 @@ mod write_store;
 
 pub use cache_store::CacheStore;
 pub use composite::{MailStore, SecretStore, ServiceResultExt, SharedGateway, SharedSecretStore};
-pub use gateway::MailGateway;
+pub use gateway::{MailGateway, SyncChunkSink};
 pub use progress::SyncProgressReporter;
 pub use read_store::{
     ConversationReadStore, MailboxReadStore, MailboxRoleOverrideStore, MessageDetailStore,

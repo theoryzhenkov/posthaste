@@ -1,4 +1,44 @@
 use super::*;
+use crate::{MessageRecord, SyncBatch, SyncChunkSink, SyncWriteStore};
+
+/// Applies and publishes each sync chunk as the gateway emits it, accumulating
+/// the per-chunk messages and counts the post-sync steps need. Chunk events are
+/// published immediately so mail surfaces progressively.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+struct ServiceSyncSink<'a> {
+    sync_writer: &'a dyn SyncWriteStore,
+    account_id: &'a AccountId,
+    publish: &'a mut (dyn FnMut(&[DomainEvent]) + Send),
+    applied_events: Vec<DomainEvent>,
+    messages: Vec<MessageRecord>,
+    mailbox_count: usize,
+    deleted_imap_location_count: usize,
+    deleted_message_count: usize,
+    error: Option<ServiceError>,
+}
+
+impl SyncChunkSink for ServiceSyncSink<'_> {
+    fn emit(&mut self, mut batch: SyncBatch) -> Result<(), GatewayError> {
+        match self.sync_writer.apply_sync_batch(self.account_id, &batch) {
+            Ok(events) => {
+                (self.publish)(&events);
+                self.applied_events.extend(events);
+                self.mailbox_count += batch.mailboxes.len();
+                self.deleted_imap_location_count += batch.deleted_imap_message_locations.len();
+                self.deleted_message_count += batch.deleted_message_ids.len();
+                self.messages.append(&mut batch.messages);
+                Ok(())
+            }
+            Err(error) => {
+                self.error = Some(error.into());
+                Err(GatewayError::Rejected(
+                    "sync chunk could not be applied".to_string(),
+                ))
+            }
+        }
+    }
+}
 
 impl MailService {
     /// Run a full sync cycle: load cursors, fetch delta, apply batch, emit events.
@@ -11,17 +51,25 @@ impl MailService {
         gateway: &dyn MailGateway,
         progress: Option<crate::SyncProgressReporter>,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
+        // No live publisher: the caller publishes the returned events.
+        let mut publish = |_: &[DomainEvent]| {};
         self.sync_account_with_mode(
             account_id,
             trigger,
             SyncMode::Incremental,
             gateway,
             progress,
+            &mut publish,
         )
         .await
     }
 
     /// Run a sync cycle with an explicit user-requested mode.
+    ///
+    /// `publish` receives each event group as it is produced (per applied
+    /// chunk, then automation/settlement/completion), so a streaming caller can
+    /// broadcast mail as it arrives instead of after the whole sync. The full
+    /// event set is still returned for callers that publish at the end.
     ///
     /// @spec docs/L1-sync#sync-loop
     pub async fn sync_account_with_mode(
@@ -31,6 +79,7 @@ impl MailService {
         mode: SyncMode,
         gateway: &dyn MailGateway,
         progress: Option<crate::SyncProgressReporter>,
+        publish: &mut (dyn FnMut(&[DomainEvent]) + Send),
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let mut cursors = self.sync_state.get_sync_cursors(account_id)?;
         if mode.requires_full_message_metadata() {
@@ -43,10 +92,61 @@ impl MailService {
         // Best-effort: offline leaves them pending and the overlay still folds.
         //
         // @spec docs/replication/L1#convergence-cycle
-        let mut events = self.flush_account(account_id, gateway).await?;
+        let mut events = Vec::new();
+        let flush_events = self.flush_account(account_id, gateway).await?;
+        publish(&flush_events);
+        events.extend(flush_events);
 
-        // OBSERVE: pull and write authoritative provider state.
-        let batch = gateway.sync(account_id, &cursors, progress.clone()).await?;
+        // OBSERVE: stream the pull as chunks, applying + publishing each so mail
+        // surfaces progressively. The sink accumulates messages/counts; the
+        // outcome carries any reconciliation set for the final pass.
+        //
+        // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+        let (sync_messages, mailbox_count, deleted_imap_location_count, deleted_message_count, outcome) = {
+            let mut sink = ServiceSyncSink {
+                sync_writer: self.sync_writer.as_ref(),
+                account_id,
+                publish,
+                applied_events: Vec::new(),
+                messages: Vec::new(),
+                mailbox_count: 0,
+                deleted_imap_location_count: 0,
+                deleted_message_count: 0,
+                error: None,
+            };
+            let result = gateway
+                .sync_streamed(account_id, &cursors, progress.clone(), &mut sink)
+                .await;
+            let outcome = match result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    // Surface the underlying apply failure when the stream
+                    // aborted because a chunk could not be written.
+                    return Err(sink.error.take().unwrap_or_else(|| error.into()));
+                }
+            };
+            events.append(&mut sink.applied_events);
+            (
+                std::mem::take(&mut sink.messages),
+                sink.mailbox_count,
+                sink.deleted_imap_location_count,
+                sink.deleted_message_count,
+                outcome,
+            )
+        };
+
+        // RECONCILE (final pass): when the gateway streamed upsert-only chunks,
+        // prune locals absent from the complete remote set and commit cursors in
+        // one transaction. A single self-reconciling batch leaves this `None`.
+        // No gateway emits a reconciliation set yet (providers stream chunks in
+        // a later slice); the final pass lands with them.
+        //
+        // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+        debug_assert!(
+            outcome.reconciliation.is_none(),
+            "streamed reconciliation arrives with provider chunking"
+        );
+        let _ = &outcome;
         if let Some(progress) = progress {
             progress.report(crate::SyncProgress {
                 sync_id: String::new(),
@@ -57,11 +157,10 @@ impl MailService {
                 mailbox_name: None,
                 mailbox_index: None,
                 mailbox_count: None,
-                message_count: Some(batch.messages.len()),
+                message_count: Some(sync_messages.len()),
                 total_count: None,
             });
         }
-        events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
         let mut post_commit_errors = Vec::new();
         if let Some(account) = self.config.get_source(account_id)? {
             let settings = self.config.get_app_settings()?;
@@ -69,7 +168,7 @@ impl MailService {
                 account_id,
                 &account,
                 &settings.cache_policy,
-                &batch.messages,
+                &sync_messages,
             ) {
                 ph_warn!(
                     events::DOMAIN_CACHE_CANDIDATE_POST_SYNC_FAILED,
@@ -81,7 +180,7 @@ impl MailService {
             }
         }
         let action_events = match self
-            .apply_automation_rules(account_id, &batch.messages, gateway)
+            .apply_automation_rules(account_id, &sync_messages, gateway)
             .await
         {
             Ok(events) => events,
@@ -97,11 +196,15 @@ impl MailService {
             }
         };
         let action_count = action_events.len();
+        publish(&action_events);
         events.extend(action_events);
         // Push any ops automation enqueued while applying the batch; they rest
         // in `applied` and retire on the next sync cycle.
         match self.flush_account(account_id, gateway).await {
-            Ok(settlement_events) => events.extend(settlement_events),
+            Ok(settlement_events) => {
+                publish(&settlement_events);
+                events.extend(settlement_events);
+            }
             Err(error) => {
                 ph_warn!(
                     events::DOMAIN_AUTOMATION_POST_SYNC_FAILED,
@@ -124,10 +227,10 @@ impl MailService {
         None,
         None,
         json!({
-            "mailboxCount": batch.mailboxes.len(),
-            "messageCount": batch.messages.len(),
-            "deletedImapLocationCount": batch.deleted_imap_message_locations.len(),
-            "deletedMessageCount": batch.deleted_message_ids.len(),
+            "mailboxCount": mailbox_count,
+            "messageCount": sync_messages.len(),
+            "deletedImapLocationCount": deleted_imap_location_count,
+            "deletedMessageCount": deleted_message_count,
             "automationEventCount": action_count,
             "trigger": trigger.as_str(),
             "mode": mode.as_str(),
@@ -139,6 +242,7 @@ impl MailService {
             "postCommitErrors": post_commit_errors,
         }),
     )?;
+        publish(std::slice::from_ref(&sync_event));
         events.push(sync_event);
         Ok(events)
     }
