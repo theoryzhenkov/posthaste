@@ -24,6 +24,8 @@ pub(super) struct TestStore {
     pub(super) rule_page: Mutex<Vec<MessageSummary>>,
     pub(super) mutation_state: Mutex<MutationStoreState>,
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
+    /// (account_id, draft_key, entity_id) alias rows.
+    pub(super) draft_aliases: Mutex<Vec<(String, String, String)>>,
 }
 
 impl Default for TestStore {
@@ -50,6 +52,7 @@ impl Default for TestStore {
             rule_page: Mutex::new(Vec::new()),
             mutation_state: Mutex::new(MutationStoreState::default()),
             outbox_operations: Mutex::new(Vec::new()),
+            draft_aliases: Mutex::new(Vec::new()),
         }
     }
 }

@@ -268,4 +268,71 @@ impl OperationOutboxStore for DatabaseStore {
             Ok(())
         })
     }
+
+    fn resolve_draft_entity(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let connection = self.read_connection()?;
+        let mut statement = connection
+            .prepare("SELECT entity_id FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2")
+            .map_err(sql_to_store_error)?;
+        statement
+            .query_row(params![account_id.as_str(), draft_key], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(sql_to_store_error)
+    }
+
+    fn set_draft_alias(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+        entity_id: &str,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "INSERT INTO draft_alias (account_id, draft_key, entity_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(account_id, draft_key) DO UPDATE SET entity_id = excluded.entity_id",
+                params![account_id.as_str(), draft_key, entity_id],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn update_draft_alias_entity(
+        &self,
+        account_id: &AccountId,
+        from_entity_id: &str,
+        to_entity_id: &str,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "UPDATE draft_alias SET entity_id = ?3
+                 WHERE account_id = ?1 AND entity_id = ?2",
+                params![account_id.as_str(), from_entity_id, to_entity_id],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
+
+    fn remove_draft_alias(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<(), StoreError> {
+        self.write_transaction(|tx| {
+            tx.execute(
+                "DELETE FROM draft_alias WHERE account_id = ?1 AND draft_key = ?2",
+                params![account_id.as_str(), draft_key],
+            )
+            .map_err(sql_to_store_error)?;
+            Ok(())
+        })
+    }
 }
