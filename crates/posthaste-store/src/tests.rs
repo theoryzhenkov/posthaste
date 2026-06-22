@@ -188,6 +188,7 @@ mod mutation_cursors;
 mod mutation_events;
 mod outbox;
 mod reads_events_integrity;
+mod reconcile;
 mod repair;
 mod smart_mailboxes;
 mod source_visibility;

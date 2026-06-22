@@ -67,6 +67,38 @@ impl SyncWriteStore for DatabaseStore {
         Ok(events)
     }
 
+    /// Runs the streamed final reconciliation pass within a single SQLite
+    /// transaction: prunes locals absent from the complete remote id set and
+    /// commits the cursors withheld until the full stream succeeded.
+    ///
+    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+    fn reconcile_sync(
+        &self,
+        account_id: &AccountId,
+        reconciliation: &SyncReconciliation,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        ph_debug!(
+            events::STORE_SYNC_BATCH_APPLYING,
+            account_id = %account_id,
+            prune_mailboxes = reconciliation.prune_mailboxes,
+            prune_messages = reconciliation.prune_messages,
+            remote_mailbox_count = reconciliation.remote_mailbox_ids.len(),
+            remote_message_count = reconciliation.remote_message_ids.len(),
+            "reconciling streamed sync"
+        );
+        let started = Instant::now();
+        let events =
+            self.write_transaction(|tx| reconcile_sync_tx(tx, account_id, reconciliation))?;
+        ph_info!(
+            events::STORE_SYNC_BATCH_APPLIED,
+            account_id = %account_id,
+            event_count = events.len(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "streamed sync reconciled"
+        );
+        Ok(events)
+    }
+
     /// Stores a lazily fetched message body and emits
     /// `EVENT_TOPIC_MESSAGE_BODY_CACHED`.
     ///

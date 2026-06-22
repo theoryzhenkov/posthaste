@@ -65,6 +65,11 @@ impl Default for TestStore {
 pub(super) struct MutationStoreState {
     pub(super) cursor: Option<SyncCursor>,
     pub(super) mailbox_ids: Vec<MailboxId>,
+    /// Message count of each `apply_sync_batch` call, in order — lets streaming
+    /// tests assert chunks are applied progressively rather than as one batch.
+    pub(super) applied_message_chunks: Vec<usize>,
+    /// Number of `reconcile_sync` calls.
+    pub(super) reconcile_calls: usize,
 }
 
 impl TestStore {
@@ -77,6 +82,7 @@ impl TestStore {
                     updated_at: crate::RFC3339_EPOCH.to_string(),
                 }),
                 mailbox_ids: mailbox_ids.iter().map(|id| MailboxId::from(*id)).collect(),
+                ..Default::default()
             }),
             ..Default::default()
         }

@@ -3,6 +3,9 @@ use super::*;
 pub(super) struct MutationGateway {
     pub(super) revision: Mutex<u64>,
     pub(super) batch: Option<SyncBatch>,
+    /// When set, `sync_streamed` emits these chunks in order and returns the
+    /// reconciliation set, exercising the progressive-delivery service path.
+    pub(super) stream: Option<(Vec<SyncBatch>, crate::SyncReconciliation)>,
     pub(super) fetch_body_result: Mutex<Option<Result<FetchedBody, GatewayError>>>,
     pub(super) fetch_attempts: Mutex<Vec<MessageId>>,
     /// Results returned by `save_draft`, popped front-first; empty falls back to
@@ -16,10 +19,21 @@ pub(super) struct MutationGateway {
 }
 
 impl MutationGateway {
+    pub(super) fn with_stream(
+        chunks: Vec<SyncBatch>,
+        reconciliation: crate::SyncReconciliation,
+    ) -> Self {
+        Self {
+            stream: Some((chunks, reconciliation)),
+            ..Self::with_revision(1)
+        }
+    }
+
     pub(super) fn with_revision(revision: u64) -> Self {
         Self {
             revision: Mutex::new(revision),
             batch: None,
+            stream: None,
             fetch_body_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
@@ -33,6 +47,7 @@ impl MutationGateway {
         Self {
             revision: Mutex::new(revision),
             batch: Some(batch),
+            stream: None,
             fetch_body_result: Mutex::new(None),
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
@@ -46,6 +61,7 @@ impl MutationGateway {
         Self {
             revision: Mutex::new(1),
             batch: None,
+            stream: None,
             fetch_body_result: Mutex::new(Some(result)),
             fetch_attempts: Mutex::new(Vec::new()),
             save_draft_results: Mutex::new(Vec::new()),
@@ -85,6 +101,26 @@ impl MailGateway for MutationGateway {
         self.batch
             .clone()
             .ok_or_else(|| GatewayError::Rejected("unused".to_string()))
+    }
+
+    async fn sync_streamed(
+        &self,
+        account_id: &AccountId,
+        cursors: &[SyncCursor],
+        progress: Option<crate::SyncProgressReporter>,
+        sink: &mut dyn crate::SyncChunkSink,
+    ) -> Result<crate::SyncOutcome, GatewayError> {
+        if let Some((chunks, reconciliation)) = &self.stream {
+            for chunk in chunks {
+                sink.emit(chunk.clone())?;
+            }
+            return Ok(crate::SyncOutcome {
+                reconciliation: Some(reconciliation.clone()),
+            });
+        }
+        let batch = self.sync(account_id, cursors, progress).await?;
+        sink.emit(batch)?;
+        Ok(crate::SyncOutcome::single_batch())
     }
 
     async fn fetch_message_body(

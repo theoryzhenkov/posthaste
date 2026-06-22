@@ -107,6 +107,19 @@ pub trait SyncWriteStore: Send + Sync {
         batch: &SyncBatch,
     ) -> Result<Vec<DomainEvent>, StoreError>;
 
+    /// Run the final reconciliation pass for a streamed upsert-only sync:
+    /// prune locals absent from the complete remote id set and commit the
+    /// withheld cursors, atomically. Only invoked when the gateway streamed
+    /// chunks and returned a reconciliation set; a single self-reconciling
+    /// batch skips it.
+    ///
+    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+    fn reconcile_sync(
+        &self,
+        account_id: &AccountId,
+        reconciliation: &SyncReconciliation,
+    ) -> Result<Vec<DomainEvent>, StoreError>;
+
     /// Persist a lazily-fetched message body.
     ///
     /// @spec docs/L1-sync#body-lazy
