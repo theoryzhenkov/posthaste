@@ -3,7 +3,9 @@ import type {
   RuntimeFrameHandlers,
   RuntimeFrameSubscriptionRequest,
   RuntimeOpenSessionRequest,
+  RuntimeOpenViewResult,
   RuntimeRunMutationRequest,
+  RuntimeSessionObjectViewRequest,
   RuntimeSessionViewRequest,
   RuntimeUnsubscribe,
 } from './types'
@@ -17,6 +19,11 @@ export const runtimeStream = {
   },
   openMessageListView(request: RuntimeSessionViewRequest) {
     return getRuntimeAdapter().openRuntimeSessionMessageListView(request)
+  },
+  openView<TData = unknown>(request: RuntimeSessionObjectViewRequest) {
+    return getRuntimeAdapter().openRuntimeSessionView(request) as Promise<
+      RuntimeOpenViewResult<TData>
+    >
   },
   closeView(sessionId: string, viewId: string, sourceId?: string | null) {
     return getRuntimeAdapter().closeRuntimeSessionView({

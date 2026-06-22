@@ -29,10 +29,12 @@ import type {
   RuntimeMoveMessageToMailboxRoleRequest,
   RuntimeMutationReceipt,
   RuntimeOpenMessageListViewResult,
+  RuntimeOpenViewResult,
   RuntimeOpenSessionRequest,
   RuntimeResourceDescriptor,
   RuntimeRunMutationRequest,
   RuntimeSession,
+  RuntimeSessionObjectViewRequest,
   RuntimeSessionViewCloseRequest,
   RuntimeSessionViewRequest,
   RuntimeTriggerSyncRequest,
@@ -85,6 +87,7 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly runtimeSessionCalls: RuntimeOpenSessionRequest[]
   readonly runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  readonly runtimeSessionObjectViewOpenCalls: RuntimeSessionObjectViewRequest[]
   readonly runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   readonly runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   readonly runtimeMutationCalls: RuntimeMutationCall[]
@@ -127,6 +130,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
     result: RuntimeOpenMessageListViewResult,
   ): void
   queueRuntimeSessionMessageListViewError(error: Error): void
+  queueRuntimeSessionView(result: RuntimeOpenViewResult): void
+  queueRuntimeSessionViewError(error: Error): void
   queueRuntimeMutationReceipt(receipt: RuntimeMutationReceipt): void
   queueRuntimeMutationError(error: Error): void
   queueOAuthStartResponse(response: StartOAuthResponse): void
@@ -156,6 +161,7 @@ export type FakeCallRecords = {
   runtimeSessionCalls: RuntimeOpenSessionRequest[]
   runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
+  runtimeSessionObjectViewOpenCalls: RuntimeSessionObjectViewRequest[]
   runtimeSessionViewCloseCalls: RuntimeSessionViewCloseRequest[]
   runtimeFrameSubscriptionCalls: RuntimeFrameSubscriptionCall[]
   runtimeMutationCalls: RuntimeMutationCall[]
@@ -184,6 +190,7 @@ export type FakeQueues = {
   openMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
   runtimeSessions: QueuedOutcome<RuntimeSession>[]
   runtimeSessionMessageListViews: QueuedOutcome<RuntimeOpenMessageListViewResult>[]
+  runtimeSessionViews: QueuedOutcome<RuntimeOpenViewResult>[]
   runtimeMutations: QueuedOutcome<RuntimeMutationReceipt>[]
   oauthStartResponses: QueuedOutcome<StartOAuthResponse>[]
   reads: QueuedOutcome<ReadResponse>[]
@@ -205,6 +212,7 @@ export interface FakeRuntimeAdapterOptions {
   defaultOpenMessageListView?: RuntimeOpenMessageListViewResult
   defaultRuntimeSession?: RuntimeSession
   defaultRuntimeSessionMessageListView?: RuntimeOpenMessageListViewResult
+  defaultRuntimeSessionView?: RuntimeOpenViewResult
   defaultRuntimeMutationReceipt?: RuntimeMutationReceipt
   defaultOAuthStartResponse?: StartOAuthResponse
   defaultReadResponse?: ReadResponse
@@ -240,6 +248,7 @@ export function createFakeCallRecords(): FakeCallRecords {
     runtimeSessionCalls: [],
     runtimeSessionCloseCalls: [],
     runtimeSessionViewOpenCalls: [],
+    runtimeSessionObjectViewOpenCalls: [],
     runtimeSessionViewCloseCalls: [],
     runtimeFrameSubscriptionCalls: [],
     runtimeMutationCalls: [],
@@ -269,6 +278,7 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.runtimeSessionCalls.length = 0
   calls.runtimeSessionCloseCalls.length = 0
   calls.runtimeSessionViewOpenCalls.length = 0
+  calls.runtimeSessionObjectViewOpenCalls.length = 0
   calls.runtimeSessionViewCloseCalls.length = 0
   calls.runtimeFrameSubscriptionCalls.length = 0
   calls.runtimeMutationCalls.length = 0
@@ -298,6 +308,7 @@ export function createFakeQueues(): FakeQueues {
     openMessageListViews: [],
     runtimeSessions: [],
     runtimeSessionMessageListViews: [],
+    runtimeSessionViews: [],
     runtimeMutations: [],
     oauthStartResponses: [],
     reads: [],
@@ -320,6 +331,7 @@ export function resetFakeQueues(queues: FakeQueues): void {
   queues.openMessageListViews.length = 0
   queues.runtimeSessions.length = 0
   queues.runtimeSessionMessageListViews.length = 0
+  queues.runtimeSessionViews.length = 0
   queues.runtimeMutations.length = 0
   queues.oauthStartResponses.length = 0
   queues.reads.length = 0

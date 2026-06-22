@@ -6,12 +6,19 @@
  *
  * @spec docs/L1-ui#messagedetail-and-emailframe
  */
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { MessageSummary, SourceMessageRef } from '../api/types'
+import type {
+  ConversationView,
+  MessageDetail as MessageDetailPayload,
+  MessageSummary,
+  SourceMessageRef,
+} from '../api/types'
+import { runtimeObjectViewsEnabled } from '../features'
 import { mailKeys, mergeConversationView } from '../mailState'
 import { runtimeViews } from '../runtime/views'
+import { useRuntimeObjectView } from '../runtime/useRuntimeObjectView'
 import { MessageAttachments } from './message-detail/MessageAttachments'
 import { MessageBody } from './message-detail/MessageBody'
 import { MessageHeader } from './message-detail/MessageHeader'
@@ -24,6 +31,31 @@ import {
   dedupeConversationMessages,
   isMessageDetailPayload,
 } from './message-detail/model'
+
+/**
+ * Fold a runtime `messageDetail` snapshot into the message cache. An optimistic
+ * header/keyword update arrives without a freshly-loaded body, so preserve the
+ * body and attachments the HTTP detail fetch already populated rather than
+ * blanking them.
+ */
+function mergeMessageDetail(
+  previous: MessageDetailPayload | MessageSummary | undefined,
+  next: MessageDetailPayload | MessageSummary,
+): MessageDetailPayload | MessageSummary {
+  if (!isMessageDetailPayload(next)) {
+    return next
+  }
+  const nextHasBody = next.bodyHtml != null || next.bodyText != null
+  if (nextHasBody || !isMessageDetailPayload(previous)) {
+    return next
+  }
+  return {
+    ...next,
+    bodyHtml: previous.bodyHtml,
+    bodyText: previous.bodyText,
+    attachments: previous.attachments,
+  }
+}
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
 interface MessageSelection extends SourceMessageRef {
@@ -56,10 +88,22 @@ export function MessageDetail({
   onSearch,
 }: MessageDetailProps) {
   const queryClient = useQueryClient()
+  const conversationQueryKey = useMemo(
+    () =>
+      selection
+        ? mailKeys.conversation(selection.conversationId)
+        : [...mailKeys.conversationRoot, null],
+    [selection],
+  )
+  const messageQueryKey = useMemo(
+    () =>
+      selection
+        ? mailKeys.message(selection.sourceId, selection.messageId)
+        : [...mailKeys.messageRoot, null, null],
+    [selection],
+  )
   const conversationQuery = useQuery({
-    queryKey: selection
-      ? mailKeys.conversation(selection.conversationId)
-      : [...mailKeys.conversationRoot, null],
+    queryKey: conversationQueryKey,
     queryFn: () => runtimeViews.mail.conversation(selection!.conversationId),
     enabled: selection !== null,
   })
@@ -71,12 +115,31 @@ export function MessageDetail({
     isLoading: isMessageLoading,
     refetch: refetchMessage,
   } = useQuery({
-    queryKey: selection
-      ? mailKeys.message(selection.sourceId, selection.messageId)
-      : [...mailKeys.messageRoot, null, null],
+    queryKey: messageQueryKey,
     queryFn: () =>
       runtimeViews.mail.message(selection!.messageId, selection!.sourceId),
     enabled: selection !== null,
+  })
+
+  // 5b-1: layer the runtime's overlay-folded conversation + detail views over
+  // the HTTP queries so flag/read/move optimism shows without a cache patch.
+  const runtimeViewsOn = runtimeObjectViewsEnabled()
+  useRuntimeObjectView<ConversationView>({
+    enabled: runtimeViewsOn && selection !== null,
+    family: 'conversation',
+    payload: selection ? { conversationId: selection.conversationId } : {},
+    queryKey: conversationQueryKey,
+    sourceId: selection?.sourceId ?? null,
+  })
+  useRuntimeObjectView<MessageDetailPayload | MessageSummary>({
+    enabled: runtimeViewsOn && selection !== null,
+    family: 'messageDetail',
+    merge: mergeMessageDetail,
+    payload: selection
+      ? { sourceId: selection.sourceId, messageId: selection.messageId }
+      : {},
+    queryKey: messageQueryKey,
+    sourceId: selection?.sourceId ?? null,
   })
 
   useEffect(() => {

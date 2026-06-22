@@ -184,6 +184,13 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
       RuntimeViewSnapshot<RuntimeMailListViewState>
     >(request.sessionId, { descriptor }, { sourceId: request.sourceId })
   },
+  openRuntimeSessionView(request) {
+    return openRuntimeSessionView(
+      request.sessionId,
+      { descriptor: request.descriptor },
+      { sourceId: request.sourceId },
+    )
+  },
   closeRuntimeSessionView(request) {
     return closeRuntimeSessionView(request.sessionId, request.viewId, {
       sourceId: request.sourceId,
