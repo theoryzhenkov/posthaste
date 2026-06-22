@@ -125,9 +125,15 @@ function hydrateMailNavigationRead(
  */
 export function useMailboxNavigationReadModels(): MailboxNavigationReadModels {
   const bootstrapQuery = useMailNavigationReadBootstrap()
+  // Read-only observer of the shared accounts cache (seeded by the bootstrap
+  // hydrate / accountStatus view). It must use the SAME queryFn as every other
+  // `queryKeys.accounts` observer: a divergent `() => Promise.resolve([])` here
+  // could win a refetch triggered elsewhere (e.g. a background sync
+  // invalidation) and resolve the shared query to `[]`, briefly emptying
+  // accounts everywhere.
   const accountsQuery = useQuery<AccountOverview[]>({
     queryKey: queryKeys.accounts,
-    queryFn: () => Promise.resolve([]),
+    queryFn: runtimeViews.accounts.list,
     enabled: false,
   })
   const accountDirectory = useMemo(
