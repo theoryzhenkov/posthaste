@@ -42,12 +42,13 @@ pub enum OperationKind {
 /// Lifecycle state of an operation within the runtime/provider outbox.
 ///
 /// ```text
-/// pending ─▶ inflight ─▶ applied
+/// pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
 ///    ▲          │  └──▶ failed
 ///    └──────────┘
 /// ```
 ///
 /// @spec docs/L1-outbox#state-machine
+/// @spec docs/replication/L1#retire-on-confirmation
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -56,16 +57,25 @@ pub enum OperationState {
     Pending,
     /// Currently being flushed to the provider.
     Inflight,
-    /// Accepted/applied by the provider; awaiting prune.
+    /// Accepted by the provider. A message state assertion rests here, folded
+    /// by the read-time overlay, until a sync observes its effect into the
+    /// projection and retires (removes) it; entity ops (drafts/sends) are pruned
+    /// on flush instead. See [`OperationState::is_flushable`] and the
+    /// retire-on-confirmation rule in `docs/replication/L1`.
     Applied,
     /// Permanently failed (e.g. validation); surfaced to the user.
     Failed,
 }
 
 impl OperationState {
-    /// Whether the operation has reached a terminal state (no further flush).
+    /// Whether the operation has reached a resting terminal state. Only
+    /// `Failed` is terminal: it stays until the user retries or dismisses it.
+    /// `Applied` is **not** terminal — it is awaiting confirmation and is
+    /// removed once a sync confirms its effect into the projection.
+    ///
+    /// @spec docs/replication/L1#retire-on-confirmation
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Applied | Self::Failed)
+        matches!(self, Self::Failed)
     }
 
     /// Whether the operation is eligible to be flushed to the provider.
@@ -202,9 +212,11 @@ mod tests {
     }
 
     #[test]
-    fn terminal_states_are_applied_and_failed() {
-        assert!(OperationState::Applied.is_terminal());
+    fn only_failed_is_terminal_applied_is_awaiting_confirmation() {
         assert!(OperationState::Failed.is_terminal());
+        // Applied rests folded, awaiting convergence, then is retired — not
+        // terminal.
+        assert!(!OperationState::Applied.is_terminal());
         assert!(!OperationState::Pending.is_terminal());
         assert!(!OperationState::Inflight.is_terminal());
     }
