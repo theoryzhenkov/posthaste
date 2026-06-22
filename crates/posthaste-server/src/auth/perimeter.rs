@@ -37,12 +37,21 @@ pub(crate) fn bearer_token(req: &Request) -> Option<&str> {
 }
 
 /// Routes (relative to the `/v1` nest, i.e. the path the api router sees) that
-/// are exempt from token auth: liveness + browsable docs. Swagger UI is mounted
-/// at the app root under `/v1/docs` and never reaches this middleware.
+/// are exempt from token auth: liveness + browsable docs, plus the OAuth
+/// loopback callback. Swagger UI is mounted at the app root under `/v1/docs` and
+/// never reaches this middleware.
+///
+/// `/oauth/callback` is the provider's browser redirect target: a top-level
+/// navigation that carries neither the `Authorization` header nor an
+/// app-controlled `Origin`, so it cannot present a bearer token. It is
+/// authenticated instead by the unguessable `state` parameter, which the server
+/// correlates to a backend-held PKCE flow (see `complete_account_oauth`); an
+/// unknown or already-used `state` is rejected there. The mandatory `Host`
+/// allowlist still runs before this exemption.
 pub(crate) fn is_exempt_path(path: &str) -> bool {
     matches!(
         nest_relative(path),
-        "/health" | "/openapi.json" | "/asyncapi.json"
+        "/health" | "/openapi.json" | "/asyncapi.json" | "/oauth/callback"
     )
 }
 

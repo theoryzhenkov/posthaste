@@ -126,6 +126,7 @@ pub(super) fn build_app(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/openapi.json", get(protected))
+        .route("/oauth/callback", get(protected))
         .route("/settings", get(protected))
         .route("/events", get(protected))
         .route("/account-assets/logos/{image_id}", get(protected))

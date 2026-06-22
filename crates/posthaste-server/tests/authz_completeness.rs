@@ -3,9 +3,10 @@
 //! in the authz map. A new route added without an authz entry fails here rather
 //! than shipping open — the same drift-guard taste as the OpenAPI contract test.
 //!
-//! Exempt routes (`/health`, `/openapi.json`, `/asyncapi.json`) are
-//! intentionally absent from the map (the perimeter exempts them before the
-//! token check); this test treats them as intentionally-exempt, not missing.
+//! Exempt routes (`/health`, `/openapi.json`, `/asyncapi.json`,
+//! `/oauth/callback`) are intentionally absent from the map (the perimeter
+//! exempts them before the token check); this test treats them as
+//! intentionally-exempt, not missing.
 //!
 //! It also checks the reverse direction: every authz-map entry corresponds to a
 //! real OpenAPI operation, so the map cannot drift with stale rows.
@@ -20,7 +21,12 @@ use serde_json::Value;
 
 /// Templates that are intentionally not in the authz map (perimeter-exempt).
 /// Stored as the nest-stripped template the auth middleware would see.
-const EXEMPT_TEMPLATES: &[&str] = &["/health", "/openapi.json", "/asyncapi.json"];
+const EXEMPT_TEMPLATES: &[&str] = &[
+    "/health",
+    "/openapi.json",
+    "/asyncapi.json",
+    "/oauth/callback",
+];
 
 fn committed_spec_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

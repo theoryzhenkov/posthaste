@@ -69,11 +69,10 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/oauth/start",
         authz: gate(Action::Manage, ResourceShape::empty()),
     },
-    Entry {
-        method: "GET",
-        template: "/oauth/callback",
-        authz: gate(Action::Manage, ResourceShape::empty()),
-    },
+    // `/oauth/callback` is perimeter-exempt (the provider's browser redirect
+    // carries no bearer token; it is authenticated by the `state` param), so it
+    // returns before the authz map is consulted and intentionally has no entry
+    // here — see `is_exempt_path`.
     Entry {
         method: "POST",
         template: "/accounts/{account_id}/enable",
