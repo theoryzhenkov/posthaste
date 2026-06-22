@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 
@@ -12,7 +12,7 @@ import type { OperationContext } from '@/observability'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SidebarSelection } from '../Sidebar'
 import type { SortConfig } from '../thread-list/columns'
-import { buildMessagePageRequest } from './model'
+import { MESSAGE_PAGE_SIZE, buildMessagePageRequest } from './model'
 
 function pageFromViewState(state: RuntimeMailListViewState): MessagePage {
   return {
@@ -30,6 +30,21 @@ function applySnapshotToQueryData(
   }
 }
 
+export interface RuntimeMailListView {
+  /** Grow the open view's window by a page; no-op while one is in flight. */
+  loadMore: () => void
+  /** Whether the runtime view reports more rows past the current window. */
+  hasMore: boolean
+  isLoadingMore: boolean
+}
+
+/**
+ * Renders a mail list from a runtime `mailList` view: opens the view, feeds its
+ * snapshot + `viewReplace` frames into the query cache, and grows the window in
+ * place via the runtime extend operation for infinite scroll.
+ *
+ * @spec docs/runtime/L2#view-operation-flow
+ */
 export function useRuntimeMailListView({
   enabled,
   operation,
@@ -44,8 +59,12 @@ export function useRuntimeMailListView({
   queryKey: readonly unknown[]
   selectedView: SidebarSelection | null
   sort: SortConfig
-}) {
+}): RuntimeMailListView {
   const queryClient = useQueryClient()
+  const viewIdRef = useRef<string | undefined>(undefined)
+  const loadingMoreRef = useRef(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
 
   useEffect(() => {
     if (!enabled || !selectedView || preparedSearchQuery.isBlocked) {
@@ -64,6 +83,7 @@ export function useRuntimeMailListView({
       }
       const closingViewId = viewId
       viewId = undefined
+      viewIdRef.current = undefined
       runtimeSessionClient.closeView(closingViewId)
     }
     const request = buildMessagePageRequest(
@@ -84,6 +104,8 @@ export function useRuntimeMailListView({
           return
         }
         const { snapshot, viewId: openedViewId } = opened
+        viewIdRef.current = openedViewId
+        setHasMore(snapshot.data.continuation.hasAfter)
         queryClient.setQueryData(
           queryKey,
           applySnapshotToQueryData({ ...snapshot, viewId: openedViewId }),
@@ -97,6 +119,7 @@ export function useRuntimeMailListView({
                   if (frame.viewId !== openedViewId) {
                     return
                   }
+                  setHasMore(frame.snapshot.data.continuation.hasAfter)
                   queryClient.setQueryData(
                     queryKey,
                     applySnapshotToQueryData(frame.snapshot),
@@ -125,6 +148,7 @@ export function useRuntimeMailListView({
       abort.abort()
       unsubscribe?.()
       closeView()
+      setHasMore(false)
     }
   }, [
     enabled,
@@ -135,4 +159,34 @@ export function useRuntimeMailListView({
     selectedView,
     sort,
   ])
+
+  const loadMore = useCallback(() => {
+    const viewId = viewIdRef.current
+    if (!viewId || loadingMoreRef.current || !hasMore) {
+      return
+    }
+    loadingMoreRef.current = true
+    setIsLoadingMore(true)
+    void runtimeSessionClient
+      .extendMessageListView(viewId, MESSAGE_PAGE_SIZE)
+      .then((result) => {
+        // The view id is unchanged; the broadcast viewReplace also lands, but
+        // applying the returned snapshot here keeps the scroll responsive.
+        if (viewIdRef.current !== viewId) {
+          return
+        }
+        setHasMore(result.snapshot.data.continuation.hasAfter)
+        queryClient.setQueryData(
+          queryKey,
+          applySnapshotToQueryData(result.snapshot),
+        )
+      })
+      .catch(() => {})
+      .finally(() => {
+        loadingMoreRef.current = false
+        setIsLoadingMore(false)
+      })
+  }, [hasMore, queryClient, queryKey])
+
+  return { hasMore, isLoadingMore, loadMore }
 }

@@ -163,7 +163,7 @@ export function MessageList({
     selectedKey,
     selection,
   })
-  useRuntimeMailListView({
+  const runtimeMailListView = useRuntimeMailListView({
     enabled: useRuntimeViewFrames,
     operation: operationEntry.context,
     preparedSearchQuery,
@@ -181,12 +181,18 @@ export function MessageList({
     useMessageListScroll({
       currentViewKey,
       fetchNextPage: () => {
-        if (!useRuntimeViewFrames) {
+        if (useRuntimeViewFrames) {
+          runtimeMailListView.loadMore()
+        } else {
           void query.fetchNextPage()
         }
       },
-      hasNextPage: !useRuntimeViewFrames && Boolean(query.hasNextPage),
-      isFetchingNextPage: !useRuntimeViewFrames && query.isFetchingNextPage,
+      hasNextPage: useRuntimeViewFrames
+        ? runtimeMailListView.hasMore
+        : Boolean(query.hasNextPage),
+      isFetchingNextPage: useRuntimeViewFrames
+        ? runtimeMailListView.isLoadingMore
+        : query.isFetchingNextPage,
       isSearchBlocked: preparedSearchQuery.isBlocked,
       messageCount: messages.length,
     })

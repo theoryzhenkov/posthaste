@@ -116,6 +116,50 @@ impl ViewRegistry {
         Ok(snapshot)
     }
 
+    /// Grow a windowed view's window by `count` rows in place, recompute its
+    /// snapshot, store the larger window, and broadcast a `Replace` so every
+    /// subscriber (and the caller) sees the extended page. Only the windowed
+    /// `mailList` family supports this; single-object views reject it.
+    ///
+    /// @spec docs/runtime/L2#view-operation-flow
+    pub(crate) async fn extend_view(
+        self: &Arc<Self>,
+        view_id: &ViewId,
+        count: usize,
+        account_scope: Option<&[String]>,
+    ) -> Result<ViewSnapshot, RuntimeError> {
+        let current = self.current_view(view_id)?;
+        validate_kind_account_scope(&current.kind, account_scope)?;
+        let ViewKind::MailList(request) = &current.kind else {
+            return Err(RuntimeError::invalid_descriptor(
+                "view family does not support window extension",
+            ));
+        };
+        let mut request = request.clone();
+        grow_message_window(&mut request, count);
+        let kind = ViewKind::MailList(request);
+        let next_revision = ViewRevision::new(current.snapshot.revision.get() + 1);
+        let snapshot = self
+            .build_snapshot(
+                view_id.clone(),
+                current.descriptor.clone(),
+                &kind,
+                next_revision,
+            )
+            .await?;
+        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(view_id) {
+            view.kind = kind;
+            view.snapshot = snapshot.clone();
+        }
+        self.send_view_frame(
+            view_id,
+            ViewFrame::Replace {
+                snapshot: snapshot.clone(),
+            },
+        );
+        Ok(snapshot)
+    }
+
     pub(crate) fn subscribe_view(
         self: &Arc<Self>,
         view_id: ViewId,
@@ -398,6 +442,19 @@ fn parse_view_kind(descriptor: &ViewDescriptor) -> Result<ViewKind, RuntimeError
         other => Err(RuntimeError::invalid_descriptor(format!(
             "unsupported view family '{other}'"
         ))),
+    }
+}
+
+/// Grow a mail-query window by `count` rows so an extend re-queries the larger
+/// first-N window (consistent with how event recompute already re-reads it).
+fn grow_message_window(request: &mut MailQueryRequest, count: usize) {
+    match &mut request.presentation {
+        MailPresentationRequest::Messages { limit, .. } => {
+            *limit = Some(limit.unwrap_or(0).saturating_add(count));
+        }
+        MailPresentationRequest::CollapsedByConversation { limit, .. } => {
+            *limit = limit.saturating_add(count);
+        }
     }
 }
 

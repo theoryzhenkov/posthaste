@@ -20,6 +20,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     closeRuntimeSession: () => reject(),
     openRuntimeSessionMessageListView: () => reject(),
     openRuntimeSessionView: () => reject(),
+    extendRuntimeSessionView: () => reject(),
     closeRuntimeSessionView: () => reject(),
     runRuntimeMutation: () => reject(),
     subscribeRuntimeFrames: (_request, handlers) => {

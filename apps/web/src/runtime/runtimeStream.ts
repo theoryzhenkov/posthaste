@@ -6,6 +6,7 @@ import type {
   RuntimeOpenViewResult,
   RuntimeRunMutationRequest,
   RuntimeSessionObjectViewRequest,
+  RuntimeSessionViewExtendRequest,
   RuntimeSessionViewRequest,
   RuntimeUnsubscribe,
 } from './types'
@@ -24,6 +25,9 @@ export const runtimeStream = {
     return getRuntimeAdapter().openRuntimeSessionView(request) as Promise<
       RuntimeOpenViewResult<TData>
     >
+  },
+  extendView(request: RuntimeSessionViewExtendRequest) {
+    return getRuntimeAdapter().extendRuntimeSessionView(request)
   },
   closeView(sessionId: string, viewId: string, sourceId?: string | null) {
     return getRuntimeAdapter().closeRuntimeSessionView({

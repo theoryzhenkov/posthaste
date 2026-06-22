@@ -79,6 +79,19 @@ export function openRuntimeSessionView<TSnapshot = unknown>(
   )
 }
 
+export function extendRuntimeSessionView<TSnapshot = unknown>(
+  sessionId: string,
+  viewId: string,
+  count: number,
+  options?: { sourceId?: string | null },
+): Promise<OpenRuntimeSessionViewResponse<TSnapshot>> {
+  return jsonRequest<OpenRuntimeSessionViewResponse<TSnapshot>>(
+    `/runtime/sessions/${encodeURIComponent(sessionId)}/views/${encodeURIComponent(viewId)}/extend${sourceSearch(options?.sourceId)}`,
+    'POST',
+    { count },
+  )
+}
+
 export function closeRuntimeSession(
   sessionId: string,
   options?: { sourceId?: string | null },
