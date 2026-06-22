@@ -39,7 +39,12 @@ fn enqueue_is_idempotent_on_operation_id() -> Result<(), StoreError> {
     store.enqueue_operation(&op)?;
 
     // Re-enqueuing the same id is a no-op and does not duplicate or overwrite.
-    let mut changed = op.clone();
+    let mut changed = operation(
+        "op-1",
+        "draft-temp-1",
+        OperationKind::DraftCreate,
+        OperationState::Pending,
+    );
     changed.payload = json!({ "subject": "Changed" });
     let stored = store.enqueue_operation(&changed)?;
     assert_eq!(stored.payload, json!({ "subject": "Hi" }));
