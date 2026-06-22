@@ -7,6 +7,15 @@ use async_trait::async_trait;
 /// Implementations: `LiveJmapGateway` for real JMAP, `MockGateway` for tests.
 ///
 /// @spec docs/L1-jmap#methods-used
+/// Receives sync chunks from [`MailGateway::sync_streamed`] to apply and publish
+/// as they arrive. The service supplies the implementation; the gateway only
+/// emits.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub trait SyncChunkSink: Send {
+    fn emit(&mut self, batch: SyncBatch) -> Result<(), GatewayError>;
+}
+
 #[async_trait]
 pub trait MailGateway: Send + Sync {
     /// Perform a delta or full sync for all object types using stored cursors.
@@ -18,6 +27,29 @@ pub trait MailGateway: Send + Sync {
         cursors: &[SyncCursor],
         progress: Option<SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError>;
+
+    /// Stream a sync as chunks, handing each to `sink` to apply + publish as it
+    /// is fetched, so mail surfaces progressively instead of arriving in one
+    /// batch. Returns a [`SyncOutcome`] whose reconciliation set (when present)
+    /// the service prunes against in a final pass.
+    ///
+    /// The default emits a single chunk — the full [`sync`](Self::sync) batch,
+    /// which carries its own `replace_all` pruning and cursors — so it is
+    /// self-reconciling and behaves exactly like the batch path. Folder-centric
+    /// (IMAP) and page-centric (JMAP) transports override this to emit chunks.
+    ///
+    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+    async fn sync_streamed(
+        &self,
+        account_id: &AccountId,
+        cursors: &[SyncCursor],
+        progress: Option<SyncProgressReporter>,
+        sink: &mut dyn SyncChunkSink,
+    ) -> Result<SyncOutcome, GatewayError> {
+        let batch = self.sync(account_id, cursors, progress).await?;
+        sink.emit(batch)?;
+        Ok(SyncOutcome::single_batch())
+    }
 
     /// Lazily fetch body content for a single message.
     ///

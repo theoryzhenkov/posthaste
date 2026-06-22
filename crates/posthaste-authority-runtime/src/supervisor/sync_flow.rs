@@ -164,6 +164,9 @@ pub(crate) async fn process_sync_trigger_inner(
                     trigger.clone(),
                     started_at.clone(),
                 );
+                // Broadcast each event group as the sync produces it so mail
+                // surfaces progressively instead of after the whole sync.
+                let mut publish = |events: &[DomainEvent]| shared.publish_events(events);
                 shared
                     .service
                     .sync_account_with_mode(
@@ -172,6 +175,7 @@ pub(crate) async fn process_sync_trigger_inner(
                         mode,
                         connection.gateway.as_ref(),
                         Some(progress),
+                        &mut publish,
                     )
                     .await
             } else {
@@ -193,7 +197,8 @@ pub(crate) async fn process_sync_trigger_inner(
                 duration_ms = started.elapsed().as_millis() as u64,
                 "sync completed"
             );
-            shared.publish_events(&events);
+            // Events were already broadcast per group by the `publish` callback
+            // during the sync; only the terminal status transition remains.
             shared.mark_sync_success(&account_id, generation).await;
             if let Some(reply) = reply {
                 let _ = reply.send(Ok(event_count));
