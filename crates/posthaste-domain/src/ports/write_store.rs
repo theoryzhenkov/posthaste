@@ -104,6 +104,40 @@ pub trait OperationOutboxStore: Send + Sync {
 
     /// Remove an operation after it has settled and been propagated downstream.
     fn remove_operation(&self, id: &OperationId) -> Result<(), StoreError>;
+
+    /// Resolve a stable client draft key to the entity id currently representing
+    /// that draft (a temporary id before its first flush, a provider id after).
+    /// Returns `None` for a key never saved before.
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    fn resolve_draft_entity(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<Option<String>, StoreError>;
+
+    /// Record the entity id a client draft key currently maps to.
+    fn set_draft_alias(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+        entity_id: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Rewrite draft-alias entity ids from a temporary/old id to a newly assigned
+    /// provider id, keeping the stable client key pointed at the live draft.
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    fn update_draft_alias_entity(
+        &self,
+        account_id: &AccountId,
+        from_entity_id: &str,
+        to_entity_id: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Drop a client draft key's alias (after the draft is deleted).
+    fn remove_draft_alias(&self, account_id: &AccountId, draft_key: &str)
+        -> Result<(), StoreError>;
 }
 
 /// Account/source projection maintenance boundary.

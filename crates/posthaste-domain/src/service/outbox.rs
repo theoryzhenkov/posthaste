@@ -105,15 +105,22 @@ impl MailService {
     pub fn save_draft(
         &self,
         account_id: &AccountId,
-        draft_id: Option<MessageId>,
+        draft_key: Option<MessageId>,
         request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
-        let (entity_id, kind) = match draft_id {
-            Some(id) => (id.to_string(), OperationKind::DraftUpdate),
-            None => (
-                format!("draft-local-{}", Id::generate()),
-                OperationKind::DraftCreate,
-            ),
+        // `draft_key` is a stable, client-chosen handle for the draft. The alias
+        // maps it to the entity id currently representing the draft (a temporary
+        // id before the first flush, a provider id after), so the client can keep
+        // using the same key across flushes without creating duplicate drafts.
+        let key = draft_key
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| format!("draft-local-{}", Id::generate()));
+        let (entity_id, kind) = match self.outbox.resolve_draft_entity(account_id, &key)? {
+            Some(entity_id) => (entity_id, OperationKind::DraftUpdate),
+            None => {
+                self.outbox.set_draft_alias(account_id, &key, &key)?;
+                (key.clone(), OperationKind::DraftCreate)
+            }
         };
         let payload = serde_json::to_value(request).map_err(|error| {
             ServiceError::from(GatewayError::Rejected(format!(
@@ -139,18 +146,25 @@ impl MailService {
     pub fn delete_draft(
         &self,
         account_id: &AccountId,
-        draft_id: MessageId,
+        draft_key: MessageId,
     ) -> Result<Operation, ServiceError> {
-        self.queue_operation(
+        let key = draft_key.to_string();
+        let entity_id = self
+            .outbox
+            .resolve_draft_entity(account_id, &key)?
+            .unwrap_or_else(|| key.clone());
+        let operation = self.queue_operation(
             account_id,
             OperationEntity {
                 kind: OperationEntityKind::Draft,
-                id: draft_id.to_string(),
+                id: entity_id,
             },
             OperationKind::DraftDelete,
             serde_json::json!({}),
             None,
-        )
+        )?;
+        self.outbox.remove_draft_alias(account_id, &key)?;
+        Ok(operation)
     }
 
     /// Flush all flushable operations for an account to the provider, returning
@@ -191,6 +205,13 @@ impl MailService {
                     if let Some(new_id) = settlement.assigned_entity_id.as_deref() {
                         if new_id != operation.entity.id {
                             self.outbox.reconcile_operation_entity_id(
+                                account_id,
+                                &operation.entity.id,
+                                new_id,
+                            )?;
+                            // Keep the stable client draft key pointed at the
+                            // live provider draft.
+                            self.outbox.update_draft_alias_entity(
                                 account_id,
                                 &operation.entity.id,
                                 new_id,
