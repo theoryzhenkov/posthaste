@@ -20,6 +20,8 @@ export const queryKeys = {
   senderAddresses: ['sender-addresses'] as const,
   composeRecipientSuggestions: ['compose-recipient-suggestions'] as const,
   mailboxes: (accountId: string | null) => ['mailboxes', accountId] as const,
+  pendingOperations: (accountId: string) =>
+    ['pending-operations', accountId] as const,
   tags: ['tags'] as const,
   mailNavigationRead: ['read', 'mail-navigation'] as const,
   messagesRoot: ['messages'] as const,
