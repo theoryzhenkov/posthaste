@@ -5,6 +5,7 @@ pub(super) type AppliedBodyRecord = (MessageId, Option<String>, Option<String>);
 pub(super) struct TestStore {
     pub(super) smart_mailbox_counts_error: Option<String>,
     pub(super) list_mailboxes_error: Option<String>,
+    pub(super) messages_error: Option<String>,
     pub(super) projection_calls: Mutex<Vec<String>>,
     pub(super) projection_deletes: Mutex<Vec<String>>,
     pub(super) source_data_deletes: Mutex<Vec<String>>,
@@ -22,6 +23,7 @@ pub(super) struct TestStore {
     pub(super) apply_body_error: Option<String>,
     pub(super) keyword_adds: Mutex<Vec<(MessageId, Vec<String>)>>,
     pub(super) rule_page: Mutex<Vec<MessageSummary>>,
+    pub(super) conversation_view: Mutex<Option<ConversationView>>,
     pub(super) mutation_state: Mutex<MutationStoreState>,
     pub(super) outbox_operations: Mutex<Vec<Operation>>,
     /// (account_id, draft_key, entity_id) alias rows.
@@ -33,6 +35,7 @@ impl Default for TestStore {
         Self {
             smart_mailbox_counts_error: None,
             list_mailboxes_error: None,
+            messages_error: None,
             projection_calls: Mutex::new(Vec::new()),
             projection_deletes: Mutex::new(Vec::new()),
             source_data_deletes: Mutex::new(Vec::new()),
@@ -50,6 +53,7 @@ impl Default for TestStore {
             apply_body_error: None,
             keyword_adds: Mutex::new(Vec::new()),
             rule_page: Mutex::new(Vec::new()),
+            conversation_view: Mutex::new(None),
             mutation_state: Mutex::new(MutationStoreState::default()),
             outbox_operations: Mutex::new(Vec::new()),
             draft_aliases: Mutex::new(Vec::new()),
