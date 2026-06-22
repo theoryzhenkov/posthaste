@@ -64,6 +64,7 @@ export const EVENT_TOPICS = {
   AccountStatusChanged: 'account.status_changed',
   PushConnected: 'push.connected',
   PushDisconnected: 'push.disconnected',
+  OperationSettled: 'operation.settled',
 } as const
 
 export type DomainEventTopic = (typeof EVENT_TOPICS)[keyof typeof EVENT_TOPICS]
