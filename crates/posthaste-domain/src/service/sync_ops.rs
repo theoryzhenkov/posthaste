@@ -88,14 +88,14 @@ impl MailService {
         };
         let action_count = action_events.len();
         events.extend(action_events);
-        match self.flush_account(account_id, gateway).await {
+        match self.flush_account_and_reconcile(account_id, gateway).await {
             Ok(settlement_events) => events.extend(settlement_events),
             Err(error) => {
                 ph_warn!(
                     events::DOMAIN_AUTOMATION_POST_SYNC_FAILED,
                     account_id = %account_id,
                     error = %error,
-                    "post-sync automation outbox flush failed after sync batch commit"
+                    "post-sync automation outbox flush/reconcile failed after sync batch commit"
                 );
                 post_commit_errors.push(error.code().to_string());
             }
@@ -122,6 +122,23 @@ impl MailService {
         }),
     )?;
         events.push(sync_event);
+        Ok(events)
+    }
+
+    pub(crate) async fn flush_account_and_reconcile(
+        &self,
+        account_id: &AccountId,
+        gateway: &dyn MailGateway,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let mut events = self.flush_account(account_id, gateway).await?;
+        if events
+            .iter()
+            .any(|event| event.topic == EVENT_TOPIC_OPERATION_SETTLED)
+        {
+            let cursors = self.sync_state.get_sync_cursors(account_id)?;
+            let batch = gateway.sync(account_id, &cursors, None).await?;
+            events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
+        }
         Ok(events)
     }
 

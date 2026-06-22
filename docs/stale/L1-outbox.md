@@ -195,6 +195,10 @@ connected:
 Flushing is ordered relative to sync: the runtime **flushes before a pull sync**
 so the provider is not re-read into the projection ahead of the local intent, and
 **flushes again after sync** to drain operations enqueued while applying a batch.
+When sync-owned automation or backfill flushes message assertions, the runtime
+then performs one bounded provider observation (without recursively re-running
+automation) so pruned assertions are reflected in the authoritative projection
+instead of briefly snapping reads back to the pre-flush snapshot.
 
 ## Temp-id reconciliation
 
