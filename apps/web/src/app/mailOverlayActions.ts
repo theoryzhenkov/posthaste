@@ -3,12 +3,8 @@ import { settingsSurface, type SurfaceDescriptor } from '@/surfaces'
 
 export function toggleSettingsSurface(input: {
   effectiveSurface: SurfaceDescriptor | null
-  shouldRenderForcedSettings: boolean
 }) {
-  if (
-    input.effectiveSurface?.kind === 'settings' &&
-    !input.shouldRenderForcedSettings
-  ) {
+  if (input.effectiveSurface?.kind === 'settings') {
     closeWebSurface()
   } else {
     openFocusedSurface(settingsSurface())
