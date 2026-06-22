@@ -100,9 +100,13 @@ export function MailClient({
   const isLoading = accountsQuery.isLoading || mailNavigationBootstrap.isLoading
   const hasLoadedAccounts =
     accountsQuery.isSuccess || mailNavigationBootstrap.isSuccess
+  // Force the account-setup surface only on a settled accounts query, so a
+  // transient empty during a post-mutation refetch (or the bootstrap query
+  // succeeding while accounts is mid-fetch) cannot hijack the UI into Settings.
+  const accountsSettled = accountsQuery.isSuccess && !accountsQuery.isFetching
   const shouldForceSettings = shouldForceAccountSettings({
     accounts,
-    accountsQuerySucceeded: hasLoadedAccounts,
+    accountsSettled,
   })
   const {
     effectiveSurface,
