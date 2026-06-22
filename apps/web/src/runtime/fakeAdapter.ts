@@ -326,6 +326,12 @@ export function createFakeRuntimeAdapter(
     listPendingOperations() {
       return Promise.resolve([])
     },
+    discardOperation() {
+      return Promise.resolve()
+    },
+    retryOperation() {
+      return Promise.resolve()
+    },
     startProviderOAuth(oauthInput) {
       calls.oauthStartCalls.push({
         provider: oauthInput.provider,

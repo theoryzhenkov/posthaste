@@ -11,6 +11,7 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId, Operation,
+    OperationId,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
     ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
     SyncTrigger,
@@ -1505,6 +1506,30 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<Vec<Operation>, RuntimeError> {
         self.ensure_runtime_active()?;
         Ok(self.core.service.list_pending_operations(&account_id)?)
+    }
+
+    async fn discard_operation(
+        &self,
+        _caller: RuntimeCaller,
+        _account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core.service.discard_operation(&operation_id)?;
+        Ok(())
+    }
+
+    async fn retry_operation(
+        &self,
+        _caller: RuntimeCaller,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_runtime_active()?;
+        self.core.service.retry_operation(&operation_id)?;
+        // Re-armed to pending; nudge a flush so it re-attempts promptly.
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(())
     }
 
     async fn set_message_keywords(

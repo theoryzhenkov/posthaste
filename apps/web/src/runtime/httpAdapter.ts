@@ -48,7 +48,9 @@ import {
   runRuntimeMutation,
   saveDraft,
   deleteDraft,
+  discardOperation,
   listPendingOperations,
+  retryOperation,
   sendMessage,
   startProviderOAuth,
   triggerSync,
@@ -521,6 +523,12 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   listPendingOperations(sourceId) {
     return listPendingOperations(sourceId)
+  },
+  discardOperation(sourceId, operationId) {
+    return discardOperation(sourceId, operationId)
+  },
+  retryOperation(sourceId, operationId) {
+    return retryOperation(sourceId, operationId)
   },
   startProviderOAuth(input) {
     return startProviderOAuth(input)

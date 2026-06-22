@@ -86,9 +86,10 @@ pub use message_commands::{
     add_to_mailbox, destroy_message, remove_from_mailbox, replace_mailboxes, set_keywords,
 };
 pub use messages::{
-    delete_draft, get_conversation, get_draft_content, get_identity, get_message,
+    delete_draft, discard_operation, get_conversation, get_draft_content, get_identity, get_message,
     get_message_attachment, get_reply_context, list_conversations, list_pending_operations,
-    list_sender_addresses, list_source_messages, save_draft, search_messages, send_message,
+    list_sender_addresses, list_source_messages, retry_operation, save_draft, search_messages,
+    send_message,
     ConversationPageResponse, DeleteDraftRequest, GetAttachmentQuery, ListConversationsQuery,
     ListSmartMailboxMessagesQuery, ListSourceMessagesQuery, MessagePageResponse, SaveDraftRequest,
     SearchMessagesQuery,

@@ -58,6 +58,8 @@ use utoipa::OpenApi;
         crate::api::messages::compose::save_draft,
         crate::api::messages::compose::delete_draft,
         crate::api::messages::compose::list_pending_operations,
+        crate::api::messages::compose::discard_operation,
+        crate::api::messages::compose::retry_operation,
         crate::api::sync_events::trigger_sync,
         crate::api::sync_events::stream_events,
         crate::api::views::open_view,
