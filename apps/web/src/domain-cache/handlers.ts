@@ -3,7 +3,6 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { DomainEvent } from '../api/types'
 import { EVENT_TOPICS, isDomainEventTopic } from '../domainVocabulary'
 import type { DomainEventTopic } from '../domainVocabulary'
-import { applyKeywordEventPatch } from '../mailState'
 import { queryKeys } from '../queryKeys'
 import { applyAccountStatusPatch, removeAccountOverview } from './accounts'
 import {
@@ -17,7 +16,7 @@ import {
   invalidateTargetMessageReadModels,
 } from './invalidations'
 import { pushNotification } from '../notifications/store'
-import { eventTarget, isStringArray, payloadString } from './payload'
+import { payloadString } from './payload'
 import {
   applyResourceInvalidationsOrFallback,
   type EventHandler,
@@ -125,18 +124,11 @@ const eventHandlers = {
     }
 
     if (payloadChangeFlag(event, 'keywords')) {
+      // List and detail surfaces render from runtime view frames, which
+      // recompute on keyword events; the renderer no longer patches message
+      // caches here. Counts/sidebar (not view-backed) still invalidate.
       invalidateMailboxReadModels(queryClient, event.accountId)
       invalidateMailNavigationBootstrapReadModels(queryClient)
-
-      const target = eventTarget(event)
-      const keywords = event.payload.keywords
-      const patched =
-        target && isStringArray(keywords)
-          ? applyKeywordEventPatch(queryClient, target, keywords)
-          : false
-      if (patched) {
-        return
-      }
     }
 
     invalidateTargetMessageReadModels(queryClient, event)
