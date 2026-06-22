@@ -63,6 +63,21 @@ export function useComposeIntent({
     })
   }, [selectedMessage])
 
+  const editDraft = useCallback((sourceId: string, messageId: string) => {
+    setComposeIntent({ kind: 'draft', sourceId, messageId })
+  }, [])
+
+  const editSelectedDraft = useCallback(() => {
+    if (!selectedMessage) {
+      return
+    }
+    setComposeIntent({
+      kind: 'draft',
+      sourceId: selectedMessage.sourceId,
+      messageId: selectedMessage.messageId,
+    })
+  }, [selectedMessage])
+
   const closeCompose = useCallback(() => {
     setComposeIntent(null)
   }, [])
@@ -70,6 +85,8 @@ export function useComposeIntent({
   return {
     closeCompose,
     composeIntent,
+    editDraft,
+    editSelectedDraft,
     forwardSelectedMessage,
     openCompose,
     replyToSelectedMessage,

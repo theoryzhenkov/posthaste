@@ -26,7 +26,9 @@ export function ComposeHeader({
             ? 'Reply'
             : intentKind === 'forward'
               ? 'Forward'
-              : 'New Message'}
+              : intentKind === 'draft'
+                ? 'Edit Draft'
+                : 'New Message'}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
           {fromLabel}

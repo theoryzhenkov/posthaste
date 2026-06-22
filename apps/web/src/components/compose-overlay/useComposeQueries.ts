@@ -7,7 +7,11 @@ import type { ComposeIntent } from '@/composeIntent'
 import { queryKeys } from '@/queryKeys'
 import { runtimeViews } from '@/runtime/views'
 
-import { accountFromOptions, wildcardMatchesEmail } from '../composeFormHelpers'
+import {
+  accountFromOptions,
+  formatRecipients,
+  wildcardMatchesEmail,
+} from '../composeFormHelpers'
 
 export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const identityQuery = useQuery({
@@ -34,6 +38,32 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const isMessageBasedCompose = intent.kind !== 'new'
   const requiresMessageContext =
     intent.kind === 'reply' || intent.kind === 'forward'
+  const isDraftEdit = intent.kind === 'draft'
+  // Resume-editing seeds the form from the existing draft message. Note: the
+  // message detail exposes `to` but not cc/bcc (those live only in the stored
+  // MIME), so cc/bcc are not restored when editing a synced draft.
+  const draftSeedQuery = useQuery({
+    queryKey: isDraftEdit
+      ? ['draft-seed', intent.sourceId, intent.messageId]
+      : ['draft-seed', null],
+    queryFn: () =>
+      runtimeViews.mail.message(
+        isDraftEdit ? intent.messageId : '',
+        intent.sourceId,
+      ),
+    enabled: isDraftEdit,
+  })
+  const draftSeed = useMemo(
+    () =>
+      draftSeedQuery.data
+        ? {
+            to: formatRecipients(draftSeedQuery.data.to),
+            subject: draftSeedQuery.data.subject ?? '',
+            body: draftSeedQuery.data.bodyText ?? '',
+          }
+        : undefined,
+    [draftSeedQuery.data],
+  )
   const replyContextQuery = useQuery({
     queryKey: requiresMessageContext
       ? ['reply-context', intent.sourceId, intent.messageId]
@@ -119,8 +149,11 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   return {
     accountsQuery,
     composeKey,
+    draftSeed,
+    draftSeedQuery,
     fromOptions,
     identityQuery,
+    isDraftEdit,
     isMessageBasedCompose,
     recipientSuggestions,
     replyContextQuery,

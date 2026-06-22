@@ -45,6 +45,7 @@ export interface MailClientViewProps {
   onClearSelectedMessage: () => void
   onCloseCommandPalette: () => void
   onCompose: () => void
+  onEditDraft: () => void
   onForward: () => void
   onMessageLayoutChanged: LayoutHandler
   onOpenCommandPalette: () => void

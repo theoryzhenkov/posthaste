@@ -44,6 +44,7 @@ export function FocusedSurface({
   const {
     closeCompose,
     composeIntent,
+    editDraft,
     forwardSelectedMessage,
     replyToSelectedMessage,
   } = useComposeIntent({
@@ -112,6 +113,9 @@ export function FocusedSurface({
             sourceId: surface.params.sourceId,
             messageId: surface.params.messageId,
           })
+        }
+        onEditDraft={() =>
+          editDraft(surface.params.sourceId, surface.params.messageId)
         }
         onForward={forwardSelectedMessage}
         onReply={replyToSelectedMessage}

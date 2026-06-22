@@ -105,6 +105,7 @@ export function useMailClientHandlers(input: {
     handleClearSelectedMessage: () => setSelectedMessage(null),
     handleCloseCommandPalette: () => setIsCommandPaletteOpen(false),
     handleCompose: compose.openCompose,
+    handleEditDraft: compose.editSelectedDraft,
     handleForward: compose.forwardSelectedMessage,
     handleOpenCommandPalette: () => setIsCommandPaletteOpen(true),
     handleOpenFocusedMessage: () => {
