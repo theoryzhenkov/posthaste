@@ -102,7 +102,13 @@ impl MailService {
         // outcome carries any reconciliation set for the final pass.
         //
         // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
-        let (sync_messages, mailbox_count, deleted_imap_location_count, deleted_message_count, outcome) = {
+        let (
+            sync_messages,
+            mailbox_count,
+            deleted_imap_location_count,
+            deleted_message_count,
+            outcome,
+        ) = {
             let mut sink = ServiceSyncSink {
                 sync_writer: self.sync_writer.as_ref(),
                 account_id,
@@ -136,17 +142,19 @@ impl MailService {
         };
 
         // RECONCILE (final pass): when the gateway streamed upsert-only chunks,
-        // prune locals absent from the complete remote set and commit cursors in
-        // one transaction. A single self-reconciling batch leaves this `None`.
-        // No gateway emits a reconciliation set yet (providers stream chunks in
-        // a later slice); the final pass lands with them.
+        // prune locals absent from the complete remote set and commit the
+        // withheld cursors in one transaction. A single self-reconciling batch
+        // (delta syncs, the default gateway path) leaves this `None`, having
+        // carried its own removals and cursors in the chunk.
         //
         // @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
-        debug_assert!(
-            outcome.reconciliation.is_none(),
-            "streamed reconciliation arrives with provider chunking"
-        );
-        let _ = &outcome;
+        if let Some(reconciliation) = &outcome.reconciliation {
+            let reconcile_events = self
+                .sync_writer
+                .reconcile_sync(account_id, reconciliation)?;
+            publish(&reconcile_events);
+            events.extend(reconcile_events);
+        }
         if let Some(progress) = progress {
             progress.report(crate::SyncProgress {
                 sync_id: String::new(),

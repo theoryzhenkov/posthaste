@@ -10,8 +10,7 @@ use crate::{
     Operation, OperationId, OperationState, PushTransport, Recipient, ReplaceMailboxesCommand,
     ReplyContext, SecretRef, SecretStoreError, SendMessageRequest, SetKeywordsCommand,
     SmartMailboxRule, SortDirection, SyncBatch, SyncCursor, SyncObject, SyncOutcome, SyncProgress,
-    SyncTrigger,
-    TagSummary, ThreadId, ThreadView,
+    SyncReconciliation, SyncTrigger, TagSummary, ThreadId, ThreadView,
 };
 use crate::{DomainEvent, GatewayError, ServiceError, StoreError};
 

@@ -3,7 +3,8 @@ use std::time::Instant;
 use jmap_client::client::Client;
 use jmap_client::email;
 use posthaste_domain::{
-    now_iso8601 as domain_now_iso8601, GatewayError, MessageId, SyncCursor, SyncObject,
+    now_iso8601 as domain_now_iso8601, GatewayError, MessageId, MessageRecord, SyncCursor,
+    SyncObject,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
@@ -35,6 +36,60 @@ pub(crate) async fn fetch_email_sync(
             Err(err) => Err(err),
         },
         None => fetch_email_full(client).await,
+    }
+}
+
+/// Outcome of a streamed email sync, mirroring [`fetch_email_sync`] but emitting
+/// full-snapshot metadata page by page through `on_page` so mail surfaces
+/// progressively.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) enum StreamedEmailSync {
+    /// Delta sync: small and self-reconciling. The caller emits it as one chunk
+    /// carrying its explicit removals and cursors; no reconciliation pass runs.
+    Delta(MessageSync),
+    /// Full snapshot: metadata pages were already emitted via `on_page`. Carries
+    /// the complete remote id set and final cursor for the reconciliation pass.
+    FullStreamed {
+        remote_message_ids: Vec<MessageId>,
+        cursor: SyncCursor,
+    },
+}
+
+/// Streaming counterpart to [`fetch_email_sync`]: a delta returns its batch for
+/// the caller to emit as one chunk, while a full snapshot streams metadata pages
+/// through `on_page` and reports the complete remote id set for reconciliation.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) async fn fetch_email_sync_streamed(
+    client: &Client,
+    since_state: Option<&str>,
+    on_page: &mut (dyn FnMut(Vec<MessageRecord>) -> Result<(), GatewayError> + Send),
+) -> Result<StreamedEmailSync, GatewayError> {
+    match since_state.and_then(decode_email_cursor_state) {
+        Some(state) => match fetch_email_delta(client, &state).await {
+            Ok(sync) => Ok(StreamedEmailSync::Delta(sync)),
+            Err(GatewayError::CannotCalculateChanges) => {
+                ph_warn!(
+                    events::JMAP_EMAIL_DELTA_UNAVAILABLE,
+                    "JMAP email delta unavailable, falling back to full snapshot"
+                );
+                let (remote_message_ids, cursor) =
+                    fetch_email_full_streamed(client, on_page).await?;
+                Ok(StreamedEmailSync::FullStreamed {
+                    remote_message_ids,
+                    cursor,
+                })
+            }
+            Err(err) => Err(err),
+        },
+        None => {
+            let (remote_message_ids, cursor) = fetch_email_full_streamed(client, on_page).await?;
+            Ok(StreamedEmailSync::FullStreamed {
+                remote_message_ids,
+                cursor,
+            })
+        }
     }
 }
 
@@ -120,6 +175,31 @@ async fn fetch_email_delta(
 /// @spec docs/L1-sync#sync-granularity
 /// @spec docs/L0-sync#sync-granularity
 async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> {
+    let mut messages = Vec::new();
+    let (_remote_message_ids, cursor) = fetch_email_full_streamed(client, &mut |page| {
+        messages.extend(page);
+        Ok(())
+    })
+    .await?;
+    Ok(MessageSync {
+        messages,
+        deleted_message_ids: Vec::new(),
+        replace_all_messages: true,
+        cursor,
+    })
+}
+
+/// Full email snapshot streamed page by page: queries all email IDs sorted by
+/// `receivedAt DESC`, fetches metadata in chunks of 100, and hands each page to
+/// `on_page` as it arrives. Returns the complete remote id set and the final
+/// cursor for the reconciliation pass. Bodies are omitted (fetched lazily).
+///
+/// @spec docs/L1-sync#sync-granularity
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+async fn fetch_email_full_streamed(
+    client: &Client,
+    on_page: &mut (dyn FnMut(Vec<MessageRecord>) -> Result<(), GatewayError> + Send),
+) -> Result<(Vec<MessageId>, SyncCursor), GatewayError> {
     let started = Instant::now();
     let email_ids = client
         .email_query(
@@ -134,7 +214,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
         message_count = email_ids.len(),
         "JMAP full email snapshot IDs fetched"
     );
-    let mut messages = Vec::new();
+    let remote_message_ids: Vec<MessageId> = email_ids.iter().cloned().map(MessageId).collect();
     let mut state = None;
     if email_ids.is_empty() {
         let mut request = client.build();
@@ -148,6 +228,7 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
         );
     } else {
         let chunk_count = email_ids.len().div_ceil(100);
+        let mut fetched_count = 0usize;
         for (chunk_index, chunk) in email_ids.chunks(100).enumerate() {
             let mut request = client.build();
             request
@@ -158,12 +239,15 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
             if state.is_none() {
                 state = Some(response.take_state());
             }
-            messages.extend(response.take_list().iter().map(to_message_record));
+            let page: Vec<MessageRecord> =
+                response.take_list().iter().map(to_message_record).collect();
+            fetched_count += page.len();
+            on_page(page)?;
             ph_info!(
                 events::JMAP_EMAIL_FULL_METADATA_PROGRESS,
                 chunk_index = chunk_index + 1,
                 chunk_count,
-                fetched_count = messages.len(),
+                fetched_count,
                 total_count = email_ids.len(),
                 "JMAP full email metadata fetch progress"
             );
@@ -171,20 +255,18 @@ async fn fetch_email_full(client: &Client) -> Result<MessageSync, GatewayError> 
     }
     ph_info!(
         events::JMAP_EMAIL_FULL_SNAPSHOT_FETCHED,
-        message_count = messages.len(),
+        message_count = remote_message_ids.len(),
         duration_ms = started.elapsed().as_millis() as u64,
         "JMAP full email snapshot fetched"
     );
-    Ok(MessageSync {
-        messages,
-        deleted_message_ids: Vec::new(),
-        replace_all_messages: true,
-        cursor: SyncCursor {
+    Ok((
+        remote_message_ids,
+        SyncCursor {
             object_type: SyncObject::Message,
             state: encode_email_cursor_state(&state.unwrap_or_default()),
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         },
-    })
+    ))
 }
 
 pub(super) fn email_metadata_properties() -> [email::Property; 16] {

@@ -47,9 +47,9 @@ use posthaste_domain::{
     SenderAddressCacheStore, SetKeywordsCommand, SmartMailboxCondition, SmartMailboxField,
     SmartMailboxGroup, SmartMailboxGroupOperator, SmartMailboxOperator, SmartMailboxRule,
     SmartMailboxRuleNode, SmartMailboxStore, SmartMailboxValue, SortDirection, SourceDataStore,
-    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncStateStore,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_MAILBOX_UPDATED,
-    EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
+    SourceProjectionStore, StoreError, SyncBatch, SyncCursor, SyncObject, SyncReconciliation,
+    SyncStateStore, SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView,
+    EVENT_TOPIC_MAILBOX_UPDATED, EVENT_TOPIC_MESSAGE_BODY_CACHED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 use rusqlite::types::Value as SqlValue;
@@ -63,8 +63,8 @@ use crate::db::{
 };
 use crate::mutations::{
     apply_message_body_tx, apply_sync_batch_tx, destroy_message_tx,
-    list_events as list_events_for_filter, replace_mailboxes_tx, set_keywords_tx,
-    stage_sync_bodies,
+    list_events as list_events_for_filter, reconcile_sync_tx, replace_mailboxes_tx,
+    set_keywords_tx, stage_sync_bodies,
 };
 use crate::projections::{cleanup_orphan_conversations_tx, insert_event_tx, synthesize_raw_mime};
 use crate::query::{

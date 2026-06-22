@@ -3,12 +3,15 @@ use std::time::Instant;
 
 use jmap_client::client::Client;
 use posthaste_domain::{
-    GatewayError, SyncBatch, SyncCursor, SyncObject, SyncProgress, SyncProgressReporter,
-    SyncProgressStage, SyncTrigger,
+    AccountId, GatewayError, MessageRecord, SyncBatch, SyncChunkSink, SyncCursor, SyncObject,
+    SyncOutcome, SyncProgress, SyncProgressReporter, SyncProgressStage, SyncReconciliation,
+    SyncTrigger,
 };
 use posthaste_observability::{events, ph_info};
 
-use crate::sync::{fetch_email_sync, fetch_mailbox_sync};
+use crate::sync::{
+    fetch_email_sync, fetch_email_sync_streamed, fetch_mailbox_sync, StreamedEmailSync,
+};
 
 /// Perform a full sync cycle: mailbox state then email state.
 ///
@@ -88,6 +91,132 @@ pub(crate) async fn sync_account(
         replace_all_messages: email_sync.replace_all_messages,
         cursors: vec![mailbox_sync.cursor, email_sync.cursor],
     })
+}
+
+/// Streaming counterpart to [`sync_account`]: fetches mailbox state, emits it as
+/// an upsert-only chunk, then streams email metadata pages as chunks so mail
+/// surfaces progressively. A delta email sync is emitted as one self-reconciling
+/// chunk carrying its own removals and cursors; a full snapshot streams
+/// upsert-only pages and returns a [`SyncReconciliation`] so the service prunes
+/// locals absent from the complete remote set and commits the withheld cursors.
+///
+/// @spec docs/L1-sync#sync-loop
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) async fn sync_account_streamed(
+    client: &Arc<Client>,
+    account_id: &AccountId,
+    cursors: &[SyncCursor],
+    progress: Option<SyncProgressReporter>,
+    sink: &mut dyn SyncChunkSink,
+) -> Result<SyncOutcome, GatewayError> {
+    let _ = account_id;
+    let mailbox_cursor = cursors
+        .iter()
+        .find(|cursor| cursor.object_type == SyncObject::Mailbox)
+        .map(|cursor| cursor.state.as_str());
+    let message_cursor = cursors
+        .iter()
+        .find(|cursor| cursor.object_type == SyncObject::Message)
+        .map(|cursor| cursor.state.as_str());
+
+    report_progress(
+        &progress,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Discovering, "Checking JMAP state"),
+    );
+    report_progress(
+        &progress,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching mailboxes"),
+    );
+    let mailbox_sync = fetch_mailbox_sync(client, mailbox_cursor).await?;
+
+    // Emit the mailbox chunk first so message rows never reference a mailbox
+    // that has not been upserted yet. A full mailbox snapshot withholds its
+    // pruning (and cursor) for the reconciliation pass; a delta carries its
+    // explicit removals in this chunk.
+    if !mailbox_sync.mailboxes.is_empty() || !mailbox_sync.deleted_mailbox_ids.is_empty() {
+        sink.emit(SyncBatch {
+            mailboxes: mailbox_sync.mailboxes.clone(),
+            deleted_mailbox_ids: if mailbox_sync.replace_all_mailboxes {
+                Vec::new()
+            } else {
+                mailbox_sync.deleted_mailbox_ids.clone()
+            },
+            ..SyncBatch::default()
+        })?;
+    }
+
+    report_progress(
+        &progress,
+        JmapSyncProgressUpdate::new(SyncProgressStage::Fetching, "Fetching messages"),
+    );
+    let mut on_page = |page: Vec<MessageRecord>| -> Result<(), GatewayError> {
+        sink.emit(SyncBatch {
+            messages: page,
+            ..SyncBatch::default()
+        })
+    };
+    let email = fetch_email_sync_streamed(client, message_cursor, &mut on_page).await?;
+
+    // Reconciliation is needed when either object type is a full snapshot:
+    // pruning by difference against the complete remote set cannot be done
+    // mid-stream. When both are deltas, the message chunk carries the removals
+    // and cursors and the stream self-reconciles.
+    let prune_mailboxes = mailbox_sync.replace_all_mailboxes;
+    match email {
+        StreamedEmailSync::Delta(message_sync) => {
+            if prune_mailboxes {
+                // Mailbox full snapshot + message delta: emit the delta chunk's
+                // removals now, defer mailbox pruning + cursors to the pass.
+                sink.emit(SyncBatch {
+                    messages: message_sync.messages,
+                    deleted_message_ids: message_sync.deleted_message_ids,
+                    ..SyncBatch::default()
+                })?;
+                Ok(SyncOutcome {
+                    reconciliation: Some(SyncReconciliation {
+                        remote_mailbox_ids: mailbox_sync
+                            .mailboxes
+                            .iter()
+                            .map(|mailbox| mailbox.id.clone())
+                            .collect(),
+                        prune_mailboxes: true,
+                        cursors: vec![mailbox_sync.cursor, message_sync.cursor],
+                        ..SyncReconciliation::default()
+                    }),
+                })
+            } else {
+                // Both deltas: one self-reconciling chunk carries removals and
+                // both cursors.
+                sink.emit(SyncBatch {
+                    messages: message_sync.messages,
+                    deleted_message_ids: message_sync.deleted_message_ids,
+                    cursors: vec![mailbox_sync.cursor, message_sync.cursor],
+                    ..SyncBatch::default()
+                })?;
+                Ok(SyncOutcome::single_batch())
+            }
+        }
+        StreamedEmailSync::FullStreamed {
+            remote_message_ids,
+            cursor: message_cursor,
+        } => Ok(SyncOutcome {
+            reconciliation: Some(SyncReconciliation {
+                remote_message_ids,
+                remote_mailbox_ids: if prune_mailboxes {
+                    mailbox_sync
+                        .mailboxes
+                        .iter()
+                        .map(|mailbox| mailbox.id.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+                prune_messages: true,
+                prune_mailboxes,
+                cursors: vec![mailbox_sync.cursor, message_cursor],
+            }),
+        }),
+    }
 }
 
 struct JmapSyncProgressUpdate {
