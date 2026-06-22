@@ -6237,6 +6237,33 @@
           },
           {
             "type": "object",
+            "description": "Undo/redo availability for the session's history stack, emitted whenever\nthe stack changes so the renderer can drive undo/redo button state.",
+            "required": [
+              "sessionSeq",
+              "canUndo",
+              "canRedo",
+              "type"
+            ],
+            "properties": {
+              "canRedo": {
+                "type": "boolean"
+              },
+              "canUndo": {
+                "type": "boolean"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mutationHistory"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "required": [
               "sessionSeq",
               "type"

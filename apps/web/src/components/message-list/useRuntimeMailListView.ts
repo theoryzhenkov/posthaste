@@ -106,6 +106,7 @@ export function useRuntimeMailListView({
                 case 'viewClosed':
                 case 'mutationSettlement':
                 case 'notification':
+                case 'mutationHistory':
                 case 'heartbeat':
                   return
               }
