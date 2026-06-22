@@ -6,7 +6,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         messages: &[MessageRecord],
-        gateway: &dyn MailGateway,
+        _gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         if self.config.get_source(account_id)?.is_none() {
             return Ok(Vec::new());
@@ -39,7 +39,7 @@ impl MailService {
                 )?;
                 for message in page.items {
                     let result = self
-                        .apply_automation_action(account_id, &message, action, gateway)
+                        .apply_automation_action(account_id, &message, action)
                         .await?;
                     events.extend(result.events);
                 }
@@ -53,7 +53,6 @@ impl MailService {
         account_id: &AccountId,
         message: &MessageSummary,
         action: &AutomationAction,
-        gateway: &dyn MailGateway,
     ) -> Result<CommandResult, ServiceError> {
         match action {
             AutomationAction::ApplyTag { tag } => {
@@ -70,7 +69,6 @@ impl MailService {
                         add: vec![tag.clone()],
                         remove: Vec::new(),
                     },
-                    gateway,
                 )
                 .await
             }
@@ -88,7 +86,6 @@ impl MailService {
                         add: Vec::new(),
                         remove: vec![tag.clone()],
                     },
-                    gateway,
                 )
                 .await
             }
@@ -106,7 +103,6 @@ impl MailService {
                         add: vec!["$seen".to_string()],
                         remove: Vec::new(),
                     },
-                    gateway,
                 )
                 .await
             }
@@ -124,7 +120,6 @@ impl MailService {
                         add: Vec::new(),
                         remove: vec!["$seen".to_string()],
                     },
-                    gateway,
                 )
                 .await
             }
@@ -142,7 +137,6 @@ impl MailService {
                         add: vec!["$flagged".to_string()],
                         remove: Vec::new(),
                     },
-                    gateway,
                 )
                 .await
             }
@@ -160,7 +154,6 @@ impl MailService {
                         add: Vec::new(),
                         remove: vec!["$flagged".to_string()],
                     },
-                    gateway,
                 )
                 .await
             }
@@ -182,7 +175,6 @@ impl MailService {
                     &ReplaceMailboxesCommand {
                         mailbox_ids: vec![mailbox_id.clone()],
                     },
-                    gateway,
                 )
                 .await
             }

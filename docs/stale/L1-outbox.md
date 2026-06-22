@@ -1,8 +1,8 @@
 ---
 scope: L1
 summary: "Local-first command outbox: operation envelope, lifecycle state machine, conflict policy, temp-id reconciliation, settlement"
-modified: 2026-06-21
-reviewed: 2026-06-21
+modified: 2026-06-22
+reviewed: 2026-06-22
 depends:
   - path: docs/L1-sync
   - path: docs/L1-api
@@ -32,6 +32,16 @@ once in `posthaste-domain` and regenerated into the client via the OpenAPI
 schema, so the two implementations cannot drift. Dispatch is opaque: callers
 invoke the same command methods and the dispatcher decides send-now vs enqueue.
 
+Current implementation status:
+
+- **Tier 2 is implemented for provider-synced drafts and message mutations**:
+  `draftCreate`, `draftUpdate`, `draftDelete`, `setKeywords`,
+  `replaceMailboxes`, and `destroy` all persist operations and flush through the
+  runtime/provider outbox.
+- **Tier 1 is not implemented yet**: the web client still needs a reachable
+  runtime. This document reserves the shared envelope/state machine for the
+  later client-runtime outbox.
+
 ## Operation model
 
 An operation is the unit persisted and flushed at every tier
@@ -55,6 +65,17 @@ An operation is the unit persisted and flushed at every tier
 
 The Tier-2 store persists operations in `outbox_operation`, ordered by insertion
 (`rowid`).
+
+For message mutations (`setKeywords`, `replaceMailboxes`, `destroy`), the
+service enqueues the operation first, then applies the local store command and
+returns the historical `CommandResult` so API/UI callers do not need a new
+response shape. If local apply fails, the just-enqueued operation is removed so a
+rejected local command is not later pushed to the provider. Local apply does not
+advance the provider sync cursor; the next sync after flush remains the source
+of provider cursor reconciliation. Runtime command handlers publish the local
+`message.updated` events immediately and nudge the supervisor to sync/flush
+best-effort. Automation rules also use the same local-first path and flush at
+the end of sync/backfill batches when a gateway is already available.
 
 ### Idempotency
 

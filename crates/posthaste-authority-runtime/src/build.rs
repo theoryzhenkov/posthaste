@@ -465,10 +465,10 @@ impl AuthorityRuntimeHandle {
         })
     }
 
-    /// Nudge the account to sync so a just-enqueued draft operation flushes
+    /// Nudge the account to sync so just-enqueued outbox operations flush
     /// promptly. Best-effort: if the account is offline the op stays queued and
     /// flushes on the next connectivity window.
-    async fn trigger_draft_flush(&self, account_id: &AccountId) {
+    async fn trigger_outbox_flush(&self, account_id: &AccountId) {
         if let Err(error) = self
             .core
             .live_accounts
@@ -476,10 +476,10 @@ impl AuthorityRuntimeHandle {
             .await
         {
             ph_warn!(
-                events::DRAFT_FOLLOWUP_SYNC_TRIGGER_FAILED,
+                events::OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED,
                 source_id = %account_id,
                 error = %error,
-                "draft enqueued but follow-up sync trigger failed"
+                "outbox operation enqueued but follow-up sync trigger failed"
             );
         }
     }
@@ -1004,7 +1004,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .core
             .service
             .save_draft(&account_id, draft_id, request)?;
-        self.trigger_draft_flush(&account_id).await;
+        self.trigger_outbox_flush(&account_id).await;
         Ok(operation)
     }
 
@@ -1016,7 +1016,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
         let operation = self.core.service.delete_draft(&account_id, draft_id)?;
-        self.trigger_draft_flush(&account_id).await;
+        self.trigger_outbox_flush(&account_id).await;
         Ok(operation)
     }
 
@@ -1037,13 +1037,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: SetKeywordsCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .service
-            .set_keywords(&account_id, &message_id, &command, gateway.as_ref())
+            .set_keywords(&account_id, &message_id, &command)
             .await?;
         self.publish_events(&result.events);
+        self.trigger_outbox_flush(&account_id).await;
         Ok(result)
     }
 
@@ -1055,13 +1055,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: AddToMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .service
-            .add_to_mailbox(&account_id, &message_id, &command, gateway.as_ref())
+            .add_to_mailbox(&account_id, &message_id, &command)
             .await?;
         self.publish_events(&result.events);
+        self.trigger_outbox_flush(&account_id).await;
         Ok(result)
     }
 
@@ -1073,13 +1073,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: RemoveFromMailboxCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .service
-            .remove_from_mailbox(&account_id, &message_id, &command, gateway.as_ref())
+            .remove_from_mailbox(&account_id, &message_id, &command)
             .await?;
         self.publish_events(&result.events);
+        self.trigger_outbox_flush(&account_id).await;
         Ok(result)
     }
 
@@ -1091,13 +1091,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: ReplaceMailboxesCommand,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .service
-            .replace_mailboxes(&account_id, &message_id, &command, gateway.as_ref())
+            .replace_mailboxes(&account_id, &message_id, &command)
             .await?;
         self.publish_events(&result.events);
+        self.trigger_outbox_flush(&account_id).await;
         Ok(result)
     }
 
@@ -1108,13 +1108,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
         let result = self
             .core
             .service
-            .destroy_message(&account_id, &message_id, gateway.as_ref())
+            .destroy_message(&account_id, &message_id)
             .await?;
         self.publish_events(&result.events);
+        self.trigger_outbox_flush(&account_id).await;
         Ok(result)
     }
 

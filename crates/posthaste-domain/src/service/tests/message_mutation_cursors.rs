@@ -1,12 +1,11 @@
 use super::*;
 
 #[tokio::test]
-async fn consecutive_keyword_mutations_advance_message_cursor() {
+async fn consecutive_keyword_mutations_keep_local_cursor_and_queue_base_cursor() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let config = Arc::new(TestConfig::default());
     let service = MailService::new(store.clone(), config);
-    let gateway = MutationGateway::with_revision(1);
 
     service
         .set_keywords(
@@ -16,19 +15,9 @@ async fn consecutive_keyword_mutations_advance_message_cursor() {
                 add: vec!["$flagged".to_string()],
                 remove: Vec::new(),
             },
-            &gateway,
         )
         .await
-        .expect("flagging should succeed");
-    assert_eq!(
-        store
-            .get_cursor(&account, SyncObject::Message)
-            .expect("cursor lookup should succeed")
-            .expect("cursor should exist")
-            .state,
-        "message-2"
-    );
-
+        .expect("flagging should apply locally");
     service
         .set_keywords(
             &account,
@@ -37,16 +26,28 @@ async fn consecutive_keyword_mutations_advance_message_cursor() {
                 add: Vec::new(),
                 remove: vec!["$flagged".to_string()],
             },
-            &gateway,
         )
         .await
-        .expect("unflagging should succeed");
+        .expect("unflagging should apply locally");
+
     assert_eq!(
         store
             .get_cursor(&account, SyncObject::Message)
             .expect("cursor lookup should succeed")
             .expect("cursor should exist")
             .state,
-        "message-3"
+        "message-1",
+        "local-first apply must not advance the provider sync cursor",
     );
+    let pending = service
+        .list_pending_operations(&account)
+        .expect("pending operations should list");
+    assert_eq!(pending.len(), 2);
+    assert!(pending
+        .iter()
+        .all(|op| op.kind == OperationKind::SetKeywords));
+    assert!(pending
+        .iter()
+        .all(|op| op.base_cursor.as_deref() == Some("message-1")));
+    assert_eq!(pending[1].depends_on.as_ref(), Some(&pending[0].id));
 }

@@ -68,7 +68,7 @@ impl MailService {
 
                 for message in page.items {
                     let result = self
-                        .apply_automation_action(account_id, &message, action, gateway)
+                        .apply_automation_action(account_id, &message, action)
                         .await?;
                     if !result.events.is_empty() {
                         remaining -= 1;
@@ -82,6 +82,7 @@ impl MailService {
             }
         }
 
+        events.extend(self.flush_account(account_id, gateway).await?);
         Ok((events, has_more))
     }
 }

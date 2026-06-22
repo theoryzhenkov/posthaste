@@ -96,10 +96,14 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 add: vec!["$flagged".to_string()],
                 remove: vec!["$seen".to_string()],
             },
-            &jmap_gateway,
         )
         .await
-        .expect("JMAP flag mutation should succeed");
+        .expect("JMAP flag mutation should apply locally");
+    harness
+        .service
+        .flush_account(&AccountId::from("jmap-stalwart"), &jmap_gateway)
+        .await
+        .expect("JMAP flag mutation should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     let jmap_target = message_by_subject(
@@ -130,10 +134,14 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
             &ReplaceMailboxesCommand {
                 mailbox_ids: vec![archive_id],
             },
-            &jmap_gateway,
         )
         .await
-        .expect("JMAP mailbox move should succeed");
+        .expect("JMAP mailbox move should apply locally");
+    harness
+        .service
+        .flush_account(&AccountId::from("jmap-stalwart"), &jmap_gateway)
+        .await
+        .expect("JMAP mailbox move should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     let jmap_labels = mailbox_labels_for_subject(
@@ -163,10 +171,14 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
             &ReplaceMailboxesCommand {
                 mailbox_ids: vec![imap_archive_id],
             },
-            &imap_gateway,
         )
         .await
-        .expect("IMAP mailbox move should succeed");
+        .expect("IMAP mailbox move should apply locally");
+    harness
+        .service
+        .flush_account(&AccountId::from("imap-stalwart"), &imap_gateway)
+        .await
+        .expect("IMAP mailbox move should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     let jmap_imap_move_labels =
@@ -190,13 +202,14 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
     );
     harness
         .service
-        .destroy_message(
-            &AccountId::from("jmap-stalwart"),
-            &deleted.id,
-            &jmap_gateway,
-        )
+        .destroy_message(&AccountId::from("jmap-stalwart"), &deleted.id)
         .await
-        .expect("JMAP delete should succeed");
+        .expect("JMAP delete should apply locally");
+    harness
+        .service
+        .flush_account(&AccountId::from("jmap-stalwart"), &jmap_gateway)
+        .await
+        .expect("JMAP delete should flush");
     sync_pair(&harness, &jmap_gateway, &imap_gateway).await;
 
     assert!(maybe_message_by_subject(
