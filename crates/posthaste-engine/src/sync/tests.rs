@@ -92,6 +92,171 @@ struct MockJmapState {
     seen_methods: Mutex<Vec<String>>,
 }
 
+/// Records the chunks a streamed sync emits so the test can assert progressive
+/// delivery (mailboxes first, then message pages) and per-chunk contents.
+#[derive(Default)]
+struct RecordingSink {
+    chunks: Vec<posthaste_domain::SyncBatch>,
+}
+
+impl posthaste_domain::SyncChunkSink for RecordingSink {
+    fn emit(
+        &mut self,
+        batch: posthaste_domain::SyncBatch,
+    ) -> Result<(), posthaste_domain::GatewayError> {
+        self.chunks.push(batch);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn full_streamed_sync_emits_mailbox_then_message_chunks_and_a_reconciliation() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock JMAP server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let app_state = Arc::new(MockJmapState {
+        base_url: format!("http://{addr}"),
+        seen_methods: Mutex::new(Vec::new()),
+    });
+    let app = Router::new()
+        .route("/.well-known/jmap", get(mock_session))
+        .route("/api", post(mock_full_sync_api))
+        .with_state(app_state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve mock JMAP");
+    });
+
+    let client = connect_jmap_client(&format!("http://{addr}"), Some("dev"), "devpass")
+        .await
+        .expect("connect mock client");
+    let client = Arc::new(client);
+
+    let mut sink = RecordingSink::default();
+    let outcome = crate::live_sync::sync_account_streamed(
+        &client,
+        &posthaste_domain::AccountId::from("acc1"),
+        &[],
+        None,
+        &mut sink,
+    )
+    .await
+    .expect("streamed sync succeeds");
+
+    // Mailbox chunk first (so message rows never reference an un-upserted
+    // mailbox), then the message page. Chunks are upsert-only: no pruning or
+    // cursors ride along; those are withheld for the reconciliation pass.
+    assert_eq!(sink.chunks.len(), 2);
+    assert_eq!(sink.chunks[0].mailboxes.len(), 1);
+    assert!(sink.chunks[0].messages.is_empty());
+    assert!(!sink.chunks[0].replace_all_mailboxes);
+    assert!(sink.chunks[0].cursors.is_empty());
+    assert_eq!(sink.chunks[1].messages.len(), 2);
+    assert!(sink.chunks[1].mailboxes.is_empty());
+    assert!(!sink.chunks[1].replace_all_messages);
+    assert!(sink.chunks[1].cursors.is_empty());
+
+    // A full snapshot of both object types yields a reconciliation set carrying
+    // the complete remote ids, both prune flags, and the withheld cursors.
+    let reconciliation = outcome
+        .reconciliation
+        .expect("full snapshot reconciles in a final pass");
+    assert!(reconciliation.prune_messages);
+    assert!(reconciliation.prune_mailboxes);
+    assert_eq!(reconciliation.remote_message_ids.len(), 2);
+    assert_eq!(reconciliation.remote_mailbox_ids.len(), 1);
+    assert_eq!(reconciliation.cursors.len(), 2);
+
+    server.abort();
+    let _ = server.await;
+}
+
+async fn mock_full_sync_api(
+    State(state): State<Arc<MockJmapState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let method_calls = body["methodCalls"]
+        .as_array()
+        .expect("methodCalls array present");
+    let method = method_calls[0][0]
+        .as_str()
+        .expect("method name present")
+        .to_string();
+    state
+        .seen_methods
+        .lock()
+        .expect("seen methods lock poisoned")
+        .push(method.clone());
+
+    match method.as_str() {
+        "Mailbox/query" => Json(json!({
+            "methodResponses": [[
+                "Mailbox/query",
+                { "accountId": "acc1", "queryState": "mq-1", "position": 0, "ids": ["inbox"] },
+                "s0"
+            ]],
+            "sessionState": "session-1"
+        })),
+        "Mailbox/get" => Json(json!({
+            "methodResponses": [[
+                "Mailbox/get",
+                {
+                    "accountId": "acc1",
+                    "state": "mailbox-state-1",
+                    "list": [{ "id": "inbox", "name": "Inbox", "role": "inbox",
+                               "totalEmails": 2, "unreadEmails": 0 }],
+                    "notFound": []
+                },
+                "s0"
+            ]],
+            "sessionState": "session-1"
+        })),
+        "Email/query" => Json(json!({
+            "methodResponses": [[
+                "Email/query",
+                {
+                    "accountId": "acc1",
+                    "queryState": "eq-1",
+                    "canCalculateChanges": true,
+                    "position": 0,
+                    "ids": ["m1", "m2"]
+                },
+                "s0"
+            ]],
+            "sessionState": "session-1"
+        })),
+        "Email/get" => {
+            let ids = method_calls[0][1]["ids"]
+                .as_array()
+                .expect("ids array present");
+            let list: Vec<Value> = ids
+                .iter()
+                .map(|id| {
+                    let id = id.as_str().expect("id is string");
+                    json!({
+                        "id": id,
+                        "threadId": format!("t-{id}"),
+                        "mailboxIds": { "inbox": true },
+                        "keywords": {},
+                        "subject": format!("Subject {id}"),
+                        "receivedAt": "2026-03-31T10:00:00Z",
+                        "size": 10
+                    })
+                })
+                .collect();
+            Json(json!({
+                "methodResponses": [[
+                    "Email/get",
+                    { "accountId": "acc1", "state": "email-state-1", "list": list, "notFound": [] },
+                    "s0"
+                ]],
+                "sessionState": "session-1"
+            }))
+        }
+        other => panic!("unexpected mock JMAP method: {other}"),
+    }
+}
+
 async fn mock_session(State(state): State<Arc<MockJmapState>>) -> Json<Value> {
     Json(json!({
         "capabilities": {

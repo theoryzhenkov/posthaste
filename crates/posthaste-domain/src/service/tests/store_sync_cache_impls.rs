@@ -10,6 +10,7 @@ impl SyncWriteStore for TestStore {
             .mutation_state
             .lock()
             .expect("mutation state lock poisoned");
+        state.applied_message_chunks.push(batch.messages.len());
         if let Some(cursor) = batch
             .cursors
             .iter()
@@ -22,6 +23,28 @@ impl SyncWriteStore for TestStore {
         }
         if !batch.deleted_message_ids.is_empty() {
             state.mailbox_ids.clear();
+        }
+        Ok(Vec::new())
+    }
+
+    fn reconcile_sync(
+        &self,
+        _account_id: &AccountId,
+        reconciliation: &crate::SyncReconciliation,
+    ) -> Result<Vec<DomainEvent>, StoreError> {
+        // Commit the cursors withheld until the stream succeeded; the real store
+        // also prunes locals absent from the remote set (covered by store tests).
+        let mut state = self
+            .mutation_state
+            .lock()
+            .expect("mutation state lock poisoned");
+        state.reconcile_calls += 1;
+        if let Some(cursor) = reconciliation
+            .cursors
+            .iter()
+            .find(|cursor| cursor.object_type == SyncObject::Message)
+        {
+            state.cursor = Some(cursor.clone());
         }
         Ok(Vec::new())
     }

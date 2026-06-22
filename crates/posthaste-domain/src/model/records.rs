@@ -110,7 +110,7 @@ pub fn now_iso8601() -> Result<String, String> {
 /// full snapshot and prunes any local objects not present in the batch.
 ///
 /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncBatch {
     pub mailboxes: Vec<MailboxRecord>,

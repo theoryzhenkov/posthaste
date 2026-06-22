@@ -38,27 +38,7 @@ pub(crate) fn apply_sync_batch_tx(
             .iter()
             .map(|mailbox| mailbox.id.clone())
             .collect();
-        let mut statement = tx
-            .prepare("SELECT id FROM mailbox WHERE account_id = ?1")
-            .map_err(sql_to_store_error)?;
-        let local_mailbox_ids = statement
-            .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
-            .map_err(sql_to_store_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_to_store_error)?
-            .into_iter()
-            .map(MailboxId)
-            .collect::<BTreeSet<_>>();
-
-        for mailbox_id in local_mailbox_ids.difference(&remote_mailbox_ids) {
-            delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, &mut events)?;
-            events.record(
-                EVENT_TOPIC_MAILBOX_UPDATED,
-                Some(mailbox_id),
-                None,
-                json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
-            )?;
-        }
+        prune_mailboxes_absent_from_remote_tx(tx, account_id, &remote_mailbox_ids, &mut events)?;
     }
 
     if batch.replace_all_messages {
@@ -67,27 +47,13 @@ pub(crate) fn apply_sync_batch_tx(
             .iter()
             .map(|message| message.id.clone())
             .collect();
-        let mut statement = tx
-            .prepare("SELECT id FROM message WHERE account_id = ?1")
-            .map_err(sql_to_store_error)?;
-        let local_message_ids = statement
-            .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
-            .map_err(sql_to_store_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(sql_to_store_error)?
-            .into_iter()
-            .map(MessageId)
-            .collect::<BTreeSet<_>>();
-
-        for message_id in local_message_ids.difference(&remote_message_ids) {
-            delete_message_and_track_projection_inputs(tx, account_id, message_id, &mut affected)?;
-            events.record(
-                EVENT_TOPIC_MESSAGE_UPDATED,
-                None,
-                Some(message_id),
-                json!({ "messageId": message_id.as_str(), "deleted": true }),
-            )?;
-        }
+        prune_messages_absent_from_remote_tx(
+            tx,
+            account_id,
+            &remote_message_ids,
+            &mut affected,
+            &mut events,
+        )?;
 
         prune_stale_imap_message_locations_for_snapshot_tx(
             tx,
@@ -240,6 +206,135 @@ pub(crate) fn apply_sync_batch_tx(
         refresh_conversation_projection_tx(tx, &conversation_id)?;
     }
     for cursor in &batch.cursors {
+        DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
+    }
+
+    Ok(events.into_events())
+}
+
+/// Delete every local mailbox whose id is absent from the complete remote set,
+/// recording a `deleted` mailbox event for each. Shared by the in-batch
+/// `replace_all_mailboxes` snapshot path and the streamed final-reconciliation
+/// pass, which both prune by difference against the authoritative remote ids.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) fn prune_mailboxes_absent_from_remote_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    remote_mailbox_ids: &BTreeSet<MailboxId>,
+    events: &mut EventRecorder<'_, '_, '_>,
+) -> Result<(), StoreError> {
+    let mut statement = tx
+        .prepare("SELECT id FROM mailbox WHERE account_id = ?1")
+        .map_err(sql_to_store_error)?;
+    let local_mailbox_ids = statement
+        .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
+        .map_err(sql_to_store_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)?
+        .into_iter()
+        .map(MailboxId)
+        .collect::<BTreeSet<_>>();
+
+    for mailbox_id in local_mailbox_ids.difference(remote_mailbox_ids) {
+        delete_mailbox_and_track_projection_inputs(tx, account_id, mailbox_id, events)?;
+        events.record(
+            EVENT_TOPIC_MAILBOX_UPDATED,
+            Some(mailbox_id),
+            None,
+            json!({ "mailboxId": mailbox_id.as_str(), "deleted": true }),
+        )?;
+    }
+    Ok(())
+}
+
+/// Delete every local message whose id is absent from the complete remote set,
+/// recording a `deleted` message event for each. Shared by the in-batch
+/// `replace_all_messages` snapshot path and the streamed final-reconciliation
+/// pass.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) fn prune_messages_absent_from_remote_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    remote_message_ids: &BTreeSet<MessageId>,
+    affected: &mut ProjectionInputs,
+    events: &mut EventRecorder<'_, '_, '_>,
+) -> Result<(), StoreError> {
+    let mut statement = tx
+        .prepare("SELECT id FROM message WHERE account_id = ?1")
+        .map_err(sql_to_store_error)?;
+    let local_message_ids = statement
+        .query_map(params![account_id.as_str()], |row| row.get::<_, String>(0))
+        .map_err(sql_to_store_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_to_store_error)?
+        .into_iter()
+        .map(MessageId)
+        .collect::<BTreeSet<_>>();
+
+    for message_id in local_message_ids.difference(remote_message_ids) {
+        delete_message_and_track_projection_inputs(tx, account_id, message_id, affected)?;
+        events.record(
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            Some(message_id),
+            json!({ "messageId": message_id.as_str(), "deleted": true }),
+        )?;
+    }
+    Ok(())
+}
+
+/// Final reconciliation pass for a streamed upsert-only sync: prune locals
+/// absent from the complete remote id set gathered across all chunks, then
+/// commit the cursors that were withheld until the full stream succeeded — all
+/// in one transaction. Additions/updates were already applied + published per
+/// chunk; this is the deletion correctness boundary.
+///
+/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+pub(crate) fn reconcile_sync_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    reconciliation: &SyncReconciliation,
+) -> Result<Vec<DomainEvent>, StoreError> {
+    let estimated = reconciliation.cursors.len()
+        + if reconciliation.prune_mailboxes {
+            reconciliation.remote_mailbox_ids.len()
+        } else {
+            0
+        }
+        + if reconciliation.prune_messages {
+            reconciliation.remote_message_ids.len()
+        } else {
+            0
+        };
+    let mut events = EventRecorder::with_capacity(tx, account_id, estimated)?;
+    let mut affected = ProjectionInputs::default();
+
+    if reconciliation.prune_mailboxes {
+        let remote_mailbox_ids: BTreeSet<_> =
+            reconciliation.remote_mailbox_ids.iter().cloned().collect();
+        prune_mailboxes_absent_from_remote_tx(tx, account_id, &remote_mailbox_ids, &mut events)?;
+    }
+    if reconciliation.prune_messages {
+        let remote_message_ids: BTreeSet<_> =
+            reconciliation.remote_message_ids.iter().cloned().collect();
+        prune_messages_absent_from_remote_tx(
+            tx,
+            account_id,
+            &remote_message_ids,
+            &mut affected,
+            &mut events,
+        )?;
+    }
+
+    for thread_id in affected.threads {
+        refresh_thread_projection_tx(tx, account_id, &thread_id)?;
+    }
+    for conversation_id in affected.conversations {
+        refresh_conversation_projection_tx(tx, &conversation_id)?;
+    }
+    for cursor in &reconciliation.cursors {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
     }
 

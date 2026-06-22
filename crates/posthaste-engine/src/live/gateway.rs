@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use posthaste_domain::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MessageId,
     MutationOutcome, PushTransport, ReplyContext, SendMessageRequest, SetKeywordsCommand,
-    SyncBatch, SyncCursor,
+    SyncBatch, SyncChunkSink, SyncCursor, SyncOutcome,
 };
 
 use super::LiveJmapGateway;
@@ -25,6 +25,22 @@ impl MailGateway for LiveJmapGateway {
         progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
         crate::live_sync::sync_account(&self.client, cursors, progress).await
+    }
+
+    /// Stream the sync as chunks: mailbox state then email metadata pages, so
+    /// mail surfaces progressively. A full snapshot returns a reconciliation
+    /// set; a delta self-reconciles.
+    ///
+    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
+    async fn sync_streamed(
+        &self,
+        account_id: &AccountId,
+        cursors: &[SyncCursor],
+        progress: Option<posthaste_domain::SyncProgressReporter>,
+        sink: &mut dyn SyncChunkSink,
+    ) -> Result<SyncOutcome, GatewayError> {
+        crate::live_sync::sync_account_streamed(&self.client, account_id, cursors, progress, sink)
+            .await
     }
 
     /// Lazily fetch the body content of a single message via `Email/get`.
