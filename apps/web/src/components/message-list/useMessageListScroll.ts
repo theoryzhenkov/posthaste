@@ -17,7 +17,8 @@ export function useMessageListScroll({
   isSearchBlocked: boolean
   messageCount: number
 }) {
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const nodeRef = useRef<HTMLDivElement | null>(null)
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const restoredViewKeyRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
@@ -27,7 +28,7 @@ export function useMessageListScroll({
   }, [currentViewKey])
 
   useEffect(() => {
-    const node = scrollContainerRef.current
+    const node = nodeRef.current
     if (!node || restoredViewKeyRef.current === currentViewKey) {
       return
     }
@@ -38,22 +39,27 @@ export function useMessageListScroll({
     return () => cancelAnimationFrame(frame)
   }, [currentViewKey, messageCount])
 
-  useEffect(() => {
-    const node = scrollContainerRef.current
+  // Callback ref: measure + observe whenever the scroll container mounts, so
+  // the viewport height is never stuck at 0. A `[]` effect raced the container
+  // mount (e.g. when it appears after a no-mailbox first render) and left the
+  // list rendering only the fallback ~8 rows regardless of window size.
+  const scrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    resizeObserverRef.current?.disconnect()
+    nodeRef.current = node
     if (!node) {
+      resizeObserverRef.current = null
       return
     }
-
-    const updateViewportHeight = () => setViewportHeight(node.clientHeight)
-    updateViewportHeight()
-
-    const resizeObserver = new ResizeObserver(updateViewportHeight)
-    resizeObserver.observe(node)
-    return () => resizeObserver.disconnect()
+    setViewportHeight(node.clientHeight)
+    const observer = new ResizeObserver(() =>
+      setViewportHeight(node.clientHeight),
+    )
+    observer.observe(node)
+    resizeObserverRef.current = observer
   }, [])
 
   const handleScroll = useCallback(() => {
-    const node = scrollContainerRef.current
+    const node = nodeRef.current
     if (!node) {
       return
     }
@@ -75,7 +81,7 @@ export function useMessageListScroll({
   ])
 
   useEffect(() => {
-    const node = scrollContainerRef.current
+    const node = nodeRef.current
     if (isSearchBlocked) {
       return
     }
