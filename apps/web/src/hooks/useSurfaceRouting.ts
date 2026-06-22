@@ -8,7 +8,6 @@ import {
   replaceWebSurface,
 } from '@/desktop'
 import {
-  settingsCategorySurface,
   surfaceRouteStateFromLocation,
   type SurfaceDescriptor,
   type SurfaceRouteState,
@@ -61,26 +60,14 @@ export function replaceFocusedSurface(surface: SurfaceDescriptor): void {
 
 export function useEffectiveSurface({
   routeSurface,
-  shouldForceSettings,
 }: {
   routeSurface: SurfaceDescriptor | null
-  shouldForceSettings: boolean
 }) {
-  const shouldRenderForcedSettings = shouldForceSettings && !isTauriRuntime()
-  const effectiveSurface =
-    shouldRenderForcedSettings && routeSurface?.kind !== 'settings'
-      ? settingsCategorySurface('accounts')
-      : routeSurface
-
-  useEffect(() => {
-    if (shouldForceSettings && isTauriRuntime()) {
-      openFocusedSurface(settingsCategorySurface('accounts'))
-    }
-  }, [shouldForceSettings])
-
+  // The renderer never force-opens Settings: account state is served, and the
+  // empty-account first run shows its own in-pane affordance rather than
+  // hijacking the surface (which churned open on background refetches).
   return {
-    effectiveSurface,
-    isSettingsSurfaceOpen: effectiveSurface?.kind === 'settings',
-    shouldRenderForcedSettings,
+    effectiveSurface: routeSurface,
+    isSettingsSurfaceOpen: routeSurface?.kind === 'settings',
   }
 }

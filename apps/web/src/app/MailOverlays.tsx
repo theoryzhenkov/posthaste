@@ -40,7 +40,7 @@ export function MailOverlays(props: MailClientViewProps) {
           />
         </Suspense>
       )}
-      {props.invalidSurfaceRoute && !props.shouldRenderForcedSettings && (
+      {props.invalidSurfaceRoute && (
         <div className="fixed inset-0 z-[2300] bg-background text-foreground">
           <InvalidSurface
             route={props.invalidSurfaceRoute}
@@ -48,17 +48,16 @@ export function MailOverlays(props: MailClientViewProps) {
           />
         </div>
       )}
-      {props.effectiveSurface &&
-        (!props.invalidSurfaceRoute || props.shouldRenderForcedSettings) && (
-          <ErrorBoundary label="surface" resetKeys={[props.effectiveSurface]}>
-            <SurfaceHost
-              surface={props.effectiveSurface}
-              canClose={!props.shouldRenderForcedSettings}
-              onClose={closeWebSurface}
-              onSearch={props.onSearch}
-            />
-          </ErrorBoundary>
-        )}
+      {props.effectiveSurface && !props.invalidSurfaceRoute && (
+        <ErrorBoundary label="surface" resetKeys={[props.effectiveSurface]}>
+          <SurfaceHost
+            surface={props.effectiveSurface}
+            canClose
+            onClose={closeWebSurface}
+            onSearch={props.onSearch}
+          />
+        </ErrorBoundary>
+      )}
     </>
   )
 }

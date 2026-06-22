@@ -33,7 +33,6 @@ export interface MailClientViewProps {
   selectedMessage: MailSelection | null
   selectedMessageData: MessageDetail | undefined
   shellDefaultLayout: LayoutValue
-  shouldRenderForcedSettings: boolean
   showShortcuts: boolean
   tags: TagSummary[]
   viewRole: string | null
