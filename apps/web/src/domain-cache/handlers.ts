@@ -16,6 +16,7 @@ import {
   invalidateSmartMailboxReadModels,
   invalidateTargetMessageReadModels,
 } from './invalidations'
+import { pushNotification } from '../notifications/store'
 import { eventTarget, isStringArray, payloadString } from './payload'
 import {
   applyResourceInvalidationsOrFallback,
@@ -145,6 +146,24 @@ const eventHandlers = {
   },
   [EVENT_TOPICS.PushDisconnected]: (queryClient, event) => {
     invalidateAccountRuntimeReadModels(queryClient, event.accountId)
+  },
+  [EVENT_TOPICS.OperationSettled]: (_queryClient, event) => {
+    // Surface only failures/conflicts; a successful flush settles silently.
+    const outcome = payloadString(event.payload, 'outcome')
+    if (outcome !== 'failed' && outcome !== 'conflicted') {
+      return
+    }
+    const id = payloadString(event.payload, 'id') ?? event.accountId
+    const detail = payloadString(event.payload, 'error')
+    pushNotification({
+      severity: outcome === 'failed' ? 'error' : 'warning',
+      title:
+        outcome === 'failed'
+          ? "Couldn't save a change to the server"
+          : 'A queued change needs attention',
+      message: detail ?? undefined,
+      dedupeKey: `operation.settled:${id}`,
+    })
   },
 } satisfies Record<DomainEventTopic, EventHandler>
 
