@@ -118,9 +118,11 @@ export function SettingsPanel({
     queryFn: () => runtimeViews.accounts.detail(editorAccountId!),
     enabled: editorAccountId !== null,
   })
+  // Prefer the view-fed accounts list so the editor shows live runtime status
+  // (it re-serves on every account event); fall back to the detail fetch.
   const editingAccount =
-    accountQuery.data ??
     accounts.find((account) => account.id === editorAccountId) ??
+    accountQuery.data ??
     null
 
   const smartMailboxSummaries = smartMailboxListQuery.data ?? []
