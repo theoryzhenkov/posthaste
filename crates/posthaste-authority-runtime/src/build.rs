@@ -288,6 +288,72 @@ struct MessageSetKeywordsMutationArgs {
     command: SetKeywordsCommand,
 }
 
+/// A message mutation that targets one message by id (read/flag/destroy/role).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageTargetArgs {
+    source_id: String,
+    message_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageSetReadStateArgs {
+    source_id: String,
+    message_id: String,
+    read: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageSetFlaggedStateArgs {
+    source_id: String,
+    message_id: String,
+    flagged: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageSetUserTagsArgs {
+    source_id: String,
+    message_id: String,
+    #[serde(default)]
+    add: Vec<String>,
+    #[serde(default)]
+    remove: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageMoveToMailboxArgs {
+    source_id: String,
+    message_id: String,
+    mailbox_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageMoveToRoleArgs {
+    source_id: String,
+    message_id: String,
+    role: String,
+}
+
+/// Build a single-keyword add/remove command from a desired presence.
+fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
+    if present {
+        SetKeywordsCommand {
+            add: vec![keyword.to_string()],
+            remove: Vec::new(),
+        }
+    } else {
+        SetKeywordsCommand {
+            add: Vec::new(),
+            remove: vec![keyword.to_string()],
+        }
+    }
+}
+
 /// Cloneable authority runtime handle used by transport adapters.
 ///
 /// spec: docs/runtime/L2#runtime-handle-transport-neutral
@@ -544,30 +610,30 @@ impl AuthorityRuntimeHandle {
         Ok(())
     }
 
-    async fn run_set_keywords_mutation(
+    /// Accept a named message mutation (idempotency), run its command, and
+    /// settle confirmed/failed on the session stream. The shared
+    /// accept -> execute -> settle flow for every message mutation; the command
+    /// `action` is one of the existing handle methods, which already publishes
+    /// the optimistic assertion and flushes the outbox.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn run_message_mutation<Fut>(
         &self,
         caller: RuntimeCaller,
-        request: MutationRequest,
-        args: MessageSetKeywordsMutationArgs,
-    ) -> Result<MutationReceipt, RuntimeError> {
+        request: &MutationRequest,
+        action: Fut,
+    ) -> Result<MutationReceipt, RuntimeError>
+    where
+        Fut: std::future::Future<Output = Result<posthaste_domain::CommandResult, RuntimeError>>,
+    {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mutation_id = match self.core.sessions.accept_mutation(caller, &request)? {
+        let mutation_id = match self.core.sessions.accept_mutation(caller, request)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
-        let account_id = AccountId(args.source_id);
-        let message_id = MessageId(args.message_id);
-        match self
-            .set_message_keywords(
-                RuntimeCaller::system(),
-                account_id,
-                message_id,
-                args.command,
-            )
-            .await
-        {
+        match action.await {
             Ok(result) => {
                 let output = serde_json::to_value(&result).map_err(|error| {
                     RuntimeError::internal(
@@ -594,6 +660,37 @@ impl AuthorityRuntimeHandle {
                 )
             }
         }
+    }
+
+    /// Resolve the account's mailbox for `role` and replace the message's
+    /// mailbox membership with it. Role resolution is runtime-owned so the
+    /// renderer submits role intent without looking up role mailboxes.
+    ///
+    /// @spec docs/state/mail/L1#message-change-assertions
+    async fn move_message_to_role(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        role: String,
+    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+        let mailbox = self
+            .core
+            .service
+            .list_mailboxes(&account_id)?
+            .into_iter()
+            .find(|mailbox| mailbox.role.as_deref() == Some(role.as_str()))
+            .ok_or_else(|| {
+                RuntimeError::invalid_mutation(format!("account has no mailbox with role '{role}'"))
+            })?;
+        self.replace_message_mailboxes(
+            RuntimeCaller::system(),
+            account_id,
+            message_id,
+            ReplaceMailboxesCommand {
+                mailbox_ids: vec![mailbox.id],
+            },
+        )
+        .await
     }
 
     fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
@@ -916,11 +1013,106 @@ impl RuntimeCore for AuthorityRuntimeHandle {
             .core
             .sessions
             .session_scope(&session_id, caller.account_scope.as_deref())?;
+        // Each named message mutation routes to an existing handle action
+        // (which enqueues the outbox op, publishes the optimistic assertion, and
+        // flushes) wrapped in the shared accept -> execute -> settle flow.
+        //
+        // @spec docs/runtime/L2#mutation-pipeline-and-catalog
         match request.name.as_str() {
             "message.setKeywords" => {
                 let args: MessageSetKeywordsMutationArgs = Self::parse_mutation_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.run_set_keywords_mutation(caller, request, args).await
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    args.command,
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.setReadState" => {
+                let args: MessageSetReadStateArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    keyword_toggle("$seen", args.read),
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.setFlaggedState" => {
+                let args: MessageSetFlaggedStateArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    keyword_toggle("$flagged", args.flagged),
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.setUserTags" => {
+                let args: MessageSetUserTagsArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    SetKeywordsCommand {
+                        add: args.add,
+                        remove: args.remove,
+                    },
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.moveToMailbox" => {
+                let args: MessageMoveToMailboxArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.replace_message_mailboxes(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    ReplaceMailboxesCommand {
+                        mailbox_ids: vec![MailboxId(args.mailbox_id)],
+                    },
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.moveToRole" => {
+                let args: MessageMoveToRoleArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    args.role,
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.archive" | "message.trash" | "message.restoreToInbox" => {
+                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let role = match request.name.as_str() {
+                    "message.archive" => "archive",
+                    "message.trash" => "trash",
+                    _ => "inbox",
+                };
+                let action = self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    role.to_string(),
+                );
+                self.run_message_mutation(caller, &request, action).await
+            }
+            "message.destroy" => {
+                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let action = self.destroy_message(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                );
+                self.run_message_mutation(caller, &request, action).await
             }
             _ => Err(RuntimeError::invalid_mutation(format!(
                 "unknown runtime mutation '{}'",
