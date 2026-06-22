@@ -25,6 +25,7 @@ import {
   createFakeRuntimeAdapter,
   type FakeRuntimeAdapter,
 } from '../src/runtime/fakeAdapter'
+import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
 import { setupDomEnvironment } from './dom-env'
 
 setupDomEnvironment()
@@ -99,6 +100,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Operations now run through the runtime session client (named mutations);
+  // reset its module singleton so an active session never leaks into other
+  // suites.
+  resetRuntimeSessionClientForTesting()
   resetRuntimeAdapterForTesting()
   queryClient.clear()
 })
@@ -125,12 +130,11 @@ describe('operation runner', () => {
     })
 
     await waitFor(() =>
-      expect(runtimeAdapter.messageCommandCalls.length).toBe(1),
+      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(1),
     )
-    expect(runtimeAdapter.messageCommandCalls[0]).toEqual({
-      messageId: 'm1',
-      sourceId: 'primary',
-      command: { kind: 'replaceMailboxes', mailboxIds: ['trash'] },
+    expect(runtimeAdapter.runtimeMutationCalls[0].request).toMatchObject({
+      name: 'message.replaceMailboxes',
+      args: { sourceId: 'primary', messageId: 'm1', mailboxIds: ['trash'] },
     })
     await waitFor(() => expect(result.current.canUndo).toBe(true))
 
@@ -139,13 +143,12 @@ describe('operation runner', () => {
     })
 
     await waitFor(() =>
-      expect(runtimeAdapter.messageCommandCalls.length).toBe(2),
+      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(2),
     )
     // Undo restores the mailbox the message actually came from.
-    expect(runtimeAdapter.messageCommandCalls[1]).toEqual({
-      messageId: 'm1',
-      sourceId: 'primary',
-      command: { kind: 'replaceMailboxes', mailboxIds: ['inbox'] },
+    expect(runtimeAdapter.runtimeMutationCalls[1].request).toMatchObject({
+      name: 'message.replaceMailboxes',
+      args: { sourceId: 'primary', messageId: 'm1', mailboxIds: ['inbox'] },
     })
     await waitFor(() => expect(result.current.canRedo).toBe(true))
   })
@@ -169,13 +172,13 @@ describe('operation runner', () => {
     })
 
     await waitFor(() =>
-      expect(runtimeAdapter.messageRoleMoveCalls.length).toBe(1),
+      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(1),
     )
-    expect(runtimeAdapter.messageRoleMoveCalls[0]).toEqual({
-      messageId: 'm1',
-      role: 'archive',
-      sourceId: 'primary',
+    expect(runtimeAdapter.runtimeMutationCalls[0].request).toMatchObject({
+      name: 'message.moveToRole',
+      args: { sourceId: 'primary', messageId: 'm1', role: 'archive' },
     })
+    expect(runtimeAdapter.messageRoleMoveCalls).toEqual([])
     expect(runtimeAdapter.messageCommandCalls).toEqual([])
     expect(runtimeAdapter.mailboxCalls).toEqual(['primary'])
     await waitFor(() => expect(result.current.canUndo).toBe(true))
@@ -216,7 +219,7 @@ describe('operation runner', () => {
       )
     })
     await waitFor(() =>
-      expect(runtimeAdapter.messageCommandCalls.length).toBe(2),
+      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(2),
     )
 
     // Fire both undos in the same tick: the synchronous pop must select
@@ -227,19 +230,19 @@ describe('operation runner', () => {
     })
 
     await waitFor(() =>
-      expect(runtimeAdapter.messageCommandCalls.length).toBe(4),
+      expect(runtimeAdapter.runtimeMutationCalls.length).toBe(4),
     )
-    const undoCommands = runtimeAdapter.messageCommandCalls.slice(2)
-    expect(undoCommands).toEqual([
+    const undoRequests = runtimeAdapter.runtimeMutationCalls
+      .slice(2)
+      .map((call) => call.request)
+    expect(undoRequests).toMatchObject([
       {
-        messageId: 'm2',
-        sourceId: 'primary',
-        command: { kind: 'replaceMailboxes', mailboxIds: ['archive'] },
+        name: 'message.replaceMailboxes',
+        args: { sourceId: 'primary', messageId: 'm2', mailboxIds: ['archive'] },
       },
       {
-        messageId: 'm1',
-        sourceId: 'primary',
-        command: { kind: 'replaceMailboxes', mailboxIds: ['inbox'] },
+        name: 'message.replaceMailboxes',
+        args: { sourceId: 'primary', messageId: 'm1', mailboxIds: ['inbox'] },
       },
     ])
   })

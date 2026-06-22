@@ -26,11 +26,6 @@ import type {
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
 
-const command: MessageCommand = {
-  kind: 'replaceMailboxes',
-  mailboxIds: ['archive'],
-}
-
 const okResult: MessageCommandResult = {
   detail: null,
   events: [],
@@ -132,13 +127,19 @@ describe('runtime adapter facade', () => {
     )
   })
 
-  it('dispatches message commands through a fake adapter override without a backend', async () => {
+  it('routes commands without a named mutation through the adapter (legacy fallback)', async () => {
     const fake = createFakeRuntimeAdapter()
     fake.queueMessageCommandResult(okResult)
     setRuntimeAdapterForTesting(fake)
 
+    // setKeywords/replaceMailboxes/destroy now route through runMutation;
+    // addToMailbox has no named mutation yet, so it keeps the adapter path.
+    const legacyCommand: MessageCommand = {
+      kind: 'addToMailbox',
+      mailboxId: 'archive',
+    }
     const result = await runtimeMutations.messages.command({
-      command,
+      command: legacyCommand,
       messageId: 'm1',
       sourceId: 'primary',
     })
@@ -146,7 +147,7 @@ describe('runtime adapter facade', () => {
     expect(result).toBe(okResult)
     expect(fake.messageCommandCalls).toEqual([
       {
-        command,
+        command: legacyCommand,
         messageId: 'm1',
         sourceId: 'primary',
       },
@@ -287,21 +288,25 @@ describe('runtime adapter facade', () => {
     expect(getRuntimeAdapter()).toBe(httpRuntimeAdapter)
   })
 
-  it('wraps existing HTTP message command behavior by default', async () => {
+  it('wraps existing HTTP message command behavior for legacy-fallback commands', async () => {
     const commandSpy = spyOn(
       apiClient,
       'performMessageCommand',
     ).mockResolvedValue(okResult)
 
     try {
+      const legacyCommand: MessageCommand = {
+        kind: 'addToMailbox',
+        mailboxId: 'archive',
+      }
       const result = await runtimeMutations.messages.command({
-        command,
+        command: legacyCommand,
         messageId: 'm1',
         sourceId: 'primary',
       })
 
       expect(result).toBe(okResult)
-      expect(commandSpy).toHaveBeenCalledWith('m1', command, 'primary')
+      expect(commandSpy).toHaveBeenCalledWith('m1', legacyCommand, 'primary')
     } finally {
       commandSpy.mockRestore()
     }
