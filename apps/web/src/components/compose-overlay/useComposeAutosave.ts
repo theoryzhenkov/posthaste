@@ -57,6 +57,7 @@ export function useComposeAutosave({
   ready,
   hasUserEdited,
   resetKey,
+  fixedDraftKey,
   intentKind,
   replyContext,
   resolveSubmissionSourceId,
@@ -65,13 +66,19 @@ export function useComposeAutosave({
   ready: boolean
   hasUserEdited: boolean
   resetKey: string
+  // When resuming an existing draft, its id is reused as the key so edits update
+  // that draft instead of creating a new one.
+  fixedDraftKey: string | undefined
   intentKind: ComposeIntent['kind']
   replyContext: ReplyContext | undefined
   resolveSubmissionSourceId: (from: Recipient | null) => string
 }) {
-  // One stable draft key per compose session; regenerated when the compose
-  // identity (resetKey) changes.
-  const [draftKey, setDraftKey] = useState(mintDraftKey)
+  // One stable draft key per compose session: the existing draft's id when
+  // resuming, otherwise minted and regenerated when the compose identity
+  // (resetKey) changes.
+  const [draftKey, setDraftKey] = useState(
+    () => fixedDraftKey ?? mintDraftKey(),
+  )
   const seenResetKeyRef = useRef(resetKey)
   const savedSourceIdRef = useRef<string | null>(null)
   const savedSignatureRef = useRef<string | null>(null)
@@ -93,8 +100,8 @@ export function useComposeAutosave({
     seenResetKeyRef.current = resetKey
     savedSignatureRef.current = null
     savedSourceIdRef.current = null
-    setDraftKey(mintDraftKey())
-  }, [resetKey])
+    setDraftKey(fixedDraftKey ?? mintDraftKey())
+  }, [resetKey, fixedDraftKey])
 
   // Plain functions (not useCallback): the React Compiler memoizes them, and
   // they read mutable refs the compiler must not see manually memoized.
