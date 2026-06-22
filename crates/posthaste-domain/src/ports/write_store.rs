@@ -75,10 +75,25 @@ pub trait OperationOutboxStore: Send + Sync {
         account_id: &AccountId,
     ) -> Result<Vec<Operation>, StoreError>;
 
-    /// All non-terminal operations for an account, in insertion order. Used to
-    /// hydrate optimistic state and surface pending/failed work to the UI.
+    /// Operations to surface as outstanding work in the outbox **UI**:
+    /// everything except `applied`. An `applied` op is provider-accepted and
+    /// awaiting silent convergence, so it is not user-facing work. This is NOT
+    /// the overlay source — use [`Self::list_unsettled_operations`] to fold
+    /// reads. In insertion order.
     fn list_pending_operations(&self, account_id: &AccountId)
         -> Result<Vec<Operation>, StoreError>;
+
+    /// The read-time **overlay** source: every operation whose optimistic
+    /// effect may still need folding — `pending`, `inflight`, and
+    /// `applied`-awaiting-convergence (a flushed message assertion the provider
+    /// accepted but a sync has not yet confirmed into the projection). Excludes
+    /// only `failed`. In insertion order.
+    ///
+    /// @spec docs/replication/L1#retire-on-confirmation
+    fn list_unsettled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError>;
 
     /// Fetch a single operation by id.
     fn get_operation(&self, id: &OperationId) -> Result<Option<Operation>, StoreError>;

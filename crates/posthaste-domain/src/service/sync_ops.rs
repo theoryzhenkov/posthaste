@@ -36,6 +36,16 @@ impl MailService {
         if mode.requires_full_message_metadata() {
             cursors.retain(|cursor| cursor.object_type != SyncObject::Message);
         }
+        // FLUSH: push pending local-first ops before the pull so the observe
+        // sees post-mutation provider state. Successful message state
+        // assertions rest in `applied` (folded by the read overlay); they are
+        // retired below once this sync writes their effect into the projection.
+        // Best-effort: offline leaves them pending and the overlay still folds.
+        //
+        // @spec docs/replication/L1#convergence-cycle
+        let mut events = self.flush_account(account_id, gateway).await?;
+
+        // OBSERVE: pull and write authoritative provider state.
         let batch = gateway.sync(account_id, &cursors, progress.clone()).await?;
         if let Some(progress) = progress {
             progress.report(crate::SyncProgress {
@@ -51,7 +61,7 @@ impl MailService {
                 total_count: None,
             });
         }
-        let mut events = self.sync_writer.apply_sync_batch(account_id, &batch)?;
+        events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
         let mut post_commit_errors = Vec::new();
         if let Some(account) = self.config.get_source(account_id)? {
             let settings = self.config.get_app_settings()?;
@@ -88,18 +98,26 @@ impl MailService {
         };
         let action_count = action_events.len();
         events.extend(action_events);
-        match self.flush_account_and_reconcile(account_id, gateway).await {
+        // Push any ops automation enqueued while applying the batch; they rest
+        // in `applied` and retire on the next sync cycle.
+        match self.flush_account(account_id, gateway).await {
             Ok(settlement_events) => events.extend(settlement_events),
             Err(error) => {
                 ph_warn!(
                     events::DOMAIN_AUTOMATION_POST_SYNC_FAILED,
                     account_id = %account_id,
                     error = %error,
-                    "post-sync automation outbox flush/reconcile failed after sync batch commit"
+                    "post-sync automation outbox flush failed after sync batch commit"
                 );
                 post_commit_errors.push(error.code().to_string());
             }
         }
+        // RETIRE: drop every applied message assertion the projection now
+        // satisfies (folding it has become a no-op). Content-based, so it never
+        // retires before the projection reflects the effect.
+        //
+        // @spec docs/replication/L1#retire-on-confirmation
+        self.retire_satisfied_operations(account_id)?;
         let sync_event = self.events.append_event(
         account_id,
         EVENT_TOPIC_SYNC_COMPLETED,
@@ -125,20 +143,24 @@ impl MailService {
         Ok(events)
     }
 
-    pub(crate) async fn flush_account_and_reconcile(
+    /// One convergence observation: flush pending ops, pull authoritative
+    /// provider state into the projection, and retire the message assertions
+    /// the pull confirmed. Used where a projection-walking loop (automation
+    /// backfill) must see its own progress reflected in the projection before
+    /// the next batch query, since query filters read the projection before the
+    /// read overlay folds.
+    ///
+    /// @spec docs/replication/L1#convergence-cycle
+    pub(crate) async fn flush_and_observe(
         &self,
         account_id: &AccountId,
         gateway: &dyn MailGateway,
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let mut events = self.flush_account(account_id, gateway).await?;
-        if events
-            .iter()
-            .any(|event| event.topic == EVENT_TOPIC_OPERATION_SETTLED)
-        {
-            let cursors = self.sync_state.get_sync_cursors(account_id)?;
-            let batch = gateway.sync(account_id, &cursors, None).await?;
-            events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
-        }
+        let cursors = self.sync_state.get_sync_cursors(account_id)?;
+        let batch = gateway.sync(account_id, &cursors, None).await?;
+        events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
+        self.retire_satisfied_operations(account_id)?;
         Ok(events)
     }
 

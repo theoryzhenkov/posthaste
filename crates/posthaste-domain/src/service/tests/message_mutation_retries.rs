@@ -373,42 +373,205 @@ async fn stale_local_cursor_does_not_conflict_message_assertion_flush() {
 }
 
 #[tokio::test]
-async fn successful_flush_prunes_message_operation_without_advancing_local_cursor() {
+async fn flush_rests_message_assertion_in_applied_and_overlay_keeps_folding() {
+    // Retire-on-confirmation: a flushed message assertion is accepted by the
+    // provider but stays folded by the read overlay until a sync observes its
+    // effect into the projection. It is not pruned on flush, so reads never
+    // flip new -> old -> new while the projection catches up.
+    //
+    // @spec docs/replication/L1#retire-on-confirmation
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-    let config = Arc::new(TestConfig::default());
-    let service = MailService::new(store.clone(), config);
+    *store.rule_page.lock().expect("rule page lock poisoned") =
+        vec![sample_message_summary("message-1", Vec::new())];
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
 
     service
-        .set_keywords(
+        .replace_mailboxes(
             &account,
             &MessageId::from("message-1"),
-            &SetKeywordsCommand {
-                add: vec!["$flagged".to_string()],
-                remove: Vec::new(),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
             },
         )
         .await
-        .expect("mutation should queue");
+        .expect("archive assertion queues");
 
     let events = service
         .flush_account(&account, &gateway)
         .await
         .expect("flush should succeed");
-
     assert_eq!(events.len(), 1);
+    assert_eq!(events[0].topic, EVENT_TOPIC_OPERATION_SETTLED);
+
+    // The op rests in `applied`: excluded from the pending/UI list, but still
+    // present for the overlay and not yet retired.
     assert!(service
         .list_pending_operations(&account)
-        .expect("pending operations should list")
+        .expect("pending list")
         .is_empty());
     assert_eq!(
+        service
+            .applied_message_assertions(&account)
+            .expect("applied list")
+            .len(),
+        1,
+        "a flushed assertion rests in applied until a sync retires it",
+    );
+
+    // The overlay keeps folding the applied assertion, so reads show the moved
+    // message while the authoritative projection is unchanged.
+    assert_eq!(
         store
-            .get_cursor(&account, SyncObject::Message)
-            .expect("cursor lookup should succeed")
-            .expect("cursor should exist")
-            .state,
-        "message-1",
-        "flush does not advance the local cursor; follow-up sync reconciles it",
+            .get_message_mailboxes(&account, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("inbox")],
+        "projection stays provider-owned until sync",
+    );
+    assert!(service
+        .list_messages(&account, Some(&MailboxId::from("inbox")))
+        .expect("inbox overlay read")
+        .is_empty());
+    let archive = service
+        .list_messages(&account, Some(&MailboxId::from("archive")))
+        .expect("archive overlay read");
+    assert_eq!(
+        archive.len(),
+        1,
+        "applied assertion still folds into the view"
+    );
+}
+
+/// A one-message observe batch that reports `record` as provider truth, plus a
+/// fresh message cursor so the test store advances.
+fn observe_batch(record: MessageRecord) -> SyncBatch {
+    SyncBatch {
+        mailboxes: Vec::new(),
+        messages: vec![record],
+        imap_mailbox_states: Vec::new(),
+        imap_message_locations: Vec::new(),
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: Vec::new(),
+        replace_all_mailboxes: false,
+        replace_all_messages: false,
+        cursors: vec![SyncCursor {
+            object_type: SyncObject::Message,
+            state: "message-2".to_string(),
+            updated_at: crate::RFC3339_EPOCH.to_string(),
+        }],
+    }
+}
+
+#[tokio::test]
+async fn sync_retires_applied_assertion_when_projection_satisfies_it() {
+    // Convergence: a flushed assertion rests in `applied`, and the sync that
+    // observes the provider's matching state into the projection retires it.
+    // Content-based, so retirement happens exactly when folding is a no-op.
+    //
+    // @spec docs/replication/L1#retire-on-confirmation
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    *store.rule_page.lock().expect("rule page lock poisoned") =
+        vec![sample_message_summary("message-1", Vec::new())];
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    service
+        .replace_mailboxes(
+            &account_id,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+
+    // The provider reflects the move: the observe returns message-1 in archive.
+    let mut record = sample_message_record("message-1", 0, false);
+    record.mailbox_ids = vec![MailboxId::from("archive")];
+    let gateway = MutationGateway::with_sync_batch(1, observe_batch(record));
+
+    service
+        .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
+        .await
+        .expect("sync converges");
+
+    assert!(
+        service
+            .applied_message_assertions(&account_id)
+            .expect("applied list")
+            .is_empty(),
+        "assertion retired once the projection satisfies it",
+    );
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account_id, &MessageId::from("message-1"))
+            .expect("mailbox lookup"),
+        vec![MailboxId::from("archive")],
+        "projection holds the provider-confirmed state",
+    );
+}
+
+#[tokio::test]
+async fn sync_keeps_assertion_applied_when_projection_does_not_match() {
+    // No premature retire: if the observe does not yet reflect the mutation
+    // (provider lag / partial coverage), the assertion stays applied and folded
+    // so the row never flips back. This is the property the earlier capture-set
+    // retire could not guarantee.
+    //
+    // @spec docs/replication/L1#retire-on-confirmation
+    let account = sample_source();
+    let account_id = account.id.clone();
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    *store.rule_page.lock().expect("rule page lock poisoned") =
+        vec![sample_message_summary("message-1", Vec::new())];
+    let config = Arc::new(TestConfig {
+        sources: vec![account],
+        ..Default::default()
+    });
+    let service = MailService::new(store.clone(), config);
+
+    service
+        .replace_mailboxes(
+            &account_id,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+
+    // The observe still shows the message in inbox (move not yet visible).
+    let record = sample_message_record("message-1", 0, false);
+    let gateway = MutationGateway::with_sync_batch(1, observe_batch(record));
+
+    service
+        .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
+        .await
+        .expect("sync runs");
+
+    assert_eq!(
+        service
+            .applied_message_assertions(&account_id)
+            .expect("applied list")
+            .len(),
+        1,
+        "assertion stays applied until the projection matches",
+    );
+    let archive = service
+        .list_messages(&account_id, Some(&MailboxId::from("archive")))
+        .expect("archive overlay read");
+    assert_eq!(
+        archive.len(),
+        1,
+        "overlay still folds the assertion (no flip)"
     );
 }

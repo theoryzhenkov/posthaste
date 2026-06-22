@@ -82,10 +82,12 @@ impl MailService {
             }
         }
 
-        events.extend(
-            self.flush_account_and_reconcile(account_id, gateway)
-                .await?,
-        );
+        // Backfill walks the projection, so it must observe its own progress
+        // into the projection before the next batch query (query filters read
+        // the projection before the overlay folds). Flush, observe, retire.
+        //
+        // @spec docs/replication/L1#convergence-cycle
+        events.extend(self.flush_and_observe(account_id, gateway).await?);
         Ok((events, has_more))
     }
 }

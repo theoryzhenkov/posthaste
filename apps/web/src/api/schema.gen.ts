@@ -1745,12 +1745,13 @@ export interface components {
          * @description Lifecycle state of an operation within the runtime/provider outbox.
          *
          *     ```text
-         *     pending ─▶ inflight ─▶ applied
+         *     pending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)
          *        ▲          │  └──▶ failed
          *        └──────────┘
          *     ```
          *
          *     @spec docs/L1-outbox#state-machine
+         *     @spec docs/replication/L1#retire-on-confirmation
          * @enum {string}
          */
         OperationState: "pending" | "inflight" | "applied" | "failed";

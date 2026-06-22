@@ -5478,7 +5478,7 @@
       },
       "OperationState": {
         "type": "string",
-        "description": "Lifecycle state of an operation within the runtime/provider outbox.\n\n```text\npending ─▶ inflight ─▶ applied\n   ▲          │  └──▶ failed\n   └──────────┘\n```\n\n@spec docs/L1-outbox#state-machine",
+        "description": "Lifecycle state of an operation within the runtime/provider outbox.\n\n```text\npending ─▶ inflight ─▶ applied ─▶ (retired/removed on convergence)\n   ▲          │  └──▶ failed\n   └──────────┘\n```\n\n@spec docs/L1-outbox#state-machine\n@spec docs/replication/L1#retire-on-confirmation",
         "enum": [
           "pending",
           "inflight",

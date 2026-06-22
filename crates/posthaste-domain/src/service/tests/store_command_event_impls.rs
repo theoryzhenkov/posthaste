@@ -161,6 +161,20 @@ impl OperationOutboxStore for TestStore {
             .collect())
     }
 
+    fn list_unsettled_operations(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<Vec<Operation>, StoreError> {
+        let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
+        Ok(ops
+            .iter()
+            .filter(|op| {
+                &op.account_id == account_id && !matches!(op.state, OperationState::Failed)
+            })
+            .cloned()
+            .collect())
+    }
+
     fn get_operation(&self, id: &OperationId) -> Result<Option<Operation>, StoreError> {
         let ops = self.outbox_operations.lock().expect("outbox lock poisoned");
         Ok(ops.iter().find(|op| &op.id == id).cloned())
