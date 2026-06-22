@@ -2,6 +2,7 @@ import { jsonRequest, request } from './core'
 
 import type {
   CachedSenderAddress,
+  DraftContent,
   Identity,
   OkResponse,
   Operation,
@@ -27,6 +28,16 @@ export async function fetchReplyContext(
 ): Promise<ReplyContext> {
   return request<ReplyContext>(
     `/sources/${sourceId}/messages/${messageId}/reply-context`,
+  )
+}
+
+/** @spec docs/L1-outbox#operation-model */
+export async function fetchDraftContent(
+  sourceId: string,
+  messageId: string,
+): Promise<DraftContent> {
+  return request<DraftContent>(
+    `/sources/${sourceId}/messages/${messageId}/draft-content`,
   )
 }
 

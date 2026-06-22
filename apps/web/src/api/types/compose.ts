@@ -23,6 +23,16 @@ export interface ReplyContext {
   references: string | null
 }
 
+/** Compose-ready content parsed from an existing provider draft. @spec docs/L1-outbox#operation-model */
+export interface DraftContent {
+  from: Recipient | null
+  to: Recipient[]
+  cc: Recipient[]
+  bcc: Recipient[]
+  subject: string
+  body: string
+}
+
 /** @spec docs/L1-api#compose */
 export interface SendMessageAttachmentInput {
   filename: string

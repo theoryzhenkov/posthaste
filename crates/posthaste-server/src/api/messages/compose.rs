@@ -89,6 +89,41 @@ pub async fn get_reply_context(
         .map_err(ApiError::from_runtime_error)
 }
 
+/// GET /v1/sources/{source_id}/messages/{id}/draft-content
+///
+/// @spec docs/L1-outbox#operation-model
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages/{message_id}/draft-content",
+    tag = "messages",
+    summary = "Get draft content",
+    description = "Returns compose-ready content for resuming an existing draft, including Cc/Bcc when cached raw MIME is available.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("message_id" = String, Path, description = "Message identifier")
+    ),
+    responses(
+        (status = 200, description = "The draft content", body = DraftContent),
+        (status = 404, description = "Message not found", body = ApiErrorBody),
+        (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn get_draft_content(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, message_id)): Path<(String, String)>,
+) -> Result<Json<DraftContent>, ApiError> {
+    state
+        .runtime
+        .get_draft_content(
+            RuntimeCaller::api(),
+            AccountId(source_id),
+            MessageId(message_id),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
 /// POST /v1/sources/{source_id}/commands/send
 ///
 /// @spec docs/L1-api#compose

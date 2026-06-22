@@ -1,3 +1,5 @@
+use mail_parser::{Address, MessageParser};
+
 use super::*;
 
 impl MailService {
@@ -117,6 +119,71 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Fetch compose-ready content for resuming an existing provider draft.
+    ///
+    /// Parses cached raw RFC822 bytes so Cc/Bcc are preserved. If the raw MIME
+    /// is not cached yet and a gateway is available, the body is fetched and
+    /// stored first, then parsed. As a last offline fallback, returns the fields
+    /// available in [`MessageDetail`] (which cannot include Cc/Bcc).
+    ///
+    /// @spec docs/L1-outbox#operation-model
+    pub async fn get_draft_content(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        gateway: Option<&dyn MailGateway>,
+    ) -> Result<DraftContentResult, ServiceError> {
+        let result = self
+            .get_message_detail(account_id, message_id, gateway)
+            .await?;
+        let detail = result
+            .detail
+            .ok_or_else(|| StoreError::NotFound(format!("message {}", message_id.as_str())))?;
+        let mut events = result.events;
+
+        if let Some(raw) = self
+            .message_detail_reader
+            .read_raw_message(account_id, message_id)?
+        {
+            return Ok(DraftContentResult {
+                content: draft_content_from_raw_mime(&raw)?,
+                events,
+            });
+        }
+
+        if let Some(gateway) = gateway {
+            let fetched = gateway.fetch_message_body(account_id, message_id).await?;
+            let cache_result = self
+                .sync_writer
+                .apply_message_body(account_id, message_id, &fetched)?;
+            events.extend(cache_result.events);
+            if let Some(raw) = self
+                .message_detail_reader
+                .read_raw_message(account_id, message_id)?
+            {
+                return Ok(DraftContentResult {
+                    content: draft_content_from_raw_mime(&raw)?,
+                    events,
+                });
+            }
+        }
+
+        Ok(DraftContentResult {
+            content: DraftContent {
+                from: detail.summary.from_email.map(|email| Recipient {
+                    name: detail.summary.from_name,
+                    email,
+                }),
+                to: detail.summary.to,
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: detail.summary.subject.unwrap_or_default(),
+                body: detail.body_text.unwrap_or_default(),
+            },
+            events,
+        })
+    }
+
     /// Download a blob for a message, preferring already-cached raw bytes.
     ///
     /// When the message's raw RFC822 body is cached and the gateway can resolve
@@ -144,4 +211,40 @@ impl MailService {
             .await
             .map_err(Into::into)
     }
+}
+
+fn draft_content_from_raw_mime(raw_mime: &[u8]) -> Result<DraftContent, ServiceError> {
+    let parsed = MessageParser::default()
+        .parse(raw_mime)
+        .ok_or_else(|| GatewayError::Rejected("cannot parse draft MIME".to_string()))?;
+    Ok(DraftContent {
+        from: parsed.from().and_then(first_recipient),
+        to: parsed.to().map(addresses_to_recipients).unwrap_or_default(),
+        cc: parsed.cc().map(addresses_to_recipients).unwrap_or_default(),
+        bcc: parsed
+            .bcc()
+            .map(addresses_to_recipients)
+            .unwrap_or_default(),
+        subject: parsed.subject().unwrap_or_default().to_string(),
+        body: parsed
+            .body_text(0)
+            .map(|body| body.to_string())
+            .unwrap_or_default(),
+    })
+}
+
+fn first_recipient(addresses: &Address<'_>) -> Option<Recipient> {
+    addresses_to_recipients(addresses).into_iter().next()
+}
+
+fn addresses_to_recipients(addresses: &Address<'_>) -> Vec<Recipient> {
+    addresses
+        .iter()
+        .filter_map(|address| {
+            Some(Recipient {
+                name: address.name.as_ref().map(|name| name.to_string()),
+                email: address.address.as_ref()?.to_string(),
+            })
+        })
+        .collect()
 }

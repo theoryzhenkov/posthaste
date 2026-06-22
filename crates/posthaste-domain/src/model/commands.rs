@@ -52,6 +52,34 @@ pub struct CommandResult {
     pub events: Vec<DomainEvent>,
 }
 
+/// Compose-ready content parsed from an existing provider draft.
+///
+/// Unlike [`MessageDetail`], this preserves all compose recipient fields that
+/// are present in the cached raw MIME, including Cc and Bcc.
+///
+/// @spec docs/L1-outbox#operation-model
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DraftContent {
+    pub from: Option<Recipient>,
+    pub to: Vec<Recipient>,
+    pub cc: Vec<Recipient>,
+    pub bcc: Vec<Recipient>,
+    pub subject: String,
+    pub body: String,
+}
+
+/// Result of loading draft content; includes events emitted by lazy body fetch.
+///
+/// @spec docs/L1-outbox#operation-model
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftContentResult {
+    pub content: DraftContent,
+    pub events: Vec<DomainEvent>,
+}
+
 /// Server-side outcome of a gateway mutation, carrying an updated sync cursor.
 ///
 /// @spec docs/L1-sync#conflict-model

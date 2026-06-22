@@ -26,6 +26,7 @@ import {
   fetchIdentity,
   fetchMailboxes,
   fetchMessage,
+  fetchDraftContent,
   fetchReplyContext,
   fetchSearchMessages,
   fetchSenderAddresses,
@@ -451,6 +452,9 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
   },
   fetchReplyContext({ sourceId, messageId }) {
     return fetchReplyContext(sourceId, messageId)
+  },
+  fetchDraftContent({ sourceId, messageId }) {
+    return fetchDraftContent(sourceId, messageId)
   },
   fetchSenderAddresses() {
     return fetchSenderAddresses()

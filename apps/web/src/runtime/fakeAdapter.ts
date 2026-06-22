@@ -234,6 +234,9 @@ export function createFakeRuntimeAdapter(
     fetchReplyContext() {
       return unsupported('reply context')
     },
+    fetchDraftContent() {
+      return unsupported('draft content')
+    },
     fetchResourceBlob(descriptor) {
       calls.resourceCalls.push({ descriptor })
       return resolveQueuedOptional(

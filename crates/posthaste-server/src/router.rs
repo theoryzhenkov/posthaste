@@ -130,6 +130,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             get(api::get_reply_context),
         )
         .route(
+            "/sources/{source_id}/messages/{message_id}/draft-content",
+            get(api::get_draft_content),
+        )
+        .route(
             "/sources/{source_id}/commands/send",
             post(api::send_message).layer(DefaultBodyLimit::max(SEND_MESSAGE_BODY_LIMIT_BYTES)),
         )

@@ -52,6 +52,7 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
       throw new Error(`runtime adapter mode ${mode} is not implemented`)
     },
     fetchReplyContext: () => reject(),
+    fetchDraftContent: () => reject(),
     fetchResourceBlob: () => reject(),
     fetchSenderAddresses: () => reject(),
     fetchSettings: () => reject(),

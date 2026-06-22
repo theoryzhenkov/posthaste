@@ -9,6 +9,7 @@ import { runtimeViews } from '@/runtime/views'
 
 import {
   accountFromOptions,
+  formatRecipient,
   formatRecipients,
   wildcardMatchesEmail,
 } from '../composeFormHelpers'
@@ -39,27 +40,29 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
   const requiresMessageContext =
     intent.kind === 'reply' || intent.kind === 'forward'
   const isDraftEdit = intent.kind === 'draft'
-  // Resume-editing seeds the form from the existing draft message. Note: the
-  // message detail exposes `to` but not cc/bcc (those live only in the stored
-  // MIME), so cc/bcc are not restored when editing a synced draft.
   const draftSeedQuery = useQuery({
     queryKey: isDraftEdit
       ? ['draft-seed', intent.sourceId, intent.messageId]
       : ['draft-seed', null],
     queryFn: () =>
-      runtimeViews.mail.message(
-        isDraftEdit ? intent.messageId : '',
-        intent.sourceId,
-      ),
+      runtimeViews.compose.draftContent({
+        sourceId: intent.sourceId,
+        messageId: isDraftEdit ? intent.messageId : '',
+      }),
     enabled: isDraftEdit,
   })
   const draftSeed = useMemo(
     () =>
       draftSeedQuery.data
         ? {
+            from: draftSeedQuery.data.from
+              ? formatRecipient(draftSeedQuery.data.from)
+              : '',
             to: formatRecipients(draftSeedQuery.data.to),
-            subject: draftSeedQuery.data.subject ?? '',
-            body: draftSeedQuery.data.bodyText ?? '',
+            cc: formatRecipients(draftSeedQuery.data.cc),
+            bcc: formatRecipients(draftSeedQuery.data.bcc),
+            subject: draftSeedQuery.data.subject,
+            body: draftSeedQuery.data.body,
           }
         : undefined,
     [draftSeedQuery.data],
