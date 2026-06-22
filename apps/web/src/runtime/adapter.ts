@@ -71,6 +71,8 @@ function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
     saveDraft: () => reject(),
     deleteDraft: () => reject(),
     listPendingOperations: () => reject(),
+    discardOperation: () => reject(),
+    retryOperation: () => reject(),
     startProviderOAuth: () => reject(),
     triggerSync: () => reject(),
     updateAccount: () => reject(),

@@ -61,6 +61,56 @@ impl MailService {
             .map_err(Into::into)
     }
 
+    /// Remove a queued or failed outbox operation, giving the user an escape
+    /// hatch for a dead op. An in-flight op is never yanked (its provider call
+    /// may be mid-send). Discarding a failed op also unblocks its dependents: a
+    /// missing dependency reads as satisfied, so a dependent no longer cancels.
+    ///
+    /// @spec docs/L1-outbox#state-machine
+    pub fn discard_operation(
+        &self,
+        operation_id: &OperationId,
+    ) -> Result<bool, ServiceError> {
+        let Some(operation) = self.outbox.get_operation(operation_id)? else {
+            return Ok(false);
+        };
+        if operation.state == OperationState::Inflight {
+            return Err(GatewayError::Rejected(
+                "cannot discard an in-flight operation".to_string(),
+            )
+            .into());
+        }
+        self.outbox.remove_operation(operation_id)?;
+        Ok(true)
+    }
+
+    /// Re-arm a failed outbox operation to `pending` so the next flush
+    /// re-attempts it (e.g. after the cause of the failure is fixed). Clears the
+    /// recorded error. Only failed ops are retryable.
+    ///
+    /// @spec docs/L1-outbox#state-machine
+    pub fn retry_operation(
+        &self,
+        operation_id: &OperationId,
+    ) -> Result<bool, ServiceError> {
+        let Some(operation) = self.outbox.get_operation(operation_id)? else {
+            return Ok(false);
+        };
+        if operation.state != OperationState::Failed {
+            return Err(GatewayError::Rejected(
+                "only failed operations can be retried".to_string(),
+            )
+            .into());
+        }
+        self.outbox.update_operation_state(
+            operation_id,
+            OperationState::Pending,
+            operation.attempts,
+            None,
+        )?;
+        Ok(true)
+    }
+
     /// Message state assertions resting in `applied` (flushed, accepted by the
     /// provider, folded by the read overlay, awaiting convergence).
     ///

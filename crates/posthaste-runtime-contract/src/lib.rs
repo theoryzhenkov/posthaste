@@ -16,7 +16,8 @@ use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, DraftContent,
     EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, Operation, ProviderAuthKind, ProviderHint, RemoveFromMailboxCommand,
+    MessageSummary, Operation, OperationId, ProviderAuthKind, ProviderHint,
+    RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind,
     SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
     SmtpTransportSettings, SyncMode, TagSummary, ValidationError,
@@ -1071,6 +1072,23 @@ pub trait RuntimeCore: Send + Sync {
         caller: RuntimeCaller,
         account_id: AccountId,
     ) -> Result<Vec<Operation>, RuntimeError>;
+
+    /// Remove a queued or failed outbox operation (a user escape hatch for a
+    /// dead op). In-flight operations cannot be discarded.
+    async fn discard_operation(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError>;
+
+    /// Re-arm a failed outbox operation so the next flush re-attempts it.
+    async fn retry_operation(
+        &self,
+        caller: RuntimeCaller,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError>;
 
     async fn set_message_keywords(
         &self,

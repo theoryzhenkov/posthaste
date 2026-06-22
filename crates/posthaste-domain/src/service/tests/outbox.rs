@@ -226,6 +226,78 @@ async fn permanent_failure_marks_op_failed_and_settles() {
     assert_eq!(pending[0].last_error.as_deref(), Some("invalid draft"));
 }
 
+async fn queue_and_fail_one(
+    service: &MailService,
+    account: &AccountId,
+    gateway: &MutationGateway,
+) -> OperationId {
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("invalid draft".to_string())));
+    service
+        .queue_operation(
+            account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftCreate,
+            serde_json::to_value(draft_request("Hello")).unwrap(),
+        )
+        .expect("queue create");
+    service.flush_account(account, gateway).await.expect("flush");
+    let failed = service.list_pending_operations(account).expect("pending");
+    assert_eq!(failed[0].state, OperationState::Failed);
+    failed[0].id.clone()
+}
+
+#[tokio::test]
+async fn discard_removes_a_failed_operation() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let id = queue_and_fail_one(&service, &account, &gateway).await;
+
+    assert!(service.discard_operation(&id).expect("discard"));
+    assert!(service
+        .list_pending_operations(&account)
+        .expect("pending")
+        .is_empty());
+}
+
+#[tokio::test]
+async fn retry_re_arms_a_failed_operation_to_pending() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let id = queue_and_fail_one(&service, &account, &gateway).await;
+
+    assert!(service.retry_operation(&id).expect("retry"));
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending[0].state, OperationState::Pending);
+    assert_eq!(pending[0].last_error, None);
+}
+
+#[tokio::test]
+async fn retry_rejects_a_non_failed_operation() {
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    service
+        .queue_operation(
+            &account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftCreate,
+            serde_json::to_value(draft_request("Hello")).unwrap(),
+        )
+        .expect("queue create");
+    let pending = service.list_pending_operations(&account).expect("pending");
+    assert_eq!(pending[0].state, OperationState::Pending);
+
+    assert!(service.retry_operation(&pending[0].id).is_err());
+}
+
 #[tokio::test]
 async fn failed_draft_predecessor_cancels_dependent_update() {
     let account = AccountId::from("primary");

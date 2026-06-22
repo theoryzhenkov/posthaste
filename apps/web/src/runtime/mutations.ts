@@ -175,6 +175,12 @@ export const runtimeMutations = {
     listPendingOperations(sourceId: string): Promise<Operation[]> {
       return getRuntimeAdapter().listPendingOperations(sourceId)
     },
+    discardOperation(sourceId: string, operationId: string): Promise<void> {
+      return getRuntimeAdapter().discardOperation(sourceId, operationId)
+    },
+    retryOperation(sourceId: string, operationId: string): Promise<void> {
+      return getRuntimeAdapter().retryOperation(sourceId, operationId)
+    },
   },
   oauth: {
     startProvider(input: StartProviderOAuthInput): Promise<StartOAuthResponse> {
