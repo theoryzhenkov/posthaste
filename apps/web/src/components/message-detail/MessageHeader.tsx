@@ -1,5 +1,14 @@
 import type { MouseEvent } from 'react'
-import { Archive, Ellipsis, Forward, Paperclip, Reply } from 'lucide-react'
+import {
+  Archive,
+  Ellipsis,
+  Forward,
+  Paperclip,
+  Pencil,
+  Reply,
+} from 'lucide-react'
+
+import { SYSTEM_KEYWORDS } from '@/domainVocabulary'
 
 import type { MessageDetail, MessageSummary } from '@/api/types'
 
@@ -16,6 +25,7 @@ export function MessageHeader({
   conversationSubject,
   message,
   onArchive,
+  onEditDraft,
   onForward,
   onReply,
   onSearch,
@@ -24,11 +34,13 @@ export function MessageHeader({
   conversationSubject: string | null | undefined
   message: MessageDetail
   onArchive: () => void
+  onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
   onSearch?: (query: string, append?: boolean) => void
   threadMessages: MessageSummary[]
 }) {
+  const isDraft = message.keywords.includes(SYSTEM_KEYWORDS.Draft)
   const senderName = message.fromName ?? message.fromEmail ?? 'Unknown sender'
   const senderEmail = message.fromEmail ?? ''
   const tags = userTags(message.keywords)
@@ -66,7 +78,9 @@ export function MessageHeader({
               </div>
             </div>
             <HeaderActions
+              isDraft={isDraft}
               onArchive={onArchive}
+              onEditDraft={onEditDraft}
               onForward={onForward}
               onReply={onReply}
             />
@@ -117,14 +131,36 @@ function SenderButtons({
 }
 
 function HeaderActions({
+  isDraft,
   onArchive,
+  onEditDraft,
   onForward,
   onReply,
 }: {
+  isDraft: boolean
   onArchive: () => void
+  onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
 }) {
+  if (isDraft && onEditDraft) {
+    return (
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          aria-label="Edit draft"
+          onClick={onEditDraft}
+          size="sm"
+          title="Edit draft"
+          type="button"
+          variant="ghost"
+          className="gap-1.5"
+        >
+          <Pencil size={14} strokeWidth={1.6} />
+          Edit draft
+        </Button>
+      </div>
+    )
+  }
   return (
     <div className="flex shrink-0 items-center gap-1">
       <Button

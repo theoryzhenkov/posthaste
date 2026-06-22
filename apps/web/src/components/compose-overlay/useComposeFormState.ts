@@ -23,6 +23,7 @@ import { validateAttachmentLimits } from './attachments'
 
 export function useComposeFormState({
   composeKey,
+  draftSeed,
   forwardAttachments,
   identity,
   intentKind,
@@ -30,6 +31,7 @@ export function useComposeFormState({
   replyContext,
 }: {
   composeKey: string
+  draftSeed: { to: string; subject: string; body: string } | undefined
   forwardAttachments: ComposeAttachment[]
   identity: Identity | undefined
   intentKind: ComposeIntent['kind']
@@ -39,6 +41,20 @@ export function useComposeFormState({
   const bodyRef = useRef<MarkdownComposerEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const initialForm = useMemo<ComposeForm>(() => {
+    if (intentKind === 'draft') {
+      // cc/bcc are not restored: the synced draft exposes only `to`.
+      return draftSeed
+        ? {
+            from: '',
+            to: draftSeed.to,
+            cc: '',
+            bcc: '',
+            subject: draftSeed.subject,
+            body: draftSeed.body,
+            attachments: [],
+          }
+        : EMPTY_FORM
+    }
     if (intentKind === 'new' || !replyContext) {
       return EMPTY_FORM
     }
@@ -58,9 +74,11 @@ export function useComposeFormState({
       body: seed ? `\n\n${seed}` : '',
       attachments: [],
     }
-  }, [intentKind, replyContext])
+  }, [draftSeed, intentKind, replyContext])
+  const contextReady =
+    intentKind === 'draft' ? Boolean(draftSeed) : Boolean(replyContext)
   const formResetKey = isMessageBasedCompose
-    ? `${composeKey}:${replyContext ? 'ready' : 'loading'}`
+    ? `${composeKey}:${contextReady ? 'ready' : 'loading'}`
     : composeKey
   const [composeState, setComposeState] = useState(() => ({
     errorMessage: null as string | null,

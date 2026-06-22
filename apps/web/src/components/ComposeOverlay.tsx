@@ -37,6 +37,7 @@ export function ComposeOverlay({
   const forwardAttachments = useForwardAttachments({ intent })
   const formState = useComposeFormState({
     composeKey: queries.composeKey,
+    draftSeed: queries.draftSeed,
     forwardAttachments: forwardAttachments.attachments,
     identity: queries.identityQuery.data,
     intentKind: intent.kind,
@@ -50,14 +51,21 @@ export function ComposeOverlay({
   })
 
   const isWaitingForMessageContext =
-    queries.requiresMessageContext && !queries.replyContextQuery.data
+    (queries.requiresMessageContext && !queries.replyContextQuery.data) ||
+    (queries.isDraftEdit && !queries.draftSeed)
   const isPreparingMessage =
-    (isWaitingForMessageContext && !queries.replyContextQuery.isError) ||
+    (isWaitingForMessageContext &&
+      !queries.replyContextQuery.isError &&
+      !queries.draftSeedQuery.isError) ||
     forwardAttachments.isLoading
   const fieldsDisabled =
     isWaitingForMessageContext || forwardAttachments.isLoading
   const preparingLabel =
-    intent.kind === 'forward' ? 'Preparing forward...' : 'Preparing reply...'
+    intent.kind === 'forward'
+      ? 'Preparing forward...'
+      : intent.kind === 'draft'
+        ? 'Loading draft...'
+        : 'Preparing reply...'
   const fromLabel = formState.form.from.trim()
     ? formState.form.from
     : queries.identityQuery.isError
@@ -71,6 +79,7 @@ export function ComposeOverlay({
     ready: !isPreparingMessage,
     hasUserEdited: formState.hasUserEdited,
     resetKey: formState.formResetKey,
+    fixedDraftKey: intent.kind === 'draft' ? intent.messageId : undefined,
     intentKind: intent.kind,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,
@@ -112,7 +121,9 @@ export function ComposeOverlay({
       ? 'reply composer'
       : intent.kind === 'forward'
         ? 'forward composer'
-        : 'message composer'
+        : intent.kind === 'draft'
+          ? 'draft composer'
+          : 'message composer'
   const header = (
     <ComposeHeader fromLabel={fromLabel} intentKind={intent.kind} />
   )

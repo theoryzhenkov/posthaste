@@ -34,6 +34,7 @@ interface MessageSelection extends SourceMessageRef {
 interface MessageDetailProps {
   selection: MessageSelection | null
   onArchive: () => void
+  onEditDraft?: () => void
   onForward: () => void
   onReply: () => void
   onSelectMessage: (message: MessageSummary) => void
@@ -48,6 +49,7 @@ interface MessageDetailProps {
 export function MessageDetail({
   selection,
   onArchive,
+  onEditDraft,
   onForward,
   onReply,
   onSelectMessage,
@@ -130,6 +132,7 @@ export function MessageDetail({
         conversationSubject={conversation.subject}
         message={message}
         onArchive={onArchive}
+        onEditDraft={onEditDraft}
         onForward={onForward}
         onReply={onReply}
         onSearch={onSearch}

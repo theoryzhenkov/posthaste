@@ -33,7 +33,8 @@ export function useForwardAttachments({
 }: {
   intent: ComposeIntent
 }): ForwardAttachmentsResult {
-  const enabled = intent.kind === 'forward'
+  // Both forwarding and resuming a draft re-send the source message's files.
+  const enabled = intent.kind === 'forward' || intent.kind === 'draft'
   const sourceId = enabled ? intent.sourceId : ''
   const messageId = enabled ? intent.messageId : ''
 
