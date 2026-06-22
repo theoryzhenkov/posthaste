@@ -31,8 +31,18 @@ struct StoredSession {
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
     latest_mutations: HashMap<RuntimeMutationId, StoredMutation>,
     mutations_by_client_id: HashMap<ClientMutationId, RuntimeMutationId>,
+    /// Reversible mutations the session has applied, oldest first. `mutation.undo`
+    /// reverses the most recent.
+    undo_stack: Vec<HistoryEntry>,
+    /// Steps moved off `undo_stack` by an undo, oldest first. `mutation.redo`
+    /// replays the most recent. Cleared whenever a new user mutation is recorded.
+    redo_stack: Vec<HistoryEntry>,
     event_task: Option<AbortHandle>,
 }
+
+/// Upper bound on each session's undo and redo history (matches the renderer's
+/// former client-side bound).
+const MAX_HISTORY: usize = 50;
 
 #[derive(Clone)]
 struct StoredMutation {
@@ -43,6 +53,38 @@ struct StoredMutation {
     state: MutationSettlementState,
     error: Option<RuntimeAdapterError>,
     output: Value,
+}
+
+/// A named mutation (name + args). Used both as the forward command recorded on
+/// the undo stack and as the inverse that reverses it.
+///
+/// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+#[derive(Clone)]
+pub(crate) struct MutationCommand {
+    pub(crate) name: String,
+    pub(crate) args: Value,
+}
+
+/// One reversible step on a session's undo/redo history. `forward` is the
+/// command that was applied (replayed on redo); `inverse` reverses it (run on
+/// undo). Non-invertible mutations (destroy) are never recorded.
+///
+/// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+#[derive(Clone)]
+pub(crate) struct HistoryEntry {
+    pub(crate) forward: MutationCommand,
+    pub(crate) inverse: MutationCommand,
+}
+
+/// How `accept_mutation` should touch the session's undo/redo history.
+pub(crate) enum HistoryRecord {
+    /// A new user mutation: push `{forward, inverse}` onto the undo stack and
+    /// clear the redo stack. `forward` is taken from the request.
+    Record(MutationCommand),
+    /// Leave the stacks untouched — the mutation is non-invertible, or it is the
+    /// replay driven by `mutation.undo`/`mutation.redo` (which manage the stacks
+    /// themselves).
+    Skip,
 }
 
 pub(crate) enum MutationAcceptance {
@@ -109,6 +151,8 @@ impl SessionRegistry {
                 latest_snapshots: HashMap::new(),
                 latest_mutations: HashMap::new(),
                 mutations_by_client_id: HashMap::new(),
+                undo_stack: Vec::new(),
+                redo_stack: Vec::new(),
                 event_task: None,
             },
         );
@@ -248,6 +292,7 @@ impl SessionRegistry {
         &self,
         caller: RuntimeCaller,
         request: &MutationRequest,
+        history: HistoryRecord,
     ) -> Result<MutationAcceptance, RuntimeError> {
         let session_id = request.session_id.as_ref().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
@@ -285,6 +330,20 @@ impl SessionRegistry {
             error: None,
             output: Value::Null,
         };
+        let recorded = matches!(history, HistoryRecord::Record(_));
+        if let HistoryRecord::Record(inverse) = history {
+            push_capped(
+                &mut session.undo_stack,
+                HistoryEntry {
+                    forward: MutationCommand {
+                        name: request.name.clone(),
+                        args: request.args.clone(),
+                    },
+                    inverse,
+                },
+            );
+            session.redo_stack.clear();
+        }
         session
             .mutations_by_client_id
             .insert(request.client_mutation_id.clone(), mutation_id.clone());
@@ -295,7 +354,94 @@ impl SessionRegistry {
         let sender = session.frames.clone();
         drop(sessions);
         let _ = sender.send(frame);
+        if recorded {
+            self.emit_history_frame(session_id)?;
+        }
         Ok(MutationAcceptance::New { mutation_id })
+    }
+
+    /// Take the most recent reversible step off the undo stack so the caller can
+    /// run its inverse. On success the caller calls [`push_redo`]; on failure it
+    /// restores it with [`restore_undo`].
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    pub(crate) fn pop_undo(
+        &self,
+        session_id: &RuntimeSessionId,
+    ) -> Result<Option<HistoryEntry>, RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        Ok(session.undo_stack.pop())
+    }
+
+    /// Take the most recent undone step off the redo stack so the caller can
+    /// replay its forward command.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    pub(crate) fn pop_redo(
+        &self,
+        session_id: &RuntimeSessionId,
+    ) -> Result<Option<HistoryEntry>, RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        Ok(session.redo_stack.pop())
+    }
+
+    /// Make a just-undone step redoable. Does not clear the redo stack.
+    pub(crate) fn push_redo(
+        &self,
+        session_id: &RuntimeSessionId,
+        entry: HistoryEntry,
+    ) -> Result<(), RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        push_capped(&mut session.redo_stack, entry);
+        Ok(())
+    }
+
+    /// Return a step to the undo stack — either after a redo replayed it, or to
+    /// roll back a failed undo. Does not clear the redo stack (unlike recording a
+    /// fresh user mutation).
+    pub(crate) fn restore_undo(
+        &self,
+        session_id: &RuntimeSessionId,
+        entry: HistoryEntry,
+    ) -> Result<(), RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        push_capped(&mut session.undo_stack, entry);
+        Ok(())
+    }
+
+    /// Broadcast the session's current undo/redo availability so the renderer can
+    /// drive undo/redo button state. Called whenever the stacks change.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    pub(crate) fn emit_history_frame(
+        &self,
+        session_id: &RuntimeSessionId,
+    ) -> Result<(), RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        let frame = RuntimeFrame::MutationHistory {
+            session_seq: next_seq(session),
+            can_undo: !session.undo_stack.is_empty(),
+            can_redo: !session.redo_stack.is_empty(),
+        };
+        let sender = session.frames.clone();
+        drop(sessions);
+        let _ = sender.send(frame);
+        Ok(())
     }
 
     pub(crate) fn settle_mutation(
@@ -549,6 +695,15 @@ fn view_frame_to_runtime(session: &mut StoredSession, frame: ViewFrame) -> Optio
 fn next_seq(session: &mut StoredSession) -> RuntimeSessionSeq {
     session.last_seq += 1;
     RuntimeSessionSeq::new(session.last_seq)
+}
+
+/// Push onto a history stack, evicting the oldest entry once `MAX_HISTORY` is
+/// exceeded so a session's undo/redo state stays bounded.
+fn push_capped(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
+    stack.push(entry);
+    if stack.len() > MAX_HISTORY {
+        stack.remove(0);
+    }
 }
 
 fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {

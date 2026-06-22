@@ -35,7 +35,7 @@ use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
 use crate::oauth::{OAuthExchangeResult, OAuthProviderProfile, OAuthTokenSet};
-use crate::sessions::{MutationAcceptance, SessionRegistry};
+use crate::sessions::{HistoryRecord, MutationAcceptance, MutationCommand, SessionRegistry};
 use crate::views::ViewRegistry;
 use crate::{
     AccountRuntimeOverviewProvider, AccountSupervisor, LiveAccountRuntimeProvider,
@@ -339,6 +339,14 @@ struct MessageMoveToRoleArgs {
     role: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageReplaceMailboxesArgs {
+    source_id: String,
+    message_id: String,
+    mailbox_ids: Vec<String>,
+}
+
 /// Build a single-keyword add/remove command from a desired presence.
 fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
     if present {
@@ -621,6 +629,7 @@ impl AuthorityRuntimeHandle {
         &self,
         caller: RuntimeCaller,
         request: &MutationRequest,
+        history: HistoryRecord,
         action: Fut,
     ) -> Result<MutationReceipt, RuntimeError>
     where
@@ -629,7 +638,7 @@ impl AuthorityRuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mutation_id = match self.core.sessions.accept_mutation(caller, request)? {
+        let mutation_id = match self.core.sessions.accept_mutation(caller, request, history)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
@@ -660,6 +669,91 @@ impl AuthorityRuntimeHandle {
                 )
             }
         }
+    }
+
+    /// Read the message's current overlay-folded summary (keywords + mailbox
+    /// membership) without provider work, for computing an undo inverse.
+    async fn current_message_summary(
+        &self,
+        source_id: &str,
+        message_id: &str,
+    ) -> Result<Option<posthaste_domain::MessageSummary>, RuntimeError> {
+        let result = self
+            .core
+            .service
+            .get_message_detail(
+                &AccountId(source_id.to_string()),
+                &MessageId(message_id.to_string()),
+                None,
+            )
+            .await?;
+        Ok(result.detail.map(|detail| detail.summary))
+    }
+
+    /// The precise keyword command that restores the message's current keyword
+    /// set after `command` is applied. Reads current keywords so the inverse is
+    /// correct even when the forward command is a partial no-op (e.g. adding a
+    /// keyword that was already present).
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn keyword_inverse(
+        &self,
+        source_id: &str,
+        message_id: &str,
+        command: &SetKeywordsCommand,
+    ) -> Result<MutationCommand, RuntimeError> {
+        let present: std::collections::HashSet<String> = self
+            .current_message_summary(source_id, message_id)
+            .await?
+            .map(|summary| summary.keywords)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        // Re-add keywords that were present and would be removed; remove keywords
+        // that were absent and would be added. Untouched keywords stay as-is.
+        let add: Vec<String> = command
+            .remove
+            .iter()
+            .filter(|keyword| present.contains(*keyword))
+            .cloned()
+            .collect();
+        let remove: Vec<String> = command
+            .add
+            .iter()
+            .filter(|keyword| !present.contains(*keyword))
+            .cloned()
+            .collect();
+        Ok(MutationCommand {
+            name: "message.setKeywords".to_string(),
+            args: serde_json::json!({
+                "sourceId": source_id,
+                "messageId": message_id,
+                "command": { "add": add, "remove": remove },
+            }),
+        })
+    }
+
+    /// The `replaceMailboxes` command that restores the message's current mailbox
+    /// membership. `None` when the message can't be read, in which case the
+    /// mutation is treated as non-invertible.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn mailbox_inverse(
+        &self,
+        source_id: &str,
+        message_id: &str,
+    ) -> Result<Option<MutationCommand>, RuntimeError> {
+        let Some(summary) = self.current_message_summary(source_id, message_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(MutationCommand {
+            name: "message.replaceMailboxes".to_string(),
+            args: serde_json::json!({
+                "sourceId": source_id,
+                "messageId": message_id,
+                "mailboxIds": summary.mailbox_ids,
+            }),
+        }))
     }
 
     /// Resolve the account's mailbox for `role` and replace the message's
@@ -739,6 +833,287 @@ impl AuthorityRuntimeHandle {
         };
         stream.boxed()
     }
+
+    /// Route a single named message mutation to its handle action (which
+    /// enqueues the outbox op, publishes the optimistic assertion, and flushes)
+    /// wrapped in the shared accept -> execute -> settle flow. `record` is true
+    /// for fresh user actions (which capture an inverse onto the undo stack) and
+    /// false for the replays driven by undo/redo.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn dispatch_named_mutation(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        request: MutationRequest,
+        record: bool,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let session_scope = self
+            .core
+            .sessions
+            .session_scope(&session_id, caller.account_scope.as_deref())?;
+        match request.name.as_str() {
+            "message.setKeywords" => {
+                let args: MessageSetKeywordsMutationArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let history = self
+                    .keyword_history(record, &args.source_id, &args.message_id, &args.command)
+                    .await?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    args.command,
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.setReadState" => {
+                let args: MessageSetReadStateArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let command = keyword_toggle("$seen", args.read);
+                let history = self
+                    .keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    command,
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.setFlaggedState" => {
+                let args: MessageSetFlaggedStateArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let command = keyword_toggle("$flagged", args.flagged);
+                let history = self
+                    .keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    command,
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.setUserTags" => {
+                let args: MessageSetUserTagsArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let command = SetKeywordsCommand {
+                    add: args.add,
+                    remove: args.remove,
+                };
+                let history = self
+                    .keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?;
+                let action = self.set_message_keywords(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    command,
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.moveToMailbox" => {
+                let args: MessageMoveToMailboxArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let history = self
+                    .mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?;
+                let action = self.replace_message_mailboxes(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    ReplaceMailboxesCommand {
+                        mailbox_ids: vec![MailboxId(args.mailbox_id)],
+                    },
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.replaceMailboxes" => {
+                let args: MessageReplaceMailboxesArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let history = self
+                    .mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?;
+                let action = self.replace_message_mailboxes(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    ReplaceMailboxesCommand {
+                        mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
+                    },
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.moveToRole" => {
+                let args: MessageMoveToRoleArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let history = self
+                    .mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?;
+                let action = self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    args.role,
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.archive" | "message.trash" | "message.restoreToInbox" => {
+                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                let role = match request.name.as_str() {
+                    "message.archive" => "archive",
+                    "message.trash" => "trash",
+                    _ => "inbox",
+                };
+                let history = self
+                    .mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?;
+                let action = self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    role.to_string(),
+                );
+                self.run_message_mutation(caller, &request, history, action)
+                    .await
+            }
+            "message.destroy" => {
+                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                // Destroy is the one non-invertible message mutation.
+                let action = self.destroy_message(
+                    RuntimeCaller::system(),
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                );
+                self.run_message_mutation(caller, &request, HistoryRecord::Skip, action)
+                    .await
+            }
+            _ => Err(RuntimeError::invalid_mutation(format!(
+                "unknown runtime mutation '{}'",
+                request.name
+            ))),
+        }
+    }
+
+    /// History plan for a keyword mutation: capture the inverse when this is a
+    /// fresh user action, otherwise skip (the replay driven by undo/redo).
+    async fn keyword_history(
+        &self,
+        record: bool,
+        source_id: &str,
+        message_id: &str,
+        command: &SetKeywordsCommand,
+    ) -> Result<HistoryRecord, RuntimeError> {
+        if !record {
+            return Ok(HistoryRecord::Skip);
+        }
+        Ok(HistoryRecord::Record(
+            self.keyword_inverse(source_id, message_id, command).await?,
+        ))
+    }
+
+    /// History plan for a mailbox mutation. Skips recording for undo/redo
+    /// replays and when the message can't be read (non-invertible).
+    async fn mailbox_history(
+        &self,
+        record: bool,
+        source_id: &str,
+        message_id: &str,
+    ) -> Result<HistoryRecord, RuntimeError> {
+        if !record {
+            return Ok(HistoryRecord::Skip);
+        }
+        Ok(match self.mailbox_inverse(source_id, message_id).await? {
+            Some(inverse) => HistoryRecord::Record(inverse),
+            None => HistoryRecord::Skip,
+        })
+    }
+
+    /// Reverse the most recent reversible mutation by replaying its captured
+    /// inverse, then make the step redoable. Errors when there is nothing to
+    /// undo.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn run_undo(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        request: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let Some(entry) = self.core.sessions.pop_undo(&session_id)? else {
+            return Err(RuntimeError::invalid_mutation("nothing to undo"));
+        };
+        let replay = MutationRequest {
+            session_id: Some(session_id.clone()),
+            name: entry.inverse.name.clone(),
+            args: entry.inverse.args.clone(),
+            client_mutation_id: request.client_mutation_id,
+            context: request.context,
+        };
+        match self
+            .dispatch_named_mutation(caller, session_id.clone(), replay, false)
+            .await
+        {
+            Ok(receipt) => {
+                self.core.sessions.push_redo(&session_id, entry)?;
+                self.core.sessions.emit_history_frame(&session_id)?;
+                Ok(receipt)
+            }
+            Err(error) => {
+                // The replay failed before it took effect; keep the step undoable.
+                self.core.sessions.restore_undo(&session_id, entry)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Re-apply the most recently undone mutation by replaying its forward
+    /// command, then make it undoable again. Errors when there is nothing to
+    /// redo.
+    ///
+    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    async fn run_redo(
+        &self,
+        caller: RuntimeCaller,
+        session_id: RuntimeSessionId,
+        request: MutationRequest,
+    ) -> Result<MutationReceipt, RuntimeError> {
+        let Some(entry) = self.core.sessions.pop_redo(&session_id)? else {
+            return Err(RuntimeError::invalid_mutation("nothing to redo"));
+        };
+        let replay = MutationRequest {
+            session_id: Some(session_id.clone()),
+            name: entry.forward.name.clone(),
+            args: entry.forward.args.clone(),
+            client_mutation_id: request.client_mutation_id,
+            context: request.context,
+        };
+        match self
+            .dispatch_named_mutation(caller, session_id.clone(), replay, false)
+            .await
+        {
+            Ok(receipt) => {
+                self.core.sessions.restore_undo(&session_id, entry)?;
+                self.core.sessions.emit_history_frame(&session_id)?;
+                Ok(receipt)
+            }
+            Err(error) => {
+                // The replay failed before it took effect; keep the step redoable.
+                self.core.sessions.push_redo(&session_id, entry)?;
+                Err(error)
+            }
+        }
+    }
 }
 
 fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
@@ -749,6 +1124,7 @@ fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
         RuntimeLifecycle::Stopping => "stopping",
         RuntimeLifecycle::Stopped => "stopped",
     }
+
 }
 
 #[async_trait]
@@ -1009,117 +1385,20 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let session_scope = self
-            .core
-            .sessions
-            .session_scope(&session_id, caller.account_scope.as_deref())?;
-        // Each named message mutation routes to an existing handle action
-        // (which enqueues the outbox op, publishes the optimistic assertion, and
-        // flushes) wrapped in the shared accept -> execute -> settle flow.
+        // Undo/redo navigate the session's runtime-owned history stack; every
+        // other mutation is a fresh user action that records onto it.
         //
         // @spec docs/runtime/L2#mutation-pipeline-and-catalog
         match request.name.as_str() {
-            "message.setKeywords" => {
-                let args: MessageSetKeywordsMutationArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.command,
-                );
-                self.run_message_mutation(caller, &request, action).await
+            "mutation.undo" => self.run_undo(caller, session_id, request).await,
+            "mutation.redo" => self.run_redo(caller, session_id, request).await,
+            _ => {
+                self.dispatch_named_mutation(caller, session_id, request, true)
+                    .await
             }
-            "message.setReadState" => {
-                let args: MessageSetReadStateArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    keyword_toggle("$seen", args.read),
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.setFlaggedState" => {
-                let args: MessageSetFlaggedStateArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    keyword_toggle("$flagged", args.flagged),
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.setUserTags" => {
-                let args: MessageSetUserTagsArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    SetKeywordsCommand {
-                        add: args.add,
-                        remove: args.remove,
-                    },
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.moveToMailbox" => {
-                let args: MessageMoveToMailboxArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.replace_message_mailboxes(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    ReplaceMailboxesCommand {
-                        mailbox_ids: vec![MailboxId(args.mailbox_id)],
-                    },
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.moveToRole" => {
-                let args: MessageMoveToRoleArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.role,
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.archive" | "message.trash" | "message.restoreToInbox" => {
-                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let role = match request.name.as_str() {
-                    "message.archive" => "archive",
-                    "message.trash" => "trash",
-                    _ => "inbox",
-                };
-                let action = self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    role.to_string(),
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            "message.destroy" => {
-                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let action = self.destroy_message(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                );
-                self.run_message_mutation(caller, &request, action).await
-            }
-            _ => Err(RuntimeError::invalid_mutation(format!(
-                "unknown runtime mutation '{}'",
-                request.name
-            ))),
         }
     }
+
 
     async fn open_view(
         &self,

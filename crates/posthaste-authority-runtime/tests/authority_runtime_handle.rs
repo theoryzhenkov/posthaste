@@ -1085,6 +1085,151 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
     assert!(unknown.is_err(), "unknown mutation names are rejected");
 }
 
+/// Read whether `message_id` shows as flagged in the account's inbox view
+/// (folded current state), for asserting undo/redo effects end-to-end.
+async fn inbox_message_flagged(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account_id: &AccountId,
+    message_id: &str,
+) -> bool {
+    let snapshot = build
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor(&format!("in:{}/inbox", account_id.as_str())),
+        )
+        .await
+        .expect("inbox view should open");
+    let state = mail_list_state(&snapshot);
+    state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == message_id)
+        .map(|row| row.projection["isFlagged"] == serde_json::Value::Bool(true))
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+async fn runtime_undo_redo_navigates_the_session_history_stack() {
+    // Undo reverses the most recent reversible mutation; redo replays it; a
+    // fresh mutation clears the redo stack — desktop-style, runtime-owned.
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("runtime-undo-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_single_message_batch(&build, &account.id, "em-001", "inbox");
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    let flag = |cmid: &str| MutationRequest {
+        session_id: Some(session.session_id.clone()),
+        name: "message.setFlaggedState".to_string(),
+        args: serde_json::json!({
+            "sourceId": account.id.as_str(),
+            "messageId": "em-001",
+            "flagged": true,
+        }),
+        client_mutation_id: ClientMutationId::new(cmid),
+        context: None,
+    };
+    let control = |name: &str, cmid: &str| MutationRequest {
+        session_id: Some(session.session_id.clone()),
+        name: name.to_string(),
+        args: serde_json::json!({}),
+        client_mutation_id: ClientMutationId::new(cmid),
+        context: None,
+    };
+
+    assert!(
+        !inbox_message_flagged(&build, &account.id, "em-001").await,
+        "message starts unflagged"
+    );
+
+    // Nothing to undo yet.
+    assert!(
+        build
+            .handle
+            .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-0"))
+            .await
+            .is_err(),
+        "undo with an empty stack is rejected"
+    );
+
+    // Flag it.
+    build
+        .handle
+        .run_mutation(RuntimeCaller::test(), flag("flag-1"))
+        .await
+        .expect("flag mutation should run");
+    assert!(inbox_message_flagged(&build, &account.id, "em-001").await);
+
+    // Undo replays the captured inverse (a setKeywords) and reverts the flag.
+    let undo = build
+        .handle
+        .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-1"))
+        .await
+        .expect("undo should run");
+    assert_eq!(undo.name, "message.setKeywords");
+    assert_eq!(undo.state, MutationSettlementState::Confirmed);
+    assert!(
+        !inbox_message_flagged(&build, &account.id, "em-001").await,
+        "undo reverts the flag"
+    );
+
+    // Redo replays the original forward command and re-flags.
+    let redo = build
+        .handle
+        .run_mutation(RuntimeCaller::test(), control("mutation.redo", "r-1"))
+        .await
+        .expect("redo should run");
+    assert_eq!(redo.name, "message.setFlaggedState");
+    assert!(
+        inbox_message_flagged(&build, &account.id, "em-001").await,
+        "redo re-applies the flag"
+    );
+
+    // Undo again, then a fresh mutation must clear the redo stack.
+    build
+        .handle
+        .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-2"))
+        .await
+        .expect("second undo should run");
+    build
+        .handle
+        .run_mutation(RuntimeCaller::test(), flag("flag-2"))
+        .await
+        .expect("fresh flag should run");
+    assert!(
+        build
+            .handle
+            .run_mutation(RuntimeCaller::test(), control("mutation.redo", "r-2"))
+            .await
+            .is_err(),
+        "a fresh mutation clears the redo stack"
+    );
+}
+
 #[tokio::test]
 async fn mail_list_view_enforces_caller_account_scope() {
     let root = temp_root();
