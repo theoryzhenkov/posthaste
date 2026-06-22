@@ -1,5 +1,8 @@
+/// The mail list renders from the runtime `mailList` view (with in-place
+/// window-extend for infinite scroll) rather than the legacy HTTP query +
+/// event-patch path. Default on as of the windowed-pagination work.
 export function runtimeMailListViewsEnabled(): boolean {
-  return import.meta.env.VITE_RUNTIME_MAIL_LIST_VIEWS === '1'
+  return true
 }
 
 /// Whether message-detail and conversation surfaces render from runtime view
