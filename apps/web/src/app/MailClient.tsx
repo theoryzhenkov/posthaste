@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { shouldForceAccountSettings } from '@/accountSetup'
 import type { TagSummary } from '@/api/types'
 import type { SidebarSelection } from '@/components/Sidebar'
 import {
@@ -100,21 +99,11 @@ export function MailClient({
   const isLoading = accountsQuery.isLoading || mailNavigationBootstrap.isLoading
   const hasLoadedAccounts =
     accountsQuery.isSuccess || mailNavigationBootstrap.isSuccess
-  // Force the account-setup surface only on a settled accounts query, so a
-  // transient empty during a post-mutation refetch (or the bootstrap query
-  // succeeding while accounts is mid-fetch) cannot hijack the UI into Settings.
-  const accountsSettled = accountsQuery.isSuccess && !accountsQuery.isFetching
-  const shouldForceSettings = shouldForceAccountSettings({
-    accounts,
-    accountsSettled,
+  const { effectiveSurface, isSettingsSurfaceOpen } = useEffectiveSurface({
+    routeSurface,
   })
-  const {
-    effectiveSurface,
-    isSettingsSurfaceOpen,
-    shouldRenderForcedSettings,
-  } = useEffectiveSurface({ routeSurface, shouldForceSettings })
 
-  useDesktopCloseRequest(effectiveSurface, shouldRenderForcedSettings)
+  useDesktopCloseRequest(effectiveSurface)
 
   const tagsQuery = useQuery<TagSummary[]>({
     queryKey: queryKeys.tags,
@@ -155,7 +144,6 @@ export function MailClient({
     setSelectedMessage,
     setSelectedView,
     setShowShortcuts,
-    shouldRenderForcedSettings,
   })
 
   useGlobalMailShortcuts({
@@ -211,7 +199,6 @@ export function MailClient({
       selectedMessage={selectedMessage}
       selectedMessageData={selectedMessageQuery.data}
       shellDefaultLayout={layout.shellDefaultLayout}
-      shouldRenderForcedSettings={shouldRenderForcedSettings}
       showShortcuts={showShortcuts}
       tags={tagsQuery.data ?? []}
       viewRole={viewRole}
@@ -261,16 +248,13 @@ function MailClientLoading() {
   )
 }
 
-function useDesktopCloseRequest(
-  effectiveSurface: SurfaceDescriptor | null,
-  shouldRenderForcedSettings: boolean,
-) {
+function useDesktopCloseRequest(effectiveSurface: SurfaceDescriptor | null) {
   useEffect(() => {
     let unlisten: (() => void) | null = null
     let disposed = false
 
     void listenForDesktopCloseRequest(() => {
-      if (effectiveSurface && !shouldRenderForcedSettings) {
+      if (effectiveSurface) {
         closeWebSurface()
         return
       }
@@ -287,7 +271,7 @@ function useDesktopCloseRequest(
       disposed = true
       unlisten?.()
     }
-  }, [effectiveSurface, shouldRenderForcedSettings])
+  }, [effectiveSurface])
 }
 
 function useSyncSourceMutation() {

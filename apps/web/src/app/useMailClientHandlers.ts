@@ -36,7 +36,6 @@ export function useMailClientHandlers(input: {
   setSelectedMessage: Dispatch<SetStateAction<MailSelection | null>>
   setSelectedView: Dispatch<SetStateAction<SidebarSelection | null>>
   setShowShortcuts: Dispatch<SetStateAction<boolean>>
-  shouldRenderForcedSettings: boolean
 }) {
   const {
     actions,
@@ -51,7 +50,6 @@ export function useMailClientHandlers(input: {
     setSelectedMessage,
     setSelectedView,
     setShowShortcuts,
-    shouldRenderForcedSettings,
   } = input
 
   const applySearchQuery = useCallback(
@@ -165,8 +163,7 @@ export function useMailClientHandlers(input: {
     },
     handleShowShortcuts: () => setShowShortcuts(true),
     handleToggleFlag,
-    handleToggleSettings: () =>
-      toggleSettingsSurface({ effectiveSurface, shouldRenderForcedSettings }),
+    handleToggleSettings: () => toggleSettingsSurface({ effectiveSurface }),
     handleToggleShortcuts: () => setShowShortcuts((prev) => !prev),
     handleTrash,
   }
