@@ -88,3 +88,39 @@ fn message_draft_id_round_trips_through_apply_and_detail() -> Result<(), StoreEr
     assert_eq!(plain_detail.draft_id, None);
     Ok(())
 }
+
+#[test]
+fn message_summary_read_agrees_with_detail_summary() -> Result<(), StoreError> {
+    // The cheap, body-free summary read returns the same header projection as
+    // the full detail read — so metadata-only callers can drop the body load.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![sample_message("message-1", "inbox", Some("mime-1"))],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    let summary = store
+        .get_message_summary(&account, &MessageId::from("message-1"))?
+        .expect("message summary");
+    let detail = store
+        .get_message_detail(&account, &MessageId::from("message-1"))?
+        .expect("message detail");
+    assert_eq!(summary.id, detail.summary.id);
+    assert_eq!(summary.subject, detail.summary.subject);
+    assert_eq!(summary.mailbox_ids, detail.summary.mailbox_ids);
+    assert_eq!(summary.keywords, detail.summary.keywords);
+    assert_eq!(summary.has_attachment, detail.summary.has_attachment);
+    assert_eq!(summary.mailbox_ids, vec![MailboxId::from("inbox")]);
+
+    // A missing message reads as None on the summary path too.
+    assert!(store
+        .get_message_summary(&account, &MessageId::from("absent"))?
+        .is_none());
+    Ok(())
+}
