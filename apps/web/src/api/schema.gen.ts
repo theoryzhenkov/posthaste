@@ -1569,6 +1569,14 @@ export interface components {
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
+            /**
+             * @description Stable `X-Posthaste-Draft-Id` for this draft, when present. The client
+             *     keys autosave by this so a resumed edit updates the draft in place
+             *     instead of creating a new one as the provider id rotates.
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             from?: null | components["schemas"]["Recipient"];
             subject: string;
             to: components["schemas"]["Recipient"][];
@@ -1657,6 +1665,13 @@ export interface components {
             attachments: components["schemas"]["MessageAttachment"][];
             bodyHtml?: string | null;
             bodyText?: string | null;
+            /**
+             * @description Stable `X-Posthaste-Draft-Id` for this message when it is a draft this
+             *     client saved; `None` otherwise.
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             rawMessage?: null | components["schemas"]["RawMessageRef"];
         };
         /**
@@ -2147,6 +2162,15 @@ export interface components {
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
+            /**
+             * @description Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request
+             *     saves a draft. The domain layer injects it from the draft key before
+             *     queuing; `save_draft` writes it as a header so the id survives provider
+             *     id rotation. Ignored by `send` (a sent message is a fresh message).
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             from?: null | components["schemas"]["Recipient"];
             inReplyTo?: string | null;
             references?: string | null;

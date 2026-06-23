@@ -41,23 +41,17 @@ pub(super) fn message(
     MessageRecord {
         id: MessageId::from(id),
         source_thread_id: ThreadId::from(format!("thread-{id}")),
-        remote_blob_id: None,
         subject: Some(format!("Subject {id}")),
         from_name: Some(from_name.to_string()),
         from_email: Some(from_email.to_string()),
-        to: Vec::new(),
         preview: Some(format!("Preview {id}")),
         received_at: "2026-03-31T10:00:00Z".to_string(),
-        has_attachment: false,
         size: 42,
         mailbox_ids: mailbox_ids.iter().map(|id| MailboxId::from(*id)).collect(),
         keywords: keywords.iter().map(|keyword| keyword.to_string()).collect(),
-        body_html: None,
         body_text: Some(format!("Body {id}")),
-        raw_mime: None,
         rfc_message_id: Some(format!("<{id}@example.test>")),
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
 

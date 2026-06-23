@@ -86,6 +86,11 @@ pub fn imap_header_message_record_with_gmail_metadata(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let draft_id = parsed
+        .header_raw(posthaste_domain::DRAFT_ID_HEADER)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
     let source_thread_id = gmail
         .thread_id
         .map(gmail_thread_id)
@@ -130,6 +135,7 @@ pub fn imap_header_message_record_with_gmail_metadata(
         rfc_message_id,
         in_reply_to,
         references,
+        draft_id,
     };
     let location = ImapMessageLocation {
         message_id,

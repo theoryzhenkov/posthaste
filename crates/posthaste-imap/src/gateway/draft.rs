@@ -44,9 +44,24 @@ pub(crate) async fn save_imap_draft(
     let drafts_name = drafts.name.clone();
     let drafts_id = drafts.id.clone();
 
-    let raw_message = build_smtp_message(&gateway.smtp_config, request)
+    let mut raw_message = build_smtp_message(&gateway.smtp_config, request)
         .map_err(imap_error_to_gateway)?
         .formatted();
+    // Stamp the stable draft identity as a top-level header so a resumed edit
+    // replaces this draft in place. Prepended to the existing header block
+    // (header order is irrelevant) so it round-trips through the RFC822 header
+    // fetch on sync. Only drafts carry it; sends never set `draft_id`.
+    if let Some(draft_id) = request
+        .draft_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        let header_line = format!("{}: {}\r\n", posthaste_domain::DRAFT_ID_HEADER, draft_id);
+        let mut prefixed = header_line.into_bytes();
+        prefixed.extend_from_slice(&raw_message);
+        raw_message = prefixed;
+    }
 
     let mut client = connect_authenticated_client(&gateway.config)
         .await

@@ -246,9 +246,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 bcc: Vec::new(),
                 subject: "JMAP parity self-send".to_string(),
                 body: "Sent through the JMAP gateway.".to_string(),
-                in_reply_to: None,
-                references: None,
-                attachments: Vec::new(),
+                ..Default::default()
             },
         )
         .expect("JMAP send should queue");
@@ -287,9 +285,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
                 bcc: Vec::new(),
                 subject: "SMTP parity self-send".to_string(),
                 body: "Sent through the IMAP/SMTP gateway.".to_string(),
-                in_reply_to: None,
-                references: None,
-                attachments: Vec::new(),
+                ..Default::default()
             },
         )
         .expect("SMTP send should queue");

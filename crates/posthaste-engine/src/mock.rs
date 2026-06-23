@@ -309,6 +309,8 @@ impl MailGateway for MockJmapGateway {
                 .as_ref()
                 .map(|references| references.split_whitespace().map(str::to_string).collect())
                 .unwrap_or_default(),
+            // Simulate the provider round-tripping the X-Posthaste-Draft-Id header.
+            draft_id: request.draft_id.clone(),
         });
         Ok(new_id)
     }

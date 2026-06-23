@@ -93,6 +93,23 @@ pub(crate) fn to_message_record(email: &jmap_client::email::Email) -> MessageRec
             .references()
             .map(|references| references.to_vec())
             .unwrap_or_default(),
+        draft_id: email
+            .header(&jmap_client::email::Header::as_text(
+                posthaste_domain::DRAFT_ID_HEADER,
+                false,
+            ))
+            .and_then(header_text_value),
+    }
+}
+
+/// Extract a single text value from a JMAP `asText` header.
+fn header_text_value(value: &jmap_client::email::HeaderValue) -> Option<String> {
+    match value {
+        jmap_client::email::HeaderValue::AsText(text) => {
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        _ => None,
     }
 }
 

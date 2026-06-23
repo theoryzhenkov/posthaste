@@ -65,23 +65,14 @@ pub(super) fn sample_message_record(id: &str, size: i64, has_attachment: bool) -
     MessageRecord {
         id: MessageId::from(id),
         source_thread_id: ThreadId::from("thread-1"),
-        remote_blob_id: None,
         subject: Some("Hello".to_string()),
         from_name: Some("PostHaste Updates".to_string()),
         from_email: Some("hello@example.com".to_string()),
-        to: Vec::new(),
-        preview: None,
         received_at: crate::RFC3339_EPOCH.to_string(),
         has_attachment,
         size,
         mailbox_ids: vec![MailboxId::from("inbox")],
-        keywords: Vec::new(),
-        body_html: None,
-        body_text: None,
-        raw_mime: None,
-        rfc_message_id: None,
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
 

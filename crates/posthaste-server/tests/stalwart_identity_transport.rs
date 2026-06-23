@@ -15,10 +15,58 @@ mod fixture;
 #[path = "stalwart_provider_parity/util.rs"]
 mod util;
 
-use posthaste_domain::{AccountId, MailGateway};
+use posthaste_domain::{AccountId, MailGateway, Recipient, SendMessageRequest};
 use posthaste_engine::LiveJmapGateway;
 
 use crate::fixture::StalwartFixture;
+
+/// End-to-end proof of the stable draft identity: a draft saved with a
+/// `draft_id` stamps `X-Posthaste-Draft-Id`, and a sync reads it back onto the
+/// message record — so a resumed edit keys by it instead of the rotating
+/// provider id.
+#[tokio::test]
+async fn draft_id_header_round_trips_through_save_and_sync() {
+    if std::env::var("POSTHASTE_STALWART_INTEGRATION").as_deref() != Ok("1") {
+        eprintln!("skipping Stalwart integration; set POSTHASTE_STALWART_INTEGRATION=1");
+        return;
+    }
+
+    let stalwart = StalwartFixture::start();
+    let account = AccountId::from("jmap-stalwart");
+    let gateway = LiveJmapGateway::connect(&stalwart.http_url, Some("dev"), &stalwart.password)
+        .await
+        .expect("JMAP gateway should connect");
+
+    let request = SendMessageRequest {
+        from: Some(Recipient {
+            name: Some("Dev".to_string()),
+            email: stalwart.email(),
+        }),
+        subject: "Draft identity round-trip".to_string(),
+        body: "work in progress".to_string(),
+        draft_id: Some("draft-local-roundtrip".to_string()),
+        ..Default::default()
+    };
+    let provider_id = gateway
+        .save_draft(&account, &request, None)
+        .await
+        .expect("draft should save");
+
+    let batch = gateway
+        .sync(&account, &[], None)
+        .await
+        .expect("sync should succeed");
+    let draft = batch
+        .messages
+        .iter()
+        .find(|message| message.id == provider_id)
+        .expect("saved draft should appear in the sync");
+    assert_eq!(
+        draft.draft_id.as_deref(),
+        Some("draft-local-roundtrip"),
+        "the X-Posthaste-Draft-Id header must round-trip onto the record"
+    );
+}
 
 #[tokio::test]
 async fn identity_get_resolves_over_http_and_websocket() {

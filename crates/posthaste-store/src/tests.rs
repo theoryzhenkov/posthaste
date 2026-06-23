@@ -28,14 +28,11 @@ fn sample_message(
     MessageRecord {
         id: MessageId::from(message_id),
         source_thread_id: ThreadId::from("thread-1"),
-        remote_blob_id: None,
         subject: Some("Hello".to_string()),
         from_name: Some("Alice".to_string()),
         from_email: Some("alice@example.com".to_string()),
-        to: Vec::new(),
         preview: Some("Preview".to_string()),
         received_at: "2026-03-31T10:00:00Z".to_string(),
-        has_attachment: false,
         size: 42,
         mailbox_ids: vec![MailboxId::from(account_mailbox)],
         keywords: vec!["$seen".to_string()],
@@ -43,8 +40,7 @@ fn sample_message(
         body_text: Some("Hello".to_string()),
         raw_mime: raw_mime.map(str::to_string),
         rfc_message_id: Some(format!("<{message_id}@example.test>")),
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
 

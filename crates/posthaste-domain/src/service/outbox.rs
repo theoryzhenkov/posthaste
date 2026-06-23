@@ -318,7 +318,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         draft_key: Option<MessageId>,
-        request: SendMessageRequest,
+        mut request: SendMessageRequest,
     ) -> Result<Operation, ServiceError> {
         // `draft_key` is a stable, client-chosen handle for the draft. The alias
         // maps it to the entity id currently representing the draft (a temporary
@@ -327,11 +327,26 @@ impl MailService {
         let key = draft_key
             .map(|id| id.to_string())
             .unwrap_or_else(|| format!("draft-local-{}", Id::generate()));
+        // Stamp the stable identity into the payload so the gateway writes it as
+        // the `X-Posthaste-Draft-Id` header. The header survives the provider id
+        // rotation a JMAP draft update causes and is read back on resume, so the
+        // client always keys by a stable value.
+        request.draft_id = Some(key.clone());
         let (entity_id, kind) = match self.outbox.resolve_draft_entity(account_id, &key)? {
             Some(entity_id) => (entity_id, OperationKind::DraftUpdate),
             None => {
                 self.outbox.set_draft_alias(account_id, &key, &key)?;
-                (key.clone(), OperationKind::DraftCreate)
+                // A key with no alias that already names an existing draft
+                // message is a draft resumed by its (rotating) provider id — a
+                // legacy draft saved before stable ids, or one created
+                // elsewhere. Replace it in place instead of creating a
+                // duplicate; this also bootstraps a stable header onto it.
+                let kind = if self.draft_message_exists(account_id, &key)? {
+                    OperationKind::DraftUpdate
+                } else {
+                    OperationKind::DraftCreate
+                };
+                (key.clone(), kind)
             }
         };
         let payload = serde_json::to_value(request).map_err(|error| {
@@ -375,6 +390,23 @@ impl MailService {
         )?;
         self.outbox.remove_draft_alias(account_id, &key)?;
         Ok(operation)
+    }
+
+    /// Whether `draft_key` names a message already in the projection — i.e. a
+    /// draft being resumed by its provider id rather than a freshly minted
+    /// local key. Used to edit such a draft in place instead of duplicating it.
+    /// Mailbox membership is the light existence proxy: a draft always sits in
+    /// the Drafts mailbox.
+    fn draft_message_exists(
+        &self,
+        account_id: &AccountId,
+        draft_key: &str,
+    ) -> Result<bool, ServiceError> {
+        let message_id = MessageId::from(draft_key);
+        Ok(!self
+            .message_mailboxes
+            .get_message_mailboxes(account_id, &message_id)?
+            .is_empty())
     }
 
     /// Flush all flushable operations for an account to the provider, returning

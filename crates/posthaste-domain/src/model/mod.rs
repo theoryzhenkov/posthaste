@@ -18,7 +18,9 @@ use crate::{
 macro_rules! string_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+        #[derive(
+            Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+        )]
         #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
         #[serde(transparent)]
         pub struct $name(pub String);
@@ -102,6 +104,14 @@ string_id!(
 ///
 /// @spec docs/L1-accounts#toml-schema
 pub const RFC3339_EPOCH: &str = "1970-01-01T00:00:00Z";
+
+/// MIME header carrying a draft's stable client identity, written when saving a
+/// draft and read back on sync into [`MessageRecord::draft_id`]. It survives the
+/// provider id rotation a JMAP draft update causes, so a resumed draft is keyed
+/// by a stable value rather than the rotating provider id.
+///
+/// @spec docs/L1-outbox#temp-id-reconciliation
+pub const DRAFT_ID_HEADER: &str = "X-Posthaste-Draft-Id";
 
 /// Event topic emitted after a successful sync cycle completes.
 ///

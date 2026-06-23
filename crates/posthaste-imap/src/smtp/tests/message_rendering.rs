@@ -27,7 +27,7 @@ fn builds_multipart_message_with_threading_headers_and_hidden_bcc() {
         body: "Hello **world**".to_string(),
         in_reply_to: Some("original@example.test".to_string()),
         references: Some("root@example.test original@example.test".to_string()),
-        attachments: Vec::new(),
+        ..Default::default()
     };
 
     let message = build_smtp_message(&config, &request).expect("SMTP message");
@@ -67,6 +67,7 @@ fn builds_multipart_mixed_message_with_attachments() {
             mime_type: "text/plain".to_string(),
             content_base64: "aGVsbG8gYXR0YWNobWVudA==".to_string(),
         }],
+        ..Default::default()
     };
 
     let message = build_smtp_message(&config, &request).expect("SMTP message");
@@ -98,13 +99,9 @@ fn builds_message_with_requested_from_identity() {
     let request = SendMessageRequest {
         from: Some(recipient(Some("Catch All"), "catch@example.test")),
         to: vec![recipient(None, "bob@example.test")],
-        cc: Vec::new(),
-        bcc: Vec::new(),
         subject: "Status".to_string(),
         body: "Hello".to_string(),
-        in_reply_to: None,
-        references: None,
-        attachments: Vec::new(),
+        ..Default::default()
     };
 
     let message = build_smtp_message(&config, &request).expect("SMTP message");
