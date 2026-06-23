@@ -43,31 +43,27 @@ impl MailService {
         payload: serde_json::Value,
         event_payload: serde_json::Value,
     ) -> Result<CommandResult, ServiceError> {
-        // Validate the synced projection knows this message. Some tests and
-        // lightweight callers only implement mailbox state, not full detail.
+        // A state assertion acknowledges the change; it does not read or return
+        // the message body. The synced mailbox memberships are both the
+        // existence check (a known message has them) and the event's mailbox
+        // hint; the body + attachments a full `get_message_detail` would load are
+        // never needed here. Membership and counts propagate through the appended
+        // event + server-side view recompute, which keys on the change flags (see
+        // `event_affects_view`), not on this hint, and every caller discards
+        // `CommandResult.detail` for state assertions. Reading the body here made
+        // archive/delete/keyword ops pay a load + serialize + transfer tax
+        // proportional to body size on attachment-shaped messages — regression-
+        // gated by `message_mutation_settlement_payload_excludes_the_message_body`.
+        //
+        // @spec docs/replication/L3#7-hardening-w5-and-the-failure-path
         let projected_mailboxes = self
             .message_mailboxes
             .get_message_mailboxes(account_id, message_id)?;
-        let base_detail = self
-            .message_detail_reader
-            .get_message_detail(account_id, message_id)?;
         let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
-        let detail = match base_detail {
-            Some(detail) => match self.apply_message_overlay(account_id, detail) {
-                Ok(detail) => detail,
-                Err(error) => {
-                    return Err(self.remove_operation_after_local_failure(&operation, error))
-                }
-            },
-            None => None,
-        };
         let event = match self.events.append_event(
             account_id,
             EVENT_TOPIC_MESSAGE_UPDATED,
-            detail
-                .as_ref()
-                .and_then(|detail| detail.summary.mailbox_ids.first())
-                .or_else(|| projected_mailboxes.first()),
+            projected_mailboxes.first(),
             Some(message_id),
             event_payload,
         ) {
@@ -78,7 +74,7 @@ impl MailService {
             }
         };
         Ok(CommandResult {
-            detail,
+            detail: None,
             events: vec![event],
         })
     }
