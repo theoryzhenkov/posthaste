@@ -533,14 +533,33 @@ fn complete_coverage() -> RuntimeCoverage {
     }
 }
 
+/// Whether a `message.updated` event can change which rows a mail list shows or
+/// their order: a keyword or mailbox-membership change, a newly arrived message,
+/// or a deletion. The diff payload always carries the `changes` flags and
+/// `created`; deletion events carry `deleted`.
+fn message_event_affects_list(event: &DomainEvent) -> bool {
+    let changes = &event.payload["changes"];
+    changes["keywords"] == true
+        || changes["mailboxes"] == true
+        || event.payload["created"] == true
+        || event.payload["deleted"] == true
+}
+
 /// Whether a domain event should trigger a recompute for a view of this kind.
 /// mailList recomputes when message membership/ordering may change (keyword
 /// assertions); messageDetail recomputes on any update to its own message.
 fn event_affects_view(kind: &ViewKind, event: &DomainEvent) -> bool {
     match kind {
+        // A mail list is derived from message membership, ordering, and keyword
+        // state. It must recompute on every change that can add, remove, or
+        // reorder a row: keyword assertions (read/flag), mailbox membership
+        // (archive/move/trash), arrival of a new message, and deletion. The
+        // earlier keywords-only gate dropped archives and new arrivals, so the
+        // list went stale until the view was reopened. The snapshot equality
+        // check in `recompute_view_if_changed` suppresses no-op recomputes, so a
+        // broad trigger costs at most a wasted query.
         ViewKind::MailList(_) => {
-            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
-                && event.payload["changes"]["keywords"] == true
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED && message_event_affects_list(event)
         }
         ViewKind::MessageDetail {
             source_id,
@@ -708,5 +727,61 @@ fn presentation_window(presentation: &MailPresentationRequest) -> Value {
         MailPresentationRequest::CollapsedByConversation { limit, cursor, .. } => {
             json!({ "limit": limit, "cursor": cursor })
         }
+    }
+}
+
+#[cfg(test)]
+mod recompute_trigger_tests {
+    use super::*;
+    use posthaste_domain::EVENT_TOPIC_MESSAGE_UPDATED;
+    use serde_json::json;
+
+    fn message_event(payload: serde_json::Value) -> DomainEvent {
+        DomainEvent {
+            seq: 1,
+            account_id: AccountId::from("acct"),
+            topic: EVENT_TOPIC_MESSAGE_UPDATED.to_string(),
+            occurred_at: "2026-06-23T00:00:00Z".to_string(),
+            mailbox_id: None,
+            message_id: Some(MessageId::from("m1")),
+            payload,
+        }
+    }
+
+    #[test]
+    fn keyword_change_affects_list() {
+        assert!(message_event_affects_list(&message_event(
+            json!({ "changes": { "keywords": true, "mailboxes": false } })
+        )));
+    }
+
+    #[test]
+    fn mailbox_change_affects_list() {
+        // Archive / move: membership changed, keywords did not. Regression guard
+        // for the keywords-only gate that left archived rows in the list.
+        assert!(message_event_affects_list(&message_event(
+            json!({ "changes": { "keywords": false, "mailboxes": true } })
+        )));
+    }
+
+    #[test]
+    fn new_message_affects_list() {
+        assert!(message_event_affects_list(&message_event(
+            json!({ "created": true, "changes": { "keywords": true, "mailboxes": true } })
+        )));
+    }
+
+    #[test]
+    fn deletion_affects_list() {
+        assert!(message_event_affects_list(&message_event(
+            json!({ "deleted": true })
+        )));
+    }
+
+    #[test]
+    fn unrelated_payload_does_not_affect_list() {
+        assert!(!message_event_affects_list(&message_event(
+            json!({ "changes": { "keywords": false, "mailboxes": false } })
+        )));
     }
 }
