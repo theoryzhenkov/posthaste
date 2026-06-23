@@ -15,8 +15,13 @@
 //!
 //! @spec docs/replication/L2#3-the-shared-predictor-crate
 
+mod convergence;
 mod message;
 
+pub use convergence::{
+    MessageBaseUpdate, MessageReplica, MutationId, PendingMessageMutation, SettlementOutcome,
+    SettlementResult,
+};
 pub use message::{
     apply_message_assertion, coalesce_message_assertions, replay_message, MessageAssertion,
     MessageFoldState, MessageOutcome,
