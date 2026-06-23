@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use posthaste_link_core::{
-    MessageAssertion, MessageBaseUpdate, MessageFoldState, MessageOutcome, MessageReplica,
-    MutationId, SettlementOutcome, SettlementResult,
+    MessageAssertion, MessageFoldState, MessageOutcome, MessageReplica, MutationId,
+    SettlementOutcome, SettlementResult,
 };
 
 /// One served mail-list row, as the host maps it from the runtime's
@@ -46,18 +46,14 @@ impl MailListReplica {
     /// mutations are untouched (they re-fold over the new base). This is the
     /// base-replace half of the rebase loop.
     pub fn ingest(&mut self, rows: Vec<MailListRow>) {
-        let updates = rows.iter().map(|row| {
-            (
-                row.message_id.clone(),
-                MessageBaseUpdate::Present(fold_state_from_projection(&row.projection)),
-            )
-        });
-        // Rebuild the base wholesale so a row that left the served window also
-        // leaves the replica's base (the served base is authoritative for the
-        // working set).
-        self.engine = MessageReplica::new();
-        let collected: Vec<_> = updates.collect();
-        self.engine.apply_base_update(collected);
+        // Swap the whole confirmed base for the served rows — messages that left
+        // the window leave the base — but keep the pending outbox so unconfirmed
+        // optimism re-folds over the new base (it retires only on settlement).
+        // (Resetting the engine here would silently drop pending intent.)
+        self.engine.replace_base(
+            rows.iter()
+                .map(|row| (row.message_id.clone(), fold_state_from_projection(&row.projection))),
+        );
         self.rows = rows;
     }
 
@@ -249,6 +245,26 @@ mod tests {
         replica.ingest(vec![row("m1", &[], &["inbox"], "A"), row("m2", &[], &["inbox"], "B")]);
         replica.accept(MutationId("op1".into()), "m1".into(), MessageAssertion::Destroy);
         assert_eq!(ids(&replica.project_all()), vec!["m2"]);
+    }
+
+    #[test]
+    fn unrelated_base_update_keeps_unconfirmed_optimism() {
+        // Regression for C1: a served base update (e.g. a sibling arrival) that
+        // does NOT reflect a still-pending mutation must not drop it. The flag
+        // re-folds over the new base and stays pending until settled.
+        let mut replica = MailListReplica::new();
+        replica.ingest(vec![row("m1", &[], &["inbox"], "A")]);
+        let (id, message, assertion) = flag("m1");
+        replica.accept(id, message, assertion);
+        // Runtime re-serves the list (unrelated recompute) WITHOUT the flag.
+        replica.ingest(vec![
+            row("m1", &[], &["inbox"], "A"),
+            row("m2", &[], &["inbox"], "B"),
+        ]);
+        let rows = replica.project_all();
+        assert_eq!(ids(&rows), vec!["m1", "m2"]);
+        assert_eq!(rows[0]["isFlagged"], json!(true), "optimism must survive");
+        assert!(replica.has_pending());
     }
 
     #[test]
