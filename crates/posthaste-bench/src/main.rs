@@ -46,6 +46,19 @@ fn main() -> Result<()> {
     })?;
     profile("mutate", &out, &mut || workloads::mutate(&seeded, 1))?;
 
+    // Mutation path as the domain service runs it (a full detail read precedes
+    // every state assertion). Seed a fixture where attachment-bearing messages
+    // carry large inline bodies, then profile the same op on an attachment
+    // message (index 7: i%7==0) vs a plain one (index 1) — the iteration counts
+    // and flamegraphs isolate the body-materialization cost archive/delete pay.
+    let heavy = workloads::open_seeded_heavy(count);
+    profile("mutate_attachment", &out, &mut || {
+        workloads::mutate_full_detail(&heavy, 7);
+    })?;
+    profile("mutate_plain", &out, &mut || {
+        workloads::mutate_full_detail(&heavy, 1);
+    })?;
+
     let session = workloads::open_seeded(count);
     profile("session_loop", &out, &mut || {
         workloads::session_loop(&session, workloads::DEFAULT_SESSION_ROUNDS);
