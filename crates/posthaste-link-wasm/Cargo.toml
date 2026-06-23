@@ -19,4 +19,6 @@ posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-wasm-bindgen = "0.2"
+# Pinned to exactly match the `wasm-bindgen-cli` nixpkgs provides (the generated
+# JS glue is version-locked to the crate). Bump both together.
+wasm-bindgen = "=0.2.117"
