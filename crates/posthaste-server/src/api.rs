@@ -33,9 +33,10 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountTransportMutation, AutomationRulePreviewMutation,
     CreateAccountMutation, CreateSmartMailboxMutation, MailPresentationRequest, MailQueryPage,
-    MailQueryRequest, PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation,
-    RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError, RuntimeErrorCode,
-    SearchVisibilityRequest, SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
+    MailQueryRequest, MessageResourceKind, PatchAccountMutation, PatchAppSettingsMutation,
+    PatchSmartMailboxMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore, RuntimeError,
+    RuntimeErrorCode, RuntimeResourceBytes, SearchVisibilityRequest,
+    SecretWriteMode as RuntimeSecretWriteMode, SecretWriteMutation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

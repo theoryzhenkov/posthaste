@@ -11,19 +11,19 @@ use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId, Operation,
-    OperationId,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId, StoreError, SyncMode,
-    SyncTrigger,
+    OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId,
+    StoreError, SyncMode, SyncTrigger,
 };
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
-    MailQueryRequest, MutationReceipt, MutationRequest, MutationSettlementState,
-    PatchAccountMutation, RuntimeAccountList, RuntimeAttachmentBytes, RuntimeCaller, RuntimeCore,
+    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore,
     RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeFrameSubscription,
-    RuntimeLifecycle, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeStatus,
-    RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor, ViewId, ViewRevision,
+    RuntimeLifecycle, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
+    RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor, ViewId,
+    ViewRevision,
 };
 use posthaste_store::DatabaseStore;
 use serde::Deserialize;
@@ -1673,13 +1673,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         Ok(result.content)
     }
 
-    async fn get_message_attachment(
+    async fn get_message_resource(
         &self,
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-        attachment_id: String,
-    ) -> Result<RuntimeAttachmentBytes, RuntimeError> {
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError> {
         self.ensure_runtime_active()?;
         let gateway = self.optional_gateway(&account_id).await;
         let result = self
@@ -1691,32 +1691,49 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let detail = result
             .detail
             .ok_or_else(|| RuntimeError::not_found("message detail not available"))?;
-        let attachment = detail
-            .attachments
-            .into_iter()
-            .find(|attachment| attachment.id == attachment_id)
-            .ok_or_else(|| RuntimeError::not_found("attachment not found"))?;
-        let gateway = gateway.ok_or_else(|| {
-            RuntimeError::retryable(
-                RuntimeErrorCode::ProviderUnavailable,
-                format!("gateway unavailable for account {account_id}"),
-            )
-        })?;
-        let bytes = self
-            .core
-            .service
-            .download_blob(
-                &account_id,
-                &message_id,
-                &attachment.blob_id,
-                gateway.as_ref(),
-            )
-            .await?;
-        Ok(RuntimeAttachmentBytes {
-            bytes,
-            mime_type: attachment.mime_type,
-            filename: attachment.filename,
-        })
+        match kind {
+            MessageResourceKind::Attachment(attachment_id) => {
+                let attachment = detail
+                    .attachments
+                    .into_iter()
+                    .find(|attachment| attachment.id == attachment_id)
+                    .ok_or_else(|| RuntimeError::not_found("attachment not found"))?;
+                let gateway = gateway.ok_or_else(|| {
+                    RuntimeError::retryable(
+                        RuntimeErrorCode::ProviderUnavailable,
+                        format!("gateway unavailable for account {account_id}"),
+                    )
+                })?;
+                let bytes = self
+                    .core
+                    .service
+                    .download_blob(
+                        &account_id,
+                        &message_id,
+                        &attachment.blob_id,
+                        gateway.as_ref(),
+                    )
+                    .await?;
+                Ok(RuntimeResourceBytes {
+                    bytes,
+                    content_type: attachment.mime_type,
+                    filename: attachment.filename,
+                })
+            }
+            // Body resources return RAW bytes; the server serve layer applies the
+            // per-kind transform (HTML sanitization + inline-URL rewrite) before
+            // responding — the runtime never sanitizes.
+            MessageResourceKind::BodyHtml => Ok(RuntimeResourceBytes {
+                bytes: detail.body_html.unwrap_or_default().into_bytes(),
+                content_type: "text/html; charset=utf-8".to_string(),
+                filename: None,
+            }),
+            MessageResourceKind::BodyText => Ok(RuntimeResourceBytes {
+                bytes: detail.body_text.unwrap_or_default().into_bytes(),
+                content_type: "text/plain; charset=utf-8".to_string(),
+                filename: None,
+            }),
+        }
     }
 
     async fn sync_account(

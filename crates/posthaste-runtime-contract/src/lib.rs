@@ -277,11 +277,24 @@ pub struct RuntimeStatus {
     pub account_count: usize,
 }
 
+/// Which lazy byte-resource of a message to resolve. The single way to name a
+/// message's deferred bytes — attachment blob or body — so they share one
+/// fetch/cache/serve path (the lazy-resource unification) instead of diverging.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MessageResourceKind {
+    Attachment(String),
+    BodyHtml,
+    BodyText,
+}
+
+/// Raw bytes of a resolved message resource plus how to serve them. The server
+/// applies any per-kind transform (e.g. HTML sanitization) before responding.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeAttachmentBytes {
+pub struct RuntimeResourceBytes {
     pub bytes: Vec<u8>,
-    pub mime_type: String,
+    pub content_type: String,
+    /// Suggested download filename (attachments); `None` for body resources.
     pub filename: Option<String>,
 }
 
@@ -1144,13 +1157,15 @@ pub trait RuntimeCore: Send + Sync {
         message_id: MessageId,
     ) -> Result<CommandResult, RuntimeError>;
 
-    async fn get_message_attachment(
+    /// Resolve a message's lazy bytes (attachment blob or body) as raw bytes +
+    /// content type. The single entry point for every deferred message resource.
+    async fn get_message_resource(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-        attachment_id: String,
-    ) -> Result<RuntimeAttachmentBytes, RuntimeError>;
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError>;
 
     async fn sync_account(
         &self,
