@@ -83,10 +83,20 @@ items_after_statements = "warn"
 #   unnecessary_wraps   — axum SSE `Result<Event, Infallible>` stream signatures
 #   useless_let_if_seq  — noisy; sole hit was a false positive across a loop
 
+[profile.dev]
+# Constrained dev VM: /home is under a 50 GB quota, and full DWARF debuginfo
+# plus the incremental cache had ballooned target/ to ~38 GB (EDQUOT on build).
+# `line-tables-only` keeps panic/backtrace file:line but drops the bulky
+# variable/type DWARF, and turning off the incremental cache removes its
+# multi-GB on-disk state. Together they keep target/ well under quota. Release
+# builds (the dogfood artifacts) use [profile.release] and are unaffected.
+debug = "line-tables-only"
+incremental = false
+
 [profile.test]
-# Keep file/line information for panics and backtraces, but avoid full DWARF in
-# every integration-test executable. The full debug profile makes parallel
-# `cargo test` links memory-heavy on constrained Linux dev VMs.
+# Inherits the dev profile above (line-tables-only, no incremental); kept
+# explicit so the intent survives if the dev profile changes. The full debug
+# profile makes parallel `cargo test` links memory-heavy on constrained VMs.
 debug = "line-tables-only"
 
 [patch.crates-io]
