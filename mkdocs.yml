@@ -61,6 +61,7 @@ nav:
       - Bundled application (L2): runtime/L2.md
   - Replication:
       - Coherent links (L1): replication/L1.md
+      - Client-layer replica (L2): replication/L2.md
   - API:
       - Contracts (L1): api/L1.md
       - Structure and flows (L2): api/L2.md
