@@ -85,6 +85,20 @@ impl MessageReplica {
         self.base.insert(message_id.into(), state);
     }
 
+    /// Swap the **entire** confirmed base for a freshly served one, keeping the
+    /// pending outbox intact. Use this when adopting a served view snapshot:
+    /// messages absent from the new base leave the base (the served base is
+    /// authoritative for the working set), but unconfirmed optimistic mutations
+    /// must survive to re-fold over it (`view-is-pure-fold`; they retire only on
+    /// settlement, §5.5). Replacing the base without clearing pending is the
+    /// base-replace half of the rebase loop ([replication L1 §5.3](../replication/L1.md)).
+    pub fn replace_base<I>(&mut self, base: I)
+    where
+        I: IntoIterator<Item = (String, MessageFoldState)>,
+    {
+        self.base = base.into_iter().collect();
+    }
+
     /// Drop a message from the confirmed base (authoritative removal).
     pub fn remove_base(&mut self, message_id: &str) {
         self.base.remove(message_id);
@@ -308,6 +322,22 @@ mod tests {
         replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         assert_eq!(replica.project("m1"), None);
         assert!(!replica.has_pending());
+    }
+
+    #[test]
+    fn replace_base_swaps_states_but_keeps_pending() {
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        // A fresh served base that does not reflect op1, and adds m2.
+        replica.replace_base([
+            ("m1".to_string(), state(&[], &["inbox"])),
+            ("m2".to_string(), state(&[], &["inbox"])),
+        ]);
+        // Pending survived and re-folds over the new base.
+        assert!(replica.has_pending());
+        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(present(&replica, "m2").keywords, Vec::<String>::new());
     }
 
     #[test]
