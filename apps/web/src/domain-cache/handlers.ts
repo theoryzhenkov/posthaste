@@ -131,6 +131,14 @@ const eventHandlers = {
       invalidateMailNavigationBootstrapReadModels(queryClient)
     }
 
+    if (event.payload.deleted === true) {
+      // A destroy/expunge carries no `changes` object, so the membership
+      // branches above don't fire. Counts/sidebar are not view-backed and would
+      // otherwise lag until the next sync, so invalidate them on deletion too.
+      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailNavigationBootstrapReadModels(queryClient)
+    }
+
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.PushConnected]: (queryClient, event) => {
