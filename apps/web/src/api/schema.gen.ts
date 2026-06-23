@@ -952,6 +952,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sources/{source_id}/messages/{message_id}/body": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get message body
+         * @description Returns the message body as a lazy resource: sanitized HTML (default) or plain text, with inline attachment URLs rewritten. Served separately from message detail so a detail read never carries the body.
+         */
+        get: operations["get_message_body"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sources/{source_id}/messages/{message_id}/draft-content": {
         parameters: {
             query?: never;
@@ -4667,6 +4687,52 @@ export interface operations {
             };
             /** @description Upstream network error fetching the attachment */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Account gateway unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    get_message_body: {
+        parameters: {
+            query?: {
+                /** @description `"html"` (default, sanitized) or `"text"`. */
+                format?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Source (account) identifier */
+                source_id: string;
+                /** @description Message identifier */
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Body bytes (text/html sanitized, or text/plain) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": number[];
+                };
+            };
+            /** @description Message not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

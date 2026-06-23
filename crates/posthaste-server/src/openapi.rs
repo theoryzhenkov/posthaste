@@ -50,6 +50,7 @@ use utoipa::OpenApi;
         crate::api::messages::detail::get_conversation,
         crate::api::messages::detail::get_message,
         crate::api::messages::detail::get_message_attachment,
+        crate::api::messages::detail::get_message_body,
         crate::api::messages::compose::get_identity,
         crate::api::messages::compose::list_sender_addresses,
         crate::api::messages::compose::get_reply_context,

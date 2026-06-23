@@ -139,17 +139,99 @@ pub async fn get_message_attachment(
     Path((source_id, message_id, attachment_id)): Path<(String, String, String)>,
     Query(query): Query<GetAttachmentQuery>,
 ) -> Result<Response, ApiError> {
+    serve_message_resource(
+        &state,
+        source_id,
+        message_id,
+        MessageResourceKind::Attachment(attachment_id),
+        query.download.unwrap_or(false),
+    )
+    .await
+}
+
+/// GET /v1/sources/{source_id}/messages/{message_id}/body
+#[utoipa::path(
+    get,
+    path = "/v1/sources/{source_id}/messages/{message_id}/body",
+    tag = "messages",
+    summary = "Get message body",
+    description = "Returns the message body as a lazy resource: sanitized HTML (default) or \
+                   plain text, with inline attachment URLs rewritten. Served separately from \
+                   message detail so a detail read never carries the body.",
+    params(
+        ("source_id" = String, Path, description = "Source (account) identifier"),
+        ("message_id" = String, Path, description = "Message identifier"),
+        GetBodyQuery
+    ),
+    responses(
+        (status = 200, description = "Body bytes (text/html sanitized, or text/plain)", content_type = "*/*", body = [u8]),
+        (status = 404, description = "Message not found", body = ApiErrorBody),
+        (status = 503, description = "Account gateway unavailable", body = ApiErrorBody)
+    )
+)]
+pub async fn get_message_body(
+    State(state): State<Arc<AppState>>,
+    Path((source_id, message_id)): Path<(String, String)>,
+    Query(query): Query<GetBodyQuery>,
+) -> Result<Response, ApiError> {
+    let kind = match query.format.as_deref() {
+        Some("text") => MessageResourceKind::BodyText,
+        _ => MessageResourceKind::BodyHtml,
+    };
+    serve_message_resource(&state, source_id, message_id, kind, false).await
+}
+
+/// Resolve a lazy message resource and serve it: fetch raw bytes from the
+/// runtime, apply the per-kind transform policy, and build the byte response.
+/// Every resource byte endpoint (attachment, body) goes through this one path.
+pub(crate) async fn serve_message_resource(
+    state: &Arc<AppState>,
+    source_id: String,
+    message_id: String,
+    kind: MessageResourceKind,
+    download: bool,
+) -> Result<Response, ApiError> {
     let resource = state
         .runtime
         .get_message_resource(
             RuntimeCaller::api(),
-            AccountId(source_id),
-            MessageId(message_id),
-            MessageResourceKind::Attachment(attachment_id),
+            AccountId(source_id.clone()),
+            MessageId(message_id.clone()),
+            kind.clone(),
         )
         .await
         .map_err(ApiError::from_runtime_error)?;
-    serve_resource_response(resource, query.download.unwrap_or(false))
+    let resource = apply_resource_transform(&source_id, &message_id, &kind, resource);
+    serve_resource_response(resource, download)
+}
+
+/// The per-kind serve policy — the single place a resource's bytes are
+/// transformed. Body HTML is sanitized then has its inline `cid:` URLs rewritten
+/// (byte-identical to what the detail endpoint used to do); every other resource
+/// is served verbatim.
+fn apply_resource_transform(
+    source_id: &str,
+    message_id: &str,
+    kind: &MessageResourceKind,
+    resource: RuntimeResourceBytes,
+) -> RuntimeResourceBytes {
+    match kind {
+        MessageResourceKind::BodyHtml => {
+            let html = String::from_utf8_lossy(&resource.bytes);
+            let sanitized = sanitize::sanitize_email_html(&html);
+            let rewritten = rewrite_inline_attachment_urls(
+                &sanitized,
+                source_id,
+                message_id,
+                &resource.inline_attachments,
+            );
+            RuntimeResourceBytes {
+                bytes: rewritten.into_bytes(),
+                ..resource
+            }
+        }
+        MessageResourceKind::Attachment(_) | MessageResourceKind::BodyText => resource,
+    }
 }
 
 /// Build the HTTP response for a resolved lazy message resource: content type,
@@ -211,4 +293,66 @@ fn rewrite_inline_attachment_urls(
 
 fn escape_content_disposition_filename(filename: &str) -> String {
     filename.replace('\\', "_").replace('"', "'")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use posthaste_domain::BlobId;
+
+    fn inline_attachment(id: &str, cid: &str) -> MessageAttachment {
+        MessageAttachment {
+            id: id.to_string(),
+            blob_id: BlobId::from("blob-1"),
+            part_id: None,
+            filename: None,
+            mime_type: "image/png".to_string(),
+            size: 0,
+            disposition: Some("inline".to_string()),
+            cid: Some(cid.to_string()),
+            is_inline: true,
+        }
+    }
+
+    // The body-html serve transform must reproduce the old detail behavior
+    // exactly: sanitize first, then rewrite inline `cid:` URLs. This is the
+    // security-critical path (XSS surface), so it is asserted directly.
+    #[test]
+    fn body_html_transform_sanitizes_then_rewrites_cid_urls() {
+        let resource = RuntimeResourceBytes {
+            bytes: br#"<script>alert(1)</script><img src="cid:img1"><p>hi</p>"#.to_vec(),
+            content_type: "text/html; charset=utf-8".to_string(),
+            filename: None,
+            inline_attachments: vec![inline_attachment("att-1", "img1")],
+        };
+        let out = apply_resource_transform("acct", "msg", &MessageResourceKind::BodyHtml, resource);
+        let html = String::from_utf8(out.bytes).expect("utf8");
+        assert!(
+            !html.contains("<script>"),
+            "script must be sanitized out: {html}"
+        );
+        assert!(
+            html.contains("/v1/sources/acct/messages/msg/attachments/att-1"),
+            "cid must be rewritten to the attachment URL: {html}"
+        );
+        assert!(!html.contains("cid:img1"), "raw cid must be gone: {html}");
+    }
+
+    #[test]
+    fn non_body_resources_are_served_verbatim() {
+        let raw = b"\x00\x01raw-bytes<script>".to_vec();
+        let resource = RuntimeResourceBytes {
+            bytes: raw.clone(),
+            content_type: "application/octet-stream".to_string(),
+            filename: Some("f.bin".to_string()),
+            inline_attachments: Vec::new(),
+        };
+        let out = apply_resource_transform(
+            "a",
+            "m",
+            &MessageResourceKind::Attachment("x".to_string()),
+            resource,
+        );
+        assert_eq!(out.bytes, raw);
+    }
 }
