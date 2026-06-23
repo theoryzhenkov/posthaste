@@ -104,13 +104,12 @@ pub async fn get_message(
             "message detail not available",
         )
     })?;
-    detail.body_html = detail
-        .body_html
-        .as_ref()
-        .map(|html| sanitize::sanitize_email_html(html))
-        .map(|html| {
-            rewrite_inline_attachment_urls(&html, &source_id, &message_id, &detail.attachments)
-        });
+    // The body is a separate lazy resource (`GET .../body`), sanitized at that
+    // single chokepoint. The detail response carries header + attachments only,
+    // so it never ships the body and the body is never served unsanitized.
+    detail.body_html = None;
+    detail.body_text = None;
+    detail.raw_message = None;
     Ok(Json(detail))
 }
 

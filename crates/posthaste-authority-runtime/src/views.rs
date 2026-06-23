@@ -384,7 +384,7 @@ impl ViewRegistry {
                 source_id,
                 message_id,
             } => {
-                let detail = self
+                let mut detail = self
                     .mail_queries
                     .message_detail(
                         &AccountId::from(source_id.clone()),
@@ -392,6 +392,12 @@ impl ViewRegistry {
                     )
                     .await?
                     .ok_or_else(|| RuntimeError::not_found("message not found"))?;
+                // The body is a separate sanitized lazy resource; the detail view
+                // serves header + attachments only and never the (unsanitized)
+                // cached body.
+                detail.body_html = None;
+                detail.body_text = None;
+                detail.raw_message = None;
                 let data = serde_json::to_value(detail).map_err(|error| {
                     RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                 })?;

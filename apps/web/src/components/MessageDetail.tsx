@@ -33,28 +33,16 @@ import {
 } from './message-detail/model'
 
 /**
- * Fold a runtime `messageDetail` snapshot into the message cache. An optimistic
- * header/keyword update arrives without a freshly-loaded body, so preserve the
- * body and attachments the HTTP detail fetch already populated rather than
- * blanking them.
+ * Fold a runtime `messageDetail` snapshot into the message cache. The body is a
+ * separate lazy resource (never part of detail), so there is no body to preserve
+ * across header updates: a detail payload (attachments present) is complete on
+ * its own, and a summary falls through to trigger a detail refetch.
  */
 function mergeMessageDetail(
-  previous: MessageDetailPayload | MessageSummary | undefined,
+  _previous: MessageDetailPayload | MessageSummary | undefined,
   next: MessageDetailPayload | MessageSummary,
 ): MessageDetailPayload | MessageSummary {
-  if (!isMessageDetailPayload(next)) {
-    return next
-  }
-  const nextHasBody = next.bodyHtml != null || next.bodyText != null
-  if (nextHasBody || !isMessageDetailPayload(previous)) {
-    return next
-  }
-  return {
-    ...next,
-    bodyHtml: previous.bodyHtml,
-    bodyText: previous.bodyText,
-    attachments: previous.attachments,
-  }
+  return next
 }
 
 /** @spec docs/L1-ui#messagedetail-and-emailframe */
