@@ -6,7 +6,8 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // src/runtime/wasm is wasm-bindgen output (just build-replica-wasm); never linted.
+  globalIgnores(['dist', 'src/runtime/wasm']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
