@@ -79,7 +79,13 @@ export function ComposeOverlay({
     ready: !isPreparingMessage,
     hasUserEdited: formState.hasUserEdited,
     resetKey: formState.formResetKey,
-    fixedDraftKey: intent.kind === 'draft' ? intent.messageId : undefined,
+    // Resume keys by the draft's stable identity once loaded, falling back to
+    // its provider id (legacy drafts without the header, or before load). The
+    // backend edits an existing provider draft in place either way.
+    fixedDraftKey:
+      intent.kind === 'draft'
+        ? (queries.draftSeedDraftId ?? intent.messageId)
+        : undefined,
     intentKind: intent.kind,
     replyContext: queries.replyContextQuery.data,
     resolveSubmissionSourceId: queries.resolveSubmissionSourceId,

@@ -156,23 +156,16 @@ fn message(id: &str, from_name: &str, received_at: &str) -> MessageRecord {
     MessageRecord {
         id: MessageId::from(id),
         source_thread_id: ThreadId::from(format!("thread-{id}")),
-        remote_blob_id: None,
         subject: Some(format!("Subject {id}")),
         from_name: Some(from_name.to_string()),
         from_email: Some(format!("{id}@example.test")),
-        to: Vec::new(),
         preview: Some(format!("Preview {id}")),
         received_at: received_at.to_string(),
-        has_attachment: false,
         size: 42,
         mailbox_ids: vec![MailboxId::from("inbox")],
-        keywords: Vec::new(),
-        body_html: None,
         body_text: Some(format!("Body {id}")),
-        raw_mime: None,
         rfc_message_id: Some(format!("<{id}@example.test>")),
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
 

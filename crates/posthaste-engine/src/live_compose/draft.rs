@@ -40,6 +40,19 @@ pub(crate) async fn save_draft(
         email_obj.mailbox_ids([drafts_mailbox_id.as_str()]);
         email_obj.keyword("$draft", true);
         email_obj.from([(identity.name.as_str(), identity.email.as_str())]);
+        // Stamp the stable draft identity so a resumed edit replaces this draft
+        // in place across provider id rotation (read back on sync).
+        if let Some(draft_id) = request_data
+            .draft_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            email_obj.header(
+                jmap_client::email::Header::as_text(posthaste_domain::DRAFT_ID_HEADER, false),
+                jmap_client::email::HeaderValue::AsText(draft_id.to_string()),
+            );
+        }
         if !request_data.to.is_empty() {
             email_obj.to(request_data.to.iter().map(recipient_to_address));
         }

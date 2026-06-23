@@ -31,6 +31,12 @@ export interface DraftContent {
   bcc: Recipient[]
   subject: string
   body: string
+  /**
+   * Stable `X-Posthaste-Draft-Id` for this draft, when present. Autosave keys by
+   * this so a resumed edit updates the draft in place instead of duplicating it
+   * as the provider id rotates.
+   */
+  draftId: string | null
 }
 
 /** @spec docs/L1-api#compose */
@@ -51,6 +57,11 @@ export interface SendMessageInput {
   inReplyTo: string | null
   references: string | null
   attachments: SendMessageAttachmentInput[]
+  /**
+   * Server-injected stable draft identity for a draft save; clients never set
+   * it (a sent message is a fresh message). Present for wire conformance.
+   */
+  draftId?: string | null
 }
 
 /** @spec docs/L1-outbox#operation-model */

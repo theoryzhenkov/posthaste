@@ -5099,6 +5099,13 @@
               "$ref": "#/components/schemas/Recipient"
             }
           },
+          "draftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable `X-Posthaste-Draft-Id` for this draft, when present. The client\nkeys autosave by this so a resumed edit updates the draft in place\ninstead of creating a new one as the provider id rotates.\n\n@spec docs/L1-outbox#temp-id-reconciliation"
+          },
           "from": {
             "oneOf": [
               {
@@ -5325,6 +5332,13 @@
                   "string",
                   "null"
                 ]
+              },
+              "draftId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Stable `X-Posthaste-Draft-Id` for this message when it is a draft this\nclient saved; `None` otherwise.\n\n@spec docs/L1-outbox#temp-id-reconciliation"
               },
               "rawMessage": {
                 "oneOf": [
@@ -6698,6 +6712,13 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          },
+          "draftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request\nsaves a draft. The domain layer injects it from the draft key before\nqueuing; `save_draft` writes it as a header so the id survives provider\nid rotation. Ignored by `send` (a sent message is a fresh message).\n\n@spec docs/L1-outbox#temp-id-reconciliation"
           },
           "from": {
             "oneOf": [

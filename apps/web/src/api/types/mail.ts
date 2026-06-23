@@ -92,6 +92,8 @@ export interface MessageDetail extends MessageSummary {
   bodyText: string | null
   rawMessage: RawMessageRef | null
   attachments: MessageAttachment[]
+  /** Stable `X-Posthaste-Draft-Id` when this message is a draft we saved. */
+  draftId?: string | null
 }
 
 /**

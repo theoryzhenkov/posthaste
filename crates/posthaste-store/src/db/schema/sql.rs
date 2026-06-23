@@ -37,6 +37,7 @@ pub(super) const SCHEMA_SQL: &str = "
                 rfc_message_id TEXT,
                 in_reply_to TEXT,
                 references_json TEXT NOT NULL DEFAULT '[]',
+                draft_id TEXT,
                 PRIMARY KEY (account_id, id)
             );
 
