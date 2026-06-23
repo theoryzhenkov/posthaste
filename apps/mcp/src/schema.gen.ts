@@ -1411,6 +1411,18 @@ export interface components {
         };
         ClientMutationId: string;
         /**
+         * @description The result of a message **state-assertion command** (set-keywords, mailbox
+         *     moves, destroy): the domain events it emitted, and nothing else. A command
+         *     acknowledges its change — it deliberately carries no message detail or body,
+         *     so archive/delete/keyword ops never serialize the body onto the settlement
+         *     stream (regression-gated by
+         *     `message_mutation_settlement_payload_excludes_the_message_body`). Reads are a
+         *     separate path ([`CommandResult`]/[`MessageDetail`]).
+         */
+        CommandAck: {
+            events: components["schemas"]["DomainEvent"][];
+        };
+        /**
          * @description Result of a message mutation: updated detail (if applicable) and emitted events.
          *
          *     @spec docs/L1-api#message-commands
@@ -1569,6 +1581,14 @@ export interface components {
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
+            /**
+             * @description Stable `X-Posthaste-Draft-Id` for this draft, when present. The client
+             *     keys autosave by this so a resumed edit updates the draft in place
+             *     instead of creating a new one as the provider id rotates.
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             from?: null | components["schemas"]["Recipient"];
             subject: string;
             to: components["schemas"]["Recipient"][];
@@ -1657,6 +1677,13 @@ export interface components {
             attachments: components["schemas"]["MessageAttachment"][];
             bodyHtml?: string | null;
             bodyText?: string | null;
+            /**
+             * @description Stable `X-Posthaste-Draft-Id` for this message when it is a draft this
+             *     client saved; `None` otherwise.
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             rawMessage?: null | components["schemas"]["RawMessageRef"];
         };
         /**
@@ -2147,6 +2174,15 @@ export interface components {
             bcc: components["schemas"]["Recipient"][];
             body: string;
             cc: components["schemas"]["Recipient"][];
+            /**
+             * @description Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request
+             *     saves a draft. The domain layer injects it from the draft key before
+             *     queuing; `save_draft` writes it as a header so the id survives provider
+             *     id rotation. Ignored by `send` (a sent message is a fresh message).
+             *
+             *     @spec docs/L1-outbox#temp-id-reconciliation
+             */
+            draftId?: string | null;
             from?: null | components["schemas"]["Recipient"];
             inReplyTo?: string | null;
             references?: string | null;
@@ -4039,7 +4075,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4082,7 +4118,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4129,7 +4165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4176,7 +4212,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4223,7 +4259,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */

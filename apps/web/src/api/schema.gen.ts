@@ -1411,6 +1411,18 @@ export interface components {
         };
         ClientMutationId: string;
         /**
+         * @description The result of a message **state-assertion command** (set-keywords, mailbox
+         *     moves, destroy): the domain events it emitted, and nothing else. A command
+         *     acknowledges its change — it deliberately carries no message detail or body,
+         *     so archive/delete/keyword ops never serialize the body onto the settlement
+         *     stream (regression-gated by
+         *     `message_mutation_settlement_payload_excludes_the_message_body`). Reads are a
+         *     separate path ([`CommandResult`]/[`MessageDetail`]).
+         */
+        CommandAck: {
+            events: components["schemas"]["DomainEvent"][];
+        };
+        /**
          * @description Result of a message mutation: updated detail (if applicable) and emitted events.
          *
          *     @spec docs/L1-api#message-commands
@@ -4063,7 +4075,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4106,7 +4118,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4153,7 +4165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4200,7 +4212,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */
@@ -4247,7 +4259,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommandResult"];
+                    "application/json": components["schemas"]["CommandAck"];
                 };
             };
             /** @description Message not found */

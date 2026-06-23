@@ -53,14 +53,11 @@ impl MailService {
         account_id: &AccountId,
         message: &MessageSummary,
         action: &AutomationAction,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         match action {
             AutomationAction::ApplyTag { tag } => {
                 if message.keywords.iter().any(|keyword| keyword == tag) {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -74,10 +71,7 @@ impl MailService {
             }
             AutomationAction::RemoveTag { tag } => {
                 if !message.keywords.iter().any(|keyword| keyword == tag) {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -91,10 +85,7 @@ impl MailService {
             }
             AutomationAction::MarkRead => {
                 if message.is_read {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -108,10 +99,7 @@ impl MailService {
             }
             AutomationAction::MarkUnread => {
                 if !message.is_read {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -125,10 +113,7 @@ impl MailService {
             }
             AutomationAction::Flag => {
                 if message.is_flagged {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -142,10 +127,7 @@ impl MailService {
             }
             AutomationAction::Unflag => {
                 if !message.is_flagged {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.set_keywords(
                     account_id,
@@ -164,10 +146,7 @@ impl MailService {
                         .iter()
                         .any(|candidate| candidate == mailbox_id)
                 {
-                    return Ok(CommandResult {
-                        detail: None,
-                        events: Vec::new(),
-                    });
+                    return Ok(CommandAck { events: Vec::new() });
                 }
                 self.replace_mailboxes(
                     account_id,

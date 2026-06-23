@@ -1,7 +1,7 @@
 use crate::{
     AccountId, AppSettings, AutomationAction, AutomationBackfillBatchOutcome,
     AutomationBackfillJob, AutomationBackfillJobStatus, AutomationRule, AutomationTrigger,
-    CommandResult, DomainEvent, MailGateway, MessageId, MessageRecord, MessageSortField,
+    CommandAck, DomainEvent, MailGateway, MessageId, MessageRecord, MessageSortField,
     MessageSummary, ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand,
     SmartMailboxCondition, SmartMailboxField, SmartMailboxGroup, SmartMailboxGroupOperator,
     SmartMailboxOperator, SmartMailboxRule, SmartMailboxRuleNode, SmartMailboxValue, SortDirection,
