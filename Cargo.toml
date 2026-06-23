@@ -10,6 +10,7 @@ default-members = [
   "crates/posthaste-engine",
   "crates/posthaste-imap",
   "crates/posthaste-lab",
+  "crates/posthaste-link-core",
   "crates/posthaste-observability",
   "crates/posthaste-runtime-contract",
   "crates/posthaste-server",

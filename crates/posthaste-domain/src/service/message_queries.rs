@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mail_parser::{Address, MessageParser};
+use posthaste_link_core::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
 
 use super::*;
 
@@ -389,10 +390,18 @@ impl MailService {
     }
 }
 
+/// Fold an account's pending message assertions over one summary using the
+/// shared predictor ([posthaste_link_core]). The renderer-facing read shape
+/// (`MessageSummary`) is mapped onto the predictor's minimal canonical state,
+/// folded, and mapped back, so the *effect* is defined once and is identical to
+/// the one the WASM replica runs (`single-local-effect`).
+///
+/// @spec docs/replication/L2#3-the-shared-predictor-crate
 fn apply_operations_to_summary(
     mut summary: MessageSummary,
     operations: &[Operation],
 ) -> Result<Option<MessageSummary>, ServiceError> {
+    let mut assertions = Vec::new();
     for operation in operations
         .iter()
         .filter(|operation| operation.entity.id == summary.id.as_str())
@@ -406,16 +415,10 @@ fn apply_operations_to_summary(
                                 "invalid setKeywords overlay payload: {error}"
                             )))
                         })?;
-                let mut keywords = summary.keywords.into_iter().collect::<BTreeSet<_>>();
-                for keyword in command.add {
-                    keywords.insert(keyword);
-                }
-                for keyword in command.remove {
-                    keywords.remove(&keyword);
-                }
-                summary.keywords = keywords.into_iter().collect();
-                summary.is_read = summary.keywords.iter().any(|keyword| keyword == "$seen");
-                summary.is_flagged = summary.keywords.iter().any(|keyword| keyword == "$flagged");
+                assertions.push(MessageAssertion::SetKeywords {
+                    add: command.add,
+                    remove: command.remove,
+                });
             }
             OperationKind::ReplaceMailboxes => {
                 let command =
@@ -425,13 +428,37 @@ fn apply_operations_to_summary(
                                 "invalid replaceMailboxes overlay payload: {error}"
                             )))
                         })?;
-                summary.mailbox_ids = command.mailbox_ids;
+                assertions.push(MessageAssertion::ReplaceMailboxes {
+                    mailbox_ids: command
+                        .mailbox_ids
+                        .into_iter()
+                        .map(|mailbox_id| mailbox_id.0)
+                        .collect(),
+                });
             }
-            OperationKind::Destroy => return Ok(None),
+            OperationKind::Destroy => assertions.push(MessageAssertion::Destroy),
             _ => {}
         }
     }
-    Ok(Some(summary))
+
+    let base = MessageFoldState {
+        keywords: std::mem::take(&mut summary.keywords),
+        mailbox_ids: summary
+            .mailbox_ids
+            .iter()
+            .map(|mailbox_id| mailbox_id.0.clone())
+            .collect(),
+    };
+    match replay_message(base, &assertions) {
+        MessageOutcome::Removed => Ok(None),
+        MessageOutcome::Present(state) => {
+            summary.keywords = state.keywords;
+            summary.mailbox_ids = state.mailbox_ids.into_iter().map(MailboxId).collect();
+            summary.is_read = summary.keywords.iter().any(|keyword| keyword == "$seen");
+            summary.is_flagged = summary.keywords.iter().any(|keyword| keyword == "$flagged");
+            Ok(Some(summary))
+        }
+    }
 }
 
 pub(crate) fn sort_message_summaries(

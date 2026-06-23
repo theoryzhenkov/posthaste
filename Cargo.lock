@@ -4124,6 +4124,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "mail-parser",
+ "posthaste-link-core",
  "posthaste-observability",
  "serde",
  "serde_json",
@@ -4184,6 +4185,14 @@ dependencies = [
  "time",
  "toml 0.8.2",
  "uuid",
+]
+
+[[package]]
+name = "posthaste-link-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
