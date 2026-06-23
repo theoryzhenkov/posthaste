@@ -8,6 +8,7 @@ import {
   buildAccountLogoUrl,
   buildEventsUrl,
   buildMessageAttachmentUrl,
+  buildMessageBodyUrl,
   buildRuntimeSessionStreamUrl,
   buildViewStreamUrl,
   buildOAuthRedirectUri,
@@ -154,6 +155,12 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
         resource.sourceId,
         resource.messageId,
         resource.attachmentId,
+      )
+    case 'message-body':
+      return buildMessageBodyUrl(
+        resource.sourceId,
+        resource.messageId,
+        resource.format,
       )
   }
 }

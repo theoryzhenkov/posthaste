@@ -12,6 +12,16 @@ export function buildMessageAttachmentUrl(
   return `${baseUrl()}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
 }
 
+export function buildMessageBodyUrl(
+  sourceId: string,
+  messageId: string,
+  format: 'html' | 'text',
+): string {
+  // The body is served as a lazy resource (sanitized HTML or plain text), loaded
+  // via an authenticated blob fetch like attachments — never inlined in detail.
+  return `${baseUrl()}/sources/${encodeURIComponent(sourceId)}/messages/${encodeURIComponent(messageId)}/body?format=${format}`
+}
+
 export function buildAccountLogoUrl(imageId: string): string {
   return `${baseUrl()}/account-assets/logos/${encodeURIComponent(imageId)}`
 }

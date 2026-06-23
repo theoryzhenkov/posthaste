@@ -1646,11 +1646,13 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.optional_gateway(&account_id).await;
+        // Gateway-less: the detail read serves header + cached attachments only.
+        // The body is a separate lazy resource (get_message_resource / `/body`),
+        // so opening a message no longer provider-fetches the body inline.
         let result = self
             .core
             .service
-            .get_message_detail(&account_id, &message_id, gateway.as_deref())
+            .get_message_detail(&account_id, &message_id, None)
             .await?;
         self.publish_events(&result.events);
         Ok(result)

@@ -291,6 +291,12 @@ export type RuntimeResourceDescriptor =
       messageId: string
       attachmentId: string
     }
+  | {
+      kind: 'message-body'
+      sourceId: string
+      messageId: string
+      format: 'html' | 'text'
+    }
 
 export interface RuntimeResourceFetchOptions {
   signal?: AbortSignal

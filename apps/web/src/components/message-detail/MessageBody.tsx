@@ -1,10 +1,31 @@
 import type { MessageDetail } from '@/api/types'
 import { resolveMessageBodyRender } from '@/messageBody'
+import { useMessageBody } from '@/hooks/useMessageBody'
 
 import { EmailFrame } from '../EmailFrame'
 
 export function MessageBody({ message }: { message: MessageDetail }) {
-  const bodyRender = resolveMessageBodyRender(message)
+  // The body is a lazy resource, not part of the detail payload: fetch it
+  // (sanitized) separately and compose it with the header the parent already
+  // has. The detail read stays body-free.
+  const { bodyHtml, bodyText, isLoading } = useMessageBody(
+    message.sourceId,
+    message.id,
+  )
+
+  if (isLoading) {
+    return (
+      <div className="ph-scroll h-full overflow-auto px-[22px] py-[18px] text-[13px] text-muted-foreground">
+        Loading…
+      </div>
+    )
+  }
+
+  const bodyRender = resolveMessageBodyRender({
+    bodyHtml,
+    bodyText,
+    preview: message.preview,
+  })
 
   if (bodyRender.kind === 'html') {
     return (
