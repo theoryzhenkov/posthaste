@@ -37,6 +37,13 @@ function runtimeResourceKey(resource: RuntimeResourceDescriptor): string {
         resource.messageId,
         resource.attachmentId,
       ])
+    case 'message-body':
+      return JSON.stringify([
+        'message-body',
+        resource.sourceId,
+        resource.messageId,
+        resource.format,
+      ])
   }
 }
 
@@ -44,6 +51,14 @@ function runtimeResourceFromKey(key: string): RuntimeResourceDescriptor {
   const [kind, first, second, third] = JSON.parse(key) as string[]
   if (kind === 'account-logo') {
     return { kind, imageId: first ?? '' }
+  }
+  if (kind === 'message-body') {
+    return {
+      kind: 'message-body',
+      sourceId: first ?? '',
+      messageId: second ?? '',
+      format: third === 'text' ? 'text' : 'html',
+    }
   }
   return {
     kind: 'message-attachment',
