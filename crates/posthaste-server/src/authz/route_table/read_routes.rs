@@ -55,6 +55,11 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/runtime/sessions/{session_id}/views/{view_id}",
         authz: filter(Action::Read, ResourceShape::account("sourceId")),
     },
+    Entry {
+        method: "POST",
+        template: "/runtime/sessions/{session_id}/views/{view_id}/extend",
+        authz: filter(Action::Read, ResourceShape::account("sourceId")),
+    },
     // -- Per-source resources: account axis from `source_id`. --
     Entry {
         method: "GET",
