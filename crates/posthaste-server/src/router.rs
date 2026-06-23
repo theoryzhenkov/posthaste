@@ -127,6 +127,10 @@ pub fn build_api_router(state: Arc<AppState>) -> Router {
             "/sources/{source_id}/messages/{message_id}/attachments/{attachment_id}",
             get(api::get_message_attachment),
         )
+        .route(
+            "/sources/{source_id}/messages/{message_id}/body",
+            get(api::get_message_body),
+        )
         .route("/sender-addresses", get(api::list_sender_addresses))
         .route("/sources/{source_id}/identity", get(api::get_identity))
         .route(

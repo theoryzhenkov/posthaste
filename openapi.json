@@ -3317,6 +3317,85 @@
         }
       }
     },
+    "/v1/sources/{source_id}/messages/{message_id}/body": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Get message body",
+        "description": "Returns the message body as a lazy resource: sanitized HTML (default) or plain text, with inline attachment URLs rewritten. Served separately from message detail so a detail read never carries the body.",
+        "operationId": "get_message_body",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "description": "Source (account) identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Message identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`\"html\"` (default, sanitized) or `\"text\"`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Body bytes (text/html sanitized, or text/plain)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Account gateway unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sources/{source_id}/messages/{message_id}/draft-content": {
       "get": {
         "tags": [

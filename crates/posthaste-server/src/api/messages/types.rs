@@ -61,6 +61,13 @@ pub struct GetAttachmentQuery {
     pub download: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct GetBodyQuery {
+    /// `"html"` (default, sanitized) or `"text"`.
+    pub format: Option<String>,
+}
+
 /// Paginated conversation list response with an opaque cursor for the next page.
 ///
 /// @spec docs/L1-api#cursor-pagination

@@ -88,10 +88,10 @@ pub use message_commands::{
 };
 pub use messages::{
     delete_draft, discard_operation, get_conversation, get_draft_content, get_identity,
-    get_message, get_message_attachment, get_reply_context, list_conversations,
+    get_message, get_message_attachment, get_message_body, get_reply_context, list_conversations,
     list_pending_operations, list_sender_addresses, list_source_messages, retry_operation,
     save_draft, search_messages, send_message, ConversationPageResponse, DeleteDraftRequest,
-    GetAttachmentQuery, ListConversationsQuery, ListSmartMailboxMessagesQuery,
+    GetAttachmentQuery, GetBodyQuery, ListConversationsQuery, ListSmartMailboxMessagesQuery,
     ListSourceMessagesQuery, MessagePageResponse, SaveDraftRequest, SearchMessagesQuery,
 };
 pub use read_calls::{

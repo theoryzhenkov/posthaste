@@ -16,11 +16,11 @@ use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
     AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult, DomainEvent,
     DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
-    MessageId, MessageSummary, Operation, OperationId, ProviderAuthKind, ProviderHint,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
-    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
-    ValidationError,
+    MessageAttachment, MessageId, MessageSummary, Operation, OperationId, ProviderAuthKind,
+    ProviderHint, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox,
+    SmartMailboxId, SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode,
+    TagSummary, ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -289,13 +289,18 @@ pub enum MessageResourceKind {
 
 /// Raw bytes of a resolved message resource plus how to serve them. The server
 /// applies any per-kind transform (e.g. HTML sanitization) before responding.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeResourceBytes {
     pub bytes: Vec<u8>,
     pub content_type: String,
     /// Suggested download filename (attachments); `None` for body resources.
     pub filename: Option<String>,
+    /// Inline attachments the server transform needs to rewrite `cid:` URLs in
+    /// body HTML. Empty for non-body resources. Carried here so the body-html
+    /// transform stays server-side without a second detail load.
+    #[serde(default)]
+    pub inline_attachments: Vec<MessageAttachment>,
 }
 
 /// Live runtime event stream returned by authority runtimes.

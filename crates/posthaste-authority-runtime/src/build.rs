@@ -1718,20 +1718,24 @@ impl RuntimeCore for AuthorityRuntimeHandle {
                     bytes,
                     content_type: attachment.mime_type,
                     filename: attachment.filename,
+                    inline_attachments: Vec::new(),
                 })
             }
             // Body resources return RAW bytes; the server serve layer applies the
             // per-kind transform (HTML sanitization + inline-URL rewrite) before
-            // responding — the runtime never sanitizes.
+            // responding — the runtime never sanitizes. Body HTML carries its
+            // inline attachments so the server can rewrite `cid:` URLs.
             MessageResourceKind::BodyHtml => Ok(RuntimeResourceBytes {
                 bytes: detail.body_html.unwrap_or_default().into_bytes(),
                 content_type: "text/html; charset=utf-8".to_string(),
                 filename: None,
+                inline_attachments: detail.attachments,
             }),
             MessageResourceKind::BodyText => Ok(RuntimeResourceBytes {
                 bytes: detail.body_text.unwrap_or_default().into_bytes(),
                 content_type: "text/plain; charset=utf-8".to_string(),
                 filename: None,
+                inline_attachments: Vec::new(),
             }),
         }
     }
