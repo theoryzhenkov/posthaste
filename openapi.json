@@ -2360,7 +2360,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandResult"
+                  "$ref": "#/components/schemas/CommandAck"
                 }
               }
             }
@@ -2422,7 +2422,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandResult"
+                  "$ref": "#/components/schemas/CommandAck"
                 }
               }
             }
@@ -2494,7 +2494,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandResult"
+                  "$ref": "#/components/schemas/CommandAck"
                 }
               }
             }
@@ -2566,7 +2566,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandResult"
+                  "$ref": "#/components/schemas/CommandAck"
                 }
               }
             }
@@ -2638,7 +2638,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandResult"
+                  "$ref": "#/components/schemas/CommandAck"
                 }
               }
             }
@@ -4692,6 +4692,21 @@
       },
       "ClientMutationId": {
         "type": "string"
+      },
+      "CommandAck": {
+        "type": "object",
+        "description": "The result of a message **state-assertion command** (set-keywords, mailbox\nmoves, destroy): the domain events it emitted, and nothing else. A command\nacknowledges its change — it deliberately carries no message detail or body,\nso archive/delete/keyword ops never serialize the body onto the settlement\nstream (regression-gated by\n`message_mutation_settlement_payload_excludes_the_message_body`). Reads are a\nseparate path ([`CommandResult`]/[`MessageDetail`]).",
+        "required": [
+          "events"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainEvent"
+            }
+          }
+        }
       },
       "CommandResult": {
         "type": "object",

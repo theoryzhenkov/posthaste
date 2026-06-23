@@ -52,6 +52,20 @@ pub struct CommandResult {
     pub events: Vec<DomainEvent>,
 }
 
+/// The result of a message **state-assertion command** (set-keywords, mailbox
+/// moves, destroy): the domain events it emitted, and nothing else. A command
+/// acknowledges its change — it deliberately carries no message detail or body,
+/// so archive/delete/keyword ops never serialize the body onto the settlement
+/// stream (regression-gated by
+/// `message_mutation_settlement_payload_excludes_the_message_body`). Reads are a
+/// separate path ([`CommandResult`]/[`MessageDetail`]).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CommandAck {
+    pub events: Vec<DomainEvent>,
+}
+
 /// Compose-ready content parsed from an existing provider draft.
 ///
 /// Unlike [`MessageDetail`], this preserves all compose recipient fields that

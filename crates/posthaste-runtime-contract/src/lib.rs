@@ -14,13 +14,13 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use posthaste_domain::{
     AccountAppearance, AccountDriver, AccountId, AccountOverview, AddToMailboxCommand, AppSettings,
-    AutomationRule, CachePolicy, CachedSenderAddress, CommandResult, DomainEvent, DraftContent,
-    EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary, MessageId,
-    MessageSummary, Operation, OperationId, ProviderAuthKind, ProviderHint,
-    RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SendMessageRequest, ServiceError, ServiceErrorKind,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxRule, SmartMailboxSummary,
-    SmtpTransportSettings, SyncMode, TagSummary, ValidationError,
+    AutomationRule, CachePolicy, CachedSenderAddress, CommandAck, CommandResult, DomainEvent,
+    DraftContent, EventFilter, Identity, ImapTransportSettings, MailboxId, MailboxSummary,
+    MessageId, MessageSummary, Operation, OperationId, ProviderAuthKind, ProviderHint,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
+    ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+    SmartMailboxRule, SmartMailboxSummary, SmtpTransportSettings, SyncMode, TagSummary,
+    ValidationError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1096,7 +1096,7 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
         command: SetKeywordsCommand,
-    ) -> Result<CommandResult, RuntimeError>;
+    ) -> Result<CommandAck, RuntimeError>;
 
     async fn add_message_to_mailbox(
         &self,
@@ -1104,7 +1104,7 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
         command: AddToMailboxCommand,
-    ) -> Result<CommandResult, RuntimeError>;
+    ) -> Result<CommandAck, RuntimeError>;
 
     async fn remove_message_from_mailbox(
         &self,
@@ -1112,7 +1112,7 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
         command: RemoveFromMailboxCommand,
-    ) -> Result<CommandResult, RuntimeError>;
+    ) -> Result<CommandAck, RuntimeError>;
 
     async fn replace_message_mailboxes(
         &self,
@@ -1120,14 +1120,14 @@ pub trait RuntimeCore: Send + Sync {
         account_id: AccountId,
         message_id: MessageId,
         command: ReplaceMailboxesCommand,
-    ) -> Result<CommandResult, RuntimeError>;
+    ) -> Result<CommandAck, RuntimeError>;
 
     async fn destroy_message(
         &self,
         caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<CommandResult, RuntimeError>;
+    ) -> Result<CommandAck, RuntimeError>;
 
     async fn set_mailbox_role(
         &self,

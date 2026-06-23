@@ -191,6 +191,7 @@ use utoipa::OpenApi;
         posthaste_domain::CachedSenderAddress,
         posthaste_domain::ReplyContext,
         posthaste_domain::CommandResult,
+        posthaste_domain::CommandAck,
         posthaste_domain::SetKeywordsCommand,
         posthaste_domain::AddToMailboxCommand,
         posthaste_domain::RemoveFromMailboxCommand,

@@ -15,7 +15,7 @@ use super::*;
     ),
     request_body = SetKeywordsCommand,
     responses(
-        (status = 200, description = "Command result", body = CommandResult),
+        (status = 200, description = "Command result", body = CommandAck),
         (status = 404, description = "Message not found", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -24,7 +24,7 @@ pub async fn set_keywords(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<SetKeywordsCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
+) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
         .set_message_keywords(
@@ -53,7 +53,7 @@ pub async fn set_keywords(
     ),
     request_body = AddToMailboxCommand,
     responses(
-        (status = 200, description = "Command result", body = CommandResult),
+        (status = 200, description = "Command result", body = CommandAck),
         (status = 404, description = "Message not found", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -62,7 +62,7 @@ pub async fn add_to_mailbox(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<AddToMailboxCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
+) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
         .add_message_to_mailbox(
@@ -91,7 +91,7 @@ pub async fn add_to_mailbox(
     ),
     request_body = RemoveFromMailboxCommand,
     responses(
-        (status = 200, description = "Command result", body = CommandResult),
+        (status = 200, description = "Command result", body = CommandAck),
         (status = 404, description = "Message not found", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -100,7 +100,7 @@ pub async fn remove_from_mailbox(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<RemoveFromMailboxCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
+) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
         .remove_message_from_mailbox(
@@ -129,7 +129,7 @@ pub async fn remove_from_mailbox(
     ),
     request_body = ReplaceMailboxesCommand,
     responses(
-        (status = 200, description = "Command result", body = CommandResult),
+        (status = 200, description = "Command result", body = CommandAck),
         (status = 404, description = "Message not found", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -138,7 +138,7 @@ pub async fn replace_mailboxes(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
     Json(command): Json<ReplaceMailboxesCommand>,
-) -> Result<Json<CommandResult>, ApiError> {
+) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
         .replace_message_mailboxes(
@@ -166,7 +166,7 @@ pub async fn replace_mailboxes(
         ("message_id" = String, Path, description = "Message identifier")
     ),
     responses(
-        (status = 200, description = "Command result", body = CommandResult),
+        (status = 200, description = "Command result", body = CommandAck),
         (status = 404, description = "Message not found", body = ApiErrorBody),
         (status = 503, description = "Gateway unavailable", body = ApiErrorBody)
     )
@@ -174,7 +174,7 @@ pub async fn replace_mailboxes(
 pub async fn destroy_message(
     State(state): State<Arc<AppState>>,
     Path((source_id, message_id)): Path<(String, String)>,
-) -> Result<Json<CommandResult>, ApiError> {
+) -> Result<Json<CommandAck>, ApiError> {
     state
         .runtime
         .destroy_message(

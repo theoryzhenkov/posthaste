@@ -1,5 +1,5 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandResult, GatewayError, MailboxId, MessageId,
+    AccountId, AddToMailboxCommand, CommandAck, GatewayError, MailboxId, MessageId,
     OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
     EVENT_TOPIC_MESSAGE_UPDATED,
@@ -42,7 +42,7 @@ impl MailService {
         kind: OperationKind,
         payload: serde_json::Value,
         event_payload: serde_json::Value,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         // A state assertion acknowledges the change; it does not read or return
         // the message body. The synced mailbox memberships are both the
         // existence check (a known message has them) and the event's mailbox
@@ -50,7 +50,7 @@ impl MailService {
         // never needed here. Membership and counts propagate through the appended
         // event + server-side view recompute, which keys on the change flags (see
         // `event_affects_view`), not on this hint, and every caller discards
-        // `CommandResult.detail` for state assertions. Reading the body here made
+        // the command result for state assertions. Reading the body here made
         // archive/delete/keyword ops pay a load + serialize + transfer tax
         // proportional to body size on attachment-shaped messages — regression-
         // gated by `message_mutation_settlement_payload_excludes_the_message_body`.
@@ -73,8 +73,7 @@ impl MailService {
                     .remove_operation_after_local_failure(&operation, ServiceError::from(error)));
             }
         };
-        Ok(CommandResult {
-            detail: None,
+        Ok(CommandAck {
             events: vec![event],
         })
     }
@@ -92,7 +91,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &SetKeywordsCommand,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         let payload = serde_json::to_value(command).map_err(|error| {
             ServiceError::from(GatewayError::Rejected(format!(
                 "failed to serialize keyword command: {error}"
@@ -120,7 +119,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &ReplaceMailboxesCommand,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         let payload = serde_json::to_value(command).map_err(|error| {
             ServiceError::from(GatewayError::Rejected(format!(
                 "failed to serialize mailbox command: {error}"
@@ -156,7 +155,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &AddToMailboxCommand,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         let mut mailbox_ids = self.list_message_mailboxes_with_overlay(account_id, message_id)?;
         if !mailbox_ids.contains(&command.mailbox_id) {
             mailbox_ids.push(command.mailbox_id.clone());
@@ -177,7 +176,7 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
         command: &RemoveFromMailboxCommand,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         let mailbox_ids: Vec<MailboxId> = self
             .list_message_mailboxes_with_overlay(account_id, message_id)?
             .into_iter()
@@ -200,7 +199,7 @@ impl MailService {
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
-    ) -> Result<CommandResult, ServiceError> {
+    ) -> Result<CommandAck, ServiceError> {
         self.queue_then_emit_message_operation(
             account_id,
             message_id,
