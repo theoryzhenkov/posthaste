@@ -22,6 +22,18 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/sources/{source_id}/operations",
         authz: gate(Action::Read, ResourceShape::account("source_id")),
     },
+    // Outbox recovery: discarding or retrying a pending operation manages the
+    // source's outbox (mirrors the source-scoped `commands/sync` manage gate).
+    Entry {
+        method: "DELETE",
+        template: "/sources/{source_id}/operations/{operation_id}",
+        authz: gate(Action::Manage, ResourceShape::account("source_id")),
+    },
+    Entry {
+        method: "POST",
+        template: "/sources/{source_id}/operations/{operation_id}/retry",
+        authz: gate(Action::Manage, ResourceShape::account("source_id")),
+    },
     Entry {
         method: "POST",
         template: "/sources/{source_id}/commands/messages/{message_id}/set-keywords",
