@@ -12,6 +12,7 @@ use posthaste_link_core::{
 /// out of the projection to seed the predictor and writes the folded state back
 /// on `project`, preserving every other field.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MailListRow {
     pub message_id: String,
     pub projection: Value,
