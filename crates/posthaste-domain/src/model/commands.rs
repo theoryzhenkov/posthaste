@@ -58,7 +58,7 @@ pub struct CommandResult {
 /// are present in the cached raw MIME, including Cc and Bcc.
 ///
 /// @spec docs/L1-outbox#operation-model
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DraftContent {
@@ -68,6 +68,13 @@ pub struct DraftContent {
     pub bcc: Vec<Recipient>,
     pub subject: String,
     pub body: String,
+    /// Stable `X-Posthaste-Draft-Id` for this draft, when present. The client
+    /// keys autosave by this so a resumed edit updates the draft in place
+    /// instead of creating a new one as the provider id rotates.
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    #[serde(default)]
+    pub draft_id: Option<String>,
 }
 
 /// Result of loading draft content; includes events emitted by lazy body fetch.
@@ -210,7 +217,7 @@ pub struct SendMessageAttachment {
 /// Request payload for sending a new email via `EmailSubmission/set`.
 ///
 /// @spec docs/L1-jmap#methods-used
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SendMessageRequest {
@@ -224,4 +231,12 @@ pub struct SendMessageRequest {
     pub references: Option<String>,
     #[serde(default)]
     pub attachments: Vec<SendMessageAttachment>,
+    /// Stable draft identity stamped as `X-Posthaste-Draft-Id` when this request
+    /// saves a draft. The domain layer injects it from the draft key before
+    /// queuing; `save_draft` writes it as a header so the id survives provider
+    /// id rotation. Ignored by `send` (a sent message is a fresh message).
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    #[serde(default)]
+    pub draft_id: Option<String>,
 }

@@ -103,6 +103,20 @@ export function useComposeAutosave({
     setDraftKey(fixedDraftKey ?? mintDraftKey())
   }, [resetKey, fixedDraftKey])
 
+  // When resuming a draft, its stable id only arrives once the draft content
+  // loads (after the initial fallback to the provider id). Adopt it before the
+  // first save — the form cannot be edited until it is seeded, so no save has
+  // keyed by the fallback id yet — so edits coalesce onto one draft.
+  useEffect(() => {
+    if (
+      fixedDraftKey &&
+      fixedDraftKey !== draftKey &&
+      savedSignatureRef.current === null
+    ) {
+      setDraftKey(fixedDraftKey)
+    }
+  }, [fixedDraftKey, draftKey])
+
   // Plain functions (not useCallback): the React Compiler memoizes them, and
   // they read mutable refs the compiler must not see manually memoized.
   const saveNow = async (): Promise<void> => {

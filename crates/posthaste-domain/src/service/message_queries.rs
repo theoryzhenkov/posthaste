@@ -204,15 +204,18 @@ impl MailService {
             .detail
             .ok_or_else(|| StoreError::NotFound(format!("message {}", message_id.as_str())))?;
         let mut events = result.events;
+        // The stable draft identity is projected from the `X-Posthaste-Draft-Id`
+        // header during sync; surface it so the client keys autosave by it and a
+        // resumed edit updates the draft in place across provider id rotation.
+        let draft_id = detail.draft_id.clone();
 
         if let Some(raw) = self
             .message_detail_reader
             .read_raw_message(account_id, message_id)?
         {
-            return Ok(DraftContentResult {
-                content: draft_content_from_raw_mime(&raw)?,
-                events,
-            });
+            let mut content = draft_content_from_raw_mime(&raw)?;
+            content.draft_id = draft_id;
+            return Ok(DraftContentResult { content, events });
         }
 
         if let Some(gateway) = gateway {
@@ -225,10 +228,9 @@ impl MailService {
                 .message_detail_reader
                 .read_raw_message(account_id, message_id)?
             {
-                return Ok(DraftContentResult {
-                    content: draft_content_from_raw_mime(&raw)?,
-                    events,
-                });
+                let mut content = draft_content_from_raw_mime(&raw)?;
+                content.draft_id = draft_id;
+                return Ok(DraftContentResult { content, events });
             }
         }
 
@@ -239,10 +241,10 @@ impl MailService {
                     email,
                 }),
                 to: detail.summary.to,
-                cc: Vec::new(),
-                bcc: Vec::new(),
                 subject: detail.summary.subject.unwrap_or_default(),
                 body: detail.body_text.unwrap_or_default(),
+                draft_id,
+                ..Default::default()
             },
             events,
         })
@@ -516,6 +518,8 @@ fn draft_content_from_raw_mime(raw_mime: &[u8]) -> Result<DraftContent, ServiceE
             .body_text(0)
             .map(|body| body.to_string())
             .unwrap_or_default(),
+        // Filled in by the caller from the projected draft identity.
+        draft_id: None,
     })
 }
 

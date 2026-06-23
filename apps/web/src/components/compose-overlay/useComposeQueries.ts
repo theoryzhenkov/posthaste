@@ -153,6 +153,10 @@ export function useComposeQueries({ intent }: { intent: ComposeIntent }) {
     accountsQuery,
     composeKey,
     draftSeed,
+    // Stable identity of the resumed draft, once its content loads. Autosave
+    // keys by this so an edit updates the draft in place across provider id
+    // rotation; `null` for legacy drafts without the header (keyed by id).
+    draftSeedDraftId: draftSeedQuery.data?.draftId ?? null,
     draftSeedQuery,
     fromOptions,
     identityQuery,

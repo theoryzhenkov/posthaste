@@ -142,3 +142,60 @@ fn maps_custom_imap_keywords_to_jmap_keywords() {
         ]
     );
 }
+
+#[test]
+fn parses_the_draft_id_header_into_the_message_record() {
+    let selected = ImapSelectedMailbox {
+        mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+        mailbox_name: "Drafts".to_string(),
+        uid_validity: ImapUidValidity(9),
+        uid_next: None,
+        highest_modseq: None,
+    };
+    let mapped = imap_header_message_record(
+        &selected,
+        ImapFetchedHeader {
+            mailbox_id: selected.mailbox_id.clone(),
+            uid: ImapUid(7),
+            modseq: None,
+            flags: vec!["\\Draft".to_string()],
+            rfc822_size: 128,
+            has_attachment: false,
+            headers: b"X-Posthaste-Draft-Id: draft-local-stable\r\nFrom: Alice <alice@example.test>\r\nSubject: WIP\r\n\r\n".to_vec(),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        },
+    )
+    .expect("mapped header");
+
+    assert_eq!(
+        mapped.message.draft_id.as_deref(),
+        Some("draft-local-stable")
+    );
+}
+
+#[test]
+fn no_draft_id_when_the_header_is_absent() {
+    let selected = ImapSelectedMailbox {
+        mailbox_id: MailboxId::from("imap:mailbox:494e424f58"),
+        mailbox_name: "INBOX".to_string(),
+        uid_validity: ImapUidValidity(9),
+        uid_next: None,
+        highest_modseq: None,
+    };
+    let mapped = imap_header_message_record(
+        &selected,
+        ImapFetchedHeader {
+            mailbox_id: selected.mailbox_id.clone(),
+            uid: ImapUid(8),
+            modseq: None,
+            flags: Vec::new(),
+            rfc822_size: 64,
+            has_attachment: false,
+            headers: b"From: Alice <alice@example.test>\r\nSubject: Hi\r\n\r\n".to_vec(),
+            updated_at: "2026-04-25T00:00:00Z".to_string(),
+        },
+    )
+    .expect("mapped header");
+
+    assert_eq!(mapped.message.draft_id, None);
+}

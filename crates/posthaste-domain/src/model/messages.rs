@@ -172,6 +172,12 @@ pub struct MessageDetail {
     pub body_text: Option<String>,
     pub raw_message: Option<RawMessageRef>,
     pub attachments: Vec<MessageAttachment>,
+    /// Stable `X-Posthaste-Draft-Id` for this message when it is a draft this
+    /// client saved; `None` otherwise.
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    #[serde(default)]
+    pub draft_id: Option<String>,
 }
 
 /// All messages belonging to a single JMAP thread, ordered by `receivedAt`.

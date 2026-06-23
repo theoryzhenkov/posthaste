@@ -16,7 +16,7 @@ pub struct MailboxRecord {
 /// Full email record from a JMAP sync response, used in [`SyncBatch`].
 ///
 /// @spec docs/L1-sync#syncbatch-and-apply_sync_batch
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageRecord {
     pub id: MessageId,
@@ -42,6 +42,14 @@ pub struct MessageRecord {
     pub in_reply_to: Option<String>,
     /// RFC 2822 `References` header chain, used for threading.
     pub references: Vec<String>,
+    /// Stable client-assigned draft identity (`X-Posthaste-Draft-Id`), present
+    /// only on drafts this client saved. Survives the provider id rotation that
+    /// JMAP's immutable-draft update (create-new + destroy-old) causes, so a
+    /// resumed draft is keyed by this instead of the rotating provider id.
+    ///
+    /// @spec docs/L1-outbox#temp-id-reconciliation
+    #[serde(default)]
+    pub draft_id: Option<String>,
 }
 
 /// Builds a minimal RFC 2822 message from constituent parts for draft storage.

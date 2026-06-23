@@ -2,15 +2,9 @@ use super::*;
 
 fn draft_request(subject: &str) -> SendMessageRequest {
     SendMessageRequest {
-        from: None,
-        to: Vec::new(),
-        cc: Vec::new(),
-        bcc: Vec::new(),
         subject: subject.to_string(),
         body: "draft body".to_string(),
-        in_reply_to: None,
-        references: None,
-        attachments: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -54,6 +48,67 @@ fn save_draft_with_id_enqueues_an_update_ordered_after_pending_ops() {
     assert_eq!(update.kind, OperationKind::DraftUpdate);
     assert_eq!(update.entity.id, create.entity.id);
     assert_eq!(update.depends_on.as_ref(), Some(&create.id));
+}
+
+#[test]
+fn save_draft_resuming_an_existing_provider_draft_updates_in_place() {
+    // A draft resumed by its provider id (no alias — a legacy draft saved before
+    // stable ids, or one created elsewhere) must edit in place, not duplicate.
+    // `mailbox_ids` non-empty makes the draft "exist" in the projection.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("state-1", &["drafts"]));
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let op = service
+        .save_draft(
+            &account,
+            Some(MessageId::from("provider-draft-42")),
+            draft_request("Edited"),
+        )
+        .expect("save draft");
+
+    assert_eq!(op.kind, OperationKind::DraftUpdate);
+    assert_eq!(op.entity.id, "provider-draft-42");
+}
+
+#[test]
+fn save_draft_for_a_brand_new_key_still_creates() {
+    // The same path with no existing message (empty mailbox set) is a genuine
+    // new draft, so it creates rather than trying to replace a non-existent id.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let op = service
+        .save_draft(
+            &account,
+            Some(MessageId::from("draft-local-new")),
+            draft_request("Hello"),
+        )
+        .expect("save draft");
+
+    assert_eq!(op.kind, OperationKind::DraftCreate);
+}
+
+#[test]
+fn save_draft_stamps_the_stable_id_into_the_payload() {
+    // The stable key is injected into the request payload so the gateway writes
+    // it as the X-Posthaste-Draft-Id header.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+
+    let op = service
+        .save_draft(
+            &account,
+            Some(MessageId::from("draft-local-xyz")),
+            draft_request("Hello"),
+        )
+        .expect("save draft");
+
+    let request: SendMessageRequest =
+        serde_json::from_value(op.payload).expect("payload is a SendMessageRequest");
+    assert_eq!(request.draft_id.as_deref(), Some("draft-local-xyz"));
 }
 
 #[tokio::test]

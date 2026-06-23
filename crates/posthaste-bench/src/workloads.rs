@@ -85,6 +85,7 @@ pub fn synthetic_messages(count: usize) -> Vec<MessageRecord> {
                 rfc_message_id: Some(format!("<{i}@example.test>")),
                 in_reply_to: None,
                 references: Vec::new(),
+                draft_id: None,
             }
         })
         .collect()

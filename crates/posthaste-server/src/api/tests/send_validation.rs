@@ -12,6 +12,7 @@ fn send_message_rejects_missing_to_recipient() {
         in_reply_to: None,
         references: None,
         attachments: Vec::new(),
+        draft_id: None,
     })
     .expect_err("empty To should be rejected");
 
@@ -38,6 +39,7 @@ fn send_message_rejects_invalid_attachment_base64() {
             mime_type: "text/plain".to_string(),
             content_base64: "not base64".to_string(),
         }],
+        draft_id: None,
     })
     .expect_err("invalid attachment should be rejected");
 
@@ -66,6 +68,7 @@ fn send_message_rejects_too_many_attachments() {
                 content_base64: "aGVsbG8=".to_string(),
             })
             .collect(),
+        draft_id: None,
     })
     .expect_err("too many attachments should be rejected");
 

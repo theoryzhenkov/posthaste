@@ -51,6 +51,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             rfc_message_id: Some("<em-001@mock>".to_string()),
             in_reply_to: None,
             references: Vec::new(),
+            draft_id: None,
         },
         MessageRecord {
             id: MessageId::from("em-002"),
@@ -72,6 +73,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             rfc_message_id: Some("<em-002@mock>".to_string()),
             in_reply_to: Some("<em-001@mock>".to_string()),
             references: vec!["<em-001@mock>".to_string()],
+            draft_id: None,
         },
         MessageRecord {
             id: MessageId::from("em-003"),
@@ -93,6 +95,7 @@ pub(super) fn sample_messages() -> Vec<MessageRecord> {
             rfc_message_id: Some("<em-003@mock>".to_string()),
             in_reply_to: None,
             references: Vec::new(),
+            draft_id: None,
         },
     ]
 }

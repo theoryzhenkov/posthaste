@@ -104,23 +104,16 @@ fn seeded_message(message_id: &str, mailbox_id: &str) -> MessageRecord {
     MessageRecord {
         id: MessageId::from(message_id),
         source_thread_id: ThreadId::from(format!("thread-{message_id}")),
-        remote_blob_id: None,
         subject: Some(format!("Subject {message_id}")),
         from_name: Some("Alice".to_string()),
         from_email: Some("alice@example.com".to_string()),
-        to: Vec::new(),
         preview: Some("Preview".to_string()),
         received_at: "2026-03-31T10:00:00Z".to_string(),
-        has_attachment: false,
         size: 42,
         mailbox_ids: vec![MailboxId::from(mailbox_id)],
         keywords: vec!["$seen".to_string()],
-        body_html: None,
-        body_text: None,
-        raw_mime: None,
         rfc_message_id: Some(format!("<{message_id}@example.test>")),
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
 

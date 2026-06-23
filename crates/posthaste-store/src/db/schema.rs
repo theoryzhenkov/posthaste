@@ -20,6 +20,12 @@ pub(crate) fn init_schema(connection: &mut Connection) -> Result<(), StoreError>
     )?;
     ensure_column(
         connection,
+        "message",
+        "draft_id",
+        "ALTER TABLE message ADD COLUMN draft_id TEXT",
+    )?;
+    ensure_column(
+        connection,
         "cache_rescore_queue",
         "rescore_priority",
         "ALTER TABLE cache_rescore_queue ADD COLUMN rescore_priority REAL NOT NULL DEFAULT 0",

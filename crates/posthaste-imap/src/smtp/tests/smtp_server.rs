@@ -23,9 +23,7 @@ async fn submits_message_to_smtp_server_and_returns_raw_copy() {
         bcc: vec![recipient(Some("Dana"), "dana@example.test")],
         subject: "Captured".to_string(),
         body: "Hello from **SMTP**".to_string(),
-        in_reply_to: None,
-        references: None,
-        attachments: Vec::new(),
+        ..Default::default()
     };
 
     let submitted = submit_smtp_message(&config, &request)

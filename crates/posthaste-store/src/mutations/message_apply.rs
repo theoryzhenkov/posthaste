@@ -87,8 +87,8 @@ pub(crate) fn upsert_message_record_tx(
             account_id, id, thread_id, conversation_id, remote_blob_id, subject,
             normalized_subject, from_name, from_email, to_json, preview, received_at,
             has_attachment, size, is_read, is_flagged, rfc_message_id, in_reply_to,
-            references_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            references_json, draft_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
          ON CONFLICT(account_id, id) DO UPDATE SET
             thread_id = excluded.thread_id,
             conversation_id = excluded.conversation_id,
@@ -106,7 +106,8 @@ pub(crate) fn upsert_message_record_tx(
             is_flagged = excluded.is_flagged,
             rfc_message_id = excluded.rfc_message_id,
             in_reply_to = excluded.in_reply_to,
-            references_json = excluded.references_json",
+            references_json = excluded.references_json,
+            draft_id = excluded.draft_id",
         params![
             account_id.as_str(),
             message.id.as_str(),
@@ -129,7 +130,8 @@ pub(crate) fn upsert_message_record_tx(
             bool_to_i64(message.keywords.iter().any(|keyword| keyword == "$flagged")),
             message.rfc_message_id,
             message.in_reply_to,
-            serde_json::to_string(&message.references).map_err(json_to_store_error)?
+            serde_json::to_string(&message.references).map_err(json_to_store_error)?,
+            message.draft_id
         ],
     )
     .map_err(sql_to_store_error)?;

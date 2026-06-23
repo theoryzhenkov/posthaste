@@ -269,7 +269,7 @@ async fn fetch_email_full_streamed(
     ))
 }
 
-pub(super) fn email_metadata_properties() -> [email::Property; 16] {
+pub(super) fn email_metadata_properties() -> [email::Property; 17] {
     [
         email::Property::Id,
         email::Property::ThreadId,
@@ -287,5 +287,10 @@ pub(super) fn email_metadata_properties() -> [email::Property; 16] {
         email::Property::MessageId,
         email::Property::References,
         email::Property::InReplyTo,
+        // Stable draft identity round-tripped through the draft's headers.
+        email::Property::Header(email::Header::as_text(
+            posthaste_domain::DRAFT_ID_HEADER,
+            false,
+        )),
     ]
 }

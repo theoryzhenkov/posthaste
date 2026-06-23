@@ -12,7 +12,7 @@ pub(crate) fn query_message_detail_tx(
         .prepare_cached(
             "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
                     m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                    m.is_read, m.is_flagged
+                    m.is_read, m.is_flagged, m.draft_id
              FROM message m
              LEFT JOIN source_projection a
                ON a.source_id = m.account_id
@@ -22,7 +22,8 @@ pub(crate) fn query_message_detail_tx(
 
     let detail = statement
         .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
-            Ok(MessageSummary {
+            let draft_id: Option<String> = row.get(14)?;
+            Ok((draft_id, MessageSummary {
                 id: MessageId(row.get(0)?),
                 source_id: AccountId(row.get(1)?),
                 source_name: row.get(2)?,
@@ -39,12 +40,12 @@ pub(crate) fn query_message_detail_tx(
                 is_flagged: row.get::<_, i64>(13)? != 0,
                 mailbox_ids: Vec::new(),
                 keywords: Vec::new(),
-            })
+            }))
         })
         .optional()
         .map_err(sql_to_store_error)?;
 
-    let Some(mut summary) = detail else {
+    let Some((draft_id, mut summary)) = detail else {
         return Ok(None);
     };
 
@@ -88,5 +89,6 @@ pub(crate) fn query_message_detail_tx(
         body_text: body.as_ref().and_then(|tuple| tuple.1.clone()),
         raw_message: body.and_then(|tuple| tuple.2),
         attachments,
+        draft_id,
     }))
 }

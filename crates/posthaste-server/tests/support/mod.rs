@@ -369,22 +369,17 @@ pub fn message(id: &str, subject: &str, mailbox: &str) -> MessageRecord {
     MessageRecord {
         id: MessageId::from(id),
         source_thread_id: ThreadId::from(format!("thread-{id}")),
-        remote_blob_id: None,
         subject: Some(subject.to_string()),
         from_name: Some("Alice".to_string()),
         from_email: Some("alice@example.com".to_string()),
-        to: Vec::new(),
         preview: Some("Preview".to_string()),
         received_at: "2026-03-31T10:00:00Z".to_string(),
-        has_attachment: false,
         size: 42,
         mailbox_ids: vec![MailboxId::from(mailbox)],
         keywords: vec!["$seen".to_string()],
         body_html: Some("<p>Hello</p>".to_string()),
         body_text: Some("Hello".to_string()),
-        raw_mime: None,
         rfc_message_id: Some(format!("<{id}@example.test>")),
-        in_reply_to: None,
-        references: Vec::new(),
+        ..Default::default()
     }
 }
