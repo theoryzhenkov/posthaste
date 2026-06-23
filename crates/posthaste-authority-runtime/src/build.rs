@@ -636,7 +636,7 @@ impl AuthorityRuntimeHandle {
         action: Fut,
     ) -> Result<MutationReceipt, RuntimeError>
     where
-        Fut: std::future::Future<Output = Result<posthaste_domain::CommandResult, RuntimeError>>,
+        Fut: std::future::Future<Output = Result<posthaste_domain::CommandAck, RuntimeError>>,
     {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
@@ -773,7 +773,7 @@ impl AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         role: String,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         let mailbox = self
             .core
             .service
@@ -1538,7 +1538,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: SetKeywordsCommand,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         let result = self
             .core
@@ -1556,7 +1556,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: AddToMailboxCommand,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         let result = self
             .core
@@ -1574,7 +1574,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: RemoveFromMailboxCommand,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         let result = self
             .core
@@ -1592,7 +1592,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
         message_id: MessageId,
         command: ReplaceMailboxesCommand,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         let result = self
             .core
@@ -1609,7 +1609,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
         account_id: AccountId,
         message_id: MessageId,
-    ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
+    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         let result = self
             .core
