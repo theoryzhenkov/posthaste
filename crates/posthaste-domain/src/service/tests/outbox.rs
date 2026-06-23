@@ -281,6 +281,84 @@ async fn permanent_failure_marks_op_failed_and_settles() {
     assert_eq!(pending[0].last_error.as_deref(), Some("invalid draft"));
 }
 
+#[tokio::test]
+async fn permanent_failure_of_a_message_assertion_emits_a_base_correction() {
+    // Tier 1: a failed message state-assertion leaves the read overlay, but the
+    // served views need a recompute trigger to revert. The failure must emit a
+    // message.updated base correction (in addition to operation.settled).
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .set_keywords_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("provider rejected".to_string())));
+
+    service
+        .queue_operation(
+            &account,
+            OperationEntity {
+                kind: OperationEntityKind::Message,
+                id: "m1".to_string(),
+            },
+            OperationKind::SetKeywords,
+            serde_json::json!({ "add": ["$flagged"], "remove": [] }),
+        )
+        .expect("queue setKeywords");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush returns ok");
+
+    assert!(
+        events.iter().any(|event| event.topic == "operation.settled"),
+        "failure still settles the operation"
+    );
+    let correction = events
+        .iter()
+        .find(|event| event.topic == "message.updated")
+        .expect("a message.updated base correction is emitted on failure");
+    assert_eq!(
+        correction.message_id.as_ref().map(MessageId::as_str),
+        Some("m1")
+    );
+    assert_eq!(correction.payload["reverted"], serde_json::json!(true));
+    assert_eq!(correction.payload["changes"]["keywords"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn permanent_failure_of_a_draft_emits_no_base_correction() {
+    // Drafts/sends don't fold into message reads, so a failure surfaces only via
+    // operation.settled — no spurious message.updated.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::default());
+    let service = MailService::new(store, Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    gateway
+        .save_draft_results
+        .lock()
+        .unwrap()
+        .push(Err(GatewayError::Rejected("invalid draft".to_string())));
+    service
+        .queue_operation(
+            &account,
+            draft_entity("draft-temp"),
+            OperationKind::DraftCreate,
+            serde_json::to_value(draft_request("Hello")).unwrap(),
+        )
+        .expect("queue create");
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush");
+
+    assert!(events.iter().all(|event| event.topic != "message.updated"));
+}
+
 async fn queue_and_fail_one(
     service: &MailService,
     account: &AccountId,

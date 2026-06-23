@@ -16,8 +16,9 @@ use crate::{
     ServiceError, SetKeywordsCommand, SharedConfigRepository, SmartMailbox, SmartMailboxId,
     SmartMailboxRule, SmartMailboxStore, SmartMailboxSummary, SortDirection, SourceDataStore,
     SourceProjectionStore, StoreError, SyncMode, SyncObject, SyncStateStore, SyncTrigger,
-    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView, EVENT_TOPIC_OPERATION_SETTLED,
-    EVENT_TOPIC_SYNC_COMPLETED, EVENT_TOPIC_SYNC_FAILED,
+    SyncWriteStore, TagReadStore, TagSummary, ThreadId, ThreadView,
+    EVENT_TOPIC_MESSAGE_UPDATED, EVENT_TOPIC_OPERATION_SETTLED, EVENT_TOPIC_SYNC_COMPLETED,
+    EVENT_TOPIC_SYNC_FAILED,
 };
 use crate::{DomainEvent, ServiceResultExt};
 
