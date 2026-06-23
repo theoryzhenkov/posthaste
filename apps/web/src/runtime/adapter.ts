@@ -4,6 +4,9 @@ import {
 } from '../connection/injected'
 
 import { httpRuntimeAdapter } from './httpAdapter'
+import { loadReplicaHandleFactory } from './replica/handle'
+import { defaultOutboxStore } from './replica/outboxStore'
+import { createReplicaAdapter } from './replica/replicaAdapter'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -119,4 +122,32 @@ export function setRuntimeAdapterForTesting(
 /** Test-only: restore the production-compatible HTTP adapter. */
 export function resetRuntimeAdapterForTesting(): void {
   activeRuntimeAdapter = httpRuntimeAdapter
+}
+
+/** Whether the client-layer replica is opted in (VITE_RUNTIME_REPLICA=true). */
+export function replicaAdapterEnabled(): boolean {
+  return import.meta.env?.VITE_RUNTIME_REPLICA === 'true'
+}
+
+let replicaInstall: Promise<void> | undefined
+
+/**
+ * Load the WASM replica, wrap the active adapter with the replicaAdapter, and
+ * make it the active runtime adapter. Idempotent; the renderer keeps using the
+ * base adapter until the WASM finishes loading.
+ */
+export function installReplicaAdapter(): Promise<void> {
+  replicaInstall ??= (async () => {
+    const makeHandle = await loadReplicaHandleFactory()
+    activeRuntimeAdapter = createReplicaAdapter({
+      base: activeRuntimeAdapter,
+      makeHandle,
+      outbox: defaultOutboxStore(),
+    })
+  })()
+  return replicaInstall
+}
+
+if (replicaAdapterEnabled()) {
+  void installReplicaAdapter()
 }

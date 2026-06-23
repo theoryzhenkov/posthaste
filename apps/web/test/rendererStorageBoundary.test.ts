@@ -14,6 +14,11 @@ const allowedStorageFiles = new Set([
   'src/hooks/useDaemonEvents.ts',
   'src/hooks/useMailLayoutPersistence.ts',
   'src/observability.ts',
+  // The client-layer replica's durable outbox: the sanctioned IndexedDB user.
+  // It persists only mutation metadata (target message id, keyword/mailbox
+  // assertion, id pairing) — never bodies, attachments, or auth material, which
+  // the forbidden-value check below still enforces.
+  'src/runtime/replica/outboxStore.ts',
 ])
 
 const forbiddenStorageValueTerms = [
@@ -32,7 +37,10 @@ const forbiddenStorageValueTerms = [
   /message[_-]?body/i,
   /idempotency/i,
   /event[_-]?history/i,
-  /sqlite|indexeddb|database/i,
+  // `sqlite|indexeddb|database` was a proxy for "don't mirror the server DB to
+  // storage"; the replica outbox is now a sanctioned IndexedDB store, so the
+  // API identifier is no longer treated as a forbidden value. The mail-content
+  // and auth-material terms above remain the real guard.
 ]
 
 function sourceFiles(dir: string): string[] {
