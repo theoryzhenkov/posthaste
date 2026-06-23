@@ -4,7 +4,7 @@ use posthaste_domain::{AccountId, GatewayError, MessageId, SendMessageRequest};
 use crate::compose::{recipient_to_address, render_markdown};
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
 use crate::live_compose::attachments::upload_send_attachments;
-use crate::live_compose::identity::fetch_send_identity;
+use crate::live_compose::identity::fetch_draft_sender;
 
 /// Persist a draft to the Drafts mailbox via `Email/set` create, returning the
 /// created provider Email id.
@@ -22,7 +22,10 @@ pub(crate) async fn save_draft(
     request_data: &SendMessageRequest,
     replace: Option<&MessageId>,
 ) -> Result<MessageId, GatewayError> {
-    let identity = fetch_send_identity(gateway, request_data.from.as_ref()).await?;
+    // A draft create carries no `identityId`, only the `from` address, so resolve
+    // the sender tolerantly: a provider with an empty `Identity/get` must not
+    // block saving a draft.
+    let identity = fetch_draft_sender(gateway, request_data.from.as_ref()).await?;
     let drafts_mailbox_id = gateway
         .fetch_mailbox_id_by_role(mailbox::Role::Drafts)
         .await?;
