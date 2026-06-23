@@ -456,6 +456,11 @@ impl MailService {
                     error: Some(message),
                 };
                 events.push(self.emit_settlement(account_id, &operation, &settlement)?);
+                if let Some(correction) =
+                    self.emit_failure_base_correction(account_id, &operation)?
+                {
+                    events.push(correction);
+                }
                 continue;
             }
             match self.dependency_status(&operation)? {
@@ -475,6 +480,11 @@ impl MailService {
                         error: Some(message),
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
+                    if let Some(correction) =
+                        self.emit_failure_base_correction(account_id, &operation)?
+                    {
+                        events.push(correction);
+                    }
                     continue;
                 }
             }
@@ -554,6 +564,11 @@ impl MailService {
                         error: Some(message),
                     };
                     events.push(self.emit_settlement(account_id, &operation, &settlement)?);
+                    if let Some(correction) =
+                        self.emit_failure_base_correction(account_id, &operation)?
+                    {
+                        events.push(correction);
+                    }
                 }
             }
         }
@@ -701,6 +716,48 @@ impl MailService {
             .apply_sync_batch(account_id, &batch)
             .map_err(|error| FlushError::Permanent(error.to_string()))?;
         Ok(())
+    }
+
+    /// When a message state-assertion op fails, its optimistic effect leaves the
+    /// read overlay (a `Failed` op is no longer folded), but nothing tells the
+    /// served views to recompute, so they keep showing the now-reverted
+    /// optimistic value. Re-assert the message's authoritative state as a
+    /// `message.updated` so every view recomputes back to truth — the failure
+    /// correction arrives as a base update, not a settlement-only signal.
+    /// Returns `None` for ops that don't fold into message reads (drafts/sends),
+    /// which surface via `operation.settled` instead.
+    ///
+    /// @spec docs/replication/L1#corrections-as-base-updates
+    /// @spec docs/replication/L1#permanent-failure-surfaces
+    fn emit_failure_base_correction(
+        &self,
+        account_id: &AccountId,
+        operation: &Operation,
+    ) -> Result<Option<DomainEvent>, ServiceError> {
+        if operation.entity.kind != OperationEntityKind::Message
+            || !operation.kind.is_state_assertion()
+        {
+            return Ok(None);
+        }
+        let message_id = MessageId::from(operation.entity.id.as_str());
+        let event = self.events.append_event(
+            account_id,
+            EVENT_TOPIC_MESSAGE_UPDATED,
+            None,
+            Some(&message_id),
+            json!({
+                "messageId": message_id.as_str(),
+                // The read already reflects the reverted state (the failed op
+                // left the overlay); both dimensions a state assertion can touch
+                // are flagged so any served view (list/detail) recomputes.
+                "changes": { "keywords": true, "mailboxes": true },
+                "reverted": true,
+                "resources": [
+                    { "kind": "message", "operation": "reverted", "accountId": account_id.as_str() },
+                ],
+            }),
+        )?;
+        Ok(Some(event))
     }
 
     fn emit_settlement(

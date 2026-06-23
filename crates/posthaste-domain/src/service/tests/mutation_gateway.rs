@@ -16,6 +16,9 @@ pub(super) struct MutationGateway {
     pub(super) delete_draft_calls: Mutex<Vec<MessageId>>,
     /// Subjects of each `send_message` call, in order.
     pub(super) send_calls: Mutex<Vec<String>>,
+    /// Results returned by `set_keywords`, popped front-first; empty falls back
+    /// to the revision-based success path.
+    pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
 }
 
 impl MutationGateway {
@@ -40,6 +43,7 @@ impl MutationGateway {
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
+            set_keywords_results: Mutex::new(Vec::new()),
         }
     }
 
@@ -54,6 +58,7 @@ impl MutationGateway {
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
+            set_keywords_results: Mutex::new(Vec::new()),
         }
     }
 
@@ -68,6 +73,7 @@ impl MutationGateway {
             save_draft_calls: Mutex::new(Vec::new()),
             delete_draft_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
+            set_keywords_results: Mutex::new(Vec::new()),
         }
     }
 
@@ -154,6 +160,14 @@ impl MailGateway for MutationGateway {
         expected_state: Option<&str>,
         _command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
+        if let Some(result) = self
+            .set_keywords_results
+            .lock()
+            .expect("set keywords results poisoned")
+            .pop()
+        {
+            return result;
+        }
         self.apply(expected_state)
     }
 
