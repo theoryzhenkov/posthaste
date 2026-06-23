@@ -8,10 +8,10 @@
 
 use posthaste_domain::{
     search, AccountId, ImapMailboxSyncState, ImapMessageLocation, ImapModSeq, ImapUid,
-    ImapUidValidity, MailboxId, MailboxRecord, MessageCommandStore, MessageId, MessageListStore,
-    MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient, SetKeywordsCommand,
-    SmartMailboxStore, SortDirection, SourceProjectionStore, SyncBatch, SyncCursor, SyncObject,
-    SyncWriteStore, ThreadId,
+    ImapUidValidity, MailboxId, MailboxRecord, MessageCommandStore, MessageDetailStore, MessageId,
+    MessageListStore, MessagePage, MessageRecord, MessageSortField, MessageSummary, Recipient,
+    SetKeywordsCommand, SmartMailboxStore, SortDirection, SourceProjectionStore, SyncBatch,
+    SyncCursor, SyncObject, SyncWriteStore, ThreadId,
 };
 use posthaste_store::DatabaseStore;
 use tempfile::TempDir;
@@ -158,6 +158,42 @@ pub fn open_seeded(count: usize) -> Fixture {
     fixture
 }
 
+/// Like [`synthetic_messages`], but every `has_attachment` message carries a
+/// large, inline-image-shaped `body_html`/`body_text` — the realistic shape of
+/// an email with attachments, where the body holds base64 inline parts. This is
+/// what makes a full message-detail read expensive, and it is the cohort the
+/// mutation path silently pays for (see [`mutate_full_detail`]).
+pub fn synthetic_messages_heavy(count: usize) -> Vec<MessageRecord> {
+    // ~128 KiB of inline-image-shaped filler, only on attachment-bearing rows.
+    let inline_blob = "A".repeat(128 * 1024);
+    synthetic_messages(count)
+        .into_iter()
+        .map(|mut message| {
+            if message.has_attachment {
+                message.body_html = Some(format!(
+                    "<p>See attached.</p><img src=\"data:image/png;base64,{inline_blob}\"/>"
+                ));
+                message.body_text = Some("See attached.\n".repeat(4096));
+            }
+            message
+        })
+        .collect()
+}
+
+/// Open a store pre-seeded with `count` messages where attachment-bearing rows
+/// have large bodies ([`synthetic_messages_heavy`]).
+pub fn open_seeded_heavy(count: usize) -> Fixture {
+    let fixture = open_empty();
+    fixture
+        .store
+        .apply_sync_batch(
+            &fixture.account,
+            &sync_batch(synthetic_messages_heavy(count)),
+        )
+        .expect("seed messages");
+    fixture
+}
+
 // --- Operations under profile -------------------------------------------------
 
 /// Apply a pre-built batch into an existing fixture. Lets benches keep batch
@@ -206,6 +242,34 @@ pub fn fts_search(fixture: &Fixture) -> Vec<MessageSummary> {
         .store
         .fts_search_messages(&fixture.account, "invoice", 50)
         .expect("fts search")
+}
+
+/// Mutation path **as the domain service runs it**: every keyword/mailbox/
+/// destroy op funnels through `queue_then_emit_message_operation`, which reads
+/// the FULL message detail — `body_html` + `body_text` + attachments — before
+/// the write, only to route the event by mailbox and return the overlaid
+/// detail. So a mutation pays for materializing the message's entire body; for
+/// a message with attachments (large inline bodies) that read dominates, which
+/// is why archive/delete feel slow on exactly those messages. Profiling this
+/// over a [`open_seeded_heavy`] fixture isolates the cost.
+pub fn mutate_full_detail(fixture: &Fixture, index: usize) {
+    let id = MessageId::from(format!("msg-{index:06}"));
+    let _ = fixture
+        .store
+        .get_message_detail(&fixture.account, &id)
+        .expect("get message detail");
+    fixture
+        .store
+        .set_keywords(
+            &fixture.account,
+            &id,
+            None,
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .expect("set keywords");
 }
 
 /// Mutation path: toggle a keyword on a single message.
