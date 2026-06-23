@@ -91,6 +91,25 @@ pub trait MessageDetailStore: Send + Sync {
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, StoreError>;
 
+    /// Fetch a message's summary (header-level projection) WITHOUT its body or
+    /// attachments. Callers that need only metadata — mailbox membership,
+    /// keywords, existence — must use this rather than [`Self::get_message_detail`]
+    /// so a keyword/mailbox/destroy path never materializes the body. (Loading
+    /// the body for metadata is the slowdown that
+    /// `message_mutation_settlement_payload_excludes_the_message_body` guards.)
+    ///
+    /// The default derives it from `get_message_detail`; a store overrides it to
+    /// skip the body/attachment reads entirely.
+    fn get_message_summary(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageSummary>, StoreError> {
+        Ok(self
+            .get_message_detail(account_id, message_id)?
+            .map(|detail| detail.summary))
+    }
+
     /// Read the cached raw RFC822 bytes for a message, if any are stored.
     ///
     /// Returns `None` when no raw body has been cached yet. Used to serve
