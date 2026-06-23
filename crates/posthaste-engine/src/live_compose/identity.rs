@@ -49,6 +49,65 @@ pub(crate) async fn fetch_send_identity(
     resolve_send_identity(fetch_identities(gateway).await?, requested_from)
 }
 
+/// Resolve the `from` header for a *draft* save (name + email only).
+///
+/// A draft create via `Email/set` carries no `identityId` — only the `from`
+/// address — so unlike [`fetch_send_identity`], a provider with an empty
+/// `Identity/get` (e.g. Stalwart without a configured identity) must **not**
+/// block saving a draft. When the caller supplies a `from` address we use it
+/// directly, consulting the provider identities only to fill a missing display
+/// name; we fall back to a provider identity solely when no `from` was given.
+///
+/// @spec docs/L1-jmap#methods-used
+/// @spec docs/L1-compose#composesession-interface
+pub(crate) async fn fetch_draft_sender(
+    gateway: &LiveJmapGateway,
+    requested_from: Option<&posthaste_domain::Recipient>,
+) -> Result<Identity, GatewayError> {
+    resolve_draft_sender(fetch_identities(gateway).await?, requested_from)
+}
+
+pub(crate) fn resolve_draft_sender(
+    identities: Vec<Identity>,
+    requested_from: Option<&posthaste_domain::Recipient>,
+) -> Result<Identity, GatewayError> {
+    let Some(requested_from) = requested_from else {
+        // No requested sender: fall back to the provider's default identity,
+        // which is the only source of an address in this case.
+        return identities.into_iter().next_back().ok_or_else(|| {
+            GatewayError::Rejected("no identity available".to_string())
+        });
+    };
+    let requested_email = requested_from.email.trim();
+    if requested_email.is_empty() {
+        return Err(GatewayError::Rejected(
+            "sender email address cannot be empty".to_string(),
+        ));
+    }
+    // The draft has no identityId, so the id is irrelevant; only name + email
+    // reach the wire. Prefer the caller's display name, then a matching
+    // provider identity's name, then the default identity's name.
+    let name = requested_from
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            identities
+                .iter()
+                .find(|identity| identity.email.eq_ignore_ascii_case(requested_email))
+                .or_else(|| identities.last())
+                .map(|identity| identity.name.clone())
+        })
+        .unwrap_or_default();
+    Ok(Identity {
+        id: String::new(),
+        name,
+        email: requested_email.to_string(),
+    })
+}
+
 pub(crate) fn resolve_send_identity(
     mut identities: Vec<Identity>,
     requested_from: Option<&posthaste_domain::Recipient>,
