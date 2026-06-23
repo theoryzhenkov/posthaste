@@ -172,20 +172,21 @@ impl MailService {
                 Ok(want == have)
             }
             OperationKind::SetKeywords => {
-                let Some(detail) = self
+                // Body-free: the no-op check needs only the keyword set.
+                let Some(summary) = self
                     .message_detail_reader
-                    .get_message_detail(account_id, &message_id)?
+                    .get_message_summary(account_id, &message_id)?
                 else {
                     return Ok(true);
                 };
                 let command: SetKeywordsCommand = parse_operation_payload(operation)?;
-                let keywords = &detail.summary.keywords;
+                let keywords = &summary.keywords;
                 Ok(command.add.iter().all(|k| keywords.contains(k))
                     && command.remove.iter().all(|k| !keywords.contains(k)))
             }
             OperationKind::Destroy => Ok(self
                 .message_detail_reader
-                .get_message_detail(account_id, &message_id)?
+                .get_message_summary(account_id, &message_id)?
                 .is_none()),
             _ => Ok(false),
         }

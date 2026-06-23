@@ -29,6 +29,32 @@ impl DatabaseStore {
     }
 }
 
+/// Read one message's summary (header-level projection) by id, without touching
+/// the body or attachments. Shared by `get_message_detail` (which then adds the
+/// body/attachments) and `get_message_summary` (which stops here).
+fn read_message_summary(
+    connection: &Connection,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<Option<MessageSummary>, StoreError> {
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
+                    m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
+                    m.is_read, m.is_flagged
+             FROM message m
+             LEFT JOIN source_projection a
+               ON a.source_id = m.account_id
+             WHERE m.account_id = ?1 AND m.id = ?2",
+        )
+        .map_err(sql_to_store_error)?;
+    let rows = load_message_summary_rows(
+        &mut statement,
+        params![account_id.as_str(), message_id.as_str()],
+    )?;
+    Ok(hydrate_message_summaries(connection, rows)?.pop())
+}
+
 impl MessageDetailStore for DatabaseStore {
     /// Returns full message detail including body (if fetched) and raw message
     /// reference.
@@ -40,23 +66,7 @@ impl MessageDetailStore for DatabaseStore {
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, StoreError> {
         let connection = self.read_connection()?;
-        let mut statement = connection
-            .prepare_cached(
-                "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
-                        m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
-                        m.is_read, m.is_flagged
-                 FROM message m
-                 LEFT JOIN source_projection a
-                   ON a.source_id = m.account_id
-                 WHERE m.account_id = ?1 AND m.id = ?2",
-            )
-            .map_err(sql_to_store_error)?;
-        let rows = load_message_summary_rows(
-            &mut statement,
-            params![account_id.as_str(), message_id.as_str()],
-        )?;
-        let mut summaries = hydrate_message_summaries(&connection, rows)?;
-        let Some(summary) = summaries.pop() else {
+        let Some(summary) = read_message_summary(&connection, account_id, message_id)? else {
             return Ok(None);
         };
         let draft_id: Option<String> = connection
@@ -108,6 +118,18 @@ impl MessageDetailStore for DatabaseStore {
             attachments,
             draft_id,
         }))
+    }
+
+    /// Cheap summary read: skips the body and attachment queries entirely so
+    /// metadata-only callers (mailbox membership, keywords, existence) never
+    /// materialize the body.
+    fn get_message_summary(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageSummary>, StoreError> {
+        let connection = self.read_connection()?;
+        read_message_summary(&connection, account_id, message_id)
     }
 
     /// Reads the cached raw RFC822 bytes for a message from its content-

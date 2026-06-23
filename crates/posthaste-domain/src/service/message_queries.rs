@@ -318,6 +318,19 @@ impl MailService {
         Ok(Some(detail))
     }
 
+    /// Fold pending message-state assertions over a bare summary — the body-free
+    /// counterpart of [`Self::apply_message_overlay`], for metadata-only callers.
+    ///
+    /// @spec docs/L1-outbox#overlay-fold
+    pub(crate) fn apply_summary_overlay(
+        &self,
+        account_id: &AccountId,
+        summary: MessageSummary,
+    ) -> Result<Option<MessageSummary>, ServiceError> {
+        let operations = self.overlay_operations(account_id)?;
+        apply_operations_to_summary(summary, &operations)
+    }
+
     /// Per-mailbox count adjustments implied by pending message assertions.
     ///
     /// Returns the delta to apply to each mailbox's stored `(unread, total)`

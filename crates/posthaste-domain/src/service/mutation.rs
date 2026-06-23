@@ -215,10 +215,12 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Vec<MailboxId>, ServiceError> {
-        let Some(detail) = self
+        // Body-free: this needs only mailbox membership, so read the summary and
+        // fold the overlay over it rather than materializing the detail.
+        let Some(summary) = self
             .message_detail_reader
-            .get_message_detail(account_id, message_id)?
-            .and_then(|detail| self.apply_message_overlay(account_id, detail).transpose())
+            .get_message_summary(account_id, message_id)?
+            .and_then(|summary| self.apply_summary_overlay(account_id, summary).transpose())
             .transpose()?
         else {
             return Err(ServiceError::from(StoreError::NotFound(format!(
@@ -226,6 +228,6 @@ impl MailService {
                 message_id.as_str()
             ))));
         };
-        Ok(detail.summary.mailbox_ids)
+        Ok(summary.mailbox_ids)
     }
 }
