@@ -60,6 +60,19 @@ build:
     just desktop build
     just site build
 
+# Build the client-layer replica WASM bundle (posthaste-link-wasm) and emit the
+# JS loader + .d.ts into apps/web/src/runtime/wasm/. The replicaAdapter loads
+# these only when VITE_RUNTIME_REPLICA is enabled. The artifacts are generated
+# but committed (like apps/web/src/api/schema.gen.ts) so web builds need no Rust
+# toolchain; re-run this and commit the result after changing the boundary, and
+# CI re-runs it to verify the bindings are fresh.
+build-replica-wasm:
+    cargo build -p posthaste-link-wasm --release --target wasm32-unknown-unknown
+    wasm-bindgen target/wasm32-unknown-unknown/release/posthaste_link_wasm.wasm \
+        --out-dir apps/web/src/runtime/wasm --target web
+    wasm-opt -Oz apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm \
+        -o apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm
+
 # Build the browser-localhost distributable assets and server binary.
 build-serve:
     just web build
