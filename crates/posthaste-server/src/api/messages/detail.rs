@@ -139,33 +139,37 @@ pub async fn get_message_attachment(
     Path((source_id, message_id, attachment_id)): Path<(String, String, String)>,
     Query(query): Query<GetAttachmentQuery>,
 ) -> Result<Response, ApiError> {
-    let attachment = state
+    let resource = state
         .runtime
-        .get_message_attachment(
+        .get_message_resource(
             RuntimeCaller::api(),
             AccountId(source_id),
             MessageId(message_id),
-            attachment_id,
+            MessageResourceKind::Attachment(attachment_id),
         )
         .await
         .map_err(ApiError::from_runtime_error)?;
-    let bytes = attachment.bytes;
+    serve_resource_response(resource, query.download.unwrap_or(false))
+}
 
-    let disposition_kind = if query.download.unwrap_or(false) {
-        "attachment"
-    } else {
-        "inline"
-    };
-    let filename = attachment.filename.as_deref().unwrap_or("attachment");
+/// Build the HTTP response for a resolved lazy message resource: content type,
+/// inline/attachment disposition, and the shared cache policy. Every resource
+/// byte response (attachment, body) goes through this one builder.
+pub(crate) fn serve_resource_response(
+    resource: RuntimeResourceBytes,
+    download: bool,
+) -> Result<Response, ApiError> {
+    let disposition_kind = if download { "attachment" } else { "inline" };
+    let filename = resource.filename.as_deref().unwrap_or("resource");
     let content_disposition = format!(
         "{disposition_kind}; filename=\"{}\"",
         escape_content_disposition_filename(filename)
     );
 
-    let mut response = Response::new(Body::from(bytes));
+    let mut response = Response::new(Body::from(resource.bytes));
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(attachment.mime_type.as_str())
+        HeaderValue::from_str(resource.content_type.as_str())
             .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
     response.headers_mut().insert(
