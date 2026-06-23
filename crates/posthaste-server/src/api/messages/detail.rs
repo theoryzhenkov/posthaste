@@ -63,8 +63,9 @@ pub async fn get_conversation(
 
 /// GET /v1/sources/{source_id}/messages/{id}
 ///
-/// Sanitizes `body_html` through [`sanitize::sanitize_email_html`] before
-/// returning to the frontend.
+/// Returns header + attachments only. The body is a separate lazy resource
+/// (`GET .../body`), sanitized at that single chokepoint, so detail never
+/// carries or serves the body.
 ///
 /// @spec docs/L1-api#conversations-and-messages
 /// @spec docs/L1-api#message-body-sanitization
