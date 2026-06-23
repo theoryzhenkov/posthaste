@@ -4205,6 +4205,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-link-wasm"
+version = "0.1.0"
+dependencies = [
+ "posthaste-link-core",
+ "posthaste-link-replica",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "posthaste-observability"
 version = "0.1.0"
 dependencies = [

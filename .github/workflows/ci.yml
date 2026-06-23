@@ -32,8 +32,8 @@ jobs:
             patchelf
       - run: cargo fmt --all -- --check
       # posthaste-bench (profiling harness) is built/run by profile.yml, not here.
-      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench -- -D warnings
-      - run: cargo test --workspace --exclude posthaste-bench
+      - run: cargo clippy --workspace --all-targets --exclude posthaste-bench --exclude posthaste-link-wasm -- -D warnings
+      - run: cargo test --workspace --exclude posthaste-bench --exclude posthaste-link-wasm
 
   frontend:
     runs-on: ubuntu-latest
