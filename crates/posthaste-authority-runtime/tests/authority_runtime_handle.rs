@@ -192,6 +192,51 @@ fn seed_single_message_batch(
         .expect("message batch should apply");
 }
 
+/// Seed one message whose cached body is large (an attachment-shaped email with
+/// a big inline body). Used to prove the mutation settlement payload stays
+/// bounded regardless of body size.
+fn seed_heavy_body_message_batch(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account_id: &AccountId,
+    message_id: &str,
+    mailbox_id: &str,
+    body_bytes: usize,
+) {
+    let mut message = seeded_message(message_id, mailbox_id);
+    let filler = "x".repeat(body_bytes);
+    message.body_html = Some(format!("<p>{filler}</p>"));
+    message.body_text = Some(filler);
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            account_id,
+            &SyncBatch {
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from(mailbox_id),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 1,
+                }],
+                messages: vec![message],
+                imap_mailbox_states: Vec::new(),
+                imap_message_locations: Vec::new(),
+                deleted_imap_message_locations: Vec::new(),
+                deleted_mailbox_ids: Vec::new(),
+                deleted_message_ids: Vec::new(),
+                replace_all_mailboxes: false,
+                replace_all_messages: false,
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "message-heavy".to_string(),
+                    updated_at: "2026-03-31T10:00:00Z".to_string(),
+                }],
+            },
+        )
+        .expect("message batch should apply");
+}
+
 fn mail_list_descriptor(query: &str) -> ViewDescriptor {
     mail_list_descriptor_with_limit(query, 10)
 }
@@ -816,6 +861,77 @@ async fn runtime_mutation_streams_settlement_frames() {
         .expect("duplicate mutation should return existing receipt");
     assert_eq!(duplicate.runtime_mutation_id, Some(mutation_id));
     assert_eq!(duplicate.state, MutationSettlementState::Confirmed);
+}
+
+/// Cost contract: a state-assertion mutation acknowledges the change; it must
+/// NOT shuttle the message body. The settlement payload (`receipt.output`,
+/// serialized onto the session stream) must stay bounded regardless of how
+/// large the message's cached body is — otherwise archive/delete/keyword ops on
+/// attachment-shaped messages pay a load + serialize + transfer tax for data the
+/// client discards. This is the regression that shipped; the bound makes it
+/// catchable. See docs/replication/L3 §7 / mutation-pipeline cost notes.
+#[tokio::test]
+async fn message_mutation_settlement_payload_excludes_the_message_body() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("settlement-size-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+
+    // A 256 KiB cached body — the shape of an attachment-bearing email.
+    let body_bytes = 256 * 1024;
+    seed_heavy_body_message_batch(&build, &account.id, "em-001", "mb-inbox", body_bytes);
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    let receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session.session_id.clone()),
+                name: "message.setKeywords".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "em-001",
+                    "command": {"add": ["$flagged"], "remove": []}
+                }),
+                client_mutation_id: ClientMutationId::new("client-1"),
+                context: None,
+            },
+        )
+        .await
+        .expect("mutation should run");
+    assert_eq!(receipt.state, MutationSettlementState::Confirmed);
+
+    let output_bytes = serde_json::to_string(&receipt.output)
+        .expect("settlement output should serialize")
+        .len();
+    assert!(
+        output_bytes < 8 * 1024,
+        "settlement payload was {output_bytes} bytes for a {body_bytes}-byte body; \
+         a state-assertion settlement must acknowledge the change, not carry the body"
+    );
 }
 
 // spec: docs/runtime/L1#view-operation

@@ -244,14 +244,16 @@ pub fn fts_search(fixture: &Fixture) -> Vec<MessageSummary> {
         .expect("fts search")
 }
 
-/// Mutation path **as the domain service runs it**: every keyword/mailbox/
-/// destroy op funnels through `queue_then_emit_message_operation`, which reads
-/// the FULL message detail — `body_html` + `body_text` + attachments — before
-/// the write, only to route the event by mailbox and return the overlaid
-/// detail. So a mutation pays for materializing the message's entire body; for
-/// a message with attachments (large inline bodies) that read dominates, which
-/// is why archive/delete feel slow on exactly those messages. Profiling this
-/// over a [`open_seeded_heavy`] fixture isolates the cost.
+/// A full message-detail read paired with a state-assertion write. This was the
+/// shape of the domain mutation path before the cost fix: every keyword/mailbox/
+/// destroy op funnelled through `queue_then_emit_message_operation`, which read
+/// the FULL detail — `body_html` + `body_text` + attachments — before the write,
+/// so a mutation paid to materialize the whole body (dominant for attachment-
+/// shaped messages with large inline bodies). The mutation path no longer reads
+/// the body (it acknowledges via the appended event), so this workload now
+/// isolates the standalone `get_message_detail` cost — the read-model tiering
+/// target: profiling it over [`open_seeded_heavy`] shows how much a body read
+/// costs, which any caller that reaches for full detail still pays.
 pub fn mutate_full_detail(fixture: &Fixture, index: usize) {
     let id = MessageId::from(format!("msg-{index:06}"));
     let _ = fixture
