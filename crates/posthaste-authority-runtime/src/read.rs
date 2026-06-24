@@ -22,12 +22,15 @@ use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
-    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    TagSummary,
+    now_iso8601, AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId,
+    ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
-use posthaste_link_contract::{BackendApi, BackendLink, DownFrame, LinkCoverage};
+use posthaste_link_contract::{
+    BackendApi, BackendLink, BaseAssertion, BaseUpdate, DownFrame, LinkCoverage,
+};
+use tokio::sync::broadcast;
 use posthaste_runtime_contract::{
     AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
     RuntimeError, RuntimeResourceBytes,
@@ -40,7 +43,7 @@ use posthaste_runtime_contract::{
 /// - **Retaining** (remote): point reads are served from a coherent summary
 ///   cache of the messages that flowed back (from point reads *and* query
 ///   pages), and read through on a miss. The cache is kept correct by the
-///   down-channel ([`run_cache_coherence`]): a message's entry is evicted when
+///   down-channel ([`run_backend_down_channel`]): a message's entry is evicted when
 ///   the backend says it changed, so it is never stale — the next read
 ///   re-fetches. (Mail-list pages are not cached; the authority computes
 ///   membership/order, so a list is always a fresh read-through that warms the
@@ -272,15 +275,62 @@ impl ReadCache {
     }
 }
 
-/// Keep a retaining [`ReadCache`] coherent: consume the link's down-channel and
-/// evict cached summaries as the backend asserts changes. Spawned for a split
-/// runtime; returns when the stream closes.
-pub(crate) async fn run_cache_coherence(link: BackendLink, reads: Arc<ReadCache>) {
+/// Consume the backend's down-channel and drive the near node from it: evict the
+/// read cache (so the next read re-fetches) AND republish each base assertion as
+/// a domain event on the runtime's event bus, so the existing view machinery
+/// (`ViewRegistry`'s event pump + `subscribe_events`) recomputes and pushes
+/// frames to clients. This is the runtime↔backend half of the recursive
+/// down-channel; the runtime→client half is the shipped view-frame protocol it
+/// feeds ([replication L4 §4.3](../replication/L4.md)). In-process the runtime
+/// shares the backend's event bus directly, so this is spawned only for a split
+/// (remote) runtime; it returns when the stream closes.
+pub(crate) async fn run_backend_down_channel(
+    link: BackendLink,
+    reads: Arc<ReadCache>,
+    events: broadcast::Sender<DomainEvent>,
+) {
     let Ok(mut stream) = link.subscribe(LinkCoverage::Complete).await else {
         return;
     };
+    // A monotonic local sequence for the synthesized events. These do NOT match
+    // the backend's authoritative seqs (those come via `replay_events` over the
+    // link); they only order the live stream for fresh subscribers.
+    let mut seq: i64 = 0;
     while let Some(frame) = stream.next().await {
         reads.apply_coherence_frame(&frame);
+        if let DownFrame::Base { assertions } = &frame {
+            for assertion in assertions {
+                seq += 1;
+                // A send error means there are no live subscribers yet; the next
+                // read still re-fetches (the cache was evicted above).
+                let _ = events.send(down_assertion_to_event(assertion, seq));
+            }
+        }
+    }
+}
+
+/// Map a down-channel base assertion to the domain event the near node's view
+/// machinery already understands: a `message.updated` over the asserted message
+/// (or a deletion). The change flags are broad — the view layer re-reads through
+/// the cache and suppresses no-op recomputes — and the account id (carried on the
+/// assertion) scopes per-account views like `messageDetail`.
+fn down_assertion_to_event(assertion: &BaseAssertion, seq: i64) -> DomainEvent {
+    let payload = if matches!(assertion.update, BaseUpdate::Removed) {
+        serde_json::json!({ "messageId": assertion.message_id, "deleted": true })
+    } else {
+        serde_json::json!({
+            "messageId": assertion.message_id,
+            "changes": { "keywords": true, "mailboxes": true },
+        })
+    };
+    DomainEvent {
+        seq,
+        account_id: AccountId(assertion.account_id.clone()),
+        topic: EVENT_TOPIC_MESSAGE_UPDATED.to_string(),
+        occurred_at: now_iso8601().unwrap_or_default(),
+        mailbox_id: None,
+        message_id: Some(MessageId(assertion.message_id.clone())),
+        payload,
     }
 }
 
@@ -362,6 +412,7 @@ mod tests {
     fn base_frame(message_id: &str) -> DownFrame {
         DownFrame::Base {
             assertions: vec![BaseAssertion {
+                account_id: "acct".to_string(),
                 message_id: message_id.to_string(),
                 update: BaseUpdate::Present(MessageFoldState::default()),
             }],
@@ -421,6 +472,72 @@ mod tests {
         cache.current_summary(&account, &message).await.unwrap();
         // The backend asserts m1 changed; the cached summary is evicted.
         cache.apply_coherence_frame(&base_frame("m1"));
+        cache.current_summary(&account, &message).await.unwrap();
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
+    }
+
+    // A backend whose down-channel emits one Base assertion then closes, with a
+    // counting point read so eviction is observable.
+    struct BridgeBackend {
+        summary_calls: AtomicU64,
+    }
+
+    #[async_trait]
+    impl BackendApi for BridgeBackend {
+        async fn forward_mutation(
+            &self,
+            _mutation: MutationRequest,
+        ) -> Result<MutationReceipt, RuntimeError> {
+            Err(RuntimeError::internal("bridge backend is read-only", None))
+        }
+
+        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::iter([DownFrame::Base {
+                assertions: vec![BaseAssertion {
+                    account_id: "acct".into(),
+                    message_id: "m1".into(),
+                    update: BaseUpdate::Present(MessageFoldState::default()),
+                }],
+            }])))
+        }
+
+        async fn current_summary(
+            &self,
+            _account_id: AccountId,
+            message_id: MessageId,
+        ) -> Result<Option<MessageSummary>, RuntimeError> {
+            self.summary_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(summary(message_id.as_str())))
+        }
+    }
+
+    #[tokio::test]
+    async fn the_down_channel_bridge_evicts_the_cache_and_republishes_an_event() {
+        let backend = Arc::new(BridgeBackend {
+            summary_calls: AtomicU64::new(0),
+        });
+        let cache = Arc::new(ReadCache::retaining(backend.clone()));
+        let account = AccountId("acct".into());
+        let message = MessageId("m1".into());
+
+        // Warm the cache (one fetch), then run the bridge over a one-frame link.
+        cache.current_summary(&account, &message).await.unwrap();
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 1);
+
+        let (events, mut rx) = broadcast::channel(16);
+        let link = BackendLink::new(backend.clone());
+        // The stub stream closes after one frame, so the bridge returns.
+        run_backend_down_channel(link, cache.clone(), events).await;
+
+        // It republished the assertion as a `message.updated` domain event
+        // scoped to the right account + message, flagged so views recompute.
+        let event = rx.try_recv().expect("an event was republished");
+        assert_eq!(event.topic, EVENT_TOPIC_MESSAGE_UPDATED);
+        assert_eq!(event.account_id.as_str(), "acct");
+        assert_eq!(event.message_id.as_ref().map(MessageId::as_str), Some("m1"));
+        assert_eq!(event.payload["changes"]["keywords"], true);
+
+        // And it evicted the cache: the next read re-fetches.
         cache.current_summary(&account, &message).await.unwrap();
         assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
     }
