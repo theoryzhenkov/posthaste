@@ -115,6 +115,14 @@ impl RuntimeCaller {
 pub struct RuntimeCallerCapabilities {
     #[serde(default)]
     pub actions: Vec<RuntimeCapability>,
+    /// The caller's session can apply incremental mail-list view deltas
+    /// ([`RuntimeFrame::ViewDelta`]) rather than whole-view replaces. When set,
+    /// the runtime sends only the rows that changed instead of re-serializing
+    /// the entire view on each recompute ([replication L6](../../replication/L6.md)).
+    /// Default `false`, so a client that does not understand deltas keeps
+    /// receiving whole `ViewReplace` frames.
+    #[serde(default)]
+    pub view_delta: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -351,6 +359,18 @@ pub enum RuntimeFrame {
         revision: ViewRevision,
         snapshot: ViewSnapshot,
     },
+    /// An incremental mail-list update: only the rows that changed since the
+    /// last snapshot, for a session that opted into deltas
+    /// ([replication L6](../../replication/L6.md)). Replaces a whole `ViewReplace`
+    /// for row-local changes (flags, reads, removals).
+    ViewDelta {
+        #[serde(rename = "sessionSeq")]
+        session_seq: RuntimeSessionSeq,
+        #[serde(rename = "viewId")]
+        view_id: ViewId,
+        revision: ViewRevision,
+        delta: MailListDelta,
+    },
     ViewError {
         #[serde(rename = "sessionSeq")]
         session_seq: RuntimeSessionSeq,
@@ -399,6 +419,7 @@ impl RuntimeFrame {
         match self {
             Self::ViewSnapshot { session_seq, .. }
             | Self::ViewReplace { session_seq, .. }
+            | Self::ViewDelta { session_seq, .. }
             | Self::ViewError { session_seq, .. }
             | Self::ViewClosed { session_seq, .. }
             | Self::MutationSettlement { session_seq, .. }
@@ -532,7 +553,7 @@ pub enum MailListProjectionKind {
     Conversation,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MailListRowState {
@@ -547,6 +568,25 @@ pub struct MailListRowState {
     pub order_key: String,
     #[serde(default)]
     pub pending_markers: Vec<RuntimeMutationId>,
+}
+
+/// An incremental mail-list view update ([replication L6](../../replication/L6.md)):
+/// the rows that changed since the last snapshot, instead of the whole view. The
+/// client reconciles it against its held rows — drop rows absent from `order`,
+/// reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
+/// session that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
+/// and only when the change is row-local (structural changes still send a whole
+/// `ViewReplace`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct MailListDelta {
+    /// The new full row order (row keys), when it changed (add/remove/reorder);
+    /// `None` when unchanged. Rows whose key is absent from a present `order` are
+    /// removed.
+    pub order: Option<Vec<String>>,
+    /// Rows that are new or whose content changed, keyed by `row_key`.
+    pub upserts: Vec<MailListRowState>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

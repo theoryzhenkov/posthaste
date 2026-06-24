@@ -5,10 +5,11 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use posthaste_domain::{DomainEvent, Id};
 use posthaste_runtime_contract::{
-    ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState,
-    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription,
-    RuntimeMutationId, RuntimeMutationSettlement, RuntimeSession, RuntimeSessionId,
-    RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
+    ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationReceipt,
+    MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller, RuntimeError,
+    RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId, RuntimeMutationSettlement,
+    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor,
+    ViewFrame, ViewId, ViewSnapshot,
 };
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -25,6 +26,9 @@ pub(crate) struct SessionRegistry {
 
 struct StoredSession {
     account_scope: Option<Vec<String>>,
+    /// The session opted into incremental mail-list deltas ([`RuntimeFrame::ViewDelta`])
+    /// instead of whole-view replaces (L6).
+    delta_capable: bool,
     last_seq: u64,
     frames: broadcast::Sender<RuntimeFrame>,
     open_views: HashSet<ViewId>,
@@ -145,6 +149,7 @@ impl SessionRegistry {
             session_id.clone(),
             StoredSession {
                 account_scope: caller.account_scope,
+                delta_capable: caller.capabilities.view_delta,
                 last_seq: 0,
                 frames,
                 open_views: HashSet::new(),
@@ -658,6 +663,44 @@ fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
     frames
 }
 
+/// Compute a row-local mail-list delta between two snapshots, or `None` when the
+/// change is not row-local — a structural change (scope/sort/window/continuation)
+/// or a non-mail-list view — in which case the caller re-serves a whole
+/// `ViewReplace` (L6). Rows are keyed by `row_key`; `order` is sent only when the
+/// id sequence changed; `upserts` carry only new or content-changed rows.
+fn mail_list_delta(old: &ViewSnapshot, new: &ViewSnapshot) -> Option<MailListDelta> {
+    let old_state: MailListViewState = serde_json::from_value(old.data.clone()).ok()?;
+    let new_state: MailListViewState = serde_json::from_value(new.data.clone()).ok()?;
+    if old_state.scope != new_state.scope
+        || old_state.projection_kind != new_state.projection_kind
+        || old_state.sort != new_state.sort
+        || old_state.window_request != new_state.window_request
+        || old_state.continuation != new_state.continuation
+    {
+        return None;
+    }
+    let old_by_key: HashMap<&str, &MailListRowState> = old_state
+        .rows
+        .iter()
+        .map(|row| (row.row_key.as_str(), row))
+        .collect();
+    let old_order: Vec<&str> = old_state.rows.iter().map(|row| row.row_key.as_str()).collect();
+    let new_order: Vec<&str> = new_state.rows.iter().map(|row| row.row_key.as_str()).collect();
+    let order = (old_order != new_order)
+        .then(|| new_order.iter().map(|key| key.to_string()).collect());
+    let mut upserts = Vec::new();
+    for new_row in &new_state.rows {
+        let changed = match old_by_key.get(new_row.row_key.as_str()) {
+            Some(old_row) => *old_row != new_row,
+            None => true,
+        };
+        if changed {
+            upserts.push(new_row.clone());
+        }
+    }
+    Some(MailListDelta { order, upserts })
+}
+
 fn view_frame_to_runtime(session: &mut StoredSession, frame: ViewFrame) -> Option<RuntimeFrame> {
     match frame {
         ViewFrame::Snapshot { snapshot } => {
@@ -684,9 +727,25 @@ fn view_frame_to_runtime(session: &mut StoredSession, frame: ViewFrame) -> Optio
             let session_seq = next_seq(session);
             let view_id = snapshot.view_id.clone();
             let revision = snapshot.revision;
-            session
+            let previous = session
                 .latest_snapshots
                 .insert(view_id.clone(), snapshot.clone());
+            // A delta-capable session receives only the rows that changed, when
+            // the change is row-local; structural changes (and non-mail-list
+            // views) fall back to a whole replace (L6).
+            if session.delta_capable {
+                if let Some(delta) = previous
+                    .as_ref()
+                    .and_then(|old| mail_list_delta(old, &snapshot))
+                {
+                    return Some(RuntimeFrame::ViewDelta {
+                        session_seq,
+                        view_id,
+                        revision,
+                        delta,
+                    });
+                }
+            }
             Some(RuntimeFrame::ViewReplace {
                 session_seq,
                 view_id,
@@ -765,4 +824,89 @@ fn lock_error<T>(_error: T) -> RuntimeError {
         posthaste_runtime_contract::RuntimeErrorCode::Internal,
         "runtime session registry lock poisoned",
     )
+}
+
+#[cfg(test)]
+mod delta_tests {
+    use super::*;
+    use posthaste_runtime_contract::{
+        RuntimeCoverage, RuntimeCoverageKind, ViewLifecycle, ViewRevision,
+    };
+    use serde_json::json;
+
+    fn row(key: &str, flagged: bool) -> Value {
+        json!({
+            "rowKey": key,
+            "resourceRef": null,
+            "projection": { "id": key, "isFlagged": flagged },
+            "sortKey": {},
+            "orderKey": key,
+            "pendingMarkers": []
+        })
+    }
+
+    fn snapshot(rows: Vec<Value>, has_after: bool) -> ViewSnapshot {
+        ViewSnapshot {
+            view_id: ViewId::new("v1"),
+            descriptor: ViewDescriptor {
+                family: "mailList".into(),
+                payload: Value::Null,
+            },
+            revision: ViewRevision::new(1),
+            lifecycle: ViewLifecycle::Ready,
+            read_watermark: None,
+            coverage: RuntimeCoverage {
+                kind: RuntimeCoverageKind::Complete,
+                details: Value::Null,
+            },
+            data: json!({
+                "scope": {},
+                "projectionKind": "message",
+                "sort": {},
+                "windowRequest": {},
+                "rows": rows,
+                "continuation": {
+                    "beforeCursor": null, "afterCursor": null,
+                    "hasBefore": false, "hasAfter": has_after
+                },
+                "readWatermark": null,
+                "coverage": { "kind": "complete", "details": {} },
+                "knownTotalCount": null,
+                "pendingMutations": [],
+                "anchor": { "kind": "notRequested" }
+            }),
+            pending_mutations: vec![],
+            error: None,
+        }
+    }
+
+    #[test]
+    fn flag_toggle_is_a_single_upsert_no_reorder() {
+        let old = snapshot(vec![row("m1", false), row("m2", false)], false);
+        let new = snapshot(vec![row("m1", true), row("m2", false)], false);
+        let delta = mail_list_delta(&old, &new).expect("row-local change yields a delta");
+        assert!(delta.order.is_none(), "order unchanged");
+        assert_eq!(delta.upserts.len(), 1, "only the changed row");
+        assert_eq!(delta.upserts[0].row_key, "m1");
+    }
+
+    #[test]
+    fn removal_sends_the_new_order_and_no_upserts() {
+        let old = snapshot(vec![row("m1", false), row("m2", false)], false);
+        let new = snapshot(vec![row("m2", false)], false);
+        let delta = mail_list_delta(&old, &new).expect("removal yields a delta");
+        assert_eq!(delta.order.as_deref(), Some(["m2".to_string()].as_slice()));
+        assert!(delta.upserts.is_empty(), "the surviving row is unchanged");
+    }
+
+    #[test]
+    fn structural_change_falls_back_to_a_whole_replace() {
+        let old = snapshot(vec![row("m1", false)], false);
+        // Same rows, but the continuation (hasAfter) changed — a structural change.
+        let new = snapshot(vec![row("m1", false)], true);
+        assert!(
+            mail_list_delta(&old, &new).is_none(),
+            "a non-row-local change must re-serve the whole view"
+        );
+    }
 }
