@@ -295,9 +295,14 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
     ));
     let outbox = Arc::new(RuntimeBackendOutbox::new());
-    let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
-        mail_queries.clone(),
+    let backend = Arc::new(Backend::new(
         service.clone(),
+        mail_queries.clone(),
+        account_supervisor.clone(),
+        event_sender.clone(),
+    ));
+    let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+        backend.clone(),
     ))));
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
@@ -307,11 +312,6 @@ pub async fn build_authority_runtime(
         reads.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
-    let backend = Arc::new(Backend::new(
-        service.clone(),
-        account_supervisor.clone(),
-        event_sender.clone(),
-    ));
     let backend_link = select_backend_link(
         &config.backend_transport,
         config.backend_transport_override.clone(),
@@ -505,9 +505,14 @@ impl AuthorityRuntimeHandle {
             query_supervisor,
         ));
         let outbox = Arc::new(RuntimeBackendOutbox::new());
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
-            mail_queries.clone(),
+        let backend = Arc::new(Backend::new(
             api_bridge.service.clone(),
+            mail_queries.clone(),
+            live_accounts.clone(),
+            api_bridge.event_sender.clone(),
+        ));
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+            backend.clone(),
         ))));
         let views = Arc::new(ViewRegistry::new(
             mail_queries.clone(),
@@ -529,11 +534,6 @@ impl AuthorityRuntimeHandle {
             },
             account_count,
         };
-        let backend = Arc::new(Backend::new(
-            api_bridge.service.clone(),
-            live_accounts.clone(),
-            api_bridge.event_sender.clone(),
-        ));
         let backend_link = BackendLink::new(Arc::new(InProcessTransport::new(backend.clone())));
         Self {
             core: Arc::new(AuthorityRuntimeCore {

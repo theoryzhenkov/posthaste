@@ -22,15 +22,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig,
+    build_authority_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig, RemoteTransport,
 };
 use posthaste_domain::{
-    AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, SecretRef, SecretStore,
-    SecretStoreError, SyncBatch, SyncCursor, SyncObject, ThreadId,
+    AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
+    SecretStore, SecretStoreError, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
+use posthaste_link_contract::{LinkCoverage, LinkTransport};
 use posthaste_runtime_contract::{
-    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationRequest,
-    RuntimeCaller, RuntimeCore, SecretWriteMutation,
+    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailPresentationRequest,
+    MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller, RuntimeCore,
+    SecretWriteMutation,
 };
 use posthaste_server::link_router;
 
@@ -98,6 +100,97 @@ fn account_mutation(id: &str) -> CreateAccountMutation {
 fn build_config(root: PathBuf) -> AuthorityRuntimeBuildConfig {
     AuthorityRuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
         .with_secret_store(Arc::new(TestSecretStore::default()))
+}
+
+fn seed_inbox_message(
+    build: &posthaste_authority_runtime::AuthorityRuntimeBuild,
+    account: &posthaste_domain::AccountId,
+    message_id: &str,
+) {
+    build
+        .api_bridge
+        .store
+        .apply_sync_batch(
+            account,
+            &SyncBatch {
+                mailboxes: vec![MailboxRecord {
+                    id: MailboxId::from("inbox"),
+                    name: "Inbox".to_string(),
+                    role: Some("inbox".to_string()),
+                    unread_emails: 0,
+                    total_emails: 1,
+                }],
+                messages: vec![MessageRecord {
+                    id: MessageId::from(message_id),
+                    source_thread_id: ThreadId::from(format!("thread-{message_id}")),
+                    subject: Some("Subject".to_string()),
+                    received_at: "2026-06-24T10:00:00Z".to_string(),
+                    mailbox_ids: vec![MailboxId::from("inbox")],
+                    keywords: vec!["$seen".to_string()],
+                    ..Default::default()
+                }],
+                cursors: vec![SyncCursor {
+                    object_type: SyncObject::Message,
+                    state: "s1".to_string(),
+                    updated_at: "2026-06-24T10:00:00Z".to_string(),
+                }],
+                ..Default::default()
+            },
+        )
+        .expect("seed applies");
+}
+
+async fn serve_link(backend: &posthaste_authority_runtime::AuthorityRuntimeBuild) -> String {
+    let router = link_router(backend.backend_link.transport().clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+// spec: docs/eph/DESIGN-L4-read-replication#6-co-located-is-the-same-code-collapsed
+#[tokio::test]
+async fn remote_transport_reads_a_real_query_over_the_link() {
+    // The backend computes the query (the authority owns the query engine); a
+    // near node reads through over the link and gets the computed page.
+    let backend = build_authority_runtime(build_config(temp_root()))
+        .await
+        .expect("backend runtime builds");
+    let account = backend
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("read-account"))
+        .await
+        .expect("account creates");
+    seed_inbox_message(&backend, &account.id, "m-read");
+    let base_url = serve_link(&backend).await;
+
+    let transport = RemoteTransport::new(base_url);
+    let page = transport
+        .query_mail_page(MailQueryRequest {
+            query: format!("in:{}/inbox", account.id.as_str()),
+            presentation: MailPresentationRequest::Messages {
+                limit: Some(10),
+                cursor: None,
+                sort_field: MessageSortField::Date,
+                sort_direction: SortDirection::Desc,
+            },
+            visibility: None,
+        })
+        .await
+        .expect("read through the link");
+
+    let MailQueryPage::Messages(page) = page else {
+        panic!("expected a message page");
+    };
+    assert!(
+        page.items.iter().any(|m| m.id.as_str() == "m-read"),
+        "the far node's computed query should reach the reader over the link"
+    );
+
+    // The read channel is distinct from the down-channel; subscribe still works.
+    let _ = transport.subscribe(LinkCoverage::Complete).await;
 }
 
 #[tokio::test]
