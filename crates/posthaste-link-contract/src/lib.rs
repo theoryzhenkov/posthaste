@@ -29,7 +29,9 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
-use posthaste_domain::{AccountId, MessageId, MessageSummary};
+use posthaste_domain::{
+    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+};
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
@@ -55,6 +57,14 @@ pub const LINK_QUERY_PATH: &str = "/v1/link/query";
 /// of one message (the read behind undo-history). `POST`ed as `{accountId,
 /// messageId}`, returns the summary or null.
 pub const LINK_SUMMARY_PATH: &str = "/v1/link/summary";
+
+/// Wire path for the read channel's message detail (the `messageDetail` view).
+/// `POST`ed as `{accountId, messageId}`, returns the detail or null.
+pub const LINK_DETAIL_PATH: &str = "/v1/link/detail";
+
+/// Wire path for the read channel's conversation (the `conversation` view).
+/// `POST`ed as `{conversationId}`, returns the folded conversation.
+pub const LINK_CONVERSATION_PATH: &str = "/v1/link/conversation";
 
 /// One authoritative base update for a single message, carried on the
 /// down-channel ([replication L1 §5.1](../replication/L1.md)). The near node
@@ -236,6 +246,26 @@ pub trait BackendApi: Send + Sync {
         let _ = (account_id, message_id);
         Err(read_channel_unsupported())
     }
+
+    /// Read channel: a message's detail (header + attachments) for the
+    /// `messageDetail` view.
+    async fn message_detail(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: an overlay-folded conversation for the `conversation` view.
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        let _ = conversation_id;
+        Err(read_channel_unsupported())
+    }
 }
 
 fn read_channel_unsupported() -> RuntimeError {
@@ -299,6 +329,23 @@ impl BackendLink {
         message_id: MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
         self.transport.current_summary(account_id, message_id).await
+    }
+
+    /// Read channel: a message's detail through to the backend.
+    pub async fn message_detail(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        self.transport.message_detail(account_id, message_id).await
+    }
+
+    /// Read channel: a conversation through to the backend.
+    pub async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.transport.conversation(conversation_id).await
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.

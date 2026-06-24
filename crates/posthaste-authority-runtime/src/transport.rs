@@ -1,12 +1,12 @@
-//! In-process link transport over the co-located backend far node.
+//! The two [`BackendApi`] implementations the runtime↔backend link selects between.
 //!
-//! [`InProcessTransport`] is the default [`BackendApi`]
-//! ([replication L4 §4](../replication/L4.md)): direct calls to a co-located
-//! [`Backend`], zero serialization, instant confirmation. It is the
-//! behavior-preserving seam — the runtime↔backend link carried in one process,
-//! byte-for-byte the pre-link behavior (assertion `colocated-unchanged`). The
-//! remote transport (POST up + SSE down) is the W3 twin selected by the same
-//! config knob.
+//! [`LocalBackend`] is the default ([replication L4 §4](../replication/L4.md)):
+//! direct calls to a co-located [`Backend`] far node, zero serialization, instant
+//! confirmation — byte-for-byte the pre-link behavior (`colocated-unchanged`).
+//! [`RemoteBackend`] is the split case: the up-channel `POST`s named mutations,
+//! the reads `POST` request/response, and the down-channel is an SSE stream of
+//! base-assertion frames — so the backend can live on another process or host.
+//! Both are config-selected ([replication L5 §5](../replication/L5.md)).
 //!
 //! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
 
@@ -14,10 +14,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use posthaste_domain::{AccountId, DomainEvent, MessageId, MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED};
+use posthaste_domain::{
+    AccountId, ConversationId, ConversationView, DomainEvent, MessageDetail, MessageId,
+    MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+};
 use posthaste_link_contract::{
-    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, BackendApi,
-    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
+    LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
+    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
@@ -29,11 +33,11 @@ use tokio::sync::broadcast;
 use crate::backend::Backend;
 
 /// The default transport: the runtime calls the co-located backend directly.
-pub(crate) struct InProcessTransport {
+pub(crate) struct LocalBackend {
     backend: Arc<Backend>,
 }
 
-impl InProcessTransport {
+impl LocalBackend {
     pub(crate) fn new(backend: Arc<Backend>) -> Self {
         Self { backend }
     }
@@ -76,7 +80,7 @@ pub(crate) fn message_event_to_assertion(
 }
 
 #[async_trait]
-impl BackendApi for InProcessTransport {
+impl BackendApi for LocalBackend {
     /// Up-channel: apply the named mutation to the co-located backend and return
     /// a receipt carrying the backend's `RuntimeMutationId` (the confirmation
     /// join key) and the command's events as `output`. In-process this is a
@@ -134,6 +138,21 @@ impl BackendApi for InProcessTransport {
         self.backend.current_summary(&account_id, &message_id).await
     }
 
+    async fn message_detail(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        self.backend.message_detail(&account_id, &message_id).await
+    }
+
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.backend.conversation(&conversation_id)
+    }
+
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
         let backend = self.backend.clone();
         let mut receiver = backend.subscribe_events();
@@ -168,12 +187,12 @@ impl BackendApi for InProcessTransport {
 /// base-assertion frames. This is what lets the backend live on another
 /// process or host; it is selected by config, the symmetric twin of the
 /// in-process transport.
-pub struct RemoteTransport {
+pub struct RemoteBackend {
     base_url: String,
     client: reqwest::Client,
 }
 
-impl RemoteTransport {
+impl RemoteBackend {
     pub fn new(base_url: String) -> Self {
         Self {
             // Trim a trailing slash so `base_url + path` never doubles it.
@@ -211,7 +230,7 @@ pub(crate) fn parse_sse_frame(block: &str) -> Option<DownFrame> {
 }
 
 #[async_trait]
-impl BackendApi for RemoteTransport {
+impl BackendApi for RemoteBackend {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
@@ -284,6 +303,59 @@ impl BackendApi for RemoteTransport {
         }
         response
             .json::<Option<MessageSummary>>()
+            .await
+            .map_err(transport_error)
+    }
+
+    async fn message_detail(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        let url = format!("{}{}", self.base_url, LINK_DETAIL_PATH);
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "accountId": account_id, "messageId": message_id }))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::GatewayRejected,
+                format!("remote backend rejected detail read ({status}): {body}"),
+            ));
+        }
+        response
+            .json::<Option<MessageDetail>>()
+            .await
+            .map_err(transport_error)
+    }
+
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        let url = format!("{}{}", self.base_url, LINK_CONVERSATION_PATH);
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "conversationId": conversation_id }))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::GatewayRejected,
+                format!("remote backend rejected conversation read ({status}): {body}"),
+            ));
+        }
+        response
+            .json::<ConversationView>()
             .await
             .map_err(transport_error)
     }
@@ -405,7 +477,7 @@ mod tests {
     }
 
     // A mock far-node HTTP surface stands in for the backend's (W3b) link
-    // endpoints, proving the RemoteTransport client speaks the wire end to end:
+    // endpoints, proving the RemoteBackend client speaks the wire end to end:
     // POST up returns a receipt, SSE down yields a base-assertion frame.
     #[tokio::test]
     async fn remote_transport_round_trips_against_a_mock_far_node() {
@@ -447,7 +519,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let transport = RemoteTransport::new(format!("http://{addr}"));
+        let transport = RemoteBackend::new(format!("http://{addr}"));
 
         let receipt = transport
             .forward_mutation(MutationRequest {

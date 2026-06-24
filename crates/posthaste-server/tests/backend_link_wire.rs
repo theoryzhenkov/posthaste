@@ -1,6 +1,6 @@
 //! The runtime↔backend link over the real remote wire: the production
 //! `link_router` (far-node HTTP surface) served against the production
-//! `RemoteTransport` (near-node client), over loopback HTTP.
+//! `RemoteBackend` (near-node client), over loopback HTTP.
 //!
 //! Proves the two ends meet on the shared contract — the up-channel POST returns
 //! the backend's receipt, the down-channel SSE delivers base-assertion frames —
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use posthaste_authority_runtime::RemoteTransport;
+use posthaste_authority_runtime::RemoteBackend;
 use posthaste_link_contract::{
     BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, BackendApi,
 };
@@ -71,7 +71,7 @@ async fn serve_far_node() -> String {
 #[tokio::test]
 async fn remote_transport_drives_the_link_router_up_channel() {
     let base_url = serve_far_node().await;
-    let transport = RemoteTransport::new(base_url);
+    let transport = RemoteBackend::new(base_url);
 
     let receipt = transport
         .forward_mutation(MutationRequest {
@@ -95,7 +95,7 @@ async fn remote_transport_drives_the_link_router_up_channel() {
 #[tokio::test]
 async fn remote_transport_reads_the_link_router_down_channel() {
     let base_url = serve_far_node().await;
-    let transport = RemoteTransport::new(base_url);
+    let transport = RemoteBackend::new(base_url);
 
     let mut down = transport
         .subscribe(LinkCoverage::Complete)

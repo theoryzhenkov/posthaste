@@ -1,160 +1,33 @@
-//! The runtime's read path as a read-through cache over a far node.
+//! The runtime's read path as a read-through cache over the backend.
 //!
 //! Reads ([replication L4 W4](../replication/L4.md), `DESIGN-L4-read-replication`)
-//! go through a [`ReadCache`] over a [`ReadSource`]: the query engine lives at
+//! go through a [`ReadCache`] over a [`BackendApi`]: the query engine lives at
 //! the authority (the far node), and a near node retains the data that flowed
 //! back under a **policy** chosen from link cost. The primitive is read-through;
 //! caching is the optimization.
 //!
-//! W4a is the seam only: `LocalReadSource` calls the in-process backend directly
-//! and the policy is **passthrough** (retain nothing, always read through), so
-//! the co-located deployment behaves exactly as before (`colocated-unchanged`).
-//! The retaining policy and the remote source (over the link) are W4c.
+//! There is no separate read-source abstraction — the cache wraps the one
+//! `BackendApi` (the in-process `LocalBackend` co-located, the `RemoteBackend`
+//! over the link), the same trait the write/subscribe channels use. Co-located
+//! the policy is **passthrough** (retain nothing, read straight through), so the
+//! deployment behaves exactly as before (`colocated-unchanged`); a split runtime
+//! gets the **retaining** policy kept coherent by the down-channel.
 //!
 //! @spec docs/eph/DESIGN-L4-read-replication#6-co-located-is-the-same-code-collapsed
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_domain::{
     AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
-use posthaste_link_contract::{BackendLink, DownFrame, LinkCoverage};
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError, RuntimeErrorCode};
+use posthaste_link_contract::{BackendApi, BackendLink, DownFrame, LinkCoverage};
+use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError};
 
-use crate::backend::Backend;
-
-/// The far node's read surface — what a near node reads through to. Co-located
-/// it is the in-process backend; split it is carried over the link (W4c).
-#[async_trait]
-pub(crate) trait ReadSource: Send + Sync {
-    /// Compute a page of a mail-list query (the query engine lives here).
-    async fn query_mail_page(
-        &self,
-        request: MailQueryRequest,
-    ) -> Result<MailQueryPage, RuntimeError>;
-
-    /// One message's current canonical summary (the point read behind
-    /// undo-history). `None` when the message is not held.
-    async fn current_summary(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageSummary>, RuntimeError>;
-
-    /// A message's detail (header + attachments) for the `messageDetail` view.
-    /// Defaults to unsupported so a source carries it only when wired.
-    async fn message_detail(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageDetail>, RuntimeError> {
-        let _ = (account_id, message_id);
-        Err(read_unsupported())
-    }
-
-    /// An overlay-folded conversation for the `conversation` view.
-    async fn conversation(
-        &self,
-        conversation_id: &ConversationId,
-    ) -> Result<ConversationView, RuntimeError> {
-        let _ = conversation_id;
-        Err(read_unsupported())
-    }
-}
-
-fn read_unsupported() -> RuntimeError {
-    RuntimeError::new(
-        RuntimeErrorCode::Internal,
-        "read source does not carry this read",
-    )
-}
-
-/// The co-located read source: calls the in-process backend far node directly
-/// (today's reads), zero serialization. The far node owns the query engine; this
-/// is the read twin of `InProcessTransport` on the write path.
-pub(crate) struct LocalReadSource {
-    backend: Arc<Backend>,
-}
-
-impl LocalReadSource {
-    pub(crate) fn new(backend: Arc<Backend>) -> Self {
-        Self { backend }
-    }
-}
-
-#[async_trait]
-impl ReadSource for LocalReadSource {
-    async fn query_mail_page(
-        &self,
-        request: MailQueryRequest,
-    ) -> Result<MailQueryPage, RuntimeError> {
-        self.backend.query_mail_page(request).await
-    }
-
-    async fn current_summary(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageSummary>, RuntimeError> {
-        self.backend.current_summary(account_id, message_id).await
-    }
-
-    async fn message_detail(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.backend.message_detail(account_id, message_id).await
-    }
-
-    async fn conversation(
-        &self,
-        conversation_id: &ConversationId,
-    ) -> Result<ConversationView, RuntimeError> {
-        self.backend.conversation(conversation_id)
-    }
-}
-
-/// The split read source: reads through to the backend over the link. W4c uses
-/// it with a passthrough policy (read-through on every read — always fresh, no
-/// retention); a retaining policy waits on the down-channel coherence of W4d so
-/// a cached entry is never stale.
-pub(crate) struct RemoteReadSource {
-    link: BackendLink,
-}
-
-impl RemoteReadSource {
-    pub(crate) fn new(link: BackendLink) -> Self {
-        Self { link }
-    }
-}
-
-#[async_trait]
-impl ReadSource for RemoteReadSource {
-    async fn query_mail_page(
-        &self,
-        request: MailQueryRequest,
-    ) -> Result<MailQueryPage, RuntimeError> {
-        self.link.query_mail_page(request).await
-    }
-
-    async fn current_summary(
-        &self,
-        account_id: &AccountId,
-        message_id: &MessageId,
-    ) -> Result<Option<MessageSummary>, RuntimeError> {
-        self.link
-            .current_summary(account_id.clone(), message_id.clone())
-            .await
-    }
-}
-
-/// A read-through cache over a [`ReadSource`], parameterized by policy.
+/// A read-through cache over the [`BackendApi`], parameterized by policy.
 ///
-/// - **Passthrough** (co-located): every read delegates straight to the source,
+/// - **Passthrough** (co-located): every read delegates straight to the backend,
 ///   retaining nothing — no redundant storage, behavior-preserving.
 /// - **Retaining** (remote): point reads are served from a coherent summary
 ///   cache of the messages that flowed back (from point reads *and* query
@@ -170,24 +43,24 @@ impl ReadSource for RemoteReadSource {
 /// over-evict across accounts — which is safe (a cache miss), only less
 /// efficient. Carrying the account id on the assertion is a later refinement.
 pub(crate) struct ReadCache {
-    source: Arc<dyn ReadSource>,
+    backend: Arc<dyn BackendApi>,
     summaries: Option<Mutex<HashMap<String, MessageSummary>>>,
 }
 
 impl ReadCache {
     /// The passthrough cache: read straight through, retain nothing.
-    pub(crate) fn passthrough(source: Arc<dyn ReadSource>) -> Self {
+    pub(crate) fn passthrough(backend: Arc<dyn BackendApi>) -> Self {
         Self {
-            source,
+            backend,
             summaries: None,
         }
     }
 
     /// The retaining cache: hold the summaries that flow back, kept coherent by
     /// the down-channel.
-    pub(crate) fn retaining(source: Arc<dyn ReadSource>) -> Self {
+    pub(crate) fn retaining(backend: Arc<dyn BackendApi>) -> Self {
         Self {
-            source,
+            backend,
             summaries: Some(Mutex::new(HashMap::new())),
         }
     }
@@ -196,7 +69,7 @@ impl ReadCache {
         &self,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
-        let page = self.source.query_mail_page(request).await?;
+        let page = self.backend.query_mail_page(request).await?;
         // A list read-through warms the message cache with what it returned.
         if let (Some(summaries), MailQueryPage::Messages(messages)) = (&self.summaries, &page) {
             let mut cache = summaries.lock().expect("summary cache poisoned");
@@ -207,22 +80,24 @@ impl ReadCache {
         Ok(page)
     }
 
-    /// Read a message's detail through the source (passthrough; the detail view
+    /// Read a message's detail through the backend (passthrough; the detail view
     /// is recomputed per open, so it is not cached here).
     pub(crate) async fn message_detail(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.source.message_detail(account_id, message_id).await
+        self.backend
+            .message_detail(account_id.clone(), message_id.clone())
+            .await
     }
 
-    /// Read a conversation through the source (passthrough).
+    /// Read a conversation through the backend (passthrough).
     pub(crate) async fn conversation(
         &self,
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
-        self.source.conversation(conversation_id).await
+        self.backend.conversation(conversation_id.clone()).await
     }
 
     pub(crate) async fn current_summary(
@@ -242,7 +117,10 @@ impl ReadCache {
                 return Ok(Some(hit));
             }
         }
-        let result = self.source.current_summary(account_id, message_id).await?;
+        let result = self
+            .backend
+            .current_summary(account_id.clone(), message_id.clone())
+            .await?;
         if let (Some(summaries), Some(summary)) = (&self.summaries, &result) {
             summaries
                 .lock()
@@ -291,9 +169,11 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use async_trait::async_trait;
     use posthaste_domain::MessagePage;
-    use posthaste_link_contract::{BaseAssertion, BaseUpdate};
+    use posthaste_link_contract::{BaseAssertion, BaseUpdate, DownStream};
     use posthaste_link_core::MessageFoldState;
+    use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
     use serde_json::json;
 
     fn summary(id: &str) -> MessageSummary {
@@ -307,14 +187,15 @@ mod tests {
         .unwrap()
     }
 
-    /// A read source that counts how often each read reaches it.
-    struct CountingSource {
+    /// A backend that counts how often each read reaches it. The write/subscribe
+    /// channels are inert (these tests exercise reads only).
+    struct CountingBackend {
         summary_calls: AtomicU64,
         query_calls: AtomicU64,
         page: MailQueryPage,
     }
 
-    impl CountingSource {
+    impl CountingBackend {
         fn new(items: Vec<MessageSummary>) -> Self {
             Self {
                 summary_calls: AtomicU64::new(0),
@@ -328,7 +209,18 @@ mod tests {
     }
 
     #[async_trait]
-    impl ReadSource for CountingSource {
+    impl BackendApi for CountingBackend {
+        async fn forward_mutation(
+            &self,
+            _mutation: MutationRequest,
+        ) -> Result<MutationReceipt, RuntimeError> {
+            Err(RuntimeError::internal("counting backend is read-only", None))
+        }
+
+        async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::empty()))
+        }
+
         async fn query_mail_page(
             &self,
             _request: MailQueryRequest,
@@ -339,8 +231,8 @@ mod tests {
 
         async fn current_summary(
             &self,
-            _account_id: &AccountId,
-            message_id: &MessageId,
+            _account_id: AccountId,
+            message_id: MessageId,
         ) -> Result<Option<MessageSummary>, RuntimeError> {
             self.summary_calls.fetch_add(1, Ordering::SeqCst);
             Ok(Some(summary(message_id.as_str())))
@@ -358,31 +250,31 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_never_retains() {
-        let source = Arc::new(CountingSource::new(vec![]));
-        let cache = ReadCache::passthrough(source.clone());
+        let backend = Arc::new(CountingBackend::new(vec![]));
+        let cache = ReadCache::passthrough(backend.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(source.summary_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn retaining_serves_a_point_read_from_cache_after_the_first() {
-        let source = Arc::new(CountingSource::new(vec![]));
-        let cache = ReadCache::retaining(source.clone());
+        let backend = Arc::new(CountingBackend::new(vec![]));
+        let cache = ReadCache::retaining(backend.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
         cache.current_summary(&account, &message).await.unwrap();
         // Second read is a cache hit.
-        assert_eq!(source.summary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn a_query_warms_the_message_cache() {
-        let source = Arc::new(CountingSource::new(vec![summary("m1")]));
-        let cache = ReadCache::retaining(source.clone());
+        let backend = Arc::new(CountingBackend::new(vec![summary("m1")]));
+        let cache = ReadCache::retaining(backend.clone());
         let request: MailQueryRequest = serde_json::from_value(json!({
             "query": "in:acct/inbox",
             "presentation": {
@@ -392,24 +284,24 @@ mod tests {
         }))
         .unwrap();
         cache.query_mail_page(request).await.unwrap();
-        // The point read is now served from the warmed cache, never reaching the source.
+        // The point read is now served from the warmed cache, never reaching the backend.
         cache
             .current_summary(&AccountId("acct".into()), &MessageId("m1".into()))
             .await
             .unwrap();
-        assert_eq!(source.summary_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn a_coherence_frame_evicts_so_the_next_read_refetches() {
-        let source = Arc::new(CountingSource::new(vec![]));
-        let cache = ReadCache::retaining(source.clone());
+        let backend = Arc::new(CountingBackend::new(vec![]));
+        let cache = ReadCache::retaining(backend.clone());
         let account = AccountId("acct".into());
         let message = MessageId("m1".into());
         cache.current_summary(&account, &message).await.unwrap();
         // The backend asserts m1 changed; the cached summary is evicted.
         cache.apply_coherence_frame(&base_frame("m1"));
         cache.current_summary(&account, &message).await.unwrap();
-        assert_eq!(source.summary_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(backend.summary_calls.load(Ordering::SeqCst), 2);
     }
 }
