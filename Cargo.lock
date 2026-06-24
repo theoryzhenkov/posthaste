@@ -4056,6 +4056,7 @@ dependencies = [
  "posthaste-domain",
  "posthaste-engine",
  "posthaste-imap",
+ "posthaste-link-contract",
  "posthaste-observability",
  "posthaste-runtime-contract",
  "posthaste-store",
@@ -4185,6 +4186,20 @@ dependencies = [
  "time",
  "toml 0.8.2",
  "uuid",
+]
+
+[[package]]
+name = "posthaste-link-contract"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "posthaste-link-core",
+ "posthaste-runtime-contract",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
