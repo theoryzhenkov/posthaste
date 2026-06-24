@@ -343,6 +343,52 @@ describe('replicaAdapter', () => {
     expect(keywordsOf(frames, 'm1')).toContain('$seen')
   })
 
+  it('reverts a confirmed optimism when the provider later corrects the base', async () => {
+    // The full lifecycle: client optimistic -> runtime confirms (store apply) ->
+    // provider rejects later -> runtime re-serves the reverted authoritative
+    // base (emit_failure_base_correction). With its op already retired the
+    // replica simply adopts the correction.
+    const built = build()
+    const { adapter, frames, outbox } = built
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(setSeen('m1', 'c1'))
+    expect(keywordsOf(frames, 'm1')).toContain('$seen')
+
+    // Stage 2: confirm — re-serve the overlay-folded base + settle; op retires.
+    built.harness.push({
+      type: 'viewReplace',
+      sessionSeq: 4,
+      viewId: 'v1',
+      revision: 2,
+      snapshot: snapshot([row('m1', ['$seen']), row('m2')]),
+    })
+    built.harness.push({
+      type: 'mutationSettlement',
+      sessionSeq: 5,
+      mutationId: 'r-1',
+      state: {
+        clientMutationId: 'c1',
+        name: 'message.setKeywords',
+        status: 'confirmed',
+        error: null,
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(await outbox.all()).toHaveLength(0)
+    expect(keywordsOf(frames, 'm1')).toContain('$seen')
+
+    // Stage 3: the provider rejects; the runtime re-serves the reverted base.
+    built.harness.push({
+      type: 'viewReplace',
+      sessionSeq: 9,
+      viewId: 'v1',
+      revision: 3,
+      snapshot: snapshot([row('m1'), row('m2')]),
+    })
+    expect(keywordsOf(frames, 'm1')).not.toContain('$seen')
+  })
+
   it('consumes a runtime viewDelta into the served base', async () => {
     const built = build()
     const { adapter, frames } = built
