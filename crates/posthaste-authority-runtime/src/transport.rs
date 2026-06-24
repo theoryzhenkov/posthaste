@@ -489,6 +489,33 @@ impl RemoteBackend {
             client: reqwest::Client::new(),
         }
     }
+
+    /// POST a JSON request to a link path and parse the JSON response — the one
+    /// HTTP round-trip the generated [`BackendApi`] methods share
+    /// ([`for_each_link_op`](posthaste_link_contract::for_each_link_op)).
+    async fn post_link<Req, Ret>(&self, path: &str, req: &Req) -> Result<Ret, RuntimeError>
+    where
+        Req: serde::Serialize,
+        Ret: serde::de::DeserializeOwned,
+    {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self
+            .client
+            .post(&url)
+            .json(req)
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::GatewayRejected,
+                format!("remote backend rejected link request ({status}): {body}"),
+            ));
+        }
+        response.json::<Ret>().await.map_err(transport_error)
+    }
 }
 
 /// Map a transport-layer (network) failure to a retryable disconnected error —
@@ -518,6 +545,15 @@ pub(crate) fn parse_sse_frame(block: &str) -> Option<DownFrame> {
     serde_json::from_str(&data).ok()
 }
 
+/// Emit the full [`RemoteBackend`] [`BackendApi`] impl: the bespoke up-channel
+/// (`forward_mutation`) + SSE down-channel (`subscribe`) + the pre-existing read
+/// methods, plus one generated method per link-op row. Emitting the whole
+/// `#[async_trait] impl` from the macro is deliberate: `async_trait` then runs
+/// on the already-expanded impl, so it desugars the generated methods too (a
+/// `macro_rules!` invocation *inside* an `#[async_trait]` impl would expand too
+/// late and the generated methods would miss the desugaring).
+macro_rules! remote_backend_impl {
+    ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
 #[async_trait]
 impl BackendApi for RemoteBackend {
     async fn forward_mutation(
@@ -686,7 +722,18 @@ impl BackendApi for RemoteBackend {
         };
         Ok(Box::pin(stream))
     }
+
+    // The full request/response surface (reads + typed writes) — generated from
+    // the shared link-op table so it cannot drift from the server handlers.
+    $(
+        async fn $method(&self, $($field: $fty),*) -> Result<$ret, RuntimeError> {
+            self.post_link($path, &posthaste_link_contract::$req { $($field),* }).await
+        }
+    )*
 }
+    };
+}
+posthaste_link_contract::for_each_link_op!(remote_backend_impl);
 
 #[cfg(test)]
 mod tests {

@@ -280,7 +280,8 @@ pub struct RuntimeStatus {
 /// Which lazy byte-resource of a message to resolve. The single way to name a
 /// message's deferred bytes — attachment blob or body — so they share one
 /// fetch/cache/serve path (the lazy-resource unification) instead of diverging.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum MessageResourceKind {
     Attachment(String),
     BodyHtml,
