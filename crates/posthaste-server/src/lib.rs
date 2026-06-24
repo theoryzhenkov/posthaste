@@ -59,7 +59,7 @@ mod spa;
 mod startup;
 
 pub use app_state::{AppState, ServerConfig, ServerHandle};
-pub use link::link_router;
+pub use link::{link_router, LinkAuth};
 pub use router::build_api_router;
 pub use secure_file::write_secure_file;
 pub use startup::start_server;

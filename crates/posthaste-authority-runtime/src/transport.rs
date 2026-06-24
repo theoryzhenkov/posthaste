@@ -479,20 +479,41 @@ impl BackendApi for LocalBackend {
 pub struct RemoteBackend {
     base_url: String,
     client: reqwest::Client,
+    /// The link bearer token presented on every request, when the backend's
+    /// `link_router` requires one ([`LinkAuth::Bearer`](posthaste_server)). `None`
+    /// for an unauthenticated link (in-process tests / dormant mounts).
+    token: Option<String>,
 }
 
 impl RemoteBackend {
     pub fn new(base_url: String) -> Self {
+        Self::with_token(base_url, None)
+    }
+
+    /// A remote transport that presents `token` (when `Some`) as a bearer
+    /// credential on every link request.
+    pub fn with_token(base_url: String, token: Option<String>) -> Self {
         Self {
             // Trim a trailing slash so `base_url + path` never doubles it.
             base_url: base_url.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
+            token,
+        }
+    }
+
+    /// Attach the link bearer token to a request, if configured.
+    fn authed(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.token {
+            Some(token) => builder.bearer_auth(token),
+            None => builder,
         }
     }
 
     /// POST a JSON request to a link path and parse the JSON response — the one
-    /// HTTP round-trip the generated [`BackendApi`] methods share
-    /// ([`for_each_link_op`](posthaste_link_contract::for_each_link_op)).
+    /// HTTP round-trip the generated [`BackendApi`] methods (and the bespoke
+    /// request/response ones) share
+    /// ([`for_each_link_op`](posthaste_link_contract::for_each_link_op)). Carries
+    /// the link bearer token.
     async fn post_link<Req, Ret>(&self, path: &str, req: &Req) -> Result<Ret, RuntimeError>
     where
         Req: serde::Serialize,
@@ -500,8 +521,7 @@ impl RemoteBackend {
     {
         let url = format!("{}{}", self.base_url, path);
         let response = self
-            .client
-            .post(&url)
+            .authed(self.client.post(&url))
             .json(req)
             .send()
             .await
@@ -560,46 +580,14 @@ impl BackendApi for RemoteBackend {
         &self,
         mutation: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let url = format!("{}{}", self.base_url, LINK_FORWARD_MUTATION_PATH);
-        let response = self
-            .client
-            .post(&url)
-            .json(&mutation)
-            .send()
-            .await
-            .map_err(transport_error)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected mutation ({status}): {body}"),
-            ));
-        }
-        response.json::<MutationReceipt>().await.map_err(transport_error)
+        self.post_link(LINK_FORWARD_MUTATION_PATH, &mutation).await
     }
 
     async fn query_mail_page(
         &self,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
-        let url = format!("{}{}", self.base_url, LINK_QUERY_PATH);
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(transport_error)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected query ({status}): {body}"),
-            ));
-        }
-        response.json::<MailQueryPage>().await.map_err(transport_error)
+        self.post_link(LINK_QUERY_PATH, &request).await
     }
 
     async fn current_summary(
@@ -607,29 +595,11 @@ impl BackendApi for RemoteBackend {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
-        let url = format!("{}{}", self.base_url, LINK_SUMMARY_PATH);
-        let response = self
-            .client
-            .post(&url)
-            .json(&serde_json::json!({
-                "accountId": account_id,
-                "messageId": message_id,
-            }))
-            .send()
-            .await
-            .map_err(transport_error)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected summary read ({status}): {body}"),
-            ));
-        }
-        response
-            .json::<Option<MessageSummary>>()
-            .await
-            .map_err(transport_error)
+        self.post_link(
+            LINK_SUMMARY_PATH,
+            &serde_json::json!({ "accountId": account_id, "messageId": message_id }),
+        )
+        .await
     }
 
     async fn message_detail(
@@ -637,52 +607,22 @@ impl BackendApi for RemoteBackend {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        let url = format!("{}{}", self.base_url, LINK_DETAIL_PATH);
-        let response = self
-            .client
-            .post(&url)
-            .json(&serde_json::json!({ "accountId": account_id, "messageId": message_id }))
-            .send()
-            .await
-            .map_err(transport_error)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected detail read ({status}): {body}"),
-            ));
-        }
-        response
-            .json::<Option<MessageDetail>>()
-            .await
-            .map_err(transport_error)
+        self.post_link(
+            LINK_DETAIL_PATH,
+            &serde_json::json!({ "accountId": account_id, "messageId": message_id }),
+        )
+        .await
     }
 
     async fn conversation(
         &self,
         conversation_id: ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
-        let url = format!("{}{}", self.base_url, LINK_CONVERSATION_PATH);
-        let response = self
-            .client
-            .post(&url)
-            .json(&serde_json::json!({ "conversationId": conversation_id }))
-            .send()
-            .await
-            .map_err(transport_error)?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::GatewayRejected,
-                format!("remote backend rejected conversation read ({status}): {body}"),
-            ));
-        }
-        response
-            .json::<ConversationView>()
-            .await
-            .map_err(transport_error)
+        self.post_link(
+            LINK_CONVERSATION_PATH,
+            &serde_json::json!({ "conversationId": conversation_id }),
+        )
+        .await
     }
 
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
@@ -691,8 +631,7 @@ impl BackendApi for RemoteBackend {
             RuntimeError::internal(format!("failed to encode coverage: {error}"), None)
         })?;
         let response = self
-            .client
-            .get(&url)
+            .authed(self.client.get(&url))
             .query(&[("coverage", coverage_param)])
             .send()
             .await

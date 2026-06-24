@@ -17,8 +17,10 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Query, Request, State};
+use axum::middleware::{from_fn_with_state, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
@@ -33,10 +35,41 @@ use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationReceip
 use serde::Deserialize;
 
 use crate::api::ApiError;
+use crate::auth::{bearer_token, constant_time_eq, unauthorized};
 
 #[derive(Clone)]
 struct LinkState {
     transport: Arc<dyn BackendApi>,
+}
+
+/// Authentication policy for the runtime↔backend link surface.
+///
+/// The link is a peer/infrastructure boundary (a split runtime authenticating to
+/// its backend), not the end-user capability surface the `/v1` macaroons govern,
+/// so it uses a shared **bearer token** rather than an attenuable macaroon.
+/// [`Disabled`](LinkAuth::Disabled) is the in-process/test default (no token);
+/// [`Bearer`](LinkAuth::Bearer) requires every request — POST up-channel, SSE
+/// down-channel, and every read/write — to carry `Authorization: Bearer <token>`,
+/// constant-time compared. A remote mount MUST use `Bearer` (the link is
+/// otherwise unauthenticated).
+pub enum LinkAuth {
+    Disabled,
+    Bearer(String),
+}
+
+/// Middleware: require a matching bearer token on every link request. Reuses the
+/// `/v1` perimeter's bearer parse + constant-time compare + 401.
+async fn require_link_token(
+    State(expected): State<Arc<str>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    match bearer_token(&req) {
+        Some(presented) if constant_time_eq(presented.as_bytes(), expected.as_bytes()) => {
+            next.run(req).await
+        }
+        _ => unauthorized().into_response(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,7 +207,7 @@ fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
 
 /// Build the far-node link router over a transport — the backend's in-process
 /// `BackendLink` transport in a split deployment.
-pub fn link_router(transport: Arc<dyn BackendApi>) -> Router {
+pub fn link_router(transport: Arc<dyn BackendApi>, auth: LinkAuth) -> Router {
     let router = Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
@@ -184,5 +217,11 @@ pub fn link_router(transport: Arc<dyn BackendApi>) -> Router {
         .route(LINK_CONVERSATION_PATH, post(conversation));
     // The full request/response surface (reads + typed writes) is generated
     // from the shared link-op table.
-    register_generated_link_routes(router).with_state(LinkState { transport })
+    let router = register_generated_link_routes(router).with_state(LinkState { transport });
+    match auth {
+        LinkAuth::Disabled => router,
+        LinkAuth::Bearer(token) => {
+            router.layer(from_fn_with_state(Arc::from(token), require_link_token))
+        }
+    }
 }

@@ -23,7 +23,7 @@ use posthaste_runtime_contract::{
     ClientMutationId, MutationReceipt, MutationRequest, MutationSettlementState, RuntimeError,
     RuntimeMutationId,
 };
-use posthaste_server::link_router;
+use posthaste_server::{link_router, LinkAuth};
 
 /// A far node that records the forwarded mutation and serves one base assertion.
 struct StubFarNode;
@@ -59,7 +59,7 @@ impl BackendApi for StubFarNode {
 }
 
 async fn serve_far_node() -> String {
-    let router = link_router(Arc::new(StubFarNode));
+    let router = link_router(Arc::new(StubFarNode), LinkAuth::Disabled);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
