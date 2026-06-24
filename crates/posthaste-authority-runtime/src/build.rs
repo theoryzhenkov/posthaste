@@ -16,7 +16,6 @@ use posthaste_domain::{
     StoreError, SyncMode,
 };
 use posthaste_link_contract::BackendLink;
-use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
@@ -228,8 +227,6 @@ pub async fn build_authority_runtime(
 /// compositions hand it to [`build_runtime`]
 /// ([replication L5 §4](../replication/L5.md), assertion `backend-builds-standalone`).
 pub(crate) struct BackendBuild {
-    service: Arc<MailService>,
-    store: Arc<dyn MailStore>,
     secret_store: Arc<dyn SecretStore>,
     event_sender: broadcast::Sender<DomainEvent>,
     account_supervisor: Arc<AccountSupervisor>,
@@ -336,8 +333,6 @@ pub(crate) async fn build_backend(
     ));
 
     Ok(BackendBuild {
-        service,
-        store,
         secret_store,
         event_sender,
         account_supervisor,
@@ -358,8 +353,6 @@ pub(crate) fn build_runtime(
     config: &AuthorityRuntimeBuildConfig,
 ) -> AuthorityRuntimeBuild {
     let BackendBuild {
-        service,
-        store,
         secret_store,
         event_sender,
         account_supervisor,
@@ -397,9 +390,6 @@ pub(crate) fn build_runtime(
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let core = Arc::new(AuthorityRuntimeCore {
-        service,
-        store,
-        backend,
         backend_link: backend_link.clone(),
         outbox,
         reads,
@@ -470,15 +460,13 @@ fn select_backend_link(
 }
 
 struct AuthorityRuntimeCore {
-    service: Arc<MailService>,
-    store: Arc<dyn MailStore>,
-    // account_reads is not held here: account/config reads route through `reads`
-    // (the BackendApi read path); ViewRegistry keeps its own for AccountStatus.
-    /// The backend far node — the single owner of message-command backend
-    /// access (L4 W1). Reached in-process via [`backend_link`](Self::backend_link).
-    backend: Arc<Backend>,
+    // Neither the service/store nor the backend far node is held here: every
+    // backend operation now routes through the link — `backend_link` for the
+    // mutation up-channel and the typed write commands, `reads` for the read
+    // channel. account_reads is likewise not held; ViewRegistry keeps its own
+    // for AccountStatus.
     /// The runtime↔backend link over its (config-selected, in-process by
-    /// default) transport. The mutation up-channel goes through here.
+    /// default) transport. The mutation up-channel + typed writes go through here.
     backend_link: BackendLink,
     /// The runtime's outbox toward the backend: forwarded-but-unconfirmed
     /// mutations, folded optimistically into served views (L4 §4.3).
@@ -632,16 +620,13 @@ impl AuthorityRuntimeHandle {
             },
             account_count,
         };
-        let backend_link = BackendLink::new(Arc::new(LocalBackend::new(backend.clone())));
+        let backend_link = BackendLink::new(Arc::new(LocalBackend::new(backend)));
         Self {
             core: Arc::new(AuthorityRuntimeCore {
-                service: api_bridge.service.clone(),
-                store: api_bridge.store.clone(),
-                backend,
                 backend_link,
                 outbox,
                 reads,
-                event_sender: api_bridge.event_sender.clone(),
+                event_sender: api_bridge.event_sender,
                 account_mutations,
                 views,
                 sessions,
@@ -683,13 +668,6 @@ impl AuthorityRuntimeHandle {
         self.core.account_mutations.clone().ok_or_else(|| {
             RuntimeError::runtime_not_ready("account mutation runtime is not available")
         })
-    }
-
-    /// Nudge the account to sync so just-enqueued outbox operations flush
-    /// promptly. Delegates to the backend far node, which owns the supervisor
-    /// handle; the non-command paths (send/draft) still flush through here.
-    async fn trigger_outbox_flush(&self, account_id: &AccountId) {
-        self.core.backend.trigger_outbox_flush(account_id).await;
     }
 
     pub async fn create_oauth_account_from_exchange(
@@ -1443,25 +1421,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        // Local-first: queue the send and flush it to the provider on the next
-        // connectivity window; no live gateway is required to accept it.
-        let sender = request.from.clone();
-        self.core.service.enqueue_send(&account_id, request)?;
-        if let Some(sender) = &sender {
-            if let Err(error) = self.core.store.remember_sender_address(&account_id, sender) {
-                ph_warn!(
-                    events::SEND_SENDER_CACHE_UPDATE_FAILED,
-                    source_id = %account_id,
-                    sender = %sender.email,
-                    error = %error,
-                    "send accepted but sender address cache update failed"
-                );
-            }
-        }
-        // `trigger_outbox_flush` nudges a sync that drains the queued send (and
-        // pulls the provider's Sent copy on the following cycle).
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(())
+        self.core.backend_link.send_message(account_id, request).await
     }
 
     async fn save_draft(
@@ -1472,12 +1432,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
-        let operation = self
-            .core
-            .service
-            .save_draft(&account_id, draft_id, request)?;
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(operation)
+        self.core
+            .backend_link
+            .save_draft(account_id, draft_id, request)
+            .await
     }
 
     async fn delete_draft(
@@ -1487,9 +1445,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
-        let operation = self.core.service.delete_draft(&account_id, draft_id)?;
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(operation)
+        self.core.backend_link.delete_draft(account_id, draft_id).await
     }
 
     async fn list_pending_operations(
@@ -1508,8 +1464,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.service.discard_operation(&operation_id)?;
-        Ok(())
+        self.core.backend_link.discard_operation(operation_id).await
     }
 
     async fn retry_operation(
@@ -1519,10 +1474,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.service.retry_operation(&operation_id)?;
-        // Re-armed to pending; nudge a flush so it re-attempts promptly.
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(())
+        self.core
+            .backend_link
+            .retry_operation(account_id, operation_id)
+            .await
     }
 
     async fn set_message_keywords(
@@ -1663,11 +1618,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self
-            .core
-            .live_accounts
-            .sync_account_with_mode(&account_id, mode)
-            .await?)
+        self.core.backend_link.sync_account(account_id, mode).await
     }
 
     async fn replay_events(
