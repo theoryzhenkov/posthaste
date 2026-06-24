@@ -343,6 +343,38 @@ describe('replicaAdapter', () => {
     expect(keywordsOf(frames, 'm1')).toContain('$seen')
   })
 
+  it('consumes a runtime viewDelta into the served base', async () => {
+    const built = build()
+    const { adapter, frames } = built
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    // The runtime sends a row-local delta: m1 gains $flagged (upsert, no
+    // reorder). The replica folds it into its served base and re-projects.
+    built.harness.push({
+      type: 'viewDelta',
+      sessionSeq: 7,
+      viewId: 'v1',
+      revision: 2,
+      delta: {
+        order: null,
+        upserts: [
+          {
+            rowKey: 'k-m1',
+            resourceRef: 'message:s:m1',
+            projection: {
+              id: 'm1',
+              keywords: ['$flagged'],
+              mailboxIds: ['inbox'],
+            } as never,
+            orderKey: 'm1',
+          },
+        ],
+      },
+    })
+
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+  })
+
   it('forwards unrelated frames unchanged (parity)', async () => {
     const built = build()
     const { adapter, frames } = built

@@ -1,4 +1,3 @@
-import { replicaAdapterEnabled } from './adapter'
 import { runtimeStream } from './runtimeStream'
 import type {
   RuntimeFrameHandlers,
@@ -49,11 +48,12 @@ function ensureSession(sourceId?: string | null): Promise<RuntimeSession> {
   }
   activeSessionSourceId = sourceId
   sessionPromise = runtimeStream
-    // Opt into incremental mail-list deltas on the default path; the replica
-    // path (when enabled) owns its own mail-list framing (replication L6).
+    // Opt into incremental mail-list deltas (replication L6). Both client read
+    // paths apply them: the default renderer reconciles directly, and the
+    // replica adapter folds the delta into its served base.
     .openSession({
       ...(sourceId === undefined ? {} : { sourceId }),
-      viewDelta: !replicaAdapterEnabled(),
+      viewDelta: true,
     })
     .then((session) => {
       activeSession = session
