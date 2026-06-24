@@ -2369,3 +2369,151 @@ async fn zero_event_channel_capacity_returns_typed_build_error() {
         AuthorityRuntimeBuildError::InvalidConfig(_)
     ));
 }
+
+/// A backend link transport whose up-channel blocks until released — a test seam
+/// for observing the runtime's outbox overlay while a mutation is in flight.
+struct DeferredTransport {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl posthaste_link_contract::LinkTransport for DeferredTransport {
+    async fn forward_mutation(
+        &self,
+        mutation: MutationRequest,
+    ) -> Result<posthaste_runtime_contract::MutationReceipt, posthaste_runtime_contract::RuntimeError>
+    {
+        // Signal that the forward has begun (so the outbox already holds the
+        // mutation), then wait for the test to release it.
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(posthaste_runtime_contract::MutationReceipt {
+            runtime_mutation_id: Some(posthaste_runtime_contract::RuntimeMutationId::new(
+                "backend-deferred",
+            )),
+            client_mutation_id: mutation.client_mutation_id,
+            name: mutation.name,
+            state: MutationSettlementState::Confirmed,
+            error: None,
+            output: serde_json::json!({ "events": [] }),
+        })
+    }
+
+    async fn subscribe(
+        &self,
+        _coverage: posthaste_link_contract::LinkCoverage,
+    ) -> Result<posthaste_link_contract::DownStream, posthaste_runtime_contract::RuntimeError> {
+        Ok(Box::pin(futures_util::stream::empty()))
+    }
+}
+
+fn flagged(state: &MailListViewState, message_id: &str) -> bool {
+    state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == message_id)
+        .expect("row should exist")
+        .projection["isFlagged"]
+        .as_bool()
+        .expect("isFlagged should be a bool")
+}
+
+// spec: docs/replication/L4#43-one-replica-two-consumers-the-read-model-twin
+#[tokio::test]
+async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_flight() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let transport = Arc::new(DeferredTransport {
+        entered: entered.clone(),
+        release: release.clone(),
+    });
+
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()))
+    .with_backend_transport_override(transport);
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mock_account_mutation("optimism-account"))
+        .await
+        .expect("account should create");
+    seed_message_batch(&build, &account.id);
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    let descriptor = mail_list_descriptor("in:optimism-account/inbox");
+
+    // Baseline: message-1 is not flagged.
+    let baseline = build
+        .handle
+        .open_view(RuntimeCaller::test(), descriptor.clone())
+        .await
+        .expect("baseline view should open");
+    assert!(!flagged(&mail_list_state(&baseline), "message-1"));
+
+    // Forward a flag mutation whose up-channel blocks, leaving it in the outbox.
+    let handle = build.handle.clone();
+    let session_id = session.session_id.clone();
+    let account_id = account.id.as_str().to_string();
+    let task = tokio::spawn(async move {
+        handle
+            .run_mutation(
+                RuntimeCaller::test(),
+                MutationRequest {
+                    session_id: Some(session_id),
+                    name: "message.setFlaggedState".to_string(),
+                    args: serde_json::json!({
+                        "sourceId": account_id,
+                        "messageId": "message-1",
+                        "flagged": true,
+                    }),
+                    client_mutation_id: ClientMutationId::new("client-flag"),
+                    context: None,
+                },
+            )
+            .await
+            .expect("mutation should run")
+    });
+
+    // Wait for the forward to begin (the outbox now holds the flag).
+    entered.notified().await;
+
+    // While the forward is in flight, the runtime serves the row optimistically
+    // flagged — folded from its outbox via the shared MailListReplica.
+    let optimistic = build
+        .handle
+        .open_view(RuntimeCaller::test(), descriptor.clone())
+        .await
+        .expect("optimistic view should open");
+    assert!(
+        flagged(&mail_list_state(&optimistic), "message-1"),
+        "the in-flight mutation should show optimistically"
+    );
+
+    // Release the forward; the mutation completes and the outbox retires.
+    release.notify_one();
+    task.await.expect("mutation task should join");
+
+    // The deferred backend never applied the change, so once the outbox retires
+    // the served row reflects the (unchanged) authoritative store again.
+    let settled = build
+        .handle
+        .open_view(RuntimeCaller::test(), descriptor)
+        .await
+        .expect("settled view should open");
+    assert!(
+        !flagged(&mail_list_state(&settled), "message-1"),
+        "the overlay should retire once the forward completes"
+    );
+}
