@@ -1533,7 +1533,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: SetKeywordsCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend.set_keywords(account_id, message_id, command).await
+        self.core
+            .backend_link
+            .set_keywords(account_id, message_id, command)
+            .await
     }
 
     async fn add_message_to_mailbox(
@@ -1544,7 +1547,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: AddToMailboxCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend.add_to_mailbox(account_id, message_id, command).await
+        self.core
+            .backend_link
+            .add_to_mailbox(account_id, message_id, command)
+            .await
     }
 
     async fn remove_message_from_mailbox(
@@ -1556,7 +1562,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend
+            .backend_link
             .remove_from_mailbox(account_id, message_id, command)
             .await
     }
@@ -1570,7 +1576,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend
+            .backend_link
             .replace_mailboxes(account_id, message_id, command)
             .await
     }
@@ -1582,7 +1588,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend.destroy(account_id, message_id).await
+        self.core
+            .backend_link
+            .destroy_message(account_id, message_id)
+            .await
     }
 
     async fn set_mailbox_role(
@@ -1594,7 +1603,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .backend
+            .backend_link
             .set_mailbox_role(account_id, mailbox_id, role)
             .await
     }
