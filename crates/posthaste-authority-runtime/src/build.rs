@@ -208,11 +208,44 @@ impl AuthorityRuntimeApiMigrationBridge {
 
 /// Build the authority runtime without binding HTTP or depending on Tauri.
 ///
+/// The bundled/daemon composition ([replication L5 §4](../replication/L5.md)):
+/// build the backend far node, then the runtime near node over it (in-process
+/// link by default). Behavior-preserving — the same graph as before, factored so
+/// the two roles can also be composed independently by the lean binaries.
+///
 /// spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 /// spec: docs/runtime/L2#runtime-builder-transport-free
 pub async fn build_authority_runtime(
     config: AuthorityRuntimeBuildConfig,
 ) -> Result<AuthorityRuntimeBuild, AuthorityRuntimeBuildError> {
+    let backend = build_backend(&config).await?;
+    Ok(build_runtime(backend, &config))
+}
+
+/// The backend far-node graph: store + service + providers (the account
+/// supervisor) + the L4 [`Backend`], built with no runtime near node. The
+/// `posthaste-backend` binary serves this over the link; the bundled/daemon
+/// compositions hand it to [`build_runtime`]
+/// ([replication L5 §4](../replication/L5.md), assertion `backend-builds-standalone`).
+pub(crate) struct BackendBuild {
+    service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
+    secret_store: Arc<dyn SecretStore>,
+    event_sender: broadcast::Sender<DomainEvent>,
+    account_supervisor: Arc<AccountSupervisor>,
+    account_reads: Arc<AccountReadService>,
+    account_mutations: Arc<AccountMutationService>,
+    mail_queries: Arc<MailQueryService>,
+    backend: Arc<Backend>,
+    api_bridge: AuthorityRuntimeApiMigrationBridge,
+    runtime_status: RuntimeStatus,
+}
+
+/// Build the backend far node alone (no runtime). Used directly by a
+/// backend-only deployment and as the first half of the bundled build.
+pub(crate) async fn build_backend(
+    config: &AuthorityRuntimeBuildConfig,
+) -> Result<BackendBuild, AuthorityRuntimeBuildError> {
     if config.event_channel_capacity == 0 {
         return Err(AuthorityRuntimeBuildError::InvalidConfig(
             "event_channel_capacity must be greater than zero".to_string(),
@@ -245,8 +278,8 @@ pub async fn build_authority_runtime(
     let (event_sender, _) = broadcast::channel(config.event_channel_capacity);
     let secret_store = config
         .secret_store
+        .clone()
         .unwrap_or_else(|| Arc::new(SystemSecretStore));
-    let stopped = Arc::new(AtomicBool::new(false));
 
     let runtime_status = RuntimeStatus {
         lifecycle: RuntimeLifecycle::Ready,
@@ -294,13 +327,52 @@ pub async fn build_authority_runtime(
         api_bridge.service.clone(),
         account_supervisor.clone(),
     ));
-    let outbox = Arc::new(RuntimeBackendOutbox::new());
     let backend = Arc::new(Backend::new(
         service.clone(),
         mail_queries.clone(),
         account_supervisor.clone(),
         event_sender.clone(),
     ));
+
+    Ok(BackendBuild {
+        service,
+        store,
+        secret_store,
+        event_sender,
+        account_supervisor,
+        account_reads,
+        account_mutations,
+        mail_queries,
+        backend,
+        api_bridge,
+        runtime_status,
+    })
+}
+
+/// Build the runtime near node over a backend. The bundled/daemon composition
+/// passes the in-process [`BackendBuild`]; the link is selected from config
+/// (in-process over that backend, or remote). Must run within a Tokio runtime
+/// (it may spawn the cache-coherence task for a split runtime).
+pub(crate) fn build_runtime(
+    backend: BackendBuild,
+    config: &AuthorityRuntimeBuildConfig,
+) -> AuthorityRuntimeBuild {
+    let BackendBuild {
+        service,
+        store,
+        secret_store,
+        event_sender,
+        account_supervisor,
+        account_reads,
+        account_mutations,
+        mail_queries,
+        backend,
+        api_bridge,
+        runtime_status,
+    } = backend;
+
+    let stopped = Arc::new(AtomicBool::new(false));
+    let outbox = Arc::new(RuntimeBackendOutbox::new());
     let backend_link = select_backend_link(
         &config.backend_transport,
         config.backend_transport_override.clone(),
@@ -327,13 +399,13 @@ pub async fn build_authority_runtime(
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let core = Arc::new(AuthorityRuntimeCore {
-        service: service.clone(),
-        store: store.clone(),
+        service,
+        store,
         backend,
         backend_link: backend_link.clone(),
         outbox,
         reads,
-        event_sender: event_sender.clone(),
+        event_sender,
         account_reads,
         account_mutations: Some(account_mutations),
         mail_queries,
@@ -344,7 +416,7 @@ pub async fn build_authority_runtime(
         stopped: stopped.clone(),
     });
 
-    Ok(AuthorityRuntimeBuild {
+    AuthorityRuntimeBuild {
         handle: AuthorityRuntimeHandle { core },
         shutdown: RuntimeShutdownHandle { stopped },
         runtime_status,
@@ -352,13 +424,9 @@ pub async fn build_authority_runtime(
         secret_store,
         api_bridge,
         backend_link,
-    })
+    }
 }
 
-/// Build the runtime↔backend [`BackendLink`] over its config-selected transport
-/// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
-/// The co-located default wraps the in-process far node; `Remote` wraps a
-/// [`RemoteTransport`] pointed at a backend serving the link wire.
 /// Build the runtime's read-through cache from the same config that picks the
 /// transport. `Remote` reads through the link and **retains** what flows back
 /// (kept coherent by the down-channel); `InProcess` reads the co-located far
@@ -380,6 +448,10 @@ fn build_read_cache(
     }
 }
 
+/// Build the runtime↔backend [`BackendLink`] over its config-selected transport
+/// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
+/// The co-located default wraps the in-process far node; `Remote` wraps a
+/// [`RemoteTransport`] pointed at a backend serving the link wire.
 fn select_backend_link(
     transport: &BackendTransportConfig,
     override_transport: Option<Arc<dyn LinkTransport>>,
