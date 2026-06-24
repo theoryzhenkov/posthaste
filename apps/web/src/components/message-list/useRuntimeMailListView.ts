@@ -5,6 +5,7 @@ import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import type { MessagePage } from '@/api/types'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
 import type {
+  RuntimeMailListDelta,
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
 } from '@/runtime/types'
@@ -27,6 +28,45 @@ function applySnapshotToQueryData(
   return {
     pages: [pageFromViewState(snapshot.data)],
     pageParams: [null],
+  }
+}
+
+/** The runtime keys mail-list rows by `${sourceId}:${id}`. */
+function rowKeyOf(item: MessagePage['items'][number]): string {
+  return `${item.sourceId}:${item.id}`
+}
+
+/**
+ * Reconcile an incremental mail-list delta (replication L6) against the held
+ * single-page window: when `order` is present, drop rows whose key is absent and
+ * reorder to it; then apply `upserts` by `rowKey`. Produces exactly the rows a
+ * whole `viewReplace` would, from a fraction of the payload.
+ */
+function applyDeltaToQueryData(
+  current: InfiniteData<MessagePage, string | null> | undefined,
+  delta: RuntimeMailListDelta,
+): InfiniteData<MessagePage, string | null> | undefined {
+  if (!current || current.pages.length === 0) {
+    return current
+  }
+  const page = current.pages[0]
+  const upsertByKey = new Map(
+    delta.upserts.map((row) => [row.rowKey, row.projection] as const),
+  )
+  let items: MessagePage['items']
+  if (delta.order) {
+    const heldByKey = new Map(
+      page.items.map((item) => [rowKeyOf(item), item] as const),
+    )
+    items = delta.order
+      .map((key) => upsertByKey.get(key) ?? heldByKey.get(key))
+      .filter((item): item is MessagePage['items'][number] => item != null)
+  } else {
+    items = page.items.map((item) => upsertByKey.get(rowKeyOf(item)) ?? item)
+  }
+  return {
+    ...current,
+    pages: [{ ...page, items }, ...current.pages.slice(1)],
   }
 }
 
@@ -123,6 +163,19 @@ export function useRuntimeMailListView({
                   queryClient.setQueryData(
                     queryKey,
                     applySnapshotToQueryData(frame.snapshot),
+                  )
+                  return
+                case 'viewDelta':
+                  // Row-local change: reconcile the delta in place. Structural
+                  // changes (window/coverage) still arrive as viewReplace, so
+                  // `hasMore` is unchanged here (replication L6).
+                  if (frame.viewId !== openedViewId) {
+                    return
+                  }
+                  queryClient.setQueryData<
+                    InfiniteData<MessagePage, string | null>
+                  >(queryKey, (current) =>
+                    applyDeltaToQueryData(current, frame.delta),
                   )
                   return
                 case 'viewError':

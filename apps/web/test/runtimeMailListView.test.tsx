@@ -187,7 +187,7 @@ describe('useRuntimeMailListView', () => {
     )
     expect(runtimeAdapter.messagePageCalls).toEqual([])
     expect(runtimeAdapter.runtimeSessionCalls).toEqual([
-      { sourceId: 'primary' },
+      { sourceId: 'primary', viewDelta: true },
     ])
     expect(runtimeAdapter.runtimeSessionViewOpenCalls).toHaveLength(1)
     expect(runtimeAdapter.runtimeSessionViewOpenCalls[0].sourceId).toBe(
@@ -222,6 +222,93 @@ describe('useRuntimeMailListView', () => {
       expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
         { sessionId: 'session-1', sourceId: 'primary' },
       ]),
+    )
+  })
+
+  it('applies a viewDelta in place (upsert) and on removal (reorder)', async () => {
+    const queryKey = queryKeys.messages(
+      { kind: 'source-mailbox', sourceId: 'primary', mailboxId: 'inbox' },
+      undefined,
+      { columnId: 'date', direction: 'desc' },
+    )
+    const secondMessage: MessageSummary = { ...message, id: 'm2' }
+    runtimeAdapter.queueRuntimeSession({ sessionId: 'session-1' })
+    runtimeAdapter.queueRuntimeSessionMessageListView({
+      viewId: 'view-1',
+      snapshot: mailListSnapshotRows(1, [message, secondMessage], false),
+    })
+
+    renderHook(
+      () =>
+        useRuntimeMailListView({
+          enabled: true,
+          operation: {
+            operationId: 'op_1',
+            operationKind: 'mail.list',
+            operationSource: 'test',
+            sessionId: 'session_1',
+          },
+          preparedSearchQuery: {
+            query: undefined,
+            validation: { state: 'valid' },
+            isBlocked: false,
+          },
+          queryKey,
+          selectedView: {
+            kind: 'source-mailbox',
+            sourceId: 'primary',
+            mailboxId: 'inbox',
+          },
+          sort: { columnId: 'date', direction: 'desc' },
+        }),
+      { wrapper },
+    )
+
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [message, secondMessage], nextCursor: null }],
+        pageParams: [null],
+      }),
+    )
+
+    // Upsert in place: flag m1, no reorder — only the changed row is sent.
+    runtimeAdapter.emitRuntimeFrame({
+      type: 'viewDelta',
+      sessionSeq: 2,
+      viewId: 'view-1',
+      revision: 2,
+      delta: {
+        order: null,
+        upserts: [
+          {
+            rowKey: 'primary:m1',
+            resourceRef: null,
+            projection: updatedMessage,
+            orderKey: 'm1',
+          },
+        ],
+      },
+    })
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [updatedMessage, secondMessage], nextCursor: null }],
+        pageParams: [null],
+      }),
+    )
+
+    // Removal: m1 leaves the view — the new order drops it, no upserts.
+    runtimeAdapter.emitRuntimeFrame({
+      type: 'viewDelta',
+      sessionSeq: 3,
+      viewId: 'view-1',
+      revision: 3,
+      delta: { order: ['primary:m2'], upserts: [] },
+    })
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)).toEqual({
+        pages: [{ items: [secondMessage], nextCursor: null }],
+        pageParams: [null],
+      }),
     )
   })
 
@@ -336,7 +423,7 @@ describe('useRuntimeMailListView', () => {
         pageParams: [null],
       }),
     )
-    expect(runtimeAdapter.runtimeSessionCalls).toEqual([{}])
+    expect(runtimeAdapter.runtimeSessionCalls).toEqual([{ viewDelta: true }])
     expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
       { request: { sessionId: 'session-1', afterSeq: null } },
     ])

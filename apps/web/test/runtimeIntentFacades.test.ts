@@ -132,7 +132,9 @@ describe('runtime intent facades', () => {
     ])
     expect(fake.eventSubscriptionCalls).toEqual([{ request: { afterSeq: 7 } }])
     expect(fake.runtimeSessionCalls).toEqual([
-      { sourceId: 'primary' },
+      // The mail-list facade opens its session through the session client, which
+      // opts into deltas; the raw openSession below does not.
+      { sourceId: 'primary', viewDelta: true },
       { sourceId: 'primary' },
     ])
     expect(fake.runtimeFrameSubscriptionCalls).toEqual([

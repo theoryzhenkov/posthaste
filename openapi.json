@@ -1071,6 +1071,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -1132,6 +1144,18 @@
             "schema": {
               "type": [
                 "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
                 "null"
               ]
             }
@@ -1206,6 +1230,18 @@
             "schema": {
               "type": [
                 "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
                 "null"
               ]
             }
@@ -1393,6 +1429,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -1496,6 +1544,18 @@
                 "null"
               ]
             }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -1576,6 +1636,18 @@
             "schema": {
               "type": [
                 "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "viewDelta",
+            "in": "query",
+            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
                 "null"
               ]
             }

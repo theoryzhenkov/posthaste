@@ -8,6 +8,11 @@ use posthaste_runtime_contract::{
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSessionQuery {
     pub source_id: Option<String>,
+    /// The session can apply incremental mail-list deltas
+    /// ([replication L6](../../../docs/replication/L6.md)); when `true` the
+    /// runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+    #[serde(default)]
+    pub view_delta: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -56,9 +61,11 @@ pub async fn open_runtime_session(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RuntimeSessionQuery>,
 ) -> Result<Json<RuntimeSession>, ApiError> {
+    let mut caller = runtime_caller(query.source_id.as_deref());
+    caller.capabilities.view_delta = query.view_delta.unwrap_or(false);
     state
         .runtime
-        .open_session(runtime_caller(query.source_id.as_deref()))
+        .open_session(caller)
         .await
         .map(Json)
         .map_err(ApiError::from_runtime_error)
