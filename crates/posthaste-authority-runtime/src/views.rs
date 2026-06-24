@@ -20,7 +20,6 @@ use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
 use crate::account_reads::AccountReadService;
-use crate::mail_queries::MailQueryService;
 
 /// The parsed, family-specific identity of a runtime view. The registry is
 /// generic over families: each carries what `build_snapshot` and the event
@@ -66,7 +65,6 @@ struct AccountStatusDescriptor {
 }
 
 pub(crate) struct ViewRegistry {
-    mail_queries: Arc<MailQueryService>,
     account_reads: Arc<AccountReadService>,
     event_sender: broadcast::Sender<DomainEvent>,
     /// The runtime's outbox toward the backend, folded over mail-list recomputes
@@ -91,14 +89,12 @@ struct StoredView {
 
 impl ViewRegistry {
     pub(crate) fn new(
-        mail_queries: Arc<MailQueryService>,
         account_reads: Arc<AccountReadService>,
         event_sender: broadcast::Sender<DomainEvent>,
         outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
         reads: Arc<crate::read::ReadCache>,
     ) -> Self {
         Self {
-            mail_queries,
             account_reads,
             event_sender,
             outbox,
@@ -404,7 +400,7 @@ impl ViewRegistry {
                 // the body is the separate sanitized `/body` lazy resource, so the
                 // view never serves the (unsanitized) cached body.
                 let detail = self
-                    .mail_queries
+                    .reads
                     .message_detail(
                         &AccountId::from(source_id.clone()),
                         &MessageId::from(message_id.clone()),
@@ -418,8 +414,9 @@ impl ViewRegistry {
             }
             ViewKind::Conversation { conversation_id } => {
                 let conversation = self
-                    .mail_queries
-                    .conversation(&ConversationId::from(conversation_id.clone()))?;
+                    .reads
+                    .conversation(&ConversationId::from(conversation_id.clone()))
+                    .await?;
                 let data = serde_json::to_value(conversation).map_err(|error| {
                     RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                 })?;
