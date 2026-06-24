@@ -276,6 +276,111 @@ pub async fn build_backend_node(
     })
 }
 
+/// A lean runtime near node ([replication L5 §4](../replication/L5.md)): the
+/// session / view / outbox machinery over a REMOTE backend link, with NO local
+/// backend (no store, service, or supervisor). The `posthaste-runtime` role (the
+/// daemon configured with a remote backend) builds this — reads + writes cross
+/// the link, and the down-channel bridge keeps the cache and views live.
+pub struct RemoteRuntimeBuild {
+    pub handle: AuthorityRuntimeHandle,
+    pub shutdown: RuntimeShutdownHandle,
+    pub runtime_status: RuntimeStatus,
+    /// The runtime's own secret store, for its `/v1` client auth.
+    pub secret_store: Arc<dyn SecretStore>,
+}
+
+/// Build a backend-less runtime near node over a remote backend link. Requires
+/// [`BackendTransportConfig::Remote`] (a near node has no in-process backend to
+/// fall back to). Must run within a Tokio runtime: it spawns the down-channel
+/// bridge that keeps the read cache + views live from the backend's assertions.
+pub fn build_remote_runtime(
+    config: AuthorityRuntimeBuildConfig,
+) -> Result<RemoteRuntimeBuild, AuthorityRuntimeBuildError> {
+    if config.event_channel_capacity == 0 {
+        return Err(AuthorityRuntimeBuildError::InvalidConfig(
+            "event_channel_capacity must be greater than zero".to_string(),
+        ));
+    }
+    let AuthorityRuntimeBuildConfig {
+        secret_store,
+        event_channel_capacity,
+        backend_transport,
+        backend_transport_override,
+        ..
+    } = config;
+
+    let (base_url, token) = match backend_transport {
+        BackendTransportConfig::Remote { base_url, token } => (base_url, token),
+        BackendTransportConfig::InProcess => {
+            return Err(AuthorityRuntimeBuildError::InvalidConfig(
+                "a remote runtime requires a remote backend transport".to_string(),
+            ));
+        }
+    };
+
+    let secret_store = secret_store.unwrap_or_else(|| Arc::new(SystemSecretStore));
+    let (event_sender, _) = broadcast::channel(event_channel_capacity);
+    let stopped = Arc::new(AtomicBool::new(false));
+    let outbox = Arc::new(RuntimeBackendOutbox::new());
+
+    // The link transport is the remote backend (optionally decorated by a test
+    // seam); there is no in-process far node to fall back to.
+    let base: Arc<dyn BackendApi> = Arc::new(RemoteBackend::with_token(base_url, token));
+    let transport = match backend_transport_override {
+        Some(decorate) => decorate(base),
+        None => base,
+    };
+    let backend_link = BackendLink::new(transport);
+    let reads = Arc::new(ReadCache::retaining(backend_link.transport().clone()));
+    // Drive the cache + views from the backend down-channel (a near node has no
+    // local event bus of its own).
+    tokio::spawn(crate::read::run_backend_down_channel(
+        backend_link.clone(),
+        reads.clone(),
+        event_sender.clone(),
+    ));
+
+    let views = Arc::new(ViewRegistry::new(
+        event_sender.clone(),
+        outbox.clone(),
+        reads.clone(),
+    ));
+    let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
+
+    // No local store; the live account count comes through the link on the
+    // `runtime_status` read.
+    let runtime_status = RuntimeStatus {
+        lifecycle: RuntimeLifecycle::Ready,
+        store: RuntimeStoreStatus {
+            config_loaded: true,
+            state_store_open: false,
+            cache_root_ready: false,
+        },
+        account_count: 0,
+    };
+
+    let core = Arc::new(AuthorityRuntimeCore {
+        backend_link,
+        outbox,
+        reads,
+        event_sender,
+        // No local account-mutation service: account CRUD crosses the link; the
+        // OAuth holdout (which needs it directly) is unavailable on a lean node.
+        account_mutations: None,
+        views,
+        sessions,
+        startup_status: runtime_status.clone(),
+        stopped: stopped.clone(),
+    });
+
+    Ok(RemoteRuntimeBuild {
+        handle: AuthorityRuntimeHandle { core },
+        shutdown: RuntimeShutdownHandle { stopped },
+        runtime_status,
+        secret_store,
+    })
+}
+
 /// The backend far-node graph: store + service + providers (the account
 /// supervisor) + the L4 [`Backend`], built with no runtime near node. The
 /// `posthaste-backend` binary serves this over the link; the bundled/daemon
@@ -285,7 +390,6 @@ pub(crate) struct BackendBuild {
     secret_store: Arc<dyn SecretStore>,
     event_sender: broadcast::Sender<DomainEvent>,
     account_supervisor: Arc<AccountSupervisor>,
-    account_reads: Arc<AccountReadService>,
     account_mutations: Arc<AccountMutationService>,
     backend: Arc<Backend>,
     api_bridge: AuthorityRuntimeApiMigrationBridge,
@@ -382,7 +486,7 @@ pub(crate) async fn build_backend(
         service.clone(),
         store.clone(),
         mail_queries,
-        account_reads.clone(),
+        account_reads,
         Some(account_mutations.clone()),
         account_supervisor.clone(),
         event_sender.clone(),
@@ -392,7 +496,6 @@ pub(crate) async fn build_backend(
         secret_store,
         event_sender,
         account_supervisor,
-        account_reads,
         account_mutations,
         backend,
         api_bridge,
@@ -412,7 +515,6 @@ pub(crate) fn build_runtime(
         secret_store,
         event_sender,
         account_supervisor,
-        account_reads,
         account_mutations,
         backend,
         api_bridge,
@@ -444,7 +546,6 @@ pub(crate) fn build_runtime(
         ));
     }
     let views = Arc::new(ViewRegistry::new(
-        account_reads,
         event_sender.clone(),
         outbox.clone(),
         reads.clone(),
@@ -524,8 +625,8 @@ struct AuthorityRuntimeCore {
     // Neither the service/store nor the backend far node is held here: every
     // backend operation now routes through the link — `backend_link` for the
     // mutation up-channel and the typed write commands, `reads` for the read
-    // channel. account_reads is likewise not held; ViewRegistry keeps its own
-    // for AccountStatus.
+    // channel. account_reads/account_supervisor are likewise not held — every
+    // view (incl. AccountStatus) reads through `reads`.
     /// The runtime↔backend link over its (config-selected, in-process by
     /// default) transport. The mutation up-channel + typed writes go through here.
     backend_link: BackendLink,
@@ -654,7 +755,7 @@ impl AuthorityRuntimeHandle {
             api_bridge.service.clone(),
             api_bridge.store.clone(),
             mail_queries,
-            account_reads.clone(),
+            account_reads,
             account_mutations.clone(),
             live_accounts.clone(),
             api_bridge.event_sender.clone(),
@@ -663,7 +764,6 @@ impl AuthorityRuntimeHandle {
             backend.clone(),
         ))));
         let views = Arc::new(ViewRegistry::new(
-            account_reads,
             api_bridge.event_sender.clone(),
             outbox.clone(),
             reads.clone(),

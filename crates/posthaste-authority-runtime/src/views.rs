@@ -19,7 +19,6 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
-use crate::account_reads::AccountReadService;
 
 /// The parsed, family-specific identity of a runtime view. The registry is
 /// generic over families: each carries what `build_snapshot` and the event
@@ -65,7 +64,6 @@ struct AccountStatusDescriptor {
 }
 
 pub(crate) struct ViewRegistry {
-    account_reads: Arc<AccountReadService>,
     event_sender: broadcast::Sender<DomainEvent>,
     /// The runtime's outbox toward the backend, folded over mail-list recomputes
     /// so served views are optimistic over forwarded-but-unconfirmed mutations
@@ -89,13 +87,11 @@ struct StoredView {
 
 impl ViewRegistry {
     pub(crate) fn new(
-        account_reads: Arc<AccountReadService>,
         event_sender: broadcast::Sender<DomainEvent>,
         outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
         reads: Arc<crate::read::ReadCache>,
     ) -> Self {
         Self {
-            account_reads,
             event_sender,
             outbox,
             reads,
@@ -423,23 +419,20 @@ impl ViewRegistry {
                 (data, local_watermark(), complete_coverage())
             }
             ViewKind::AccountStatus { account_id } => {
+                // Account status reads through the link (the same `reads` path
+                // as every other view), so a backend-less runtime serves it too.
                 let data = match account_id {
                     Some(account_id) => {
                         let overview = self
-                            .account_reads
+                            .reads
                             .get_account(AccountId::from(account_id.clone()))
-                            .await
-                            .map_err(account_read_error)?;
+                            .await?;
                         serde_json::to_value(overview).map_err(|error| {
                             RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                         })?
                     }
                     None => {
-                        let list = self
-                            .account_reads
-                            .list_accounts()
-                            .await
-                            .map_err(account_read_error)?;
+                        let list = self.reads.list_accounts().await?;
                         serde_json::to_value(list.items).map_err(|error| {
                             RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
                         })?
@@ -530,10 +523,6 @@ fn grow_message_window(request: &mut MailQueryRequest, count: usize) {
             *limit = limit.saturating_add(count);
         }
     }
-}
-
-fn account_read_error(error: posthaste_domain::ServiceError) -> RuntimeError {
-    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
 }
 
 fn local_watermark() -> Option<ReadWatermark> {

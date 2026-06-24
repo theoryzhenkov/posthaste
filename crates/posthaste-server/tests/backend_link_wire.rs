@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_authority_runtime::RemoteBackend;
 use posthaste_link_contract::{
-    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, BackendApi,
+    BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
