@@ -37,7 +37,10 @@ use crate::backend::{
     MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
+use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
 use crate::transport::{InProcessTransport, RemoteTransport};
+use posthaste_link_contract::LinkTransport;
+use posthaste_link_core::{MutationId, PendingMessageMutation};
 use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
@@ -70,6 +73,10 @@ pub struct AuthorityRuntimeBuildConfig {
     /// Chosen from configuration, not at build time; the default is in-process
     /// co-located (assertion `transport-selected-by-config`).
     pub backend_transport: BackendTransportConfig,
+    /// A pre-built link transport that overrides [`backend_transport`](Self::backend_transport)
+    /// when set. A host/test seam for injecting a custom transport (e.g. a
+    /// deferred one to exercise the near-node outbox); `None` in normal builds.
+    pub backend_transport_override: Option<Arc<dyn LinkTransport>>,
 }
 
 /// The runtime↔backend link transport, selected by configuration.
@@ -102,12 +109,22 @@ impl AuthorityRuntimeBuildConfig {
             event_channel_capacity: DEFAULT_EVENT_CHANNEL_CAPACITY,
             poll_interval: Duration::from_secs(60),
             backend_transport: BackendTransportConfig::InProcess,
+            backend_transport_override: None,
         }
     }
 
     /// Select the runtime↔backend link transport (default in-process).
     pub fn with_backend_transport(mut self, backend_transport: BackendTransportConfig) -> Self {
         self.backend_transport = backend_transport;
+        self
+    }
+
+    /// Inject a pre-built link transport, overriding [`backend_transport`](Self::backend_transport).
+    pub fn with_backend_transport_override(
+        mut self,
+        transport: Arc<dyn LinkTransport>,
+    ) -> Self {
+        self.backend_transport_override = Some(transport);
         self
     }
 
@@ -276,10 +293,12 @@ pub async fn build_authority_runtime(
         api_bridge.service.clone(),
         account_supervisor.clone(),
     ));
+    let outbox = Arc::new(RuntimeBackendOutbox::new());
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
         account_reads.clone(),
         event_sender.clone(),
+        outbox.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let backend = Arc::new(Backend::new(
@@ -287,12 +306,17 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
         event_sender.clone(),
     ));
-    let backend_link = select_backend_link(&config.backend_transport, backend.clone());
+    let backend_link = select_backend_link(
+        &config.backend_transport,
+        config.backend_transport_override.clone(),
+        backend.clone(),
+    );
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
         backend,
         backend_link: backend_link.clone(),
+        outbox,
         event_sender: event_sender.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
@@ -319,7 +343,14 @@ pub async fn build_authority_runtime(
 /// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
 /// [`RemoteTransport`] pointed at a backend serving the link wire.
-fn select_backend_link(transport: &BackendTransportConfig, backend: Arc<Backend>) -> BackendLink {
+fn select_backend_link(
+    transport: &BackendTransportConfig,
+    override_transport: Option<Arc<dyn LinkTransport>>,
+    backend: Arc<Backend>,
+) -> BackendLink {
+    if let Some(transport) = override_transport {
+        return BackendLink::new(transport);
+    }
     match transport {
         BackendTransportConfig::InProcess => {
             BackendLink::new(Arc::new(InProcessTransport::new(backend)))
@@ -339,6 +370,9 @@ struct AuthorityRuntimeCore {
     /// The runtime↔backend link over its (config-selected, in-process by
     /// default) transport. The mutation up-channel goes through here.
     backend_link: BackendLink,
+    /// The runtime's outbox toward the backend: forwarded-but-unconfirmed
+    /// mutations, folded optimistically into served views (L4 §4.3).
+    outbox: Arc<RuntimeBackendOutbox>,
     event_sender: broadcast::Sender<DomainEvent>,
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
@@ -460,10 +494,12 @@ impl AuthorityRuntimeHandle {
             api_bridge.service.clone(),
             query_supervisor,
         ));
+        let outbox = Arc::new(RuntimeBackendOutbox::new());
         let views = Arc::new(ViewRegistry::new(
             mail_queries.clone(),
             account_reads.clone(),
             api_bridge.event_sender.clone(),
+            outbox.clone(),
         ));
         let sessions = Arc::new(SessionRegistry::new(
             views.clone(),
@@ -490,6 +526,7 @@ impl AuthorityRuntimeHandle {
                 store: api_bridge.store.clone(),
                 backend,
                 backend_link,
+                outbox,
                 event_sender: api_bridge.event_sender.clone(),
                 account_reads,
                 account_mutations,
@@ -869,10 +906,29 @@ impl AuthorityRuntimeHandle {
                 )))
             }
         };
+        // Accept the mutation into the runtime's outbox toward the backend so
+        // recomputed views fold it optimistically while it is in flight; retire
+        // it once the backend confirms (or fails). In the in-process default the
+        // forward confirms synchronously, so the outbox is empty between
+        // mutations and the overlay is a pass-through (`colocated-unchanged`).
+        let optimistic = named_message_assertion(&request).map(|(message_id, assertion)| {
+            let id = MutationId(request.client_mutation_id.as_str().to_string());
+            self.core.outbox.accept(PendingMessageMutation {
+                id: id.clone(),
+                message_id,
+                assertion,
+            });
+            id
+        });
         // Up-channel: forward the named mutation to the backend far node.
         let forward = self.core.backend_link.forward_mutation(request.clone());
-        self.run_message_mutation(caller, &request, history, forward)
-            .await
+        let result = self
+            .run_message_mutation(caller, &request, history, forward)
+            .await;
+        if let Some(id) = optimistic {
+            self.core.outbox.retire(&id);
+        }
+        result
     }
 
     /// History plan for a keyword mutation: capture the inverse when this is a
