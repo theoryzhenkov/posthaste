@@ -19,12 +19,17 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
+use std::collections::BTreeMap;
+
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MessageDetail,
-    MessageId, MessageSummary,
+    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    TagSummary,
 };
 use posthaste_link_contract::{BackendApi, BackendLink, DownFrame, LinkCoverage};
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeAccountList, RuntimeError};
+use posthaste_runtime_contract::{
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, RuntimeAccountList, RuntimeError,
+};
 
 /// A read-through cache over the [`BackendApi`], parameterized by policy.
 ///
@@ -116,6 +121,40 @@ impl ReadCache {
 
     pub(crate) async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
         self.backend.app_settings().await
+    }
+
+    pub(crate) async fn resolve_account_scope(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<AccountId>, RuntimeError> {
+        self.backend.resolve_account_scope(scope).await
+    }
+
+    pub(crate) async fn list_mailboxes(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError> {
+        self.backend.list_mailboxes(scope).await
+    }
+
+    pub(crate) async fn list_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        self.backend.list_smart_mailboxes().await
+    }
+
+    pub(crate) async fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.backend.get_smart_mailbox(smart_mailbox_id).await
+    }
+
+    pub(crate) async fn list_tags(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<TagSummary>, RuntimeError> {
+        self.backend.list_tags(scope).await
     }
 
     pub(crate) async fn current_summary(

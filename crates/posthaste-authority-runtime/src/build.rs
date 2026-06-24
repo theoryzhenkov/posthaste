@@ -12,7 +12,7 @@ use posthaste_domain::{
     AccountId, AddToMailboxCommand, AppSettings, ConfigError, ConfigRepository, DomainEvent,
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId, Operation,
     OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore,
-    SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId,
+    SendMessageRequest, ServiceError, SetKeywordsCommand, SmartMailboxId,
     StoreError, SyncMode,
 };
 use posthaste_link_contract::BackendLink;
@@ -392,7 +392,7 @@ pub(crate) fn build_runtime(
         ));
     }
     let views = Arc::new(ViewRegistry::new(
-        account_reads.clone(),
+        account_reads,
         event_sender.clone(),
         outbox.clone(),
         reads.clone(),
@@ -406,7 +406,6 @@ pub(crate) fn build_runtime(
         outbox,
         reads,
         event_sender,
-        account_reads,
         account_mutations: Some(account_mutations),
         mail_queries,
         views,
@@ -476,6 +475,8 @@ fn select_backend_link(
 struct AuthorityRuntimeCore {
     service: Arc<MailService>,
     store: Arc<dyn MailStore>,
+    // account_reads is not held here: account/config reads route through `reads`
+    // (the BackendApi read path); ViewRegistry keeps its own for AccountStatus.
     /// The backend far node — the single owner of message-command backend
     /// access (L4 W1). Reached in-process via [`backend_link`](Self::backend_link).
     backend: Arc<Backend>,
@@ -489,7 +490,6 @@ struct AuthorityRuntimeCore {
     /// and the mail-list base draw from here.
     reads: Arc<ReadCache>,
     event_sender: broadcast::Sender<DomainEvent>,
-    account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
     mail_queries: Arc<MailQueryService>,
     views: Arc<ViewRegistry>,
@@ -621,7 +621,7 @@ impl AuthorityRuntimeHandle {
             backend.clone(),
         ))));
         let views = Arc::new(ViewRegistry::new(
-            account_reads.clone(),
+            account_reads,
             api_bridge.event_sender.clone(),
             outbox.clone(),
             reads.clone(),
@@ -649,7 +649,6 @@ impl AuthorityRuntimeHandle {
                 outbox,
                 reads,
                 event_sender: api_bridge.event_sender.clone(),
-                account_reads,
                 account_mutations,
                 mail_queries,
                 views,
@@ -1228,7 +1227,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         scope: AccountScopeRequest,
     ) -> Result<Vec<AccountId>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.account_reads.resolve_account_scope(scope)?)
+        self.core.reads.resolve_account_scope(scope).await
     }
 
     async fn list_mailboxes(
@@ -1240,20 +1239,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         RuntimeError,
     > {
         self.ensure_runtime_active()?;
-        self.core
-            .account_reads
-            .list_mailboxes(scope)
-            .map_err(|error| {
-                if error.kind() == ServiceErrorKind::NotFound {
-                    RuntimeError::with_details(
-                        RuntimeErrorCode::NotFound,
-                        "account not found",
-                        serde_json::json!({}),
-                    )
-                } else {
-                    error.into()
-                }
-            })
+        self.core.reads.list_mailboxes(scope).await
     }
 
     async fn list_smart_mailboxes(
@@ -1261,7 +1247,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.account_reads.list_smart_mailboxes()?)
+        self.core.reads.list_smart_mailboxes().await
     }
 
     async fn get_smart_mailbox(
@@ -1270,10 +1256,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self
-            .core
-            .account_reads
-            .get_smart_mailbox(&smart_mailbox_id)?)
+        self.core.reads.get_smart_mailbox(smart_mailbox_id).await
     }
 
     async fn create_smart_mailbox(
@@ -1320,7 +1303,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         scope: AccountScopeRequest,
     ) -> Result<Vec<posthaste_domain::TagSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.account_reads.list_tags(scope)?)
+        self.core.reads.list_tags(scope).await
     }
 
     async fn get_identity(
