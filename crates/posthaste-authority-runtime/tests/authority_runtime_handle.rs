@@ -2373,6 +2373,7 @@ async fn zero_event_channel_capacity_returns_typed_build_error() {
 /// A backend link transport whose up-channel blocks until released — a test seam
 /// for observing the runtime's outbox overlay while a mutation is in flight.
 struct DeferredTransport {
+    inner: Arc<dyn posthaste_link_contract::BackendApi>,
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
 }
@@ -2402,9 +2403,20 @@ impl posthaste_link_contract::BackendApi for DeferredTransport {
 
     async fn subscribe(
         &self,
-        _coverage: posthaste_link_contract::LinkCoverage,
+        coverage: posthaste_link_contract::LinkCoverage,
     ) -> Result<posthaste_link_contract::DownStream, posthaste_runtime_contract::RuntimeError> {
-        Ok(Box::pin(futures_util::stream::empty()))
+        self.inner.subscribe(coverage).await
+    }
+
+    // Everything other than the gated up-channel delegates to the real backend,
+    // so setup (account creation) hits the live store the local reads observe.
+    // (forward_mutation deliberately does *not* delegate: it confirms without
+    // applying, so the test can prove the optimistic overlay reverts on retire.)
+    async fn create_account(
+        &self,
+        mutation: CreateAccountMutation,
+    ) -> Result<posthaste_domain::AccountOverview, posthaste_runtime_contract::RuntimeError> {
+        self.inner.create_account(mutation).await
     }
 }
 
@@ -2424,10 +2436,8 @@ fn flagged(state: &MailListViewState, message_id: &str) -> bool {
 async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_flight() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
-    let transport = Arc::new(DeferredTransport {
-        entered: entered.clone(),
-        release: release.clone(),
-    });
+    let entered_for_transport = entered.clone();
+    let release_for_transport = release.clone();
 
     let root = temp_root();
     let config = AuthorityRuntimeBuildConfig::new(
@@ -2436,7 +2446,15 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
         root.join("cache"),
     )
     .with_secret_store(Arc::new(TestSecretStore::default()))
-    .with_backend_transport_override(transport);
+    // Decorate the real in-process transport: gate the up-channel, delegate the
+    // rest (so account-creation setup reaches the live backend).
+    .with_backend_transport_override(move |inner| {
+        Arc::new(DeferredTransport {
+            inner,
+            entered: entered_for_transport,
+            release: release_for_transport,
+        })
+    });
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");

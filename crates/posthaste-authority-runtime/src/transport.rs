@@ -32,8 +32,11 @@ use posthaste_link_contract::{
 use posthaste_runtime_contract::{AccountScopeRequest, RuntimeAccountList};
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
-    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
-    MutationSettlementState, RuntimeError, RuntimeErrorCode, RuntimeMutationId, RuntimeResourceBytes,
+    AccountVerificationResult, AutomationRulePreviewMutation, AutomationRulePreviewResult,
+    CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage, MailQueryRequest,
+    MessageResourceKind, MutationReceipt, MutationRequest, MutationSettlementState,
+    PatchAccountMutation, PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeError,
+    RuntimeErrorCode, RuntimeMutationId, RuntimeResourceBytes,
 };
 use tokio::sync::broadcast;
 
@@ -353,6 +356,86 @@ impl BackendApi for LocalBackend {
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
         self.backend.sync_account(account_id, mode).await
+    }
+
+    async fn patch_app_settings(
+        &self,
+        mutation: PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError> {
+        self.backend.patch_app_settings(mutation)
+    }
+
+    async fn preview_automation_rule(
+        &self,
+        mutation: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
+        self.backend.preview_automation_rule(mutation)
+    }
+
+    async fn create_smart_mailbox(
+        &self,
+        mutation: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.backend.create_smart_mailbox(mutation)
+    }
+
+    async fn patch_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.backend.patch_smart_mailbox(smart_mailbox_id, mutation)
+    }
+
+    async fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        self.backend.delete_smart_mailbox(smart_mailbox_id)
+    }
+
+    async fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        self.backend.reset_default_smart_mailboxes()
+    }
+
+    async fn create_account(
+        &self,
+        mutation: CreateAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.backend.create_account(mutation).await
+    }
+
+    async fn patch_account(
+        &self,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.backend.patch_account(account_id, mutation).await
+    }
+
+    async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
+        self.backend.delete_account(account_id).await
+    }
+
+    async fn verify_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError> {
+        self.backend.verify_account(account_id).await
+    }
+
+    async fn set_account_enabled(
+        &self,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        self.backend.set_account_enabled(account_id, enabled).await
+    }
+
+    async fn reload_config(&self) -> Result<(), RuntimeError> {
+        self.backend.reload_config().await
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {

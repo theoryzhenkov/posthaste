@@ -33,8 +33,11 @@ use posthaste_domain::{
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, MutationRequest,
-    RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
+    MailQueryRequest, MessageResourceKind, MutationRequest, PatchAccountMutation,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
+    RuntimeErrorCode, RuntimeResourceBytes,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -42,6 +45,7 @@ use tokio::sync::broadcast;
 use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
+use crate::mutations::AccountMutationService;
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by
 /// the backend's read-state/flagged-state application and the runtime's history
@@ -135,6 +139,7 @@ pub(crate) struct Backend {
     store: Arc<dyn MailStore>,
     mail_queries: Arc<MailQueryService>,
     account_reads: Arc<AccountReadService>,
+    account_mutations: Option<Arc<AccountMutationService>>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     event_sender: broadcast::Sender<DomainEvent>,
 }
@@ -145,6 +150,7 @@ impl Backend {
         store: Arc<dyn MailStore>,
         mail_queries: Arc<MailQueryService>,
         account_reads: Arc<AccountReadService>,
+        account_mutations: Option<Arc<AccountMutationService>>,
         live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
         event_sender: broadcast::Sender<DomainEvent>,
     ) -> Self {
@@ -153,9 +159,18 @@ impl Backend {
             store,
             mail_queries,
             account_reads,
+            account_mutations,
             live_accounts,
             event_sender,
         }
+    }
+
+    /// The account/config mutation service, or the not-ready error when this
+    /// backend was built without one (some migration/test compositions).
+    fn account_mutations(&self) -> Result<&AccountMutationService, RuntimeError> {
+        self.account_mutations.as_deref().ok_or_else(|| {
+            RuntimeError::runtime_not_ready("account mutation runtime is not available")
+        })
     }
 
     /// Resolve a best-effort gateway for the account, swallowing the error: the
@@ -627,6 +642,97 @@ impl Backend {
             .live_accounts
             .sync_account_with_mode(&account_id, mode)
             .await?)
+    }
+
+    // ===== Account + config mutations (account_mutations authority) =====
+
+    pub(crate) fn patch_app_settings(
+        &self,
+        mutation: PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError> {
+        self.account_mutations()?.patch_app_settings(mutation)
+    }
+
+    pub(crate) fn preview_automation_rule(
+        &self,
+        mutation: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
+        self.account_mutations()?.preview_automation_rule(mutation)
+    }
+
+    pub(crate) fn create_smart_mailbox(
+        &self,
+        mutation: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.account_mutations()?.create_smart_mailbox(mutation)
+    }
+
+    pub(crate) fn patch_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.account_mutations()?
+            .patch_smart_mailbox(smart_mailbox_id, mutation)
+    }
+
+    pub(crate) fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?
+            .delete_smart_mailbox(smart_mailbox_id)
+    }
+
+    pub(crate) fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        self.account_mutations()?.reset_default_smart_mailboxes()
+    }
+
+    pub(crate) async fn create_account(
+        &self,
+        mutation: CreateAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.account_mutations()?.create_account(mutation).await
+    }
+
+    pub(crate) async fn patch_account(
+        &self,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.account_mutations()?
+            .patch_account(account_id, mutation)
+            .await
+    }
+
+    pub(crate) async fn delete_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?.delete_account(account_id).await
+    }
+
+    pub(crate) async fn verify_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError> {
+        self.account_mutations()?.verify_account(account_id).await
+    }
+
+    pub(crate) async fn set_account_enabled(
+        &self,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        self.account_mutations()?
+            .set_account_enabled(account_id, enabled)
+            .await
+    }
+
+    pub(crate) async fn reload_config(&self) -> Result<(), RuntimeError> {
+        self.account_mutations()?.reload_config().await
     }
 
     /// Resolve the account's mailbox for `role` and replace the message's
