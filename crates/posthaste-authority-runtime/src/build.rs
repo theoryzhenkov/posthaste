@@ -330,6 +330,7 @@ pub(crate) async fn build_backend(
     let backend = Arc::new(Backend::new(
         service.clone(),
         mail_queries.clone(),
+        account_reads.clone(),
         account_supervisor.clone(),
         event_sender.clone(),
     ));
@@ -612,6 +613,7 @@ impl AuthorityRuntimeHandle {
         let backend = Arc::new(Backend::new(
             api_bridge.service.clone(),
             mail_queries.clone(),
+            account_reads.clone(),
             live_accounts.clone(),
             api_bridge.event_sender.clone(),
         ));
@@ -1178,7 +1180,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
 
     async fn get_app_settings(&self, _caller: RuntimeCaller) -> Result<AppSettings, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.account_reads.app_settings()?)
+        self.core.reads.app_settings().await
     }
 
     async fn patch_app_settings(
@@ -1204,7 +1206,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<RuntimeAccountList, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.account_reads.list_accounts().await?)
+        self.core.reads.list_accounts().await
     }
 
     async fn get_account(
@@ -1214,7 +1216,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
         self.core
-            .account_reads
+            .reads
             .get_account(account_id)
             .await?
             .ok_or_else(|| RuntimeError::not_found("account not found"))

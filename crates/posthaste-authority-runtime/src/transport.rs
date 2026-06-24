@@ -15,14 +15,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_domain::{
-    AccountId, ConversationId, ConversationView, DomainEvent, MessageDetail, MessageId,
-    MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, DomainEvent,
+    MessageDetail, MessageId, MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
     LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
     LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
+use posthaste_runtime_contract::RuntimeAccountList;
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, MutationSettlementState,
@@ -151,6 +152,21 @@ impl BackendApi for LocalBackend {
         conversation_id: ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
         self.backend.conversation(&conversation_id)
+    }
+
+    async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
+        self.backend.list_accounts().await
+    }
+
+    async fn get_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<AccountOverview>, RuntimeError> {
+        self.backend.get_account(account_id).await
+    }
+
+    async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        self.backend.app_settings()
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {

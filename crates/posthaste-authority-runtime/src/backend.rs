@@ -22,16 +22,20 @@
 use std::sync::Arc;
 
 use posthaste_domain::{
-    AccountId, AddToMailboxCommand, CommandAck, ConversationId, ConversationView, DomainEvent,
-    MailService, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SetKeywordsCommand, SyncTrigger,
+    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CommandAck, ConversationId,
+    ConversationView, DomainEvent, MailService, MailboxId, MailboxSummary, MessageDetail, MessageId,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SetKeywordsCommand,
+    SyncTrigger,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationRequest, RuntimeError};
+use posthaste_runtime_contract::{
+    MailQueryPage, MailQueryRequest, MutationRequest, RuntimeAccountList, RuntimeError,
+};
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
+use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
 
@@ -125,6 +129,7 @@ pub(crate) struct MessageTargetArgs {
 pub(crate) struct Backend {
     service: Arc<MailService>,
     mail_queries: Arc<MailQueryService>,
+    account_reads: Arc<AccountReadService>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     event_sender: broadcast::Sender<DomainEvent>,
 }
@@ -133,15 +138,35 @@ impl Backend {
     pub(crate) fn new(
         service: Arc<MailService>,
         mail_queries: Arc<MailQueryService>,
+        account_reads: Arc<AccountReadService>,
         live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
         event_sender: broadcast::Sender<DomainEvent>,
     ) -> Self {
         Self {
             service,
             mail_queries,
+            account_reads,
             live_accounts,
             event_sender,
         }
+    }
+
+    /// Read channel: the account list.
+    pub(crate) async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
+        Ok(self.account_reads.list_accounts().await?)
+    }
+
+    /// Read channel: one account's overview (`None` when absent).
+    pub(crate) async fn get_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<AccountOverview>, RuntimeError> {
+        Ok(self.account_reads.get_account(account_id).await?)
+    }
+
+    /// Read channel: the application settings.
+    pub(crate) fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        Ok(self.account_reads.app_settings()?)
     }
 
     /// Read channel: compute a page of a mail-list query — the query engine is
