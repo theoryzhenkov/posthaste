@@ -73,11 +73,21 @@ pub struct AuthorityRuntimeBuildConfig {
     /// Chosen from configuration, not at build time; the default is in-process
     /// co-located (assertion `transport-selected-by-config`).
     pub backend_transport: BackendTransportConfig,
-    /// A pre-built link transport that overrides [`backend_transport`](Self::backend_transport)
-    /// when set. A host/test seam for injecting a custom transport (e.g. a
-    /// deferred one to exercise the near-node outbox); `None` in normal builds.
-    pub backend_transport_override: Option<Arc<dyn BackendApi>>,
+    /// A decorator over the config-selected link transport. When set, the
+    /// builder hands it the real (in-process or remote) [`BackendApi`] and uses
+    /// what it returns. A host/test seam for *composing over* the transport
+    /// (e.g. gating the up-channel to exercise the near-node outbox) without
+    /// replacing the full backend surface — the decorator delegates everything
+    /// it does not intercept to the inner transport. `None` in normal builds.
+    pub backend_transport_override: Option<BackendTransportDecorator>,
 }
+
+/// A decorator over the config-selected link transport (see
+/// [`AuthorityRuntimeBuildConfig::backend_transport_override`]): receives the
+/// real [`BackendApi`] and returns a wrapping one. Composes, so it need not
+/// re-implement the whole surface — only the methods it intercepts.
+pub type BackendTransportDecorator =
+    Box<dyn FnOnce(Arc<dyn BackendApi>) -> Arc<dyn BackendApi> + Send>;
 
 /// The runtime↔backend link transport, selected by configuration.
 ///
@@ -119,12 +129,14 @@ impl AuthorityRuntimeBuildConfig {
         self
     }
 
-    /// Inject a pre-built link transport, overriding [`backend_transport`](Self::backend_transport).
+    /// Decorate the config-selected link transport (see
+    /// [`backend_transport_override`](Self::backend_transport_override)). The
+    /// closure receives the real transport and returns the one the link uses.
     pub fn with_backend_transport_override(
         mut self,
-        transport: Arc<dyn BackendApi>,
+        decorator: impl FnOnce(Arc<dyn BackendApi>) -> Arc<dyn BackendApi> + Send + 'static,
     ) -> Self {
-        self.backend_transport_override = Some(transport);
+        self.backend_transport_override = Some(Box::new(decorator));
         self
     }
 
@@ -218,7 +230,7 @@ pub async fn build_authority_runtime(
     config: AuthorityRuntimeBuildConfig,
 ) -> Result<AuthorityRuntimeBuild, AuthorityRuntimeBuildError> {
     let backend = build_backend(&config).await?;
-    Ok(build_runtime(backend, &config))
+    Ok(build_runtime(backend, config))
 }
 
 /// The backend far-node graph: store + service + providers (the account
@@ -328,6 +340,7 @@ pub(crate) async fn build_backend(
         store.clone(),
         mail_queries,
         account_reads.clone(),
+        Some(account_mutations.clone()),
         account_supervisor.clone(),
         event_sender.clone(),
     ));
@@ -350,7 +363,7 @@ pub(crate) async fn build_backend(
 /// (it may spawn the cache-coherence task for a split runtime).
 pub(crate) fn build_runtime(
     backend: BackendBuild,
-    config: &AuthorityRuntimeBuildConfig,
+    config: AuthorityRuntimeBuildConfig,
 ) -> AuthorityRuntimeBuild {
     let BackendBuild {
         secret_store,
@@ -362,21 +375,22 @@ pub(crate) fn build_runtime(
         api_bridge,
         runtime_status,
     } = backend;
+    // Take the transport selection out of the config (the override decorator is
+    // `FnOnce`, so it is moved, not cloned); the rest of the config was consumed
+    // by `build_backend`.
+    let AuthorityRuntimeBuildConfig {
+        backend_transport,
+        backend_transport_override,
+        ..
+    } = config;
 
     let stopped = Arc::new(AtomicBool::new(false));
     let outbox = Arc::new(RuntimeBackendOutbox::new());
-    let backend_link = select_backend_link(
-        &config.backend_transport,
-        config.backend_transport_override.clone(),
-        backend.clone(),
-    );
-    let reads = Arc::new(build_read_cache(
-        &config.backend_transport,
-        &backend,
-        &backend_link,
-    ));
+    let backend_link =
+        select_backend_link(&backend_transport, backend_transport_override, backend.clone());
+    let reads = Arc::new(build_read_cache(&backend_transport, &backend, &backend_link));
     // A split runtime's retaining cache is kept coherent by the down-channel.
-    if matches!(config.backend_transport, BackendTransportConfig::Remote { .. }) {
+    if matches!(backend_transport, BackendTransportConfig::Remote { .. }) {
         tokio::spawn(crate::read::run_cache_coherence(
             backend_link.clone(),
             reads.clone(),
@@ -440,22 +454,23 @@ fn build_read_cache(
 /// Build the runtime↔backend [`BackendLink`] over its config-selected transport
 /// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
-/// [`RemoteBackend`] pointed at a backend serving the link wire.
+/// [`RemoteBackend`] pointed at a backend serving the link wire. An override
+/// decorator, when present, composes over that real transport (delegating what
+/// it does not intercept) — it does not replace the surface.
 fn select_backend_link(
     transport: &BackendTransportConfig,
-    override_transport: Option<Arc<dyn BackendApi>>,
+    override_decorator: Option<BackendTransportDecorator>,
     backend: Arc<Backend>,
 ) -> BackendLink {
-    if let Some(transport) = override_transport {
-        return BackendLink::new(transport);
-    }
-    match transport {
-        BackendTransportConfig::InProcess => {
-            BackendLink::new(Arc::new(LocalBackend::new(backend)))
-        }
+    let base: Arc<dyn BackendApi> = match transport {
+        BackendTransportConfig::InProcess => Arc::new(LocalBackend::new(backend)),
         BackendTransportConfig::Remote { base_url } => {
-            BackendLink::new(Arc::new(RemoteBackend::new(base_url.clone())))
+            Arc::new(RemoteBackend::new(base_url.clone()))
         }
+    };
+    match override_decorator {
+        Some(decorate) => BackendLink::new(decorate(base)),
+        None => BackendLink::new(base),
     }
 }
 
@@ -595,6 +610,7 @@ impl AuthorityRuntimeHandle {
             api_bridge.store.clone(),
             mail_queries,
             account_reads.clone(),
+            account_mutations.clone(),
             live_accounts.clone(),
             api_bridge.event_sender.clone(),
         ));
@@ -1147,7 +1163,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: posthaste_runtime_contract::PatchAppSettingsMutation,
     ) -> Result<AppSettings, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.patch_app_settings(mutation)
+        self.core.backend_link.patch_app_settings(mutation).await
     }
 
     async fn preview_automation_rule(
@@ -1156,7 +1172,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: posthaste_runtime_contract::AutomationRulePreviewMutation,
     ) -> Result<posthaste_runtime_contract::AutomationRulePreviewResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.preview_automation_rule(mutation)
+        self.core
+            .backend_link
+            .preview_automation_rule(mutation)
+            .await
     }
 
     async fn list_accounts(
@@ -1224,7 +1243,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: posthaste_runtime_contract::CreateSmartMailboxMutation,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.create_smart_mailbox(mutation)
+        self.core.backend_link.create_smart_mailbox(mutation).await
     }
 
     async fn patch_smart_mailbox(
@@ -1234,8 +1253,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: posthaste_runtime_contract::PatchSmartMailboxMutation,
     ) -> Result<posthaste_domain::SmartMailbox, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?
+        self.core
+            .backend_link
             .patch_smart_mailbox(smart_mailbox_id, mutation)
+            .await
     }
 
     async fn delete_smart_mailbox(
@@ -1244,8 +1265,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         smart_mailbox_id: SmartMailboxId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?
+        self.core
+            .backend_link
             .delete_smart_mailbox(smart_mailbox_id)
+            .await
     }
 
     async fn reset_default_smart_mailboxes(
@@ -1253,7 +1276,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.reset_default_smart_mailboxes()
+        self.core
+            .backend_link
+            .reset_default_smart_mailboxes()
+            .await
     }
 
     async fn list_tags(
@@ -1657,7 +1683,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: CreateAccountMutation,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.create_account(mutation).await
+        self.core.backend_link.create_account(mutation).await
     }
 
     async fn patch_account(
@@ -1667,7 +1693,8 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         mutation: PatchAccountMutation,
     ) -> Result<posthaste_domain::AccountOverview, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?
+        self.core
+            .backend_link
             .patch_account(account_id, mutation)
             .await
     }
@@ -1678,7 +1705,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.delete_account(account_id).await
+        self.core.backend_link.delete_account(account_id).await
     }
 
     async fn verify_account(
@@ -1687,7 +1714,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
     ) -> Result<AccountVerificationResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.verify_account(account_id).await
+        self.core.backend_link.verify_account(account_id).await
     }
 
     async fn set_account_enabled(
@@ -1697,14 +1724,15 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         enabled: bool,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?
+        self.core
+            .backend_link
             .set_account_enabled(account_id, enabled)
             .await
     }
 
     async fn reload_config(&self, _caller: RuntimeCaller) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.account_mutations()?.reload_config().await
+        self.core.backend_link.reload_config().await
     }
 }
 

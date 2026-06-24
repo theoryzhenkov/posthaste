@@ -40,8 +40,11 @@ use posthaste_domain::{
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt,
-    MutationRequest, RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
+    AccountScopeRequest, AccountVerificationResult, AutomationRulePreviewMutation,
+    AutomationRulePreviewResult, CreateAccountMutation, CreateSmartMailboxMutation, MailQueryPage,
+    MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest, PatchAccountMutation,
+    PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
+    RuntimeErrorCode, RuntimeResourceBytes,
 };
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
@@ -526,6 +529,115 @@ pub trait BackendApi: Send + Sync {
         let _ = (account_id, mode);
         Err(write_channel_unsupported())
     }
+
+    // ===== Write channel: account + config mutations =====
+    //
+    // The account/config write surface (account CRUD + enable/verify, app
+    // settings, smart mailboxes, automation preview, config reload) is backend
+    // authority; the runtime forwards it over the link. (OAuth account creation
+    // stays host-driven for now — its provider types live above this contract.)
+
+    /// Write: patch the application settings.
+    async fn patch_app_settings(
+        &self,
+        mutation: PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError> {
+        let _ = mutation;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: preview an automation rule against current messages.
+    async fn preview_automation_rule(
+        &self,
+        mutation: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
+        let _ = mutation;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: create a smart mailbox.
+    async fn create_smart_mailbox(
+        &self,
+        mutation: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        let _ = mutation;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: patch a smart mailbox.
+    async fn patch_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        let _ = (smart_mailbox_id, mutation);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: delete a smart mailbox.
+    async fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        let _ = smart_mailbox_id;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: reset the default smart mailboxes.
+    async fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: create an account.
+    async fn create_account(
+        &self,
+        mutation: CreateAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        let _ = mutation;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: patch an account.
+    async fn patch_account(
+        &self,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        let _ = (account_id, mutation);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: delete an account.
+    async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
+        let _ = account_id;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: verify an account's connectivity/credentials.
+    async fn verify_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError> {
+        let _ = account_id;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: enable or disable an account.
+    async fn set_account_enabled(
+        &self,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        let _ = (account_id, enabled);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: reload configuration from disk.
+    async fn reload_config(&self) -> Result<(), RuntimeError> {
+        Err(write_channel_unsupported())
+    }
 }
 
 fn read_channel_unsupported() -> RuntimeError {
@@ -745,6 +857,100 @@ impl BackendLink {
         mode: SyncMode,
     ) -> Result<usize, RuntimeError> {
         self.transport.sync_account(account_id, mode).await
+    }
+
+    /// Write: patch the application settings.
+    pub async fn patch_app_settings(
+        &self,
+        mutation: PatchAppSettingsMutation,
+    ) -> Result<AppSettings, RuntimeError> {
+        self.transport.patch_app_settings(mutation).await
+    }
+
+    /// Write: preview an automation rule.
+    pub async fn preview_automation_rule(
+        &self,
+        mutation: AutomationRulePreviewMutation,
+    ) -> Result<AutomationRulePreviewResult, RuntimeError> {
+        self.transport.preview_automation_rule(mutation).await
+    }
+
+    /// Write: create a smart mailbox.
+    pub async fn create_smart_mailbox(
+        &self,
+        mutation: CreateSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.transport.create_smart_mailbox(mutation).await
+    }
+
+    /// Write: patch a smart mailbox.
+    pub async fn patch_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+        mutation: PatchSmartMailboxMutation,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        self.transport
+            .patch_smart_mailbox(smart_mailbox_id, mutation)
+            .await
+    }
+
+    /// Write: delete a smart mailbox.
+    pub async fn delete_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<(), RuntimeError> {
+        self.transport.delete_smart_mailbox(smart_mailbox_id).await
+    }
+
+    /// Write: reset the default smart mailboxes.
+    pub async fn reset_default_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        self.transport.reset_default_smart_mailboxes().await
+    }
+
+    /// Write: create an account.
+    pub async fn create_account(
+        &self,
+        mutation: CreateAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.transport.create_account(mutation).await
+    }
+
+    /// Write: patch an account.
+    pub async fn patch_account(
+        &self,
+        account_id: AccountId,
+        mutation: PatchAccountMutation,
+    ) -> Result<AccountOverview, RuntimeError> {
+        self.transport.patch_account(account_id, mutation).await
+    }
+
+    /// Write: delete an account.
+    pub async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
+        self.transport.delete_account(account_id).await
+    }
+
+    /// Write: verify an account.
+    pub async fn verify_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<AccountVerificationResult, RuntimeError> {
+        self.transport.verify_account(account_id).await
+    }
+
+    /// Write: enable or disable an account.
+    pub async fn set_account_enabled(
+        &self,
+        account_id: AccountId,
+        enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        self.transport.set_account_enabled(account_id, enabled).await
+    }
+
+    /// Write: reload configuration from disk.
+    pub async fn reload_config(&self) -> Result<(), RuntimeError> {
+        self.transport.reload_config().await
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.
