@@ -29,8 +29,12 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+use posthaste_domain::{AccountId, MessageId, MessageSummary};
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
-use posthaste_runtime_contract::{MutationReceipt, MutationRequest, RuntimeError};
+use posthaste_runtime_contract::{
+    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
+    RuntimeErrorCode,
+};
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
 /// [`MutationRequest`] (JSON) here and receives a [`MutationReceipt`]. Shared by
@@ -41,6 +45,16 @@ pub const LINK_FORWARD_MUTATION_PATH: &str = "/v1/link/mutations";
 /// Wire path for the link down-channel: a remote near node opens an SSE stream
 /// here whose `data:` frames are JSON [`DownFrame`]s.
 pub const LINK_SUBSCRIBE_PATH: &str = "/v1/link/subscribe";
+
+/// Wire path for the read channel's mail-list query: a remote near node `POST`s
+/// a [`MailQueryRequest`] and receives a [`MailQueryPage`]. The query engine
+/// runs at the far node (the authority); the near node reads through to it.
+pub const LINK_QUERY_PATH: &str = "/v1/link/query";
+
+/// Wire path for the read channel's point read: the current [`MessageSummary`]
+/// of one message (the read behind undo-history). `POST`ed as `{accountId,
+/// messageId}`, returns the summary or null.
+pub const LINK_SUMMARY_PATH: &str = "/v1/link/summary";
 
 /// One authoritative base update for a single message, carried on the
 /// down-channel ([replication L1 §5.1](../replication/L1.md)). The near node
@@ -198,6 +212,37 @@ pub trait LinkTransport: Send + Sync {
     /// assertions + per-mutation confirmation for a coverage. The near node
     /// rebases its base cache on each frame and recomputes its derived views.
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError>;
+
+    /// Read channel: compute a page of a mail-list query at the far node (the
+    /// query engine is the authority's, [`DESIGN-L4-read-replication`](../../eph/DESIGN-L4-read-replication.md)).
+    /// A near node reads through here on a cache miss. The default errors: a
+    /// transport that does not carry the read channel (e.g. a write-only test
+    /// stub) is simply not a read source.
+    async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        let _ = request;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the current canonical summary of one message (the point
+    /// read behind undo-history). `None` when the far node does not hold it.
+    async fn current_summary(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(read_channel_unsupported())
+    }
+}
+
+fn read_channel_unsupported() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::Internal,
+        "link transport does not carry the read channel",
+    )
 }
 
 /// The runtime↔backend link ([replication L4 §3](../replication/L4.md)): the

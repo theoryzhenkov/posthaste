@@ -22,10 +22,12 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
+use posthaste_domain::{AccountId, MessageId, MessageSummary};
 use posthaste_link_contract::{
-    DownFrame, LinkCoverage, LinkTransport, LINK_FORWARD_MUTATION_PATH, LINK_SUBSCRIBE_PATH,
+    DownFrame, LinkCoverage, LinkTransport, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
+    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
-use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
+use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest};
 use serde::Deserialize;
 
 use crate::api::ApiError;
@@ -72,6 +74,39 @@ async fn subscribe(
     Ok(Sse::new(stream.map(down_frame_to_sse)).keep_alive(KeepAlive::default()))
 }
 
+/// Read channel: compute a mail-list query at the far node.
+async fn query_mail_page(
+    State(state): State<LinkState>,
+    Json(request): Json<MailQueryRequest>,
+) -> Result<Json<MailQueryPage>, ApiError> {
+    state
+        .transport
+        .query_mail_page(request)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SummaryRequest {
+    account_id: AccountId,
+    message_id: MessageId,
+}
+
+/// Read channel: the current summary of one message (the point read).
+async fn current_summary(
+    State(state): State<LinkState>,
+    Json(request): Json<SummaryRequest>,
+) -> Result<Json<Option<MessageSummary>>, ApiError> {
+    state
+        .transport
+        .current_summary(request.account_id, request.message_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
 fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
         .json_data(frame)
@@ -84,5 +119,7 @@ pub fn link_router(transport: Arc<dyn LinkTransport>) -> Router {
     Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
+        .route(LINK_QUERY_PATH, post(query_mail_page))
+        .route(LINK_SUMMARY_PATH, post(current_summary))
         .with_state(LinkState { transport })
 }

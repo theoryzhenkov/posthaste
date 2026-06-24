@@ -135,9 +135,14 @@ backend's computation directly; `RemoteTransport` carries it as HTTP + SSE.
   undo-history (`current_message_summary` — the c3 blocker) draw from the
   `ReadCache`. Passthrough retains nothing, so the co-located deployment is
   unchanged (64 unit + 28 integration + all server suites pass). Mirrors W1.
-- **W4b — backend read surface.** The far node serves the `ReadSource` methods
-  (queries + point reads) and the view-subscription protocol; `LinkTransport`
-  grows the read half. In-process first; co-located unchanged.
+- **W4b — backend read surface.** *(Landed.)* `LinkTransport` grew the read half
+  — `query_mail_page` + `current_summary`, default-erroring so write-only stubs
+  do not churn. `Backend` is the single far-node read authority (it gained
+  `mail_queries`); `LocalReadSource` and `InProcessTransport` both delegate to
+  it. `RemoteTransport` carries the reads as HTTP; `link_router` serves
+  `/v1/link/query` + `/v1/link/summary`. A bare `RemoteTransport` reading a real
+  backend query over the link is proven (`backend_link_split`). Co-located
+  unchanged (the runtime still reads through `LocalReadSource` directly).
 - **W4c — `RemoteReadSource` + retaining policy + `link_router` reads.** A split
   runtime reads through over the link and retains what it fetched; the split
   test now serves a **read** from the backend (the c3 twin). The
