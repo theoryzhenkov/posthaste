@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod authz;
 pub mod config;
+pub mod link;
 pub mod logging;
 pub mod oauth {
     pub use posthaste_authority_runtime::oauth::*;
@@ -58,6 +59,7 @@ mod spa;
 mod startup;
 
 pub use app_state::{AppState, ServerConfig, ServerHandle};
+pub use link::link_router;
 pub use router::build_api_router;
 pub use secure_file::write_secure_file;
 pub use startup::start_server;
