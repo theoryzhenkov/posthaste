@@ -125,6 +125,16 @@ export interface RuntimeMailListViewState {
   anchor: unknown
 }
 
+/**
+ * An incremental mail-list update (replication L6): only the rows that changed.
+ * Reconcile against the held rows — when `order` is present, drop rows whose key
+ * is absent and reorder to it; then apply `upserts` by `rowKey`.
+ */
+export interface RuntimeMailListDelta {
+  order: string[] | null
+  upserts: RuntimeMailListRowState[]
+}
+
 export type RuntimeViewFrame<TData = unknown> =
   | { kind: 'snapshot'; snapshot: RuntimeViewSnapshot<TData> }
   | { kind: 'replace'; snapshot: RuntimeViewSnapshot<TData> }
@@ -178,6 +188,13 @@ export type RuntimeFrame<TData = unknown> =
       revision: number
       snapshot: RuntimeViewSnapshot<TData>
     }
+  | {
+      type: 'viewDelta'
+      sessionSeq: number
+      viewId: string
+      revision: number
+      delta: RuntimeMailListDelta
+    }
   | { type: 'viewError'; sessionSeq: number; viewId: string; error: unknown }
   | { type: 'viewClosed'; sessionSeq: number; viewId: string }
   | {
@@ -201,6 +218,8 @@ export interface RuntimeSession {
 
 export interface RuntimeOpenSessionRequest {
   sourceId?: string | null
+  /** Opt into incremental mail-list view deltas (replication L6). */
+  viewDelta?: boolean
 }
 
 export interface RuntimeCloseSessionRequest {
