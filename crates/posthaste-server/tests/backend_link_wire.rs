@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_authority_runtime::RemoteTransport;
 use posthaste_link_contract::{
-    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, LinkTransport,
+    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, BackendApi,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
@@ -29,7 +29,7 @@ use posthaste_server::link_router;
 struct StubFarNode;
 
 #[async_trait]
-impl LinkTransport for StubFarNode {
+impl BackendApi for StubFarNode {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,

@@ -2378,7 +2378,7 @@ struct DeferredTransport {
 }
 
 #[async_trait::async_trait]
-impl posthaste_link_contract::LinkTransport for DeferredTransport {
+impl posthaste_link_contract::BackendApi for DeferredTransport {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,

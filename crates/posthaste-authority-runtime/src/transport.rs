@@ -1,6 +1,6 @@
 //! In-process link transport over the co-located backend far node.
 //!
-//! [`InProcessTransport`] is the default [`LinkTransport`]
+//! [`InProcessTransport`] is the default [`BackendApi`]
 //! ([replication L4 §4](../replication/L4.md)): direct calls to a co-located
 //! [`Backend`], zero serialization, instant confirmation. It is the
 //! behavior-preserving seam — the runtime↔backend link carried in one process,
@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_domain::{AccountId, DomainEvent, MessageId, MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED};
 use posthaste_link_contract::{
-    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, LinkTransport,
+    BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, BackendApi,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_link_core::MessageFoldState;
@@ -76,7 +76,7 @@ pub(crate) fn message_event_to_assertion(
 }
 
 #[async_trait]
-impl LinkTransport for InProcessTransport {
+impl BackendApi for InProcessTransport {
     /// Up-channel: apply the named mutation to the co-located backend and return
     /// a receipt carrying the backend's `RuntimeMutationId` (the confirmation
     /// join key) and the command's events as `output`. In-process this is a
@@ -211,7 +211,7 @@ pub(crate) fn parse_sse_frame(block: &str) -> Option<DownFrame> {
 }
 
 #[async_trait]
-impl LinkTransport for RemoteTransport {
+impl BackendApi for RemoteTransport {
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,

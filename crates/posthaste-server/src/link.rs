@@ -24,7 +24,7 @@ use axum::{Json, Router};
 use futures_util::StreamExt;
 use posthaste_domain::{AccountId, MessageId, MessageSummary};
 use posthaste_link_contract::{
-    DownFrame, LinkCoverage, LinkTransport, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
+    DownFrame, LinkCoverage, BackendApi, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
     LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest};
@@ -34,7 +34,7 @@ use crate::api::ApiError;
 
 #[derive(Clone)]
 struct LinkState {
-    transport: Arc<dyn LinkTransport>,
+    transport: Arc<dyn BackendApi>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,7 +115,7 @@ fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
 
 /// Build the far-node link router over a transport — the backend's in-process
 /// `BackendLink` transport in a split deployment.
-pub fn link_router(transport: Arc<dyn LinkTransport>) -> Router {
+pub fn link_router(transport: Arc<dyn BackendApi>) -> Router {
     Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
