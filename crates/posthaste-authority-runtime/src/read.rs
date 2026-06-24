@@ -16,10 +16,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use posthaste_domain::{AccountId, MailService, MessageId, MessageSummary};
+use posthaste_domain::{AccountId, MessageId, MessageSummary};
 use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError};
 
-use crate::mail_queries::MailQueryService;
+use crate::backend::Backend;
 
 /// The far node's read surface — what a near node reads through to. Co-located
 /// it is the in-process backend; split it is carried over the link (W4c).
@@ -40,19 +40,16 @@ pub(crate) trait ReadSource: Send + Sync {
     ) -> Result<Option<MessageSummary>, RuntimeError>;
 }
 
-/// The co-located read source: calls the in-process backend directly (today's
-/// reads), zero serialization.
+/// The co-located read source: calls the in-process backend far node directly
+/// (today's reads), zero serialization. The far node owns the query engine; this
+/// is the read twin of `InProcessTransport` on the write path.
 pub(crate) struct LocalReadSource {
-    mail_queries: Arc<MailQueryService>,
-    service: Arc<MailService>,
+    backend: Arc<Backend>,
 }
 
 impl LocalReadSource {
-    pub(crate) fn new(mail_queries: Arc<MailQueryService>, service: Arc<MailService>) -> Self {
-        Self {
-            mail_queries,
-            service,
-        }
+    pub(crate) fn new(backend: Arc<Backend>) -> Self {
+        Self { backend }
     }
 }
 
@@ -62,7 +59,7 @@ impl ReadSource for LocalReadSource {
         &self,
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
-        self.mail_queries.query_mail_page(request).await
+        self.backend.query_mail_page(request).await
     }
 
     async fn current_summary(
@@ -70,11 +67,7 @@ impl ReadSource for LocalReadSource {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
-        let result = self
-            .service
-            .get_message_detail(account_id, message_id, None)
-            .await?;
-        Ok(result.detail.map(|detail| detail.summary))
+        self.backend.current_summary(account_id, message_id).await
     }
 }
 

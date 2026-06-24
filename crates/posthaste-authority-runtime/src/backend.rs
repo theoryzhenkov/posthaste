@@ -23,15 +23,17 @@ use std::sync::Arc;
 
 use posthaste_domain::{
     AccountId, AddToMailboxCommand, CommandAck, DomainEvent, MailService, MailboxId, MailboxSummary,
-    MessageId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SetKeywordsCommand, SyncTrigger,
+    MessageId, MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
+    SetKeywordsCommand, SyncTrigger,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
-use posthaste_runtime_contract::{MutationRequest, RuntimeError};
+use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationRequest, RuntimeError};
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::live_accounts::LiveAccountRuntimeProvider;
+use crate::mail_queries::MailQueryService;
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by
 /// the backend's read-state/flagged-state application and the runtime's history
@@ -122,6 +124,7 @@ pub(crate) struct MessageTargetArgs {
 /// applies message-state commands to them.
 pub(crate) struct Backend {
     service: Arc<MailService>,
+    mail_queries: Arc<MailQueryService>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     event_sender: broadcast::Sender<DomainEvent>,
 }
@@ -129,14 +132,40 @@ pub(crate) struct Backend {
 impl Backend {
     pub(crate) fn new(
         service: Arc<MailService>,
+        mail_queries: Arc<MailQueryService>,
         live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
         event_sender: broadcast::Sender<DomainEvent>,
     ) -> Self {
         Self {
             service,
+            mail_queries,
             live_accounts,
             event_sender,
         }
+    }
+
+    /// Read channel: compute a page of a mail-list query — the query engine is
+    /// the authority's ([replication L4 W4](../replication/L4.md)). A near node
+    /// reads through here.
+    pub(crate) async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        self.mail_queries.query_mail_page(request).await
+    }
+
+    /// Read channel: the message's current canonical summary (the point read
+    /// behind undo-history).
+    pub(crate) async fn current_summary(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        let result = self
+            .service
+            .get_message_detail(account_id, message_id, None)
+            .await?;
+        Ok(result.detail.map(|detail| detail.summary))
     }
 
     /// Publish authoritative domain events on the down-channel broadcast. In the

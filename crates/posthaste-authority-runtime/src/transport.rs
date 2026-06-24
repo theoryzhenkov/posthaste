@@ -14,15 +14,15 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use posthaste_domain::{DomainEvent, EVENT_TOPIC_MESSAGE_UPDATED};
+use posthaste_domain::{AccountId, DomainEvent, MessageId, MessageSummary, EVENT_TOPIC_MESSAGE_UPDATED};
 use posthaste_link_contract::{
     BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage, LinkTransport,
-    LINK_FORWARD_MUTATION_PATH, LINK_SUBSCRIBE_PATH,
+    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
-    MutationReceipt, MutationRequest, MutationSettlementState, RuntimeError, RuntimeErrorCode,
-    RuntimeMutationId,
+    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, MutationSettlementState,
+    RuntimeError, RuntimeErrorCode, RuntimeMutationId,
 };
 use tokio::sync::broadcast;
 
@@ -117,6 +117,23 @@ impl LinkTransport for InProcessTransport {
     /// assertions; a co-located runtime that derives views from the cache is the
     /// W3-paired step (in-process the cache equals the store, so the view read
     /// path is unchanged today, keeping `colocated-unchanged`).
+    /// Read channel: serve the co-located backend's query computation directly.
+    /// This is what a remote runtime reads through to (via `link_router`).
+    async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        self.backend.query_mail_page(request).await
+    }
+
+    async fn current_summary(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        self.backend.current_summary(&account_id, &message_id).await
+    }
+
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
         let backend = self.backend.clone();
         let mut receiver = backend.subscribe_events();
@@ -216,6 +233,59 @@ impl LinkTransport for RemoteTransport {
             ));
         }
         response.json::<MutationReceipt>().await.map_err(transport_error)
+    }
+
+    async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        let url = format!("{}{}", self.base_url, LINK_QUERY_PATH);
+        let response = self
+            .client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::GatewayRejected,
+                format!("remote backend rejected query ({status}): {body}"),
+            ));
+        }
+        response.json::<MailQueryPage>().await.map_err(transport_error)
+    }
+
+    async fn current_summary(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        let url = format!("{}{}", self.base_url, LINK_SUMMARY_PATH);
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({
+                "accountId": account_id,
+                "messageId": message_id,
+            }))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::GatewayRejected,
+                format!("remote backend rejected summary read ({status}): {body}"),
+            ));
+        }
+        response
+            .json::<Option<MessageSummary>>()
+            .await
+            .map_err(transport_error)
     }
 
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
