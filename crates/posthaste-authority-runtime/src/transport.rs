@@ -67,6 +67,7 @@ pub(crate) fn message_event_to_assertion(
         return None;
     }
     let message_id = event.message_id.as_ref()?.as_str().to_string();
+    let account_id = event.account_id.as_str().to_string();
     let deleted = event
         .payload
         .get("deleted")
@@ -74,6 +75,7 @@ pub(crate) fn message_event_to_assertion(
         .unwrap_or(false);
     if deleted {
         return Some(BaseAssertion {
+            account_id,
             message_id,
             update: BaseUpdate::Removed,
         });
@@ -81,6 +83,7 @@ pub(crate) fn message_event_to_assertion(
     // A present message asserts its complete current state. If the read found
     // nothing (a race with a concurrent removal), treat it as removed.
     Some(BaseAssertion {
+        account_id,
         message_id,
         update: match current {
             Some(state) => BaseUpdate::Present(state),
@@ -736,6 +739,7 @@ mod tests {
     fn parse_sse_frame_reads_a_data_line_as_a_down_frame() {
         let frame = DownFrame::Base {
             assertions: vec![BaseAssertion {
+                account_id: "acct".into(),
                 message_id: "m1".into(),
                 update: BaseUpdate::Removed,
             }],
@@ -777,6 +781,7 @@ mod tests {
         {
             let frame = DownFrame::Base {
                 assertions: vec![BaseAssertion {
+                    account_id: "acct".into(),
                     message_id: "m1".into(),
                     update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
                 }],
@@ -821,6 +826,7 @@ mod tests {
             frame,
             DownFrame::Base {
                 assertions: vec![BaseAssertion {
+                    account_id: "acct".into(),
                     message_id: "m1".into(),
                     update: BaseUpdate::Present(fold(&["$flagged"], &["inbox"])),
                 }],

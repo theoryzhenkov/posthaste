@@ -100,6 +100,10 @@ pub enum BaseUpdate {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseAssertion {
+    /// The account the message belongs to. Carried so a near node can scope the
+    /// change (cache eviction, view recompute) to the right account rather than
+    /// matching on the bare message id.
+    pub account_id: String,
     pub message_id: String,
     pub update: BaseUpdate,
 }
@@ -1162,6 +1166,7 @@ mod tests {
         let frame = DownFrame::Base {
             assertions: vec![
                 BaseAssertion {
+                    account_id: "acct".into(),
                     message_id: "m1".into(),
                     update: BaseUpdate::Present(MessageFoldState {
                         keywords: vec!["$flagged".into()],
@@ -1169,6 +1174,7 @@ mod tests {
                     }),
                 },
                 BaseAssertion {
+                    account_id: "acct".into(),
                     message_id: "m2".into(),
                     update: BaseUpdate::Removed,
                 },

@@ -432,11 +432,15 @@ pub(crate) fn build_runtime(
     let backend_link =
         select_backend_link(&backend_transport, backend_transport_override, backend.clone());
     let reads = Arc::new(build_read_cache(&backend_transport, &backend, &backend_link));
-    // A split runtime's retaining cache is kept coherent by the down-channel.
+    // A split runtime drives its cache + views from the backend down-channel:
+    // evict on assertions, and republish them onto the event bus so the view
+    // machinery recomputes and pushes frames to clients (in-process the runtime
+    // shares the backend's bus, so no bridge is needed).
     if matches!(backend_transport, BackendTransportConfig::Remote { .. }) {
-        tokio::spawn(crate::read::run_cache_coherence(
+        tokio::spawn(crate::read::run_backend_down_channel(
             backend_link.clone(),
             reads.clone(),
+            event_sender.clone(),
         ));
     }
     let views = Arc::new(ViewRegistry::new(
