@@ -30,12 +30,13 @@ use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use posthaste_domain::{
-    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MessageDetail,
+    MessageId, MessageSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
-    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
-    RuntimeErrorCode,
+    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeAccountList,
+    RuntimeError, RuntimeErrorCode,
 };
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
@@ -266,6 +267,25 @@ pub trait BackendApi: Send + Sync {
         let _ = conversation_id;
         Err(read_channel_unsupported())
     }
+
+    /// Read channel: the account list (ids + enabled + overviews).
+    async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: one account's overview, `None` when absent.
+    async fn get_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<AccountOverview>, RuntimeError> {
+        let _ = account_id;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the application settings.
+    async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
 }
 
 fn read_channel_unsupported() -> RuntimeError {
@@ -346,6 +366,24 @@ impl BackendLink {
         conversation_id: ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
         self.transport.conversation(conversation_id).await
+    }
+
+    /// Read channel: the account list through to the backend.
+    pub async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
+        self.transport.list_accounts().await
+    }
+
+    /// Read channel: one account's overview through to the backend.
+    pub async fn get_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<AccountOverview>, RuntimeError> {
+        self.transport.get_account(account_id).await
+    }
+
+    /// Read channel: the application settings through to the backend.
+    pub async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        self.transport.app_settings().await
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.

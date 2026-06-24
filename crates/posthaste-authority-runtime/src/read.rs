@@ -20,10 +20,11 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use posthaste_domain::{
-    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MessageDetail,
+    MessageId, MessageSummary,
 };
 use posthaste_link_contract::{BackendApi, BackendLink, DownFrame, LinkCoverage};
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError};
+use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeAccountList, RuntimeError};
 
 /// A read-through cache over the [`BackendApi`], parameterized by policy.
 ///
@@ -98,6 +99,23 @@ impl ReadCache {
         conversation_id: &ConversationId,
     ) -> Result<ConversationView, RuntimeError> {
         self.backend.conversation(conversation_id.clone()).await
+    }
+
+    /// Account/config reads through the backend (passthrough; not cached — these
+    /// are config metadata, re-read on demand).
+    pub(crate) async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
+        self.backend.list_accounts().await
+    }
+
+    pub(crate) async fn get_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<AccountOverview>, RuntimeError> {
+        self.backend.get_account(account_id).await
+    }
+
+    pub(crate) async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        self.backend.app_settings().await
     }
 
     pub(crate) async fn current_summary(
