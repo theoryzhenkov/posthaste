@@ -9,11 +9,13 @@
 
 mod account_reads;
 mod account_repository;
+mod backend;
 mod bootstrap;
 mod build;
 mod live_accounts;
 mod mail_queries;
 mod mutations;
+mod transport;
 pub mod oauth;
 mod push;
 mod secret;
@@ -25,7 +27,7 @@ pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{
     build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuild,
     AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError, AuthorityRuntimeHandle,
-    AuthorityRuntimeShutdownError, RuntimeShutdownHandle,
+    AuthorityRuntimeShutdownError, BackendTransportConfig, RuntimeShutdownHandle,
 };
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use secret::SystemSecretStore;

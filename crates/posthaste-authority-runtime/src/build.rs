@@ -13,8 +13,9 @@ use posthaste_domain::{
     EventFilter, MailService, MailStore, MailboxId, MailboxSummary, MessageId, Operation,
     OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SecretStore,
     SendMessageRequest, ServiceError, ServiceErrorKind, SetKeywordsCommand, SmartMailboxId,
-    StoreError, SyncMode, SyncTrigger,
+    StoreError, SyncMode,
 };
+use posthaste_link_contract::BackendLink;
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
@@ -26,12 +27,17 @@ use posthaste_runtime_contract::{
     ViewRevision,
 };
 use posthaste_store::DatabaseStore;
-use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
 use crate::account_repository::AccountRepository;
+use crate::backend::{
+    keyword_toggle, parse_args, Backend, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
+    MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
+    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
+};
+use crate::transport::{InProcessTransport, RemoteTransport};
 use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
@@ -60,6 +66,25 @@ pub struct AuthorityRuntimeBuildConfig {
     pub secret_store: Option<Arc<dyn SecretStore>>,
     pub event_channel_capacity: usize,
     pub poll_interval: Duration,
+    /// Which transport carries the runtime↔backend link ([replication L4 §5](../replication/L4.md)).
+    /// Chosen from configuration, not at build time; the default is in-process
+    /// co-located (assertion `transport-selected-by-config`).
+    pub backend_transport: BackendTransportConfig,
+}
+
+/// The runtime↔backend link transport, selected by configuration.
+///
+/// `InProcess` (default) is the co-located far node — zero serialization, byte
+/// for byte the pre-link behavior. `Remote` points the link at a backend that
+/// serves the link wire (POST up + SSE down) elsewhere; switching is a config
+/// change, not a rebuild ([replication L4 §5](../replication/L4.md)).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum BackendTransportConfig {
+    #[default]
+    InProcess,
+    Remote {
+        base_url: String,
+    },
 }
 
 impl AuthorityRuntimeBuildConfig {
@@ -76,7 +101,14 @@ impl AuthorityRuntimeBuildConfig {
             secret_store: None,
             event_channel_capacity: DEFAULT_EVENT_CHANNEL_CAPACITY,
             poll_interval: Duration::from_secs(60),
+            backend_transport: BackendTransportConfig::InProcess,
         }
+    }
+
+    /// Select the runtime↔backend link transport (default in-process).
+    pub fn with_backend_transport(mut self, backend_transport: BackendTransportConfig) -> Self {
+        self.backend_transport = backend_transport;
+        self
     }
 
     pub fn with_bootstrap_path(mut self, bootstrap_path: impl Into<PathBuf>) -> Self {
@@ -244,9 +276,17 @@ pub async fn build_authority_runtime(
         event_sender.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
+    let backend = Arc::new(Backend::new(
+        service.clone(),
+        account_supervisor.clone(),
+        event_sender.clone(),
+    ));
+    let backend_link = select_backend_link(&config.backend_transport, backend.clone());
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
+        backend,
+        backend_link,
         event_sender: event_sender.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
@@ -268,9 +308,30 @@ pub async fn build_authority_runtime(
     })
 }
 
+/// Build the runtime↔backend [`BackendLink`] over its config-selected transport
+/// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
+/// The co-located default wraps the in-process far node; `Remote` wraps a
+/// [`RemoteTransport`] pointed at a backend serving the link wire.
+fn select_backend_link(transport: &BackendTransportConfig, backend: Arc<Backend>) -> BackendLink {
+    match transport {
+        BackendTransportConfig::InProcess => {
+            BackendLink::new(Arc::new(InProcessTransport::new(backend)))
+        }
+        BackendTransportConfig::Remote { base_url } => {
+            BackendLink::new(Arc::new(RemoteTransport::new(base_url.clone())))
+        }
+    }
+}
+
 struct AuthorityRuntimeCore {
     service: Arc<MailService>,
     store: Arc<dyn MailStore>,
+    /// The backend far node — the single owner of message-command backend
+    /// access (L4 W1). Reached in-process via [`backend_link`](Self::backend_link).
+    backend: Arc<Backend>,
+    /// The runtime↔backend link over its (config-selected, in-process by
+    /// default) transport. The mutation up-channel goes through here.
+    backend_link: BackendLink,
     event_sender: broadcast::Sender<DomainEvent>,
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
@@ -280,88 +341,6 @@ struct AuthorityRuntimeCore {
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageSetKeywordsMutationArgs {
-    source_id: String,
-    message_id: String,
-    command: SetKeywordsCommand,
-}
-
-/// A message mutation that targets one message by id (read/flag/destroy/role).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageTargetArgs {
-    source_id: String,
-    message_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageSetReadStateArgs {
-    source_id: String,
-    message_id: String,
-    read: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageSetFlaggedStateArgs {
-    source_id: String,
-    message_id: String,
-    flagged: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageSetUserTagsArgs {
-    source_id: String,
-    message_id: String,
-    #[serde(default)]
-    add: Vec<String>,
-    #[serde(default)]
-    remove: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageMoveToMailboxArgs {
-    source_id: String,
-    message_id: String,
-    mailbox_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageMoveToRoleArgs {
-    source_id: String,
-    message_id: String,
-    role: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageReplaceMailboxesArgs {
-    source_id: String,
-    message_id: String,
-    mailbox_ids: Vec<String>,
-}
-
-/// Build a single-keyword add/remove command from a desired presence.
-fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
-    if present {
-        SetKeywordsCommand {
-            add: vec![keyword.to_string()],
-            remove: Vec::new(),
-        }
-    } else {
-        SetKeywordsCommand {
-            add: Vec::new(),
-            remove: vec![keyword.to_string()],
-        }
-    }
 }
 
 /// Cloneable authority runtime handle used by transport adapters.
@@ -492,10 +471,18 @@ impl AuthorityRuntimeHandle {
             },
             account_count,
         };
+        let backend = Arc::new(Backend::new(
+            api_bridge.service.clone(),
+            live_accounts.clone(),
+            api_bridge.event_sender.clone(),
+        ));
+        let backend_link = BackendLink::new(Arc::new(InProcessTransport::new(backend.clone())));
         Self {
             core: Arc::new(AuthorityRuntimeCore {
                 service: api_bridge.service.clone(),
                 store: api_bridge.store.clone(),
+                backend,
+                backend_link,
                 event_sender: api_bridge.event_sender.clone(),
                 account_reads,
                 account_mutations,
@@ -543,22 +530,10 @@ impl AuthorityRuntimeHandle {
     }
 
     /// Nudge the account to sync so just-enqueued outbox operations flush
-    /// promptly. Best-effort: if the account is offline the op stays queued and
-    /// flushes on the next connectivity window.
+    /// promptly. Delegates to the backend far node, which owns the supervisor
+    /// handle; the non-command paths (send/draft) still flush through here.
     async fn trigger_outbox_flush(&self, account_id: &AccountId) {
-        if let Err(error) = self
-            .core
-            .live_accounts
-            .trigger_account_sync(account_id, SyncTrigger::Manual)
-            .await
-        {
-            ph_warn!(
-                events::OUTBOX_FOLLOWUP_SYNC_TRIGGER_FAILED,
-                source_id = %account_id,
-                error = %error,
-                "outbox operation enqueued but follow-up sync trigger failed"
-            );
-        }
+        self.core.backend.trigger_outbox_flush(account_id).await;
     }
 
     pub async fn create_oauth_account_from_exchange(
@@ -584,9 +559,7 @@ impl AuthorityRuntimeHandle {
     }
 
     fn publish_events(&self, events: &[DomainEvent]) {
-        for event in events {
-            let _ = self.core.event_sender.send(event.clone());
-        }
+        self.core.backend.publish_events(events);
     }
 
     async fn optional_gateway(
@@ -594,19 +567,6 @@ impl AuthorityRuntimeHandle {
         account_id: &AccountId,
     ) -> Option<posthaste_domain::SharedGateway> {
         self.core.live_accounts.gateway(account_id).await.ok()
-    }
-
-    fn parse_mutation_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        serde_json::from_value(request.args.clone()).map_err(|error| {
-            RuntimeError::with_details(
-                RuntimeErrorCode::InvalidMutation,
-                format!("invalid args for mutation '{}'", request.name),
-                serde_json::json!({ "error": error.to_string() }),
-            )
-        })
     }
 
     fn ensure_account_in_scope(
@@ -628,15 +588,21 @@ impl AuthorityRuntimeHandle {
     /// the optimistic assertion and flushes the outbox.
     ///
     /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// Accept a named message mutation onto the session (idempotency + history),
+    /// forward it up the backend link, and settle the session stream from the
+    /// backend's receipt. The `forward` future is the link's up-channel
+    /// (`BackendLink::forward_mutation`); its receipt carries the command's
+    /// events as `output` and the backend's confirmation id. Scope and history
+    /// are the runtime's (near-node) concern and are resolved before this call.
     async fn run_message_mutation<Fut>(
         &self,
         caller: RuntimeCaller,
         request: &MutationRequest,
         history: HistoryRecord,
-        action: Fut,
+        forward: Fut,
     ) -> Result<MutationReceipt, RuntimeError>
     where
-        Fut: std::future::Future<Output = Result<posthaste_domain::CommandAck, RuntimeError>>,
+        Fut: std::future::Future<Output = Result<MutationReceipt, RuntimeError>>,
     {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
@@ -649,20 +615,17 @@ impl AuthorityRuntimeHandle {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
-        match action.await {
-            Ok(result) => {
-                let output = serde_json::to_value(&result).map_err(|error| {
-                    RuntimeError::internal(
-                        format!("failed to serialize mutation output: {error}"),
-                        None,
-                    )
-                })?;
+        match forward.await {
+            Ok(backend_receipt) => {
+                // The backend already serialized the command's events as the
+                // receipt output (state-before-event: the effect is applied
+                // before the receipt returns); settle the session with it.
                 self.core.sessions.settle_mutation(
                     &session_id,
                     &mutation_id,
                     MutationSettlementState::Confirmed,
                     None,
-                    output,
+                    backend_receipt.output,
                 )
             }
             Err(error) => {
@@ -763,37 +726,6 @@ impl AuthorityRuntimeHandle {
         }))
     }
 
-    /// Resolve the account's mailbox for `role` and replace the message's
-    /// mailbox membership with it. Role resolution is runtime-owned so the
-    /// renderer submits role intent without looking up role mailboxes.
-    ///
-    /// @spec docs/state/mail/L1#message-change-assertions
-    async fn move_message_to_role(
-        &self,
-        account_id: AccountId,
-        message_id: MessageId,
-        role: String,
-    ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
-        let mailbox = self
-            .core
-            .service
-            .list_mailboxes(&account_id)?
-            .into_iter()
-            .find(|mailbox| mailbox.role.as_deref() == Some(role.as_str()))
-            .ok_or_else(|| {
-                RuntimeError::invalid_mutation(format!("account has no mailbox with role '{role}'"))
-            })?;
-        self.replace_message_mailboxes(
-            RuntimeCaller::system(),
-            account_id,
-            message_id,
-            ReplaceMailboxesCommand {
-                mailbox_ids: vec![mailbox.id],
-            },
-        )
-        .await
-    }
-
     fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
         if let Some(account_id) = &filter.account_id {
             if &event.account_id != account_id {
@@ -859,157 +791,81 @@ impl AuthorityRuntimeHandle {
             .core
             .sessions
             .session_scope(&session_id, caller.account_scope.as_deref())?;
-        match request.name.as_str() {
+        // Runtime (near-node) concerns: scope enforcement and undo-history
+        // capture, both per mutation. The command application itself is the
+        // backend's; it is forwarded up the link below, uniform across names.
+        let history = match request.name.as_str() {
             "message.setKeywords" => {
-                let args: MessageSetKeywordsMutationArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageSetKeywordsMutationArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let history = self
-                    .keyword_history(record, &args.source_id, &args.message_id, &args.command)
-                    .await?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.command,
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.keyword_history(record, &args.source_id, &args.message_id, &args.command)
+                    .await?
             }
             "message.setReadState" => {
-                let args: MessageSetReadStateArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageSetReadStateArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
                 let command = keyword_toggle("$seen", args.read);
-                let history = self
-                    .keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    command,
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?
             }
             "message.setFlaggedState" => {
-                let args: MessageSetFlaggedStateArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageSetFlaggedStateArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
                 let command = keyword_toggle("$flagged", args.flagged);
-                let history = self
-                    .keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    command,
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?
             }
             "message.setUserTags" => {
-                let args: MessageSetUserTagsArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageSetUserTagsArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
                 let command = SetKeywordsCommand {
                     add: args.add,
                     remove: args.remove,
                 };
-                let history = self
-                    .keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?;
-                let action = self.set_message_keywords(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    command,
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.keyword_history(record, &args.source_id, &args.message_id, &command)
+                    .await?
             }
             "message.moveToMailbox" => {
-                let args: MessageMoveToMailboxArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageMoveToMailboxArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let history = self
-                    .mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?;
-                let action = self.replace_message_mailboxes(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    ReplaceMailboxesCommand {
-                        mailbox_ids: vec![MailboxId(args.mailbox_id)],
-                    },
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?
             }
             "message.replaceMailboxes" => {
-                let args: MessageReplaceMailboxesArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageReplaceMailboxesArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let history = self
-                    .mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?;
-                let action = self.replace_message_mailboxes(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    ReplaceMailboxesCommand {
-                        mailbox_ids: args.mailbox_ids.into_iter().map(MailboxId).collect(),
-                    },
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?
             }
             "message.moveToRole" => {
-                let args: MessageMoveToRoleArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageMoveToRoleArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let history = self
-                    .mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?;
-                let action = self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    args.role,
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?
             }
             "message.archive" | "message.trash" | "message.restoreToInbox" => {
-                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageTargetArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let role = match request.name.as_str() {
-                    "message.archive" => "archive",
-                    "message.trash" => "trash",
-                    _ => "inbox",
-                };
-                let history = self
-                    .mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?;
-                let action = self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    role.to_string(),
-                );
-                self.run_message_mutation(caller, &request, history, action)
-                    .await
+                self.mailbox_history(record, &args.source_id, &args.message_id)
+                    .await?
             }
             "message.destroy" => {
-                let args: MessageTargetArgs = Self::parse_mutation_args(&request)?;
+                let args: MessageTargetArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
                 // Destroy is the one non-invertible message mutation.
-                let action = self.destroy_message(
-                    RuntimeCaller::system(),
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                );
-                self.run_message_mutation(caller, &request, HistoryRecord::Skip, action)
-                    .await
+                HistoryRecord::Skip
             }
-            _ => Err(RuntimeError::invalid_mutation(format!(
-                "unknown runtime mutation '{}'",
-                request.name
-            ))),
-        }
+            _ => {
+                return Err(RuntimeError::invalid_mutation(format!(
+                    "unknown runtime mutation '{}'",
+                    request.name
+                )))
+            }
+        };
+        // Up-channel: forward the named mutation to the backend far node.
+        let forward = self.core.backend_link.forward_mutation(request.clone());
+        self.run_message_mutation(caller, &request, history, forward)
+            .await
     }
 
     /// History plan for a keyword mutation: capture the inverse when this is a
@@ -1540,14 +1396,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: SetKeywordsCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let result = self
-            .core
-            .service
-            .set_keywords(&account_id, &message_id, &command)
-            .await?;
-        self.publish_events(&result.events);
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(result)
+        self.core.backend.set_keywords(account_id, message_id, command).await
     }
 
     async fn add_message_to_mailbox(
@@ -1558,14 +1407,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: AddToMailboxCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let result = self
-            .core
-            .service
-            .add_to_mailbox(&account_id, &message_id, &command)
-            .await?;
-        self.publish_events(&result.events);
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(result)
+        self.core.backend.add_to_mailbox(account_id, message_id, command).await
     }
 
     async fn remove_message_from_mailbox(
@@ -1576,14 +1418,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: RemoveFromMailboxCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let result = self
-            .core
-            .service
-            .remove_from_mailbox(&account_id, &message_id, &command)
-            .await?;
-        self.publish_events(&result.events);
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(result)
+        self.core
+            .backend
+            .remove_from_mailbox(account_id, message_id, command)
+            .await
     }
 
     async fn replace_message_mailboxes(
@@ -1594,14 +1432,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         command: ReplaceMailboxesCommand,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let result = self
-            .core
-            .service
-            .replace_mailboxes(&account_id, &message_id, &command)
-            .await?;
-        self.publish_events(&result.events);
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(result)
+        self.core
+            .backend
+            .replace_mailboxes(account_id, message_id, command)
+            .await
     }
 
     async fn destroy_message(
@@ -1611,14 +1445,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandAck, RuntimeError> {
         self.ensure_runtime_active()?;
-        let result = self
-            .core
-            .service
-            .destroy_message(&account_id, &message_id)
-            .await?;
-        self.publish_events(&result.events);
-        self.trigger_outbox_flush(&account_id).await;
-        Ok(result)
+        self.core.backend.destroy(account_id, message_id).await
     }
 
     async fn set_mailbox_role(
@@ -1629,14 +1456,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
-        let events = self
-            .core
-            .service
-            .set_mailbox_role(&account_id, &mailbox_id, role.as_deref(), gateway.as_ref())
-            .await?;
-        self.publish_events(&events);
-        Ok(self.core.service.list_mailboxes(&account_id)?)
+        self.core
+            .backend
+            .set_mailbox_role(account_id, mailbox_id, role)
+            .await
     }
 
     async fn get_message_detail(
