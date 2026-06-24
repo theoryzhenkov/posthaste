@@ -23,16 +23,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CommandAck, ConversationId,
-    ConversationView, DomainEvent, MailService, MailboxId, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceErrorKind,
-    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncTrigger, TagSummary,
+    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailService,
+    MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, ServiceErrorKind,
+    SetKeywordsCommand, SharedGateway, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    StoreError, SyncTrigger, TagSummary,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeAccountList,
-    RuntimeError, RuntimeErrorCode,
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, MutationRequest,
+    RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -130,6 +132,7 @@ pub(crate) struct MessageTargetArgs {
 /// applies message-state commands to them.
 pub(crate) struct Backend {
     service: Arc<MailService>,
+    store: Arc<dyn MailStore>,
     mail_queries: Arc<MailQueryService>,
     account_reads: Arc<AccountReadService>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
@@ -139,6 +142,7 @@ pub(crate) struct Backend {
 impl Backend {
     pub(crate) fn new(
         service: Arc<MailService>,
+        store: Arc<dyn MailStore>,
         mail_queries: Arc<MailQueryService>,
         account_reads: Arc<AccountReadService>,
         live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
@@ -146,11 +150,19 @@ impl Backend {
     ) -> Self {
         Self {
             service,
+            store,
             mail_queries,
             account_reads,
             live_accounts,
             event_sender,
         }
+    }
+
+    /// Resolve a best-effort gateway for the account, swallowing the error: the
+    /// draft/resource reads serve cached data offline when no live gateway is
+    /// available.
+    async fn optional_gateway(&self, account_id: &AccountId) -> Option<SharedGateway> {
+        self.live_accounts.gateway(account_id).await.ok()
     }
 
     /// Read channel: the account list.
@@ -218,6 +230,137 @@ impl Backend {
         scope: AccountScopeRequest,
     ) -> Result<Vec<TagSummary>, RuntimeError> {
         Ok(self.account_reads.list_tags(scope)?)
+    }
+
+    /// Read channel: the account's sender identity (resolving a live gateway).
+    pub(crate) async fn get_identity(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Identity, RuntimeError> {
+        let gateway = self.live_accounts.gateway(&account_id).await?;
+        Ok(self
+            .service
+            .fetch_identity(&account_id, gateway.as_ref())
+            .await?)
+    }
+
+    /// Read channel: reply/forward metadata for one message (resolving a live
+    /// gateway).
+    pub(crate) async fn get_reply_context(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<ReplyContext, RuntimeError> {
+        let gateway = self.live_accounts.gateway(&account_id).await?;
+        Ok(self
+            .service
+            .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
+            .await?)
+    }
+
+    /// Read channel: the cached sender addresses.
+    pub(crate) fn list_sender_addresses(
+        &self,
+    ) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
+        self.store
+            .list_sender_address_cache()
+            .map_err(store_error_to_runtime_error)
+    }
+
+    /// Read channel: an account's pending outbox operations.
+    pub(crate) fn list_pending_operations(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError> {
+        Ok(self.service.list_pending_operations(&account_id)?)
+    }
+
+    /// Read channel: replay the authoritative event log for a filter.
+    pub(crate) fn replay_events(
+        &self,
+        filter: EventFilter,
+    ) -> Result<Vec<DomainEvent>, RuntimeError> {
+        Ok(self.service.list_events(&filter)?)
+    }
+
+    /// Read channel: compose-ready content for resuming a draft. Lazily fetches
+    /// the body when a gateway is available, publishing the resulting events on
+    /// the down-channel.
+    pub(crate) async fn get_draft_content(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<DraftContent, RuntimeError> {
+        let gateway = self.optional_gateway(&account_id).await;
+        let result = self
+            .service
+            .get_draft_content(&account_id, &message_id, gateway.as_deref())
+            .await?;
+        self.publish_events(&result.events);
+        Ok(result.content)
+    }
+
+    /// Read channel: the raw bytes of a message resource — an attachment blob, or
+    /// the HTML/text body. Body resources return raw bytes (the serve layer
+    /// applies the per-kind transform); attachments may download from the
+    /// gateway. Lazily fetches detail when a gateway is available, publishing the
+    /// resulting events on the down-channel.
+    pub(crate) async fn get_message_resource(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError> {
+        let gateway = self.optional_gateway(&account_id).await;
+        let result = self
+            .service
+            .get_message_detail(&account_id, &message_id, gateway.as_deref())
+            .await?;
+        self.publish_events(&result.events);
+        let detail = result
+            .detail
+            .ok_or_else(|| RuntimeError::not_found("message detail not available"))?;
+        match kind {
+            MessageResourceKind::Attachment(attachment_id) => {
+                let attachment = detail
+                    .attachments
+                    .into_iter()
+                    .find(|attachment| attachment.id == attachment_id)
+                    .ok_or_else(|| RuntimeError::not_found("attachment not found"))?;
+                let gateway = gateway.ok_or_else(|| {
+                    RuntimeError::retryable(
+                        RuntimeErrorCode::ProviderUnavailable,
+                        format!("gateway unavailable for account {account_id}"),
+                    )
+                })?;
+                let bytes = self
+                    .service
+                    .download_blob(&account_id, &message_id, &attachment.blob_id, gateway.as_ref())
+                    .await?;
+                Ok(RuntimeResourceBytes {
+                    bytes,
+                    content_type: attachment.mime_type,
+                    filename: attachment.filename,
+                    inline_attachments: Vec::new(),
+                })
+            }
+            // Body resources return RAW bytes; the server serve layer applies the
+            // per-kind transform (HTML sanitization + inline-URL rewrite) before
+            // responding — the runtime never sanitizes. Body HTML carries its
+            // inline attachments so the server can rewrite `cid:` URLs.
+            MessageResourceKind::BodyHtml => Ok(RuntimeResourceBytes {
+                bytes: detail.body_html.unwrap_or_default().into_bytes(),
+                content_type: "text/html; charset=utf-8".to_string(),
+                filename: None,
+                inline_attachments: detail.attachments,
+            }),
+            MessageResourceKind::BodyText => Ok(RuntimeResourceBytes {
+                bytes: detail.body_text.unwrap_or_default().into_bytes(),
+                content_type: "text/plain; charset=utf-8".to_string(),
+                filename: None,
+                inline_attachments: Vec::new(),
+            }),
+        }
     }
 
     /// Read channel: compute a page of a mail-list query — the query engine is
@@ -545,6 +688,12 @@ impl Backend {
             ))),
         }
     }
+}
+
+/// Map a store-layer failure to an internal runtime error — the shape the
+/// runtime handle used before these reads moved to the far node.
+fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
+    RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
 }
 
 pub(crate) fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>

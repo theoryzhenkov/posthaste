@@ -17,9 +17,10 @@ use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, DomainEvent,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
+    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
+    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
@@ -29,8 +30,8 @@ use posthaste_link_contract::{
 use posthaste_runtime_contract::{AccountScopeRequest, RuntimeAccountList};
 use posthaste_link_core::MessageFoldState;
 use posthaste_runtime_contract::{
-    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, MutationSettlementState,
-    RuntimeError, RuntimeErrorCode, RuntimeMutationId,
+    MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
+    MutationSettlementState, RuntimeError, RuntimeErrorCode, RuntimeMutationId, RuntimeResourceBytes,
 };
 use tokio::sync::broadcast;
 
@@ -202,6 +203,52 @@ impl BackendApi for LocalBackend {
         scope: AccountScopeRequest,
     ) -> Result<Vec<TagSummary>, RuntimeError> {
         self.backend.list_tags(scope)
+    }
+
+    async fn get_identity(&self, account_id: AccountId) -> Result<Identity, RuntimeError> {
+        self.backend.get_identity(account_id).await
+    }
+
+    async fn get_reply_context(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<ReplyContext, RuntimeError> {
+        self.backend.get_reply_context(account_id, message_id).await
+    }
+
+    async fn list_sender_addresses(&self) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
+        self.backend.list_sender_addresses()
+    }
+
+    async fn list_pending_operations(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError> {
+        self.backend.list_pending_operations(account_id)
+    }
+
+    async fn replay_events(&self, filter: EventFilter) -> Result<Vec<DomainEvent>, RuntimeError> {
+        self.backend.replay_events(filter)
+    }
+
+    async fn get_draft_content(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<DraftContent, RuntimeError> {
+        self.backend.get_draft_content(account_id, message_id).await
+    }
+
+    async fn get_message_resource(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError> {
+        self.backend
+            .get_message_resource(account_id, message_id, kind)
+            .await
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
