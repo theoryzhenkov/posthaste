@@ -151,13 +151,13 @@ impl LinkTransport for InProcessTransport {
 /// base-assertion frames. This is what lets the backend live on another
 /// process or host; it is selected by config, the symmetric twin of the
 /// in-process transport.
-pub(crate) struct RemoteTransport {
+pub struct RemoteTransport {
     base_url: String,
     client: reqwest::Client,
 }
 
 impl RemoteTransport {
-    pub(crate) fn new(base_url: String) -> Self {
+    pub fn new(base_url: String) -> Self {
         Self {
             // Trim a trailing slash so `base_url + path` never doubles it.
             base_url: base_url.trim_end_matches('/').to_string(),

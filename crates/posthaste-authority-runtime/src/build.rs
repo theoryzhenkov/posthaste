@@ -152,6 +152,12 @@ pub struct AuthorityRuntimeBuild {
     ///
     /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#legacy-fields-temporary
     pub api_bridge: AuthorityRuntimeApiMigrationBridge,
+    /// The in-process runtime↔backend link. A split-backend host serves its
+    /// transport over the link wire (`link_router`) so a remote runtime can
+    /// connect; the in-process runtime already holds the same link internally.
+    ///
+    /// @spec docs/replication/L4#3-the-link-contract-backendlink
+    pub backend_link: BackendLink,
 }
 
 /// Temporary bridge for compatibility harnesses and migration handle constructors
@@ -286,7 +292,7 @@ pub async fn build_authority_runtime(
         service: service.clone(),
         store: store.clone(),
         backend,
-        backend_link,
+        backend_link: backend_link.clone(),
         event_sender: event_sender.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
@@ -305,6 +311,7 @@ pub async fn build_authority_runtime(
         account_supervisor,
         secret_store,
         api_bridge,
+        backend_link,
     })
 }
 

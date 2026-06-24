@@ -1,0 +1,88 @@
+//! The backend far-node HTTP surface: serves the runtime↔backend link wire.
+//!
+//! The symmetric inner twin of the client↔runtime API. Where that surface lets
+//! a remote client drive the runtime, this one lets a **remote runtime** drive
+//! the **backend** ([replication L4 §4](../replication/L4.md)): the up-channel is
+//! a `POST` of a named mutation, the down-channel an SSE stream of base-assertion
+//! frames. A split-backend host mounts this over the backend's in-process
+//! `BackendLink` transport (`AuthorityRuntimeBuild::backend_link`); a runtime
+//! configured with `transport = "remote"` connects to it via `RemoteTransport`.
+//!
+//! The wire paths and frame types are the shared contract
+//! ([`posthaste_link_contract`]) — one definition, both ends — so client and
+//! server cannot drift (assertion `one-link-transport`).
+//!
+//! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+
+use std::convert::Infallible;
+use std::sync::Arc;
+
+use axum::extract::{Query, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use futures_util::StreamExt;
+use posthaste_link_contract::{
+    DownFrame, LinkCoverage, LinkTransport, LINK_FORWARD_MUTATION_PATH, LINK_SUBSCRIBE_PATH,
+};
+use posthaste_runtime_contract::{MutationReceipt, MutationRequest};
+use serde::Deserialize;
+
+use crate::api::ApiError;
+
+#[derive(Clone)]
+struct LinkState {
+    transport: Arc<dyn LinkTransport>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubscribeQuery {
+    /// JSON-encoded [`LinkCoverage`]; absent means complete coverage.
+    coverage: Option<String>,
+}
+
+/// Up-channel: apply a forwarded named mutation and return the backend's receipt.
+async fn forward_mutation(
+    State(state): State<LinkState>,
+    Json(request): Json<MutationRequest>,
+) -> Result<Json<MutationReceipt>, ApiError> {
+    state
+        .transport
+        .forward_mutation(request)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+/// Down-channel: stream authoritative base-assertion frames as SSE.
+async fn subscribe(
+    State(state): State<LinkState>,
+    Query(query): Query<SubscribeQuery>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let coverage = query
+        .coverage
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or(LinkCoverage::Complete);
+    let stream = state
+        .transport
+        .subscribe(coverage)
+        .await
+        .map_err(ApiError::from_runtime_error)?;
+    Ok(Sse::new(stream.map(down_frame_to_sse)).keep_alive(KeepAlive::default()))
+}
+
+fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
+    Ok(Event::default()
+        .json_data(frame)
+        .unwrap_or_else(|_| Event::default().data("{}")))
+}
+
+/// Build the far-node link router over a transport — the backend's in-process
+/// `BackendLink` transport in a split deployment.
+pub fn link_router(transport: Arc<dyn LinkTransport>) -> Router {
+    Router::new()
+        .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
+        .route(LINK_SUBSCRIBE_PATH, get(subscribe))
+        .with_state(LinkState { transport })
+}

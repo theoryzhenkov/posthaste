@@ -32,6 +32,7 @@ posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain", features = ["openapi"] }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
+posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract", features = ["openapi"] }
 posthaste-store = { path = "../posthaste-store" }
@@ -52,7 +53,11 @@ utoipa-swagger-ui = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 http-body-util = "0.1"
+posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-link-core = { path = "../posthaste-link-core" }
+tokio = { workspace = true, features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
 
 [lints]
