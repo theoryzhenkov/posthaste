@@ -14,6 +14,12 @@ path = "src/main.rs"
 # behavior, so skip the otherwise empty libtest harness for this binary.
 test = false
 
+[[bin]]
+# The standalone backend role (L5 §4): serves only the authenticated link.
+name = "posthaste-backend"
+path = "src/bin/backend.rs"
+test = false
+
 [dependencies]
 ammonia = { workspace = true }
 async-stream = "0.3"

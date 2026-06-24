@@ -22,7 +22,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig, RemoteBackend,
+    build_authority_runtime, build_backend_node, AuthorityRuntimeBuildConfig, BackendTransportConfig,
+    RemoteBackend,
 };
 use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
@@ -480,5 +481,43 @@ async fn link_auth_requires_a_matching_bearer_token() {
     assert!(
         accounts.ids.contains(&account.id),
         "the authenticated read should see the backend's account"
+    );
+}
+
+// The `posthaste-backend` role: a STANDALONE backend far node (build_backend_node,
+// no runtime near node) served over the link drives reads AND writes — incl.
+// account CRUD — for a remote runtime.
+//
+// spec: docs/replication/L5
+#[tokio::test]
+async fn standalone_backend_node_serves_the_link() {
+    let node = build_backend_node(build_config(temp_root()))
+        .await
+        .expect("backend node builds standalone");
+
+    let router = link_router(node.transport(), LinkAuth::Disabled);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let transport = RemoteBackend::new(format!("http://{addr}"));
+
+    // Write over the link: create an account at the standalone backend.
+    let created = transport
+        .create_account(account_mutation("standalone-account"))
+        .await
+        .expect("create_account over the link");
+    assert_eq!(created.id.as_str(), "standalone-account");
+
+    // Read it back over the link.
+    let accounts = transport
+        .list_accounts()
+        .await
+        .expect("list_accounts over the link");
+    assert!(
+        accounts.ids.contains(&created.id),
+        "the standalone backend should serve the account it just created"
     );
 }

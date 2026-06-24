@@ -29,8 +29,9 @@ use axum::{middleware, Router};
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeHandle, BackendTransportConfig, RuntimeShutdownHandle,
+    build_authority_runtime, build_backend_node, AuthorityRuntimeApiMigrationBridge,
+    AuthorityRuntimeBuildConfig, AuthorityRuntimeHandle, BackendTransportConfig,
+    RuntimeShutdownHandle,
 };
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{DomainEvent, MailService, MailStore, SecretStore};
@@ -57,12 +58,14 @@ mod router;
 mod secure_file;
 mod spa;
 mod startup;
+mod startup_backend;
 
 pub use app_state::{AppState, ServerConfig, ServerHandle};
 pub use link::{link_router, LinkAuth};
 pub use router::build_api_router;
 pub use secure_file::write_secure_file;
 pub use startup::start_server;
+pub use startup_backend::{start_backend, BackendServerHandle};
 
 pub(crate) use spa::spa_fallback_service;
 

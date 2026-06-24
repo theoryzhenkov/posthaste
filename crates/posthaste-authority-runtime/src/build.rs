@@ -236,6 +236,46 @@ pub async fn build_authority_runtime(
     Ok(build_runtime(backend, config))
 }
 
+/// A standalone backend far node ([replication L5 §4](../replication/L5.md),
+/// assertion `backend-builds-standalone`): the store + service + account
+/// supervisor + the L4 [`Backend`], with NO runtime near node. The
+/// `posthaste-backend` role binary serves [`transport`](BackendNode::transport)
+/// over `link_router` so a remote runtime drives it across the link.
+pub struct BackendNode {
+    transport: Arc<dyn BackendApi>,
+    /// Held so the supervisor's account tasks keep running for the node's life
+    /// (also reachable through the transport's far node).
+    _account_supervisor: Arc<AccountSupervisor>,
+    runtime_status: RuntimeStatus,
+}
+
+impl BackendNode {
+    /// The in-process link transport over this backend — hand to `link_router`.
+    pub fn transport(&self) -> Arc<dyn BackendApi> {
+        self.transport.clone()
+    }
+
+    /// The backend's startup status (store readiness + account count).
+    pub fn runtime_status(&self) -> &RuntimeStatus {
+        &self.runtime_status
+    }
+}
+
+/// Build a standalone backend far node (no runtime). The far node is live after
+/// this returns (the supervisor has started its accounts); serve
+/// [`BackendNode::transport`] over the link to expose it to a remote runtime.
+pub async fn build_backend_node(
+    config: AuthorityRuntimeBuildConfig,
+) -> Result<BackendNode, AuthorityRuntimeBuildError> {
+    let backend = build_backend(&config).await?;
+    let transport: Arc<dyn BackendApi> = Arc::new(LocalBackend::new(backend.backend.clone()));
+    Ok(BackendNode {
+        transport,
+        _account_supervisor: backend.account_supervisor.clone(),
+        runtime_status: backend.runtime_status,
+    })
+}
+
 /// The backend far-node graph: store + service + providers (the account
 /// supervisor) + the L4 [`Backend`], built with no runtime near node. The
 /// `posthaste-backend` binary serves this over the link; the bundled/daemon
