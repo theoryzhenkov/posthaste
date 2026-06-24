@@ -37,11 +37,9 @@ impl MailQueryService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        let result = self
-            .service
-            .get_message_detail(account_id, message_id, None)
-            .await?;
-        Ok(result.detail)
+        // Body-free: the messageDetail view serves header + attachments; the
+        // body is the separate `/body` lazy resource.
+        Ok(self.service.get_message_header(account_id, message_id)?)
     }
 
     /// The overlay-folded conversation (its messages with pending assertions
