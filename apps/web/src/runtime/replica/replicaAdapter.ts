@@ -16,6 +16,8 @@ import type {
   RuntimeFrame,
   RuntimeFrameHandlers,
   RuntimeFrameSubscriptionRequest,
+  RuntimeMailListDelta,
+  RuntimeMailListRowState,
   RuntimeMailListViewState,
   RuntimeOpenMessageListViewResult,
   RuntimeRunMutationRequest,
@@ -50,6 +52,26 @@ interface ViewEntry {
   membershipMailbox: string | null
   lastSnapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
   lastProjectionJson: string
+}
+
+/**
+ * Reconcile a runtime mail-list delta (replication L6) into a served row set:
+ * when `order` is present, reorder to it and drop rows whose key is absent;
+ * then apply `upserts` by `rowKey`. Produces the same served base a whole
+ * `viewReplace` would, which the replica then re-ingests (keeping pending).
+ */
+function applyRuntimeDelta(
+  rows: RuntimeMailListRowState[],
+  delta: RuntimeMailListDelta,
+): RuntimeMailListRowState[] {
+  const upsertByKey = new Map(delta.upserts.map((row) => [row.rowKey, row]))
+  if (delta.order) {
+    const heldByKey = new Map(rows.map((row) => [row.rowKey, row]))
+    return delta.order
+      .map((key) => upsertByKey.get(key) ?? heldByKey.get(key))
+      .filter((row): row is RuntimeMailListRowState => row != null)
+  }
+  return rows.map((row) => upsertByKey.get(row.rowKey) ?? row)
 }
 
 /** A message mutation the replica can fold, or `null` to pass through unchanged. */
@@ -216,6 +238,38 @@ class ReplicaController {
         entry.lastSnapshot = frame.snapshot
         const snapshot = this.projectSnapshot(entry)
         handlers.onFrame({ ...frame, snapshot })
+        return
+      }
+      case 'viewDelta': {
+        const entry = this.views.get(frame.viewId)
+        if (!entry) {
+          handlers.onFrame(frame)
+          return
+        }
+        // Fold the runtime delta into the held served base, then re-ingest the
+        // reconstructed base (replace_base keeps unconfirmed optimism). Emit the
+        // folded result as a viewReplace; emitting deltas to the renderer is a
+        // later step (L6 U3c).
+        const rows = applyRuntimeDelta(
+          entry.lastSnapshot.data.rows,
+          frame.delta,
+        )
+        entry.lastSnapshot = {
+          ...entry.lastSnapshot,
+          revision: frame.revision,
+          data: { ...entry.lastSnapshot.data, rows },
+        }
+        entry.handle.ingestJson(
+          JSON.stringify(replicaRowsFromViewState(entry.lastSnapshot.data)),
+        )
+        const snapshot = this.projectSnapshot(entry)
+        handlers.onFrame({
+          type: 'viewReplace',
+          sessionSeq: frame.sessionSeq,
+          viewId: frame.viewId,
+          revision: frame.revision,
+          snapshot,
+        })
         return
       }
       case 'mutationSettlement': {
