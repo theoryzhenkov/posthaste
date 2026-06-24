@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use posthaste_domain::{AccountId, MessageId, MessageSummary};
+use posthaste_link_contract::BackendLink;
 use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError};
 
 use crate::backend::Backend;
@@ -68,6 +69,40 @@ impl ReadSource for LocalReadSource {
         message_id: &MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
         self.backend.current_summary(account_id, message_id).await
+    }
+}
+
+/// The split read source: reads through to the backend over the link. W4c uses
+/// it with a passthrough policy (read-through on every read — always fresh, no
+/// retention); a retaining policy waits on the down-channel coherence of W4d so
+/// a cached entry is never stale.
+pub(crate) struct RemoteReadSource {
+    link: BackendLink,
+}
+
+impl RemoteReadSource {
+    pub(crate) fn new(link: BackendLink) -> Self {
+        Self { link }
+    }
+}
+
+#[async_trait]
+impl ReadSource for RemoteReadSource {
+    async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        self.link.query_mail_page(request).await
+    }
+
+    async fn current_summary(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        self.link
+            .current_summary(account_id.clone(), message_id.clone())
+            .await
     }
 }
 

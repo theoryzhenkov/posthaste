@@ -143,12 +143,21 @@ backend's computation directly; `RemoteTransport` carries it as HTTP + SSE.
   `/v1/link/query` + `/v1/link/summary`. A bare `RemoteTransport` reading a real
   backend query over the link is proven (`backend_link_split`). Co-located
   unchanged (the runtime still reads through `LocalReadSource` directly).
-- **W4c — `RemoteReadSource` + retaining policy + `link_router` reads.** A split
-  runtime reads through over the link and retains what it fetched; the split
-  test now serves a **read** from the backend (the c3 twin). The
-  `MailListReplica` caches served rows, the outbox folds, the client is served.
-- **W4d — coherence + eviction + coverage.** The down-channel keeps cached
-  entries live; eviction under storage pressure; `RuntimeCoverage` reports what a
+- **W4c — `RemoteReadSource` (read-through).** *(Landed.)* `read.rs` gains
+  `RemoteReadSource` (reads through the `BackendLink`'s read methods);
+  `select_read_source` picks it from the same config that picks the transport
+  (`Remote` → read through, `InProcess` → local; the transport *override* stays
+  write-only). A `Remote` runtime now serves a mail-list view whose rows are the
+  backend's computed query, with an empty local store
+  (`backend_link_split::remote_runtime_serves_a_mail_list_view_from_the_backend`)
+  — the read twin of the c3 write proof; undo-history (`current_summary`) reads
+  through too, lifting the c3 blocker. The policy is **passthrough**
+  (read-through every time, always fresh): a *retaining* policy is unsafe without
+  coherence, so retention moves to W4d.
+- **W4d — retaining policy + coherence + eviction + coverage.** A retaining
+  `ReadCache` policy that serves hits locally, kept correct by the down-channel
+  (a cached entry dropped/updated when the backend says it changed — never
+  TTL-stale); eviction under storage pressure; `RuntimeCoverage` reports what a
   split runtime holds; reconnect/snapshot recovery.
 - **W4e — policy surface + control config.** Expose the policy (static:
   passthrough vs retaining) in the desktop control config alongside the per-link

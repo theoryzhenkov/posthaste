@@ -282,6 +282,25 @@ impl BackendLink {
         self.transport.subscribe(coverage).await
     }
 
+    /// Read channel: read a mail-list query page through to the backend (the
+    /// authority owns the query engine). A near node reads through here on a
+    /// cache miss.
+    pub async fn query_mail_page(
+        &self,
+        request: MailQueryRequest,
+    ) -> Result<MailQueryPage, RuntimeError> {
+        self.transport.query_mail_page(request).await
+    }
+
+    /// Read channel: the current summary of one message through to the backend.
+    pub async fn current_summary(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<Option<MessageSummary>, RuntimeError> {
+        self.transport.current_summary(account_id, message_id).await
+    }
+
     /// The underlying transport, for callers that need to inspect or hold it.
     pub fn transport(&self) -> &Arc<dyn LinkTransport> {
         &self.transport

@@ -30,9 +30,9 @@ use posthaste_domain::{
 };
 use posthaste_link_contract::{LinkCoverage, LinkTransport};
 use posthaste_runtime_contract::{
-    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailPresentationRequest,
-    MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller, RuntimeCore,
-    SecretWriteMutation,
+    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
+    MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
+    RuntimeCore, SecretWriteMutation, ViewDescriptor,
 };
 use posthaste_server::link_router;
 
@@ -191,6 +191,65 @@ async fn remote_transport_reads_a_real_query_over_the_link() {
 
     // The read channel is distinct from the down-channel; subscribe still works.
     let _ = transport.subscribe(LinkCoverage::Complete).await;
+}
+
+fn mail_list_descriptor(query: &str) -> ViewDescriptor {
+    let request = MailQueryRequest {
+        query: query.to_string(),
+        presentation: MailPresentationRequest::Messages {
+            limit: Some(10),
+            cursor: None,
+            sort_field: MessageSortField::Date,
+            sort_direction: SortDirection::Desc,
+        },
+        visibility: None,
+    };
+    ViewDescriptor {
+        family: "mailList".to_string(),
+        payload: serde_json::to_value(request).unwrap(),
+    }
+}
+
+// spec: docs/eph/DESIGN-L4-read-replication#2-the-model-one-read-through-cache-policy-per-link
+#[tokio::test]
+async fn remote_runtime_serves_a_mail_list_view_from_the_backend() {
+    // The backend holds the data; a Remote runtime holds none of it locally.
+    let backend = build_authority_runtime(build_config(temp_root()))
+        .await
+        .expect("backend runtime builds");
+    let account = backend
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("view-account"))
+        .await
+        .expect("account creates");
+    seed_inbox_message(&backend, &account.id, "m-view");
+    let base_url = serve_link(&backend).await;
+
+    let remote = build_authority_runtime(build_config(temp_root()).with_backend_transport(
+        BackendTransportConfig::Remote {
+            base_url: base_url.clone(),
+        },
+    ))
+    .await
+    .expect("remote runtime builds");
+
+    // The Remote runtime opens a mail-list view. Its read source reads through
+    // the link, so the rows are the backend's computed query — even though the
+    // runtime's own store is empty.
+    let snapshot = remote
+        .handle
+        .open_view(
+            RuntimeCaller::test(),
+            mail_list_descriptor(&format!("in:{}/inbox", account.id.as_str())),
+        )
+        .await
+        .expect("mail-list view opens over the link");
+    let state: MailListViewState =
+        serde_json::from_value(snapshot.data).expect("mail-list state");
+    assert!(
+        state.rows.iter().any(|row| row.projection["id"] == "m-view"),
+        "the split runtime should serve the backend's rows, read through the link"
+    );
 }
 
 #[tokio::test]

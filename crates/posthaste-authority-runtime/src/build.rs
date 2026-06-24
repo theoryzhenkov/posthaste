@@ -38,7 +38,7 @@ use crate::backend::{
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
-use crate::read::{LocalReadSource, ReadCache};
+use crate::read::{LocalReadSource, ReadCache, ReadSource, RemoteReadSource};
 use crate::transport::{InProcessTransport, RemoteTransport};
 use posthaste_link_contract::LinkTransport;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
@@ -301,9 +301,16 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
         event_sender.clone(),
     ));
-    let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+    let backend_link = select_backend_link(
+        &config.backend_transport,
+        config.backend_transport_override.clone(),
         backend.clone(),
-    ))));
+    );
+    let reads = Arc::new(ReadCache::passthrough(select_read_source(
+        &config.backend_transport,
+        &backend,
+        &backend_link,
+    )));
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
         account_reads.clone(),
@@ -312,11 +319,6 @@ pub async fn build_authority_runtime(
         reads.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
-    let backend_link = select_backend_link(
-        &config.backend_transport,
-        config.backend_transport_override.clone(),
-        backend.clone(),
-    );
     let core = Arc::new(AuthorityRuntimeCore {
         service: service.clone(),
         store: store.clone(),
@@ -350,6 +352,23 @@ pub async fn build_authority_runtime(
 /// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
 /// [`RemoteTransport`] pointed at a backend serving the link wire.
+/// Pick the runtime's read source from the same config that picks the transport.
+/// `Remote` reads through the link; `InProcess` reads the co-located far node
+/// directly. The transport *override* (a write/link test seam) does not change
+/// the read source — reads follow the deployment's transport choice.
+fn select_read_source(
+    transport: &BackendTransportConfig,
+    backend: &Arc<Backend>,
+    backend_link: &BackendLink,
+) -> Arc<dyn ReadSource> {
+    match transport {
+        BackendTransportConfig::Remote { .. } => {
+            Arc::new(RemoteReadSource::new(backend_link.clone()))
+        }
+        BackendTransportConfig::InProcess => Arc::new(LocalReadSource::new(backend.clone())),
+    }
+}
+
 fn select_backend_link(
     transport: &BackendTransportConfig,
     override_transport: Option<Arc<dyn LinkTransport>>,
