@@ -399,6 +399,12 @@ pub trait BackendApi: Send + Sync {
         Err(read_channel_unsupported())
     }
 
+    /// Read channel: the backend's count of live (running) accounts, for the
+    /// runtime status. `None` when the backend does not track it.
+    async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
     // ===== Write channel: typed backend commands =====
     //
     // The named up-channel ([`forward_mutation`](Self::forward_mutation)) carries

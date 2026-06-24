@@ -108,6 +108,11 @@ impl ReadCache {
         self.backend.conversation(conversation_id.clone()).await
     }
 
+    /// Read the backend's live account count (passthrough; status metadata).
+    pub(crate) async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
+        self.backend.account_count().await
+    }
+
     /// Account/config reads through the backend (passthrough; not cached — these
     /// are config metadata, re-read on demand).
     pub(crate) async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
