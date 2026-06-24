@@ -420,6 +420,12 @@ impl Backend {
         self.mail_queries.conversation(conversation_id)
     }
 
+    /// Read channel: the count of live (running) accounts (the supervisor's),
+    /// for the runtime status.
+    pub(crate) fn account_count(&self) -> Option<usize> {
+        self.live_accounts.account_count()
+    }
+
     /// Publish authoritative domain events on the down-channel broadcast. In the
     /// co-located deployment this is the same event bus the runtime's views and
     /// the SSE event stream already consume.
