@@ -98,19 +98,15 @@ pub async fn get_message(
         )
         .await
         .map_err(ApiError::from_runtime_error)?;
-    let mut detail = result.detail.ok_or_else(|| {
+    let detail = result.detail.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
             ApiErrorCode::NotFound,
             "message detail not available",
         )
     })?;
-    // The body is a separate lazy resource (`GET .../body`), sanitized at that
-    // single chokepoint. The detail response carries header + attachments only,
-    // so it never ships the body and the body is never served unsanitized.
-    detail.body_html = None;
-    detail.body_text = None;
-    detail.raw_message = None;
+    // Body-free by construction: the detail read (get_message_header) never loads
+    // the body — it is the separate, sanitized `/body` lazy resource.
     Ok(Json(detail))
 }
 

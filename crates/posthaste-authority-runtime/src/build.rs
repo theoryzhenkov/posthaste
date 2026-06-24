@@ -1646,16 +1646,17 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::CommandResult, RuntimeError> {
         self.ensure_runtime_active()?;
-        // Gateway-less: the detail read serves header + cached attachments only.
-        // The body is a separate lazy resource (get_message_resource / `/body`),
-        // so opening a message no longer provider-fetches the body inline.
-        let result = self
+        // Body-free: the detail read serves header + cached attachments only and
+        // never loads the body (it is the separate `/body` lazy resource), so
+        // opening a message neither provider-fetches nor materializes the body.
+        let detail = self
             .core
             .service
-            .get_message_detail(&account_id, &message_id, None)
-            .await?;
-        self.publish_events(&result.events);
-        Ok(result)
+            .get_message_header(&account_id, &message_id)?;
+        Ok(posthaste_domain::CommandResult {
+            detail,
+            events: Vec::new(),
+        })
     }
 
     async fn get_draft_content(
