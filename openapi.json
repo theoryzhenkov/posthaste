@@ -5288,6 +5288,65 @@
           }
         }
       },
+      "MailListDelta": {
+        "type": "object",
+        "description": "An incremental mail-list view update ([replication L6](../../replication/L6.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nsession that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
+        "required": [
+          "upserts"
+        ],
+        "properties": {
+          "order": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The new full row order (row keys), when it changed (add/remove/reorder);\n`None` when unchanged. Rows whose key is absent from a present `order` are\nremoved."
+          },
+          "upserts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailListRowState"
+            },
+            "description": "Rows that are new or whose content changed, keyed by `row_key`."
+          }
+        }
+      },
+      "MailListRowState": {
+        "type": "object",
+        "required": [
+          "rowKey",
+          "orderKey"
+        ],
+        "properties": {
+          "orderKey": {
+            "type": "string"
+          },
+          "pendingMarkers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeMutationId"
+            }
+          },
+          "projection": {
+            "type": "object"
+          },
+          "resourceRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rowKey": {
+            "type": "string"
+          },
+          "sortKey": {
+            "type": "object"
+          }
+        }
+      },
       "MailboxId": {
         "type": "string",
         "description": "Opaque server-assigned identifier for a mailbox (folder or label).\n\n@spec docs/L1-jmap#core-types"
@@ -6476,6 +6535,37 @@
                 "type": "string",
                 "enum": [
                   "viewReplace"
+                ]
+              },
+              "viewId": {
+                "$ref": "#/components/schemas/ViewId"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An incremental mail-list update: only the rows that changed since the\nlast snapshot, for a session that opted into deltas\n([replication L6](../../replication/L6.md)). Replaces a whole `ViewReplace`\nfor row-local changes (flags, reads, removals).",
+            "required": [
+              "sessionSeq",
+              "viewId",
+              "revision",
+              "delta",
+              "type"
+            ],
+            "properties": {
+              "delta": {
+                "$ref": "#/components/schemas/MailListDelta"
+              },
+              "revision": {
+                "$ref": "#/components/schemas/ViewRevision"
+              },
+              "sessionSeq": {
+                "$ref": "#/components/schemas/RuntimeSessionSeq"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "viewDelta"
                 ]
               },
               "viewId": {
