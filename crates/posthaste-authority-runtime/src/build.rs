@@ -391,7 +391,6 @@ pub(crate) fn build_runtime(
         ));
     }
     let views = Arc::new(ViewRegistry::new(
-        mail_queries.clone(),
         account_reads.clone(),
         event_sender.clone(),
         outbox.clone(),
@@ -617,7 +616,6 @@ impl AuthorityRuntimeHandle {
             backend.clone(),
         ))));
         let views = Arc::new(ViewRegistry::new(
-            mail_queries.clone(),
             account_reads.clone(),
             api_bridge.event_sender.clone(),
             outbox.clone(),

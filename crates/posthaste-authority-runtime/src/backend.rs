@@ -22,9 +22,9 @@
 use std::sync::Arc;
 
 use posthaste_domain::{
-    AccountId, AddToMailboxCommand, CommandAck, DomainEvent, MailService, MailboxId, MailboxSummary,
-    MessageId, MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand,
-    SetKeywordsCommand, SyncTrigger,
+    AccountId, AddToMailboxCommand, CommandAck, ConversationId, ConversationView, DomainEvent,
+    MailService, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, SetKeywordsCommand, SyncTrigger,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
@@ -166,6 +166,24 @@ impl Backend {
             .get_message_detail(account_id, message_id, None)
             .await?;
         Ok(result.detail.map(|detail| detail.summary))
+    }
+
+    /// Read channel: a message's detail (header + attachments, body-free) for the
+    /// `messageDetail` view.
+    pub(crate) async fn message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        self.mail_queries.message_detail(account_id, message_id).await
+    }
+
+    /// Read channel: an overlay-folded conversation for the `conversation` view.
+    pub(crate) fn conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.mail_queries.conversation(conversation_id)
     }
 
     /// Publish authoritative domain events on the down-channel broadcast. In the
