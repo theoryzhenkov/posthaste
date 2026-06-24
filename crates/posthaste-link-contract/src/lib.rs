@@ -32,6 +32,16 @@ use serde::{Deserialize, Serialize};
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{MutationReceipt, MutationRequest, RuntimeError};
 
+/// Wire path for the link up-channel: a remote near node `POST`s a
+/// [`MutationRequest`] (JSON) here and receives a [`MutationReceipt`]. Shared by
+/// the remote transport client and the far-node HTTP surface so the two cannot
+/// drift ([replication L4 §4](../replication/L4.md)).
+pub const LINK_FORWARD_MUTATION_PATH: &str = "/v1/link/mutations";
+
+/// Wire path for the link down-channel: a remote near node opens an SSE stream
+/// here whose `data:` frames are JSON [`DownFrame`]s.
+pub const LINK_SUBSCRIBE_PATH: &str = "/v1/link/subscribe";
+
 /// One authoritative base update for a single message, carried on the
 /// down-channel ([replication L1 §5.1](../replication/L1.md)). The near node
 /// rebases its base cache on each: a new asserted confirmed state, or a removal.

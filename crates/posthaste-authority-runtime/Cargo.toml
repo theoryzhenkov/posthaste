@@ -19,9 +19,12 @@ posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain" }
 posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
+posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
+reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -30,6 +33,11 @@ tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true }
 
 [lints]
 workspace = true
