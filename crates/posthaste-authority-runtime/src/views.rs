@@ -69,6 +69,10 @@ pub(crate) struct ViewRegistry {
     mail_queries: Arc<MailQueryService>,
     account_reads: Arc<AccountReadService>,
     event_sender: broadcast::Sender<DomainEvent>,
+    /// The runtime's outbox toward the backend, folded over mail-list recomputes
+    /// so served views are optimistic over forwarded-but-unconfirmed mutations
+    /// ([replication L4 §4.3](../replication/L4.md)).
+    outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
     views: Mutex<HashMap<ViewId, StoredView>>,
     next_view_id: AtomicU64,
 }
@@ -87,11 +91,13 @@ impl ViewRegistry {
         mail_queries: Arc<MailQueryService>,
         account_reads: Arc<AccountReadService>,
         event_sender: broadcast::Sender<DomainEvent>,
+        outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
     ) -> Self {
         Self {
             mail_queries,
             account_reads,
             event_sender,
+            outbox,
             views: Mutex::new(HashMap::new()),
             next_view_id: AtomicU64::new(1),
         }
@@ -372,7 +378,12 @@ impl ViewRegistry {
         let (data, read_watermark, coverage) = match kind {
             ViewKind::MailList(request) => {
                 let page = self.mail_queries.query_mail_page(request.clone()).await?;
-                let state = mail_list_state(request, page)?;
+                let mut state = mail_list_state(request, page)?;
+                // Fold the runtime→backend outbox: served rows are optimistic
+                // over forwarded-but-unconfirmed mutations. A no-op when the
+                // outbox is empty (the in-process default), so co-located
+                // behavior is unchanged (`colocated-unchanged`).
+                crate::near_node::apply_outbox_overlay(&mut state, &self.outbox.snapshot());
                 let read_watermark = state.read_watermark.clone();
                 let coverage = state.coverage.clone();
                 let data = serde_json::to_value(state).map_err(|error| {

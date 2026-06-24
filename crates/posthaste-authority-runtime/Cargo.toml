@@ -21,6 +21,7 @@ posthaste-engine = { path = "../posthaste-engine" }
 posthaste-imap = { path = "../posthaste-imap" }
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-link-replica = { path = "../posthaste-link-replica" }
 posthaste-observability = { path = "../posthaste-observability" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }

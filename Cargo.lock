@@ -4059,6 +4059,7 @@ dependencies = [
  "posthaste-imap",
  "posthaste-link-contract",
  "posthaste-link-core",
+ "posthaste-link-replica",
  "posthaste-observability",
  "posthaste-runtime-contract",
  "posthaste-store",
