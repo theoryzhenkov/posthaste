@@ -18,9 +18,11 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use posthaste_domain::{AccountId, MessageId, MessageSummary};
+use posthaste_domain::{
+    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+};
 use posthaste_link_contract::{BackendLink, DownFrame, LinkCoverage};
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError};
+use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, RuntimeError, RuntimeErrorCode};
 
 use crate::backend::Backend;
 
@@ -41,6 +43,33 @@ pub(crate) trait ReadSource: Send + Sync {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError>;
+
+    /// A message's detail (header + attachments) for the `messageDetail` view.
+    /// Defaults to unsupported so a source carries it only when wired.
+    async fn message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(read_unsupported())
+    }
+
+    /// An overlay-folded conversation for the `conversation` view.
+    async fn conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        let _ = conversation_id;
+        Err(read_unsupported())
+    }
+}
+
+fn read_unsupported() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::Internal,
+        "read source does not carry this read",
+    )
 }
 
 /// The co-located read source: calls the in-process backend far node directly
@@ -71,6 +100,21 @@ impl ReadSource for LocalReadSource {
         message_id: &MessageId,
     ) -> Result<Option<MessageSummary>, RuntimeError> {
         self.backend.current_summary(account_id, message_id).await
+    }
+
+    async fn message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        self.backend.message_detail(account_id, message_id).await
+    }
+
+    async fn conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.backend.conversation(conversation_id)
     }
 }
 
@@ -161,6 +205,24 @@ impl ReadCache {
             }
         }
         Ok(page)
+    }
+
+    /// Read a message's detail through the source (passthrough; the detail view
+    /// is recomputed per open, so it is not cached here).
+    pub(crate) async fn message_detail(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, RuntimeError> {
+        self.source.message_detail(account_id, message_id).await
+    }
+
+    /// Read a conversation through the source (passthrough).
+    pub(crate) async fn conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<ConversationView, RuntimeError> {
+        self.source.conversation(conversation_id).await
     }
 
     pub(crate) async fn current_summary(
