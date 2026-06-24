@@ -19,18 +19,20 @@
 //!
 //! @spec docs/replication/L4#3-the-link-contract-backendlink
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CommandAck, ConversationId,
     ConversationView, DomainEvent, MailService, MailboxId, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, SetKeywordsCommand,
-    SyncTrigger,
+    MessageSummary, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ServiceErrorKind,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncTrigger, TagSummary,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
 use posthaste_runtime_contract::{
-    MailQueryPage, MailQueryRequest, MutationRequest, RuntimeAccountList, RuntimeError,
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeAccountList,
+    RuntimeError, RuntimeErrorCode,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -167,6 +169,55 @@ impl Backend {
     /// Read channel: the application settings.
     pub(crate) fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
         Ok(self.account_reads.app_settings()?)
+    }
+
+    /// Read channel: resolve an account scope to concrete ids.
+    pub(crate) fn resolve_account_scope(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<AccountId>, RuntimeError> {
+        Ok(self.account_reads.resolve_account_scope(scope)?)
+    }
+
+    /// Read channel: mailboxes per account for a scope.
+    pub(crate) fn list_mailboxes(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError> {
+        self.account_reads.list_mailboxes(scope).map_err(|error| {
+            if error.kind() == ServiceErrorKind::NotFound {
+                RuntimeError::with_details(
+                    RuntimeErrorCode::NotFound,
+                    "account not found",
+                    serde_json::json!({}),
+                )
+            } else {
+                error.into()
+            }
+        })
+    }
+
+    /// Read channel: the smart-mailbox summaries.
+    pub(crate) fn list_smart_mailboxes(
+        &self,
+    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        Ok(self.account_reads.list_smart_mailboxes()?)
+    }
+
+    /// Read channel: one smart mailbox.
+    pub(crate) fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        Ok(self.account_reads.get_smart_mailbox(&smart_mailbox_id)?)
+    }
+
+    /// Read channel: the tag summaries for a scope.
+    pub(crate) fn list_tags(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<TagSummary>, RuntimeError> {
+        Ok(self.account_reads.list_tags(scope)?)
     }
 
     /// Read channel: compute a page of a mail-list query — the query engine is

@@ -29,14 +29,17 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeMap;
+
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MessageDetail,
-    MessageId, MessageSummary,
+    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MailboxSummary,
+    MessageDetail, MessageId, MessageSummary, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
-    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeAccountList,
-    RuntimeError, RuntimeErrorCode,
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
+    RuntimeAccountList, RuntimeError, RuntimeErrorCode,
 };
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
@@ -284,6 +287,47 @@ pub trait BackendApi: Send + Sync {
 
     /// Read channel: the application settings.
     async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: resolve an account scope to concrete account ids.
+    async fn resolve_account_scope(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<AccountId>, RuntimeError> {
+        let _ = scope;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: mailboxes per account for a scope.
+    async fn list_mailboxes(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<BTreeMap<AccountId, Vec<MailboxSummary>>, RuntimeError> {
+        let _ = scope;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the smart-mailbox summaries.
+    async fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: one smart mailbox.
+    async fn get_smart_mailbox(
+        &self,
+        smart_mailbox_id: SmartMailboxId,
+    ) -> Result<SmartMailbox, RuntimeError> {
+        let _ = smart_mailbox_id;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the tag summaries for a scope.
+    async fn list_tags(
+        &self,
+        scope: AccountScopeRequest,
+    ) -> Result<Vec<TagSummary>, RuntimeError> {
+        let _ = scope;
         Err(read_channel_unsupported())
     }
 }
