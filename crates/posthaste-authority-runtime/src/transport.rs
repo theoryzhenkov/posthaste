@@ -17,10 +17,11 @@ use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
-    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
@@ -249,6 +250,63 @@ impl BackendApi for LocalBackend {
         self.backend
             .get_message_resource(account_id, message_id, kind)
             .await
+    }
+
+    async fn set_keywords(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: SetKeywordsCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.backend.set_keywords(account_id, message_id, command).await
+    }
+
+    async fn add_to_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: AddToMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.backend.add_to_mailbox(account_id, message_id, command).await
+    }
+
+    async fn remove_from_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: RemoveFromMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.backend
+            .remove_from_mailbox(account_id, message_id, command)
+            .await
+    }
+
+    async fn replace_mailboxes(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: ReplaceMailboxesCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.backend
+            .replace_mailboxes(account_id, message_id, command)
+            .await
+    }
+
+    async fn destroy_message(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.backend.destroy(account_id, message_id).await
+    }
+
+    async fn set_mailbox_role(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        role: Option<String>,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.backend.set_mailbox_role(account_id, mailbox_id, role).await
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
