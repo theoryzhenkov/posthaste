@@ -27,10 +27,10 @@ mod views;
 
 pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{
-    build_authority_runtime, build_backend_node, AuthorityRuntimeApiMigrationBridge,
-    AuthorityRuntimeBuild, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
-    AuthorityRuntimeHandle, AuthorityRuntimeShutdownError, BackendNode, BackendTransportConfig,
-    RuntimeShutdownHandle,
+    build_authority_runtime, build_backend_node, build_remote_runtime,
+    AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuild, AuthorityRuntimeBuildConfig,
+    AuthorityRuntimeBuildError, AuthorityRuntimeHandle, AuthorityRuntimeShutdownError, BackendNode,
+    BackendTransportConfig, RemoteRuntimeBuild, RuntimeShutdownHandle,
 };
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
 pub use transport::RemoteBackend;

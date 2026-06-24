@@ -22,15 +22,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
-    build_authority_runtime, build_backend_node, AuthorityRuntimeBuildConfig, BackendTransportConfig,
-    RemoteBackend,
+    build_authority_runtime, build_backend_node, build_remote_runtime, AuthorityRuntimeBuildConfig,
+    BackendTransportConfig, RemoteBackend,
 };
 use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
     SyncObject, ThreadId,
 };
-use posthaste_link_contract::{LinkCoverage, BackendApi};
+use posthaste_link_contract::{BackendApi, LinkCoverage};
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
@@ -247,10 +247,12 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_backend() {
         )
         .await
         .expect("mail-list view opens over the link");
-    let state: MailListViewState =
-        serde_json::from_value(snapshot.data).expect("mail-list state");
+    let state: MailListViewState = serde_json::from_value(snapshot.data).expect("mail-list state");
     assert!(
-        state.rows.iter().any(|row| row.projection["id"] == "m-view"),
+        state
+            .rows
+            .iter()
+            .any(|row| row.projection["id"] == "m-view"),
         "the split runtime should serve the backend's rows, read through the link"
     );
 }
@@ -307,13 +309,12 @@ async fn remote_runtime_forwards_a_mutation_into_the_backend_store() {
     });
 
     // A separate runtime configured to reach that backend remotely.
-    let remote = build_authority_runtime(
-        build_config(temp_root())
-            .with_backend_transport(BackendTransportConfig::Remote {
-                base_url: format!("http://{addr}"),
-                token: None,
-            }),
-    )
+    let remote = build_authority_runtime(build_config(temp_root()).with_backend_transport(
+        BackendTransportConfig::Remote {
+            base_url: format!("http://{addr}"),
+            token: None,
+        },
+    ))
     .await
     .expect("remote runtime builds");
     let session = remote
@@ -519,5 +520,52 @@ async fn standalone_backend_node_serves_the_link() {
     assert!(
         accounts.ids.contains(&created.id),
         "the standalone backend should serve the account it just created"
+    );
+}
+
+// The `posthaste-runtime` role: a LEAN near node (build_remote_runtime, NO local
+// backend — no store/service/supervisor) drives a standalone backend entirely
+// over the link, through the normal RuntimeCore handle clients use.
+//
+// spec: docs/replication/L5
+#[tokio::test]
+async fn lean_remote_runtime_drives_the_backend_over_the_link() {
+    // A standalone backend served over the link.
+    let backend = build_backend_node(build_config(temp_root()))
+        .await
+        .expect("backend node builds");
+    let router = link_router(backend.transport(), LinkAuth::Disabled);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    // A backend-less runtime pointed at it.
+    let runtime = build_remote_runtime(build_config(temp_root()).with_backend_transport(
+        BackendTransportConfig::Remote {
+            base_url: format!("http://{addr}"),
+            token: None,
+        },
+    ))
+    .expect("lean remote runtime builds");
+
+    // Drive it through the normal client-facing handle: a write, then a read,
+    // both crossing the link to the backend (the runtime holds no store).
+    let created = runtime
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("lean-account"))
+        .await
+        .expect("create_account through the lean runtime");
+    assert_eq!(created.id.as_str(), "lean-account");
+
+    let accounts = runtime
+        .handle
+        .list_accounts(RuntimeCaller::test())
+        .await
+        .expect("list_accounts through the lean runtime");
+    assert!(
+        accounts.ids.contains(&created.id),
+        "the lean runtime should serve the account it created over the link"
     );
 }

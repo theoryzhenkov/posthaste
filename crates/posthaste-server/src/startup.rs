@@ -1,5 +1,15 @@
 use super::*;
 
+/// The runtime parts `start_server` needs regardless of role: the handle,
+/// shutdown, secret store, and — only for an in-process backend that opts into
+/// serving — the link transport to expose over `link_router`.
+type RuntimeServeParts = (
+    AuthorityRuntimeHandle,
+    RuntimeShutdownHandle,
+    Arc<dyn SecretStore>,
+    Option<Arc<dyn BackendApi>>,
+);
+
 /// Initialize the entire backend (config, store, supervisor, logging)
 /// and spawn the Axum server on a Tokio task. Returns immediately.
 ///
@@ -36,18 +46,37 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         None => BackendTransportConfig::InProcess,
     };
 
-    let runtime_build = build_authority_runtime(
-        AuthorityRuntimeBuildConfig::new(
-            roots.config_root.clone(),
-            roots.state_root.clone(),
-            roots.state_root.join("cache"),
-        )
-        .with_bootstrap_path_option(roots.bootstrap_path.clone())
-        .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds))
-        .with_backend_transport(backend_transport),
+    let config = AuthorityRuntimeBuildConfig::new(
+        roots.config_root.clone(),
+        roots.state_root.clone(),
+        roots.state_root.join("cache"),
     )
-    .await
-    .expect("failed to build authority runtime");
+    .with_bootstrap_path_option(roots.bootstrap_path.clone())
+    .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds))
+    .with_backend_transport(backend_transport.clone());
+
+    // A remote backend makes this process a LEAN near node: no local backend
+    // (reads/writes cross the link, the down-channel drives views). Otherwise
+    // the full bundled graph is built in-process. Both expose the same handle +
+    // shutdown + secret store; only an in-process backend can serve the link.
+    let (runtime_handle, runtime_shutdown, secret_store, link_serve_transport): RuntimeServeParts =
+        if matches!(backend_transport, BackendTransportConfig::Remote { .. }) {
+            let build = build_remote_runtime(config).expect("failed to build remote runtime");
+            (build.handle, build.shutdown, build.secret_store, None)
+        } else {
+            let build = build_authority_runtime(config)
+                .await
+                .expect("failed to build authority runtime");
+            let link_transport = runtime
+                .link_serve
+                .then(|| build.backend_link.transport().clone());
+            (
+                build.handle,
+                build.shutdown,
+                build.secret_store,
+                link_transport,
+            )
+        };
 
     if config_was_empty {
         if let Some(bootstrap_path) = &roots.bootstrap_path {
@@ -63,8 +92,6 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             );
         }
     }
-
-    let secret_store = runtime_build.secret_store.clone();
 
     // Per-process bearer token for the loopback trust model: a full-scope
     // macaroon (no caveats) minted from the per-install root key. Replaces the
@@ -87,7 +114,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     let host_allowlist = auth::host_allowlist(&bind_address);
 
     let state = Arc::new(AppState {
-        runtime: runtime_build.handle.clone(),
+        runtime: runtime_handle.clone(),
         account_logo_root: roots.config_root.join("account-assets").join("logos"),
         oauth_flows: Arc::new(OAuthFlowStore::default()),
         auth_token: auth_token.clone(),
@@ -184,7 +211,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // link has its OWN bearer-token auth (distinct from the `/v1` macaroon
     // perimeter); serving under `require_auth` without a token is refused
     // (fail closed — the link is a network-exposed backend surface).
-    let app = if runtime.link_serve {
+    let app = if let Some(link_transport) = link_serve_transport {
         let link_auth = if runtime.require_auth {
             match &runtime.link_token {
                 Some(token) => LinkAuth::Bearer(token.clone()),
@@ -201,10 +228,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             authenticated = runtime.require_auth,
             "serving the runtime↔backend link surface for a remote runtime"
         );
-        app.merge(link_router(
-            runtime_build.backend_link.transport().clone(),
-            link_auth,
-        ))
+        app.merge(link_router(link_transport, link_auth))
     } else {
         app
     };
@@ -226,7 +250,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         addr,
         join_handle,
         log_guard,
-        runtime_shutdown: runtime_build.shutdown,
+        runtime_shutdown,
         auth_token,
         require_auth: runtime.require_auth,
     }
