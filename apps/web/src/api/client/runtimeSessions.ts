@@ -60,9 +60,19 @@ function sourceSearch(sourceId?: string | null): string {
 
 export function openRuntimeSession(options?: {
   sourceId?: string | null
+  /** Opt into incremental mail-list view deltas (replication L6). */
+  viewDelta?: boolean
 }): Promise<OpenRuntimeSessionResponse> {
+  const params = new URLSearchParams()
+  if (options?.sourceId) {
+    params.set('sourceId', options.sourceId)
+  }
+  if (options?.viewDelta) {
+    params.set('viewDelta', 'true')
+  }
+  const search = params.toString()
   return jsonRequest<OpenRuntimeSessionResponse>(
-    `/runtime/sessions${sourceSearch(options?.sourceId)}`,
+    `/runtime/sessions${search ? `?${search}` : ''}`,
     'POST',
   )
 }

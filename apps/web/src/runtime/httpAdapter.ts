@@ -178,7 +178,10 @@ function handleMalformedFrame(
 
 export const httpRuntimeAdapter: RuntimeAdapter = {
   openRuntimeSession(request) {
-    return openRuntimeSession({ sourceId: request.sourceId })
+    return openRuntimeSession({
+      sourceId: request.sourceId,
+      viewDelta: request.viewDelta,
+    })
   },
   closeRuntimeSession(request) {
     return closeRuntimeSession(request.sessionId, {

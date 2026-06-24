@@ -1647,6 +1647,33 @@ export interface components {
             security: components["schemas"]["TransportSecurity"];
         };
         /**
+         * @description An incremental mail-list view update ([replication L6](../../replication/L6.md)):
+         *     the rows that changed since the last snapshot, instead of the whole view. The
+         *     client reconciles it against its held rows — drop rows absent from `order`,
+         *     reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
+         *     session that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
+         *     and only when the change is row-local (structural changes still send a whole
+         *     `ViewReplace`).
+         */
+        MailListDelta: {
+            /**
+             * @description The new full row order (row keys), when it changed (add/remove/reorder);
+             *     `None` when unchanged. Rows whose key is absent from a present `order` are
+             *     removed.
+             */
+            order?: string[] | null;
+            /** @description Rows that are new or whose content changed, keyed by `row_key`. */
+            upserts: components["schemas"]["MailListRowState"][];
+        };
+        MailListRowState: {
+            orderKey: string;
+            pendingMarkers?: components["schemas"]["RuntimeMutationId"][];
+            projection?: Record<string, never>;
+            resourceRef?: string | null;
+            rowKey: string;
+            sortKey?: Record<string, never>;
+        };
+        /**
          * @description Opaque server-assigned identifier for a mailbox (folder or label).
          *
          *     @spec docs/L1-jmap#core-types
@@ -2080,6 +2107,13 @@ export interface components {
             snapshot: components["schemas"]["ViewSnapshot"];
             /** @enum {string} */
             type: "viewReplace";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            delta: components["schemas"]["MailListDelta"];
+            revision: components["schemas"]["ViewRevision"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "viewDelta";
             viewId: components["schemas"]["ViewId"];
         } | {
             error: components["schemas"]["RuntimeAdapterError"];
@@ -3249,6 +3283,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -3289,6 +3329,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3341,6 +3387,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3466,6 +3518,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3531,6 +3589,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3585,6 +3649,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
