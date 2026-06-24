@@ -30,5 +30,6 @@ pub use build::{
     AuthorityRuntimeShutdownError, BackendTransportConfig, RuntimeShutdownHandle,
 };
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
+pub use transport::RemoteTransport;
 pub use secret::SystemSecretStore;
 pub use supervisor::AccountSupervisor;

@@ -4275,6 +4275,8 @@ dependencies = [
  "posthaste-domain",
  "posthaste-engine",
  "posthaste-imap",
+ "posthaste-link-contract",
+ "posthaste-link-core",
  "posthaste-observability",
  "posthaste-runtime-contract",
  "posthaste-store",
