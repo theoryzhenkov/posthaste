@@ -128,11 +128,13 @@ backend's computation directly; `RemoteTransport` carries it as HTTP + SSE.
 
 ## 7. Slicing (W4)
 
-- **W4a — the read seam (passthrough).** Introduce `ReadSource` + `LocalReadSource`
-  (over `mail_queries` / service) and a passthrough `ReadCache`; route the
-  runtime's mail-list base and the point reads behind mutations
-  (`current_message_summary`) through it. Behavior-preserving; no caching, no
-  link. Mirrors W1.
+- **W4a — the read seam (passthrough).** *(Landed.)* `read.rs`: the `ReadSource`
+  trait (`query_mail_page` + `current_summary`), `LocalReadSource` over
+  `mail_queries` + service, and a passthrough `ReadCache`. The runtime's
+  mail-list base (`ViewRegistry::build_snapshot`) and the point read behind
+  undo-history (`current_message_summary` — the c3 blocker) draw from the
+  `ReadCache`. Passthrough retains nothing, so the co-located deployment is
+  unchanged (64 unit + 28 integration + all server suites pass). Mirrors W1.
 - **W4b — backend read surface.** The far node serves the `ReadSource` methods
   (queries + point reads) and the view-subscription protocol; `LinkTransport`
   grows the read half. In-process first; co-located unchanged.

@@ -38,6 +38,7 @@ use crate::backend::{
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
+use crate::read::{LocalReadSource, ReadCache};
 use crate::transport::{InProcessTransport, RemoteTransport};
 use posthaste_link_contract::LinkTransport;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
@@ -294,11 +295,16 @@ pub async fn build_authority_runtime(
         account_supervisor.clone(),
     ));
     let outbox = Arc::new(RuntimeBackendOutbox::new());
+    let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+        mail_queries.clone(),
+        service.clone(),
+    ))));
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
         account_reads.clone(),
         event_sender.clone(),
         outbox.clone(),
+        reads.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
     let backend = Arc::new(Backend::new(
@@ -317,6 +323,7 @@ pub async fn build_authority_runtime(
         backend,
         backend_link: backend_link.clone(),
         outbox,
+        reads,
         event_sender: event_sender.clone(),
         account_reads,
         account_mutations: Some(account_mutations),
@@ -373,6 +380,9 @@ struct AuthorityRuntimeCore {
     /// The runtime's outbox toward the backend: forwarded-but-unconfirmed
     /// mutations, folded optimistically into served views (L4 §4.3).
     outbox: Arc<RuntimeBackendOutbox>,
+    /// The read-through cache over the far node (W4a: passthrough). Point reads
+    /// and the mail-list base draw from here.
+    reads: Arc<ReadCache>,
     event_sender: broadcast::Sender<DomainEvent>,
     account_reads: Arc<AccountReadService>,
     account_mutations: Option<Arc<AccountMutationService>>,
@@ -495,11 +505,16 @@ impl AuthorityRuntimeHandle {
             query_supervisor,
         ));
         let outbox = Arc::new(RuntimeBackendOutbox::new());
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+            mail_queries.clone(),
+            api_bridge.service.clone(),
+        ))));
         let views = Arc::new(ViewRegistry::new(
             mail_queries.clone(),
             account_reads.clone(),
             api_bridge.event_sender.clone(),
             outbox.clone(),
+            reads.clone(),
         ));
         let sessions = Arc::new(SessionRegistry::new(
             views.clone(),
@@ -527,6 +542,7 @@ impl AuthorityRuntimeHandle {
                 backend,
                 backend_link,
                 outbox,
+                reads,
                 event_sender: api_bridge.event_sender.clone(),
                 account_reads,
                 account_mutations,
@@ -692,16 +708,15 @@ impl AuthorityRuntimeHandle {
         source_id: &str,
         message_id: &str,
     ) -> Result<Option<posthaste_domain::MessageSummary>, RuntimeError> {
-        let result = self
-            .core
-            .service
-            .get_message_detail(
+        // Read through the far node (W4a passthrough; W4c serves from cache or
+        // reads through over the link). This is the c3 split-runtime read.
+        self.core
+            .reads
+            .current_summary(
                 &AccountId(source_id.to_string()),
                 &MessageId(message_id.to_string()),
-                None,
             )
-            .await?;
-        Ok(result.detail.map(|detail| detail.summary))
+            .await
     }
 
     /// The precise keyword command that restores the message's current keyword
