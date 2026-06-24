@@ -235,7 +235,6 @@ pub(crate) struct BackendBuild {
     account_supervisor: Arc<AccountSupervisor>,
     account_reads: Arc<AccountReadService>,
     account_mutations: Arc<AccountMutationService>,
-    mail_queries: Arc<MailQueryService>,
     backend: Arc<Backend>,
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     runtime_status: RuntimeStatus,
@@ -329,7 +328,8 @@ pub(crate) async fn build_backend(
     ));
     let backend = Arc::new(Backend::new(
         service.clone(),
-        mail_queries.clone(),
+        store.clone(),
+        mail_queries,
         account_reads.clone(),
         account_supervisor.clone(),
         event_sender.clone(),
@@ -343,7 +343,6 @@ pub(crate) async fn build_backend(
         account_supervisor,
         account_reads,
         account_mutations,
-        mail_queries,
         backend,
         api_bridge,
         runtime_status,
@@ -366,7 +365,6 @@ pub(crate) fn build_runtime(
         account_supervisor,
         account_reads,
         account_mutations,
-        mail_queries,
         backend,
         api_bridge,
         runtime_status,
@@ -407,7 +405,6 @@ pub(crate) fn build_runtime(
         reads,
         event_sender,
         account_mutations: Some(account_mutations),
-        mail_queries,
         views,
         sessions,
         live_accounts: account_supervisor.clone(),
@@ -491,7 +488,6 @@ struct AuthorityRuntimeCore {
     reads: Arc<ReadCache>,
     event_sender: broadcast::Sender<DomainEvent>,
     account_mutations: Option<Arc<AccountMutationService>>,
-    mail_queries: Arc<MailQueryService>,
     views: Arc<ViewRegistry>,
     sessions: Arc<SessionRegistry>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
@@ -509,10 +505,6 @@ pub struct AuthorityRuntimeHandle {
 }
 
 impl AuthorityRuntimeHandle {
-    fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
-        RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
-    }
-
     /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
     /// test/API parts until all router state is produced by the authority
     /// runtime builder.
@@ -612,7 +604,8 @@ impl AuthorityRuntimeHandle {
         let outbox = Arc::new(RuntimeBackendOutbox::new());
         let backend = Arc::new(Backend::new(
             api_bridge.service.clone(),
-            mail_queries.clone(),
+            api_bridge.store.clone(),
+            mail_queries,
             account_reads.clone(),
             live_accounts.clone(),
             api_bridge.event_sender.clone(),
@@ -650,7 +643,6 @@ impl AuthorityRuntimeHandle {
                 reads,
                 event_sender: api_bridge.event_sender.clone(),
                 account_mutations,
-                mail_queries,
                 views,
                 sessions,
                 live_accounts,
@@ -720,17 +712,6 @@ impl AuthorityRuntimeHandle {
         self.account_mutations()?
             .persist_oauth_token_set(account_id, token_set)
             .await
-    }
-
-    fn publish_events(&self, events: &[DomainEvent]) {
-        self.core.backend.publish_events(events);
-    }
-
-    async fn optional_gateway(
-        &self,
-        account_id: &AccountId,
-    ) -> Option<posthaste_domain::SharedGateway> {
-        self.core.live_accounts.gateway(account_id).await.ok()
     }
 
     fn ensure_account_in_scope(
@@ -1312,12 +1293,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
     ) -> Result<posthaste_domain::Identity, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
-        Ok(self
-            .core
-            .service
-            .fetch_identity(&account_id, gateway.as_ref())
-            .await?)
+        self.core.reads.get_identity(account_id).await
     }
 
     async fn list_sender_addresses(
@@ -1325,10 +1301,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::CachedSenderAddress>, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .store
-            .list_sender_address_cache()
-            .map_err(Self::store_error_to_runtime_error)
+        self.core.reads.list_sender_addresses().await
     }
 
     async fn get_reply_context(
@@ -1338,12 +1311,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::ReplyContext, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.core.live_accounts.gateway(&account_id).await?;
-        Ok(self
-            .core
-            .service
-            .fetch_reply_context(&account_id, &message_id, gateway.as_ref())
-            .await?)
+        self.core
+            .reads
+            .get_reply_context(account_id, message_id)
+            .await
     }
 
     async fn query_mail_page(
@@ -1352,7 +1323,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: MailQueryRequest,
     ) -> Result<MailQueryPage, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.mail_queries.query_mail_page(request).await
+        self.core.reads.query_mail_page(request).await
     }
 
     async fn open_session(&self, caller: RuntimeCaller) -> Result<RuntimeSession, RuntimeError> {
@@ -1527,7 +1498,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         account_id: AccountId,
     ) -> Result<Vec<Operation>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.service.list_pending_operations(&account_id)?)
+        self.core.reads.list_pending_operations(account_id).await
     }
 
     async fn discard_operation(
@@ -1640,8 +1611,9 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         // opening a message neither provider-fetches nor materializes the body.
         let detail = self
             .core
-            .service
-            .get_message_header(&account_id, &message_id)?;
+            .reads
+            .message_detail(&account_id, &message_id)
+            .await?;
         Ok(posthaste_domain::CommandResult {
             detail,
             events: Vec::new(),
@@ -1655,14 +1627,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         message_id: MessageId,
     ) -> Result<posthaste_domain::DraftContent, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.optional_gateway(&account_id).await;
-        let result = self
-            .core
-            .service
-            .get_draft_content(&account_id, &message_id, gateway.as_deref())
-            .await?;
-        self.publish_events(&result.events);
-        Ok(result.content)
+        self.core
+            .reads
+            .get_draft_content(account_id, message_id)
+            .await
     }
 
     async fn get_message_resource(
@@ -1673,63 +1641,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         kind: MessageResourceKind,
     ) -> Result<RuntimeResourceBytes, RuntimeError> {
         self.ensure_runtime_active()?;
-        let gateway = self.optional_gateway(&account_id).await;
-        let result = self
-            .core
-            .service
-            .get_message_detail(&account_id, &message_id, gateway.as_deref())
-            .await?;
-        self.publish_events(&result.events);
-        let detail = result
-            .detail
-            .ok_or_else(|| RuntimeError::not_found("message detail not available"))?;
-        match kind {
-            MessageResourceKind::Attachment(attachment_id) => {
-                let attachment = detail
-                    .attachments
-                    .into_iter()
-                    .find(|attachment| attachment.id == attachment_id)
-                    .ok_or_else(|| RuntimeError::not_found("attachment not found"))?;
-                let gateway = gateway.ok_or_else(|| {
-                    RuntimeError::retryable(
-                        RuntimeErrorCode::ProviderUnavailable,
-                        format!("gateway unavailable for account {account_id}"),
-                    )
-                })?;
-                let bytes = self
-                    .core
-                    .service
-                    .download_blob(
-                        &account_id,
-                        &message_id,
-                        &attachment.blob_id,
-                        gateway.as_ref(),
-                    )
-                    .await?;
-                Ok(RuntimeResourceBytes {
-                    bytes,
-                    content_type: attachment.mime_type,
-                    filename: attachment.filename,
-                    inline_attachments: Vec::new(),
-                })
-            }
-            // Body resources return RAW bytes; the server serve layer applies the
-            // per-kind transform (HTML sanitization + inline-URL rewrite) before
-            // responding — the runtime never sanitizes. Body HTML carries its
-            // inline attachments so the server can rewrite `cid:` URLs.
-            MessageResourceKind::BodyHtml => Ok(RuntimeResourceBytes {
-                bytes: detail.body_html.unwrap_or_default().into_bytes(),
-                content_type: "text/html; charset=utf-8".to_string(),
-                filename: None,
-                inline_attachments: detail.attachments,
-            }),
-            MessageResourceKind::BodyText => Ok(RuntimeResourceBytes {
-                bytes: detail.body_text.unwrap_or_default().into_bytes(),
-                content_type: "text/plain; charset=utf-8".to_string(),
-                filename: None,
-                inline_attachments: Vec::new(),
-            }),
-        }
+        self.core
+            .reads
+            .get_message_resource(account_id, message_id, kind)
+            .await
     }
 
     async fn sync_account(
@@ -1752,7 +1667,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         filter: EventFilter,
     ) -> Result<Vec<DomainEvent>, RuntimeError> {
         self.ensure_runtime_active()?;
-        Ok(self.core.service.list_events(&filter)?)
+        self.core.reads.replay_events(filter).await
     }
 
     async fn subscribe_events(

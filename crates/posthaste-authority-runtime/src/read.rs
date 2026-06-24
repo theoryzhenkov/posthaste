@@ -22,13 +22,15 @@ use futures_util::StreamExt;
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
+    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
+    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
     TagSummary,
 };
 use posthaste_link_contract::{BackendApi, BackendLink, DownFrame, LinkCoverage};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, MailQueryPage, MailQueryRequest, RuntimeAccountList, RuntimeError,
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, RuntimeAccountList,
+    RuntimeError, RuntimeResourceBytes,
 };
 
 /// A read-through cache over the [`BackendApi`], parameterized by policy.
@@ -155,6 +157,62 @@ impl ReadCache {
         scope: AccountScopeRequest,
     ) -> Result<Vec<TagSummary>, RuntimeError> {
         self.backend.list_tags(scope).await
+    }
+
+    /// Provider/account reads through the backend (passthrough; not cached —
+    /// these resolve a live gateway or read config/outbox state on demand).
+    pub(crate) async fn get_identity(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Identity, RuntimeError> {
+        self.backend.get_identity(account_id).await
+    }
+
+    pub(crate) async fn get_reply_context(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<ReplyContext, RuntimeError> {
+        self.backend.get_reply_context(account_id, message_id).await
+    }
+
+    pub(crate) async fn list_sender_addresses(
+        &self,
+    ) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
+        self.backend.list_sender_addresses().await
+    }
+
+    pub(crate) async fn list_pending_operations(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError> {
+        self.backend.list_pending_operations(account_id).await
+    }
+
+    pub(crate) async fn replay_events(
+        &self,
+        filter: EventFilter,
+    ) -> Result<Vec<DomainEvent>, RuntimeError> {
+        self.backend.replay_events(filter).await
+    }
+
+    pub(crate) async fn get_draft_content(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<DraftContent, RuntimeError> {
+        self.backend.get_draft_content(account_id, message_id).await
+    }
+
+    pub(crate) async fn get_message_resource(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError> {
+        self.backend
+            .get_message_resource(account_id, message_id, kind)
+            .await
     }
 
     pub(crate) async fn current_summary(

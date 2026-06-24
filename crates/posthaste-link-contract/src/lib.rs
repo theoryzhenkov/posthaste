@@ -32,14 +32,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, ConversationId, ConversationView, MailboxSummary,
-    MessageDetail, MessageId, MessageSummary, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
+    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
+    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
+    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
     TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
-    AccountScopeRequest, MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
-    RuntimeAccountList, RuntimeError, RuntimeErrorCode,
+    AccountScopeRequest, MailQueryPage, MailQueryRequest, MessageResourceKind, MutationReceipt,
+    MutationRequest, RuntimeAccountList, RuntimeError, RuntimeErrorCode, RuntimeResourceBytes,
 };
 
 /// Wire path for the link up-channel: a remote near node `POST`s a
@@ -328,6 +329,69 @@ pub trait BackendApi: Send + Sync {
         scope: AccountScopeRequest,
     ) -> Result<Vec<TagSummary>, RuntimeError> {
         let _ = scope;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the account's sender identity (provider-backed, falling
+    /// back to configured sender). Resolves a gateway at the far node.
+    async fn get_identity(&self, account_id: AccountId) -> Result<Identity, RuntimeError> {
+        let _ = account_id;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: reply/forward metadata for composing a response to one
+    /// message. Resolves a gateway at the far node.
+    async fn get_reply_context(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<ReplyContext, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the cached sender addresses (the compose autocomplete set).
+    async fn list_sender_addresses(&self) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: an account's pending outbox operations.
+    async fn list_pending_operations(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<Operation>, RuntimeError> {
+        let _ = account_id;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: replay the authoritative event log for a filter.
+    async fn replay_events(&self, filter: EventFilter) -> Result<Vec<DomainEvent>, RuntimeError> {
+        let _ = filter;
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: compose-ready content for resuming an existing draft. May
+    /// lazily fetch and cache the body at the far node (publishing the resulting
+    /// events on the down-channel).
+    async fn get_draft_content(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<DraftContent, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(read_channel_unsupported())
+    }
+
+    /// Read channel: the raw bytes of a message resource (an attachment blob or
+    /// the HTML/text body). Body resources return raw bytes; the serve layer
+    /// applies the per-kind transform. May lazily fetch at the far node.
+    async fn get_message_resource(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        kind: MessageResourceKind,
+    ) -> Result<RuntimeResourceBytes, RuntimeError> {
+        let _ = (account_id, message_id, kind);
         Err(read_channel_unsupported())
     }
 }
