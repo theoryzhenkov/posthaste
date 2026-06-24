@@ -32,10 +32,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use posthaste_domain::{
-    AccountId, AccountOverview, AppSettings, CachedSenderAddress, ConversationId, ConversationView,
-    DomainEvent, DraftContent, EventFilter, Identity, MailboxSummary, MessageDetail, MessageId,
-    MessageSummary, Operation, ReplyContext, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    TagSummary,
+    AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, RemoveFromMailboxCommand,
+    ReplaceMailboxesCommand, ReplyContext, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
+    SmartMailboxSummary, TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
@@ -394,12 +395,93 @@ pub trait BackendApi: Send + Sync {
         let _ = (account_id, message_id, kind);
         Err(read_channel_unsupported())
     }
+
+    // ===== Write channel: typed backend commands =====
+    //
+    // The named up-channel ([`forward_mutation`](Self::forward_mutation)) carries
+    // session-originated message mutations through the replica; these typed
+    // commands are the direct (REST) command surface, applied at the far node
+    // and returning the typed ack. Default-erroring so a transport that does not
+    // carry the write channel is simply not a command sink (the remote wire is
+    // wired per-op alongside the reads).
+
+    /// Write: set/clear keywords on a message.
+    async fn set_keywords(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: SetKeywordsCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        let _ = (account_id, message_id, command);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: add a message to a mailbox.
+    async fn add_to_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: AddToMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        let _ = (account_id, message_id, command);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: remove a message from a mailbox.
+    async fn remove_from_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: RemoveFromMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        let _ = (account_id, message_id, command);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: replace a message's mailbox membership.
+    async fn replace_mailboxes(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: ReplaceMailboxesCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        let _ = (account_id, message_id, command);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: destroy a message.
+    async fn destroy_message(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandAck, RuntimeError> {
+        let _ = (account_id, message_id);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: set (or clear) a mailbox's role, returning the account's mailboxes.
+    async fn set_mailbox_role(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        role: Option<String>,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        let _ = (account_id, mailbox_id, role);
+        Err(write_channel_unsupported())
+    }
 }
 
 fn read_channel_unsupported() -> RuntimeError {
     RuntimeError::new(
         RuntimeErrorCode::Internal,
         "link transport does not carry the read channel",
+    )
+}
+
+fn write_channel_unsupported() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::Internal,
+        "link transport does not carry the write channel",
     )
 }
 
@@ -492,6 +574,69 @@ impl BackendLink {
     /// Read channel: the application settings through to the backend.
     pub async fn app_settings(&self) -> Result<AppSettings, RuntimeError> {
         self.transport.app_settings().await
+    }
+
+    /// Write: set/clear keywords on a message (up-channel typed command).
+    pub async fn set_keywords(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: SetKeywordsCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.transport.set_keywords(account_id, message_id, command).await
+    }
+
+    /// Write: add a message to a mailbox.
+    pub async fn add_to_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: AddToMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.transport.add_to_mailbox(account_id, message_id, command).await
+    }
+
+    /// Write: remove a message from a mailbox.
+    pub async fn remove_from_mailbox(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: RemoveFromMailboxCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.transport
+            .remove_from_mailbox(account_id, message_id, command)
+            .await
+    }
+
+    /// Write: replace a message's mailbox membership.
+    pub async fn replace_mailboxes(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+        command: ReplaceMailboxesCommand,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.transport
+            .replace_mailboxes(account_id, message_id, command)
+            .await
+    }
+
+    /// Write: destroy a message.
+    pub async fn destroy_message(
+        &self,
+        account_id: AccountId,
+        message_id: MessageId,
+    ) -> Result<CommandAck, RuntimeError> {
+        self.transport.destroy_message(account_id, message_id).await
+    }
+
+    /// Write: set (or clear) a mailbox's role.
+    pub async fn set_mailbox_role(
+        &self,
+        account_id: AccountId,
+        mailbox_id: MailboxId,
+        role: Option<String>,
+    ) -> Result<Vec<MailboxSummary>, RuntimeError> {
+        self.transport.set_mailbox_role(account_id, mailbox_id, role).await
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.
