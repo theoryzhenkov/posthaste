@@ -26,7 +26,8 @@ use posthaste_authority_runtime::{
 };
 use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
-    SecretStore, SecretStoreError, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId,
+    SecretStore, SecretStoreError, SetKeywordsCommand, SortDirection, SyncBatch, SyncCursor,
+    SyncObject, ThreadId,
 };
 use posthaste_link_contract::{LinkCoverage, BackendApi};
 use posthaste_runtime_contract::{
@@ -368,5 +369,60 @@ async fn remote_runtime_forwards_a_mutation_into_the_backend_store() {
     assert!(
         gone,
         "the remote-forwarded destroy should be applied to the backend store"
+    );
+}
+
+// The macro-generated wire (one method per `for_each_link_op!` row) round-trips
+// a read and a write end to end: production `RemoteBackend` (generated client)
+// -> `link_router` (generated handler) -> in-process `Backend`.
+//
+// spec: docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+#[tokio::test]
+async fn generated_wire_round_trips_a_read_and_a_write() {
+    let backend = build_authority_runtime(build_config(temp_root()))
+        .await
+        .expect("backend runtime builds");
+    let account = backend
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("wire-account"))
+        .await
+        .expect("account creates");
+    seed_inbox_message(&backend, &account.id, "m-wire");
+    let base_url = serve_link(&backend).await;
+
+    let transport = RemoteBackend::new(base_url);
+
+    // Generated READ over the wire: the backend's account list reaches the reader.
+    let accounts = transport
+        .list_accounts()
+        .await
+        .expect("list_accounts over the link");
+    assert!(
+        accounts.ids.contains(&account.id),
+        "the generated read should see the backend's account"
+    );
+
+    // Generated WRITE over the wire: flag the seeded message at the backend.
+    transport
+        .set_keywords(
+            account.id.clone(),
+            MessageId::from("m-wire"),
+            SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("set_keywords over the link");
+
+    // The write hit the authoritative store: a point read reflects it.
+    let summary = transport
+        .current_summary(account.id.clone(), MessageId::from("m-wire"))
+        .await
+        .expect("summary over the link")
+        .expect("the message is present");
+    assert!(
+        summary.keywords.iter().any(|keyword| keyword == "$flagged"),
+        "the generated write should be applied to the backend store"
     );
 }
