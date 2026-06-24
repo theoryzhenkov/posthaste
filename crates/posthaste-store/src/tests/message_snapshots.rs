@@ -124,3 +124,44 @@ fn message_summary_read_agrees_with_detail_summary() -> Result<(), StoreError> {
         .is_none());
     Ok(())
 }
+
+#[test]
+fn message_detail_without_body_keeps_header_and_attachments() -> Result<(), StoreError> {
+    // The body-free detail tier returns the same header + attachments as the
+    // full read, but never the body — the detail surface's read tier.
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            messages: vec![sample_message("message-1", "inbox", Some("mime-1"))],
+            ..SyncBatch::default()
+        },
+    )?;
+
+    let full = store
+        .get_message_detail(&account, &MessageId::from("message-1"))?
+        .expect("detail");
+    let header = store
+        .get_message_detail_without_body(&account, &MessageId::from("message-1"))?
+        .expect("header detail");
+
+    assert!(full.body_html.is_some(), "fixture has a body");
+    assert_eq!(header.body_html, None);
+    assert_eq!(header.body_text, None);
+    assert!(header.raw_message.is_none());
+    assert_eq!(header.summary.id, full.summary.id);
+    assert_eq!(header.summary.mailbox_ids, full.summary.mailbox_ids);
+    assert_eq!(
+        header.attachments.iter().map(|a| &a.id).collect::<Vec<_>>(),
+        full.attachments.iter().map(|a| &a.id).collect::<Vec<_>>(),
+    );
+    assert_eq!(header.draft_id, full.draft_id);
+
+    assert!(store
+        .get_message_detail_without_body(&account, &MessageId::from("absent"))?
+        .is_none());
+    Ok(())
+}

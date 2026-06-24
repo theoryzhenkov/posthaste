@@ -110,6 +110,28 @@ pub trait MessageDetailStore: Send + Sync {
             .map(|detail| detail.summary))
     }
 
+    /// Fetch message detail WITHOUT the body (header + attachments). The body is
+    /// a separate lazy resource (`GET .../body`), so the detail read surface must
+    /// not load it — loading the body only to drop it from the detail response is
+    /// wasted work, dominant for messages with large bodies/attachments.
+    ///
+    /// The default derives it from `get_message_detail` (nulling the body); a
+    /// store overrides it to skip the body query entirely.
+    fn get_message_detail_without_body(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, StoreError> {
+        Ok(self
+            .get_message_detail(account_id, message_id)?
+            .map(|mut detail| {
+                detail.body_html = None;
+                detail.body_text = None;
+                detail.raw_message = None;
+                detail
+            }))
+    }
+
     /// Read the cached raw RFC822 bytes for a message, if any are stored.
     ///
     /// Returns `None` when no raw body has been cached yet. Used to serve

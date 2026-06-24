@@ -146,6 +146,24 @@ impl MailService {
             .not_found("thread", thread_id.as_str())
     }
 
+    /// Overlay-folded message detail WITHOUT the body: header + attachments, no
+    /// body query and no gateway. The detail read surface uses this — the body
+    /// is the separate `/body` lazy resource — so opening a message never loads
+    /// the body just to drop it from the response.
+    pub fn get_message_header(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, ServiceError> {
+        let Some(detail) = self
+            .message_detail_reader
+            .get_message_detail_without_body(account_id, message_id)?
+        else {
+            return Ok(None);
+        };
+        self.apply_message_overlay(account_id, detail)
+    }
+
     /// Fetch message detail, lazily fetching body from the gateway if needed.
     ///
     /// @spec docs/L1-sync#sync-loop

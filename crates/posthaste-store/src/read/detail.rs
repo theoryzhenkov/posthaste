@@ -132,6 +132,38 @@ impl MessageDetailStore for DatabaseStore {
         read_message_summary(&connection, account_id, message_id)
     }
 
+    /// Detail read without the body: header + attachments, skipping the
+    /// `message_body` query so the body is never materialized for the detail
+    /// surface (the body is the separate `/body` resource).
+    fn get_message_detail_without_body(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+    ) -> Result<Option<MessageDetail>, StoreError> {
+        let connection = self.read_connection()?;
+        let Some(summary) = read_message_summary(&connection, account_id, message_id)? else {
+            return Ok(None);
+        };
+        let draft_id: Option<String> = connection
+            .query_row(
+                "SELECT draft_id FROM message WHERE account_id = ?1 AND id = ?2",
+                params![account_id.as_str(), message_id.as_str()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(sql_to_store_error)?
+            .flatten();
+        let attachments = fetch_message_attachments(&connection, account_id, message_id)?;
+        Ok(Some(MessageDetail {
+            summary,
+            body_html: None,
+            body_text: None,
+            raw_message: None,
+            attachments,
+            draft_id,
+        }))
+    }
+
     /// Reads the cached raw RFC822 bytes for a message from its content-
     /// addressed file, or `None` when no raw body has been cached.
     ///
