@@ -20,7 +20,7 @@ mod source_types;
 
 pub(crate) use app::AppToml;
 #[cfg(test)]
-use app::{CachePolicyToml, DaemonToml, LoggingToml};
+use app::{CachePolicyToml, DaemonToml, LinkToml, LoggingToml};
 pub use smart_types::{
     ConditionOperatorToml, ConditionToml, FieldToml, GroupOperatorToml, RuleGroupToml,
     RuleNodeToml, SmartMailboxKindToml, SmartMailboxToml,

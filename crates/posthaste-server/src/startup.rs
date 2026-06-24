@@ -25,6 +25,17 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // Axum adapter keeps only HTTP-owned state plus the runtime handle.
     //
     // @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#server-startup-authority-builder
+    // Runtime↔backend transport: a remote backend when `[link] backend_url` is
+    // configured (this process is then a near node over the link), else the
+    // in-process default ([replication L5](../replication/L5.md)).
+    let backend_transport = match &runtime.link_backend_url {
+        Some(base_url) => BackendTransportConfig::Remote {
+            base_url: base_url.clone(),
+            token: runtime.link_token.clone(),
+        },
+        None => BackendTransportConfig::InProcess,
+    };
+
     let runtime_build = build_authority_runtime(
         AuthorityRuntimeBuildConfig::new(
             roots.config_root.clone(),
@@ -32,7 +43,8 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
             roots.state_root.join("cache"),
         )
         .with_bootstrap_path_option(roots.bootstrap_path.clone())
-        .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds)),
+        .with_poll_interval(Duration::from_secs(runtime.poll_interval_seconds))
+        .with_backend_transport(backend_transport),
     )
     .await
     .expect("failed to build authority runtime");
@@ -167,6 +179,35 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         Router::new().nest("/v1", api)
     }
     .merge(api_docs);
+
+    // Backend role: serve the runtime↔backend link for a remote runtime. The
+    // link has its OWN bearer-token auth (distinct from the `/v1` macaroon
+    // perimeter); serving under `require_auth` without a token is refused
+    // (fail closed — the link is a network-exposed backend surface).
+    let app = if runtime.link_serve {
+        let link_auth = if runtime.require_auth {
+            match &runtime.link_token {
+                Some(token) => LinkAuth::Bearer(token.clone()),
+                None => panic!(
+                    "[link] serve is enabled under require_auth but no [link] token is set \
+                     (set [link].token or POSTHASTE_LINK_TOKEN)"
+                ),
+            }
+        } else {
+            LinkAuth::Disabled
+        };
+        ph_info!(
+            events::LINK_SURFACE_SERVED,
+            authenticated = runtime.require_auth,
+            "serving the runtime↔backend link surface for a remote runtime"
+        );
+        app.merge(link_router(
+            runtime_build.backend_link.transport().clone(),
+            link_auth,
+        ))
+    } else {
+        app
+    };
 
     ph_info!(
         events::SERVER_LISTENING,

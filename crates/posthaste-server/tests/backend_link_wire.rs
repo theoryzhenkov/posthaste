@@ -116,3 +116,17 @@ async fn remote_transport_reads_the_link_router_down_channel() {
         }
     );
 }
+
+// Startup mounts the link surface as `.nest("/v1", api).merge(link_router(..))`.
+// The link path consts are the full `/v1/link/*`, while the nest registers
+// concrete `/v1/...` routes, so the two coexist. Route insertion panics on
+// conflict — reaching the end of this test means there is none, guarding the
+// live mount (W6b) against a startup panic.
+#[test]
+fn link_router_merges_under_a_v1_nest_without_route_conflict() {
+    let api: axum::Router =
+        axum::Router::new().route("/sources", axum::routing::get(|| async { "ok" }));
+    let _app: axum::Router = axum::Router::new()
+        .nest("/v1", api)
+        .merge(link_router(Arc::new(StubFarNode), LinkAuth::Disabled));
+}
