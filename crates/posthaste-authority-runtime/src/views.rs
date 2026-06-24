@@ -73,6 +73,9 @@ pub(crate) struct ViewRegistry {
     /// so served views are optimistic over forwarded-but-unconfirmed mutations
     /// ([replication L4 §4.3](../replication/L4.md)).
     outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
+    /// The mail-list base read through the far node (W4a: passthrough cache over
+    /// the in-process backend, behavior-preserving).
+    reads: Arc<crate::read::ReadCache>,
     views: Mutex<HashMap<ViewId, StoredView>>,
     next_view_id: AtomicU64,
 }
@@ -92,12 +95,14 @@ impl ViewRegistry {
         account_reads: Arc<AccountReadService>,
         event_sender: broadcast::Sender<DomainEvent>,
         outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
+        reads: Arc<crate::read::ReadCache>,
     ) -> Self {
         Self {
             mail_queries,
             account_reads,
             event_sender,
             outbox,
+            reads,
             views: Mutex::new(HashMap::new()),
             next_view_id: AtomicU64::new(1),
         }
@@ -377,7 +382,7 @@ impl ViewRegistry {
     ) -> Result<ViewSnapshot, RuntimeError> {
         let (data, read_watermark, coverage) = match kind {
             ViewKind::MailList(request) => {
-                let page = self.mail_queries.query_mail_page(request.clone()).await?;
+                let page = self.reads.query_mail_page(request.clone()).await?;
                 let mut state = mail_list_state(request, page)?;
                 // Fold the runtime→backend outbox: served rows are optimistic
                 // over forwarded-but-unconfirmed mutations. A no-op when the
