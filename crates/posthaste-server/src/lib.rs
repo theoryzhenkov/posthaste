@@ -30,7 +30,7 @@ use axum::{middleware, Router};
 use dotenvy::dotenv;
 use posthaste_authority_runtime::{
     build_authority_runtime, AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeHandle, RuntimeShutdownHandle,
+    AuthorityRuntimeHandle, BackendTransportConfig, RuntimeShutdownHandle,
 };
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{DomainEvent, MailService, MailStore, SecretStore};

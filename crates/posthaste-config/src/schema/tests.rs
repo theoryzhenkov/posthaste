@@ -178,6 +178,7 @@ fn app_toml_round_trips() {
         daemon: DaemonToml::default(),
         logging: LoggingToml::default(),
         cache: CachePolicyToml::default(),
+        link: LinkToml::default(),
     };
     let toml_struct = AppToml::from_app_settings(&settings, &existing);
     let toml_string = toml::to_string_pretty(&toml_struct).unwrap();
