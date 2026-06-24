@@ -40,7 +40,7 @@ use crate::backend::{
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
 use crate::read::{LocalReadSource, ReadCache, RemoteReadSource};
 use crate::transport::{InProcessTransport, RemoteTransport};
-use posthaste_link_contract::LinkTransport;
+use posthaste_link_contract::BackendApi;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
 use crate::bootstrap::initialize_config;
 use crate::mail_queries::MailQueryService;
@@ -77,7 +77,7 @@ pub struct AuthorityRuntimeBuildConfig {
     /// A pre-built link transport that overrides [`backend_transport`](Self::backend_transport)
     /// when set. A host/test seam for injecting a custom transport (e.g. a
     /// deferred one to exercise the near-node outbox); `None` in normal builds.
-    pub backend_transport_override: Option<Arc<dyn LinkTransport>>,
+    pub backend_transport_override: Option<Arc<dyn BackendApi>>,
 }
 
 /// The runtime↔backend link transport, selected by configuration.
@@ -123,7 +123,7 @@ impl AuthorityRuntimeBuildConfig {
     /// Inject a pre-built link transport, overriding [`backend_transport`](Self::backend_transport).
     pub fn with_backend_transport_override(
         mut self,
-        transport: Arc<dyn LinkTransport>,
+        transport: Arc<dyn BackendApi>,
     ) -> Self {
         self.backend_transport_override = Some(transport);
         self
@@ -453,7 +453,7 @@ fn build_read_cache(
 /// [`RemoteTransport`] pointed at a backend serving the link wire.
 fn select_backend_link(
     transport: &BackendTransportConfig,
-    override_transport: Option<Arc<dyn LinkTransport>>,
+    override_transport: Option<Arc<dyn BackendApi>>,
     backend: Arc<Backend>,
 ) -> BackendLink {
     if let Some(transport) = override_transport {

@@ -28,7 +28,7 @@ use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
     SecretStore, SecretStoreError, SortDirection, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
-use posthaste_link_contract::{LinkCoverage, LinkTransport};
+use posthaste_link_contract::{LinkCoverage, BackendApi};
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,

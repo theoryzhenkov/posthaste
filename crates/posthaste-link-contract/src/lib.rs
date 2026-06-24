@@ -13,7 +13,7 @@
 //! *from* it, not invented beside it (§4.1). The runtime↔backend link adopts the
 //! same shape via [`BackendLink`].
 //!
-//! [`LinkTransport`] is the Rust abstraction over one link's two channels; it is
+//! [`BackendApi`] is the Rust abstraction over one link's two channels; it is
 //! selected by configuration (in-process co-located by default, remote when
 //! split — [replication L4 §5](../replication/L4.md)). The transport is what
 //! varies across deployments; the contract above it does not. This is the seam
@@ -198,7 +198,7 @@ pub type DownStream = BoxStream<'static, DownFrame>;
 /// it already speaks), and the runtime↔backend link adopts it via
 /// [`BackendLink`].
 #[async_trait]
-pub trait LinkTransport: Send + Sync {
+pub trait BackendApi: Send + Sync {
     /// Up-channel. Forward a (possibly client-originated) named mutation toward
     /// the far node with a stable mutation id; the receipt carries the far
     /// node's `RuntimeMutationId` for the confirmation join. Idempotent on the
@@ -247,7 +247,7 @@ fn read_channel_unsupported() -> RuntimeError {
 
 /// The runtime↔backend link ([replication L4 §3](../replication/L4.md)): the
 /// runtime's typed handle to the backend, carried by a swappable
-/// [`LinkTransport`]. The runtime reaches the backend **only** through these two
+/// [`BackendApi`]. The runtime reaches the backend **only** through these two
 /// channels — never by reading the backend store across the link (assertion
 /// `backend-link-is-replication-only`); reads become state the near node derives
 /// locally from its base cache (W2).
@@ -257,14 +257,14 @@ fn read_channel_unsupported() -> RuntimeError {
 /// abstraction, so there is one mechanism, two consumers.
 #[derive(Clone)]
 pub struct BackendLink {
-    transport: Arc<dyn LinkTransport>,
+    transport: Arc<dyn BackendApi>,
 }
 
 impl BackendLink {
     /// Build a backend link over a transport. The transport is config-selected
     /// upstream ([replication L4 §5](../replication/L4.md)); this type does not
     /// know or care which one it holds.
-    pub fn new(transport: Arc<dyn LinkTransport>) -> Self {
+    pub fn new(transport: Arc<dyn BackendApi>) -> Self {
         Self { transport }
     }
 
@@ -302,7 +302,7 @@ impl BackendLink {
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.
-    pub fn transport(&self) -> &Arc<dyn LinkTransport> {
+    pub fn transport(&self) -> &Arc<dyn BackendApi> {
         &self.transport
     }
 }
@@ -379,7 +379,7 @@ mod tests {
     struct StubTransport;
 
     #[async_trait]
-    impl LinkTransport for StubTransport {
+    impl BackendApi for StubTransport {
         async fn forward_mutation(
             &self,
             mutation: MutationRequest,
