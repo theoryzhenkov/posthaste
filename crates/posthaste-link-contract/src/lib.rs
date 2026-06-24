@@ -34,9 +34,9 @@ use std::collections::BTreeMap;
 use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, TagSummary,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode, TagSummary,
 };
 use posthaste_link_core::{MessageFoldState, MutationId, SettlementOutcome};
 use posthaste_runtime_contract::{
@@ -469,6 +469,63 @@ pub trait BackendApi: Send + Sync {
         let _ = (account_id, mailbox_id, role);
         Err(write_channel_unsupported())
     }
+
+    /// Write: queue a local-first send for an account.
+    async fn send_message(
+        &self,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError> {
+        let _ = (account_id, request);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: save (create or update) a draft.
+    async fn save_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError> {
+        let _ = (account_id, draft_id, request);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: delete a draft.
+    async fn delete_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError> {
+        let _ = (account_id, draft_id);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: discard a pending outbox operation.
+    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        let _ = operation_id;
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: re-arm a failed outbox operation to pending.
+    async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        let _ = (account_id, operation_id);
+        Err(write_channel_unsupported())
+    }
+
+    /// Write: drive an explicit account sync, returning the number of changes.
+    async fn sync_account(
+        &self,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError> {
+        let _ = (account_id, mode);
+        Err(write_channel_unsupported())
+    }
 }
 
 fn read_channel_unsupported() -> RuntimeError {
@@ -637,6 +694,57 @@ impl BackendLink {
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
         self.transport.set_mailbox_role(account_id, mailbox_id, role).await
+    }
+
+    /// Write: queue a local-first send for an account.
+    pub async fn send_message(
+        &self,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError> {
+        self.transport.send_message(account_id, request).await
+    }
+
+    /// Write: save (create or update) a draft.
+    pub async fn save_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError> {
+        self.transport.save_draft(account_id, draft_id, request).await
+    }
+
+    /// Write: delete a draft.
+    pub async fn delete_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError> {
+        self.transport.delete_draft(account_id, draft_id).await
+    }
+
+    /// Write: discard a pending outbox operation.
+    pub async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        self.transport.discard_operation(operation_id).await
+    }
+
+    /// Write: re-arm a failed outbox operation to pending.
+    pub async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.transport.retry_operation(account_id, operation_id).await
+    }
+
+    /// Write: drive an explicit account sync.
+    pub async fn sync_account(
+        &self,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError> {
+        self.transport.sync_account(account_id, mode).await
     }
 
     /// The underlying transport, for callers that need to inspect or hold it.

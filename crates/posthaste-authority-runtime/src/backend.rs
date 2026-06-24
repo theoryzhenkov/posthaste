@@ -28,7 +28,7 @@ use posthaste_domain::{
     MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation,
     RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, ServiceErrorKind,
     SetKeywordsCommand, SharedGateway, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    StoreError, SyncTrigger, TagSummary,
+    OperationId, SendMessageRequest, StoreError, SyncMode, SyncTrigger, TagSummary,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
@@ -548,6 +548,85 @@ impl Backend {
             .await?;
         self.publish_events(&events);
         Ok(self.service.list_mailboxes(&account_id)?)
+    }
+
+    /// Write: queue a local-first send and nudge a flush. No live gateway is
+    /// required to accept it; it flushes on the next connectivity window.
+    pub(crate) async fn send_message(
+        &self,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError> {
+        let sender = request.from.clone();
+        self.service.enqueue_send(&account_id, request)?;
+        if let Some(sender) = &sender {
+            if let Err(error) = self.store.remember_sender_address(&account_id, sender) {
+                ph_warn!(
+                    events::SEND_SENDER_CACHE_UPDATE_FAILED,
+                    source_id = %account_id,
+                    sender = %sender.email,
+                    error = %error,
+                    "send accepted but sender address cache update failed"
+                );
+            }
+        }
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(())
+    }
+
+    /// Write: save (create or update) a draft and nudge a flush.
+    pub(crate) async fn save_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError> {
+        let operation = self.service.save_draft(&account_id, draft_id, request)?;
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(operation)
+    }
+
+    /// Write: delete a draft and nudge a flush.
+    pub(crate) async fn delete_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError> {
+        let operation = self.service.delete_draft(&account_id, draft_id)?;
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(operation)
+    }
+
+    /// Write: discard a pending outbox operation.
+    pub(crate) fn discard_operation(
+        &self,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.service.discard_operation(&operation_id)?;
+        Ok(())
+    }
+
+    /// Write: re-arm a failed outbox operation to pending and nudge a flush.
+    pub(crate) async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.service.retry_operation(&operation_id)?;
+        self.trigger_outbox_flush(&account_id).await;
+        Ok(())
+    }
+
+    /// Write: drive an explicit account sync, returning the number of changes.
+    pub(crate) async fn sync_account(
+        &self,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError> {
+        Ok(self
+            .live_accounts
+            .sync_account_with_mode(&account_id, mode)
+            .await?)
     }
 
     /// Resolve the account's mailbox for `role` and replace the message's

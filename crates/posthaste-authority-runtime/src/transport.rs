@@ -19,9 +19,10 @@ use std::collections::BTreeMap;
 use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
-    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, ReplyContext, SetKeywordsCommand, SmartMailbox, SmartMailboxId,
-    SmartMailboxSummary, TagSummary, EVENT_TOPIC_MESSAGE_UPDATED,
+    MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation, OperationId,
+    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, SendMessageRequest,
+    SetKeywordsCommand, SmartMailbox, SmartMailboxId, SmartMailboxSummary, SyncMode, TagSummary,
+    EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_link_contract::{
     BackendApi, BaseAssertion, BaseUpdate, DownFrame, DownStream, LinkCoverage,
@@ -307,6 +308,51 @@ impl BackendApi for LocalBackend {
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
         self.backend.set_mailbox_role(account_id, mailbox_id, role).await
+    }
+
+    async fn send_message(
+        &self,
+        account_id: AccountId,
+        request: SendMessageRequest,
+    ) -> Result<(), RuntimeError> {
+        self.backend.send_message(account_id, request).await
+    }
+
+    async fn save_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: Option<MessageId>,
+        request: SendMessageRequest,
+    ) -> Result<Operation, RuntimeError> {
+        self.backend.save_draft(account_id, draft_id, request).await
+    }
+
+    async fn delete_draft(
+        &self,
+        account_id: AccountId,
+        draft_id: MessageId,
+    ) -> Result<Operation, RuntimeError> {
+        self.backend.delete_draft(account_id, draft_id).await
+    }
+
+    async fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
+        self.backend.discard_operation(operation_id)
+    }
+
+    async fn retry_operation(
+        &self,
+        account_id: AccountId,
+        operation_id: OperationId,
+    ) -> Result<(), RuntimeError> {
+        self.backend.retry_operation(account_id, operation_id).await
+    }
+
+    async fn sync_account(
+        &self,
+        account_id: AccountId,
+        mode: SyncMode,
+    ) -> Result<usize, RuntimeError> {
+        self.backend.sync_account(account_id, mode).await
     }
 
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
