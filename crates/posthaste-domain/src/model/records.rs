@@ -173,7 +173,8 @@ pub struct DomainEvent {
 /// Query parameters for filtering the event log, used by `GET /v1/events`.
 ///
 /// @spec docs/L1-api#sse-event-stream
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EventFilter {
     pub account_id: Option<AccountId>,
     pub topic: Option<String>,

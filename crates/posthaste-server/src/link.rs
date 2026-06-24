@@ -141,6 +141,31 @@ async fn conversation(
         .map_err(ApiError::from_runtime_error)
 }
 
+/// Emit a far-node handler per link-op row + the function that registers them
+/// all. Generated from the shared link-op table so the server surface cannot
+/// drift from the [`RemoteBackend`](posthaste_authority_runtime) client.
+macro_rules! emit_link_routes {
+    ($($method:ident => $path:literal => $req:ident { $($field:ident : $fty:ty),* $(,)? } => $ret:ty;)*) => {
+        $(
+            // Zero-arg ops leave `req` unused (the request body is `{}`).
+            #[allow(unused_variables)]
+            async fn $method(
+                State(state): State<LinkState>,
+                Json(req): Json<posthaste_link_contract::$req>,
+            ) -> Result<Json<$ret>, ApiError> {
+                let result: Result<$ret, posthaste_runtime_contract::RuntimeError> =
+                    state.transport.$method($(req.$field),*).await;
+                result.map(Json).map_err(ApiError::from_runtime_error)
+            }
+        )*
+
+        fn register_generated_link_routes(router: Router<LinkState>) -> Router<LinkState> {
+            router $( .route($path, post($method)) )*
+        }
+    };
+}
+posthaste_link_contract::for_each_link_op!(emit_link_routes);
+
 fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
         .json_data(frame)
@@ -150,12 +175,14 @@ fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
 /// Build the far-node link router over a transport — the backend's in-process
 /// `BackendLink` transport in a split deployment.
 pub fn link_router(transport: Arc<dyn BackendApi>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route(LINK_FORWARD_MUTATION_PATH, post(forward_mutation))
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
         .route(LINK_QUERY_PATH, post(query_mail_page))
         .route(LINK_SUMMARY_PATH, post(current_summary))
         .route(LINK_DETAIL_PATH, post(message_detail))
-        .route(LINK_CONVERSATION_PATH, post(conversation))
-        .with_state(LinkState { transport })
+        .route(LINK_CONVERSATION_PATH, post(conversation));
+    // The full request/response surface (reads + typed writes) is generated
+    // from the shared link-op table.
+    register_generated_link_routes(router).with_state(LinkState { transport })
 }
