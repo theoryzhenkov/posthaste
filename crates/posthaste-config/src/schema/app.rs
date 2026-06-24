@@ -20,6 +20,25 @@ pub struct AppToml {
     pub logging: LoggingToml,
     #[serde(default)]
     pub cache: CachePolicyToml,
+    #[serde(default)]
+    pub link: LinkToml,
+}
+
+/// Runtime↔backend link settings (`[link]`). Default: in-process, link not
+/// served — the bundled single-process deployment is unaffected.
+///
+/// @spec docs/replication/L5
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LinkToml {
+    /// Backend role: serve the runtime↔backend link over HTTP for a remote
+    /// runtime. Default `false`.
+    pub serve: Option<bool>,
+    /// Shared bearer token — required from connecting runtimes (serve role) and
+    /// presented to the remote backend (connect role).
+    pub token: Option<String>,
+    /// Runtime role: connect to a remote backend at this base URL instead of the
+    /// in-process one. When set, this process is a near node over the link.
+    pub backend_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -123,6 +142,7 @@ impl AppToml {
             daemon: existing.daemon.clone(),
             logging: existing.logging.clone(),
             cache: CachePolicyToml::from_cache_policy(&settings.cache_policy),
+            link: existing.link.clone(),
         }
     }
 }

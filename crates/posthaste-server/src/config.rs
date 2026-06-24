@@ -37,6 +37,19 @@ pub struct DaemonSettings {
     ///
     /// @spec docs/eph/DESIGN-L1-trust-model
     pub require_auth: bool,
+    /// Backend role: when `true`, mount the runtime↔backend `link_router` so a
+    /// remote runtime can drive this backend over HTTP. Default `false` (the
+    /// bundled single-process deployment never exposes the link).
+    ///
+    /// @spec docs/replication/L5
+    pub link_serve: bool,
+    /// Shared bearer token for the link surface — required from connecting
+    /// runtimes when serving, and presented to the remote backend when
+    /// connecting. Serving without a token (under `require_auth`) is refused.
+    pub link_token: Option<String>,
+    /// Runtime role: when set, this process connects to a remote backend at this
+    /// base URL over the link instead of using the in-process one.
+    pub link_backend_url: Option<String>,
 }
 
 /// Resolve config, state, and bootstrap paths from environment variables
@@ -113,12 +126,31 @@ pub fn read_daemon_settings(
         .or(app_toml.daemon.require_auth)
         .unwrap_or(true);
 
+    // Runtime↔backend link roles (default: in-process, not served). Env wins
+    // over `[link]` so a split can be dogfooded without editing config.
+    let link_serve = std::env::var("POSTHASTE_LINK_SERVE")
+        .ok()
+        .and_then(|v| parse_bool_flag(&v))
+        .or(app_toml.link.serve)
+        .unwrap_or(false);
+    let link_token = std::env::var("POSTHASTE_LINK_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+        .or(app_toml.link.token);
+    let link_backend_url = std::env::var("POSTHASTE_LINK_BACKEND_URL")
+        .ok()
+        .filter(|url| !url.is_empty())
+        .or(app_toml.link.backend_url);
+
     Ok(DaemonSettings {
         bind_address: bind,
         cors_origin,
         poll_interval_seconds,
         log_level,
         require_auth,
+        link_serve,
+        link_token,
+        link_backend_url,
     })
 }
 

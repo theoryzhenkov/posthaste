@@ -67,6 +67,7 @@ pub const FRONTEND_ERROR_UNHANDLED_REJECTION: LogEvent =
 pub const HTTP_REQUEST_COMPLETED: LogEvent = LogEvent::new("http.request.completed");
 pub const LOGGING_INITIALIZED: LogEvent = LogEvent::new("logging.initialized");
 pub const SERVER_LISTENING: LogEvent = LogEvent::new("server.listening");
+pub const LINK_SURFACE_SERVED: LogEvent = LogEvent::new("link.surface_served");
 pub const SEND_FOLLOWUP_SYNC_TRIGGER_FAILED: LogEvent =
     LogEvent::new("send.followup_sync_trigger_failed");
 pub const SEND_SENDER_CACHE_UPDATE_FAILED: LogEvent =
