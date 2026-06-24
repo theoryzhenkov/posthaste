@@ -3,7 +3,7 @@
 //! into the backend's store.
 //!
 //! This is the end-to-end capstone of the runtime↔backend link: the production
-//! `RemoteTransport` (near node) → `link_router` (far-node HTTP surface) →
+//! `RemoteBackend` (near node) → `link_router` (far-node HTTP surface) →
 //! in-process `Backend` (real `MailService` + store). It proves a mutation
 //! forwarded by a remote runtime is applied to the backend's authoritative
 //! store — not a mock on either side.
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig, RemoteTransport,
+    build_authority_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig, RemoteBackend,
 };
 use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
@@ -166,7 +166,7 @@ async fn remote_transport_reads_a_real_query_over_the_link() {
     seed_inbox_message(&backend, &account.id, "m-read");
     let base_url = serve_link(&backend).await;
 
-    let transport = RemoteTransport::new(base_url);
+    let transport = RemoteBackend::new(base_url);
     let page = transport
         .query_mail_page(MailQueryRequest {
             query: format!("in:{}/inbox", account.id.as_str()),

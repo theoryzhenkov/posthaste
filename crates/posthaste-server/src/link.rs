@@ -22,10 +22,12 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
-use posthaste_domain::{AccountId, MessageId, MessageSummary};
+use posthaste_domain::{
+    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+};
 use posthaste_link_contract::{
-    DownFrame, LinkCoverage, BackendApi, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
-    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    BackendApi, DownFrame, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
+    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest};
 use serde::Deserialize;
@@ -107,6 +109,38 @@ async fn current_summary(
         .map_err(ApiError::from_runtime_error)
 }
 
+/// Read channel: a message's detail (the `messageDetail` view).
+async fn message_detail(
+    State(state): State<LinkState>,
+    Json(request): Json<SummaryRequest>,
+) -> Result<Json<Option<MessageDetail>>, ApiError> {
+    state
+        .transport
+        .message_detail(request.account_id, request.message_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationRequest {
+    conversation_id: ConversationId,
+}
+
+/// Read channel: an overlay-folded conversation (the `conversation` view).
+async fn conversation(
+    State(state): State<LinkState>,
+    Json(request): Json<ConversationRequest>,
+) -> Result<Json<ConversationView>, ApiError> {
+    state
+        .transport
+        .conversation(request.conversation_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from_runtime_error)
+}
+
 fn down_frame_to_sse(frame: DownFrame) -> Result<Event, Infallible> {
     Ok(Event::default()
         .json_data(frame)
@@ -121,5 +155,7 @@ pub fn link_router(transport: Arc<dyn BackendApi>) -> Router {
         .route(LINK_SUBSCRIBE_PATH, get(subscribe))
         .route(LINK_QUERY_PATH, post(query_mail_page))
         .route(LINK_SUMMARY_PATH, post(current_summary))
+        .route(LINK_DETAIL_PATH, post(message_detail))
+        .route(LINK_CONVERSATION_PATH, post(conversation))
         .with_state(LinkState { transport })
 }

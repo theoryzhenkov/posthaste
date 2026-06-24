@@ -38,8 +38,8 @@ use crate::backend::{
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
-use crate::read::{LocalReadSource, ReadCache, RemoteReadSource};
-use crate::transport::{InProcessTransport, RemoteTransport};
+use crate::read::ReadCache;
+use crate::transport::{LocalBackend, RemoteBackend};
 use posthaste_link_contract::BackendApi;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
 use crate::bootstrap::initialize_config;
@@ -438,11 +438,14 @@ fn build_read_cache(
     backend_link: &BackendLink,
 ) -> ReadCache {
     match transport {
+        // Remote: read through the same RemoteBackend the link uses (shared HTTP
+        // client), retaining what flows back. In-process: read straight through
+        // a LocalBackend over the co-located far node, retaining nothing.
         BackendTransportConfig::Remote { .. } => {
-            ReadCache::retaining(Arc::new(RemoteReadSource::new(backend_link.clone())))
+            ReadCache::retaining(backend_link.transport().clone())
         }
         BackendTransportConfig::InProcess => {
-            ReadCache::passthrough(Arc::new(LocalReadSource::new(backend.clone())))
+            ReadCache::passthrough(Arc::new(LocalBackend::new(backend.clone())))
         }
     }
 }
@@ -450,7 +453,7 @@ fn build_read_cache(
 /// Build the runtime↔backend [`BackendLink`] over its config-selected transport
 /// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
-/// [`RemoteTransport`] pointed at a backend serving the link wire.
+/// [`RemoteBackend`] pointed at a backend serving the link wire.
 fn select_backend_link(
     transport: &BackendTransportConfig,
     override_transport: Option<Arc<dyn BackendApi>>,
@@ -461,10 +464,10 @@ fn select_backend_link(
     }
     match transport {
         BackendTransportConfig::InProcess => {
-            BackendLink::new(Arc::new(InProcessTransport::new(backend)))
+            BackendLink::new(Arc::new(LocalBackend::new(backend)))
         }
         BackendTransportConfig::Remote { base_url } => {
-            BackendLink::new(Arc::new(RemoteTransport::new(base_url.clone())))
+            BackendLink::new(Arc::new(RemoteBackend::new(base_url.clone())))
         }
     }
 }
@@ -612,7 +615,7 @@ impl AuthorityRuntimeHandle {
             live_accounts.clone(),
             api_bridge.event_sender.clone(),
         ));
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalReadSource::new(
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(LocalBackend::new(
             backend.clone(),
         ))));
         let views = Arc::new(ViewRegistry::new(
@@ -634,7 +637,7 @@ impl AuthorityRuntimeHandle {
             },
             account_count,
         };
-        let backend_link = BackendLink::new(Arc::new(InProcessTransport::new(backend.clone())));
+        let backend_link = BackendLink::new(Arc::new(LocalBackend::new(backend.clone())));
         Self {
             core: Arc::new(AuthorityRuntimeCore {
                 service: api_bridge.service.clone(),
