@@ -411,7 +411,6 @@ pub(crate) fn build_runtime(
         account_mutations: Some(account_mutations),
         views,
         sessions,
-        live_accounts: account_supervisor.clone(),
         startup_status: runtime_status.clone(),
         stopped: stopped.clone(),
     });
@@ -493,7 +492,6 @@ struct AuthorityRuntimeCore {
     account_mutations: Option<Arc<AccountMutationService>>,
     views: Arc<ViewRegistry>,
     sessions: Arc<SessionRegistry>,
-    live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     startup_status: RuntimeStatus,
     stopped: Arc<AtomicBool>,
 }
@@ -646,7 +644,6 @@ impl AuthorityRuntimeHandle {
                 account_mutations,
                 views,
                 sessions,
-                live_accounts,
                 startup_status: runtime_status,
                 stopped: Arc::new(AtomicBool::new(false)),
             }),
@@ -654,10 +651,9 @@ impl AuthorityRuntimeHandle {
     }
 
     fn current_status(&self) -> RuntimeStatus {
+        // Runtime-local status only (lifecycle + the build-time store snapshot);
+        // the live account count is layered on in `runtime_status` via the link.
         let mut status = self.core.startup_status.clone();
-        if let Some(account_count) = self.core.live_accounts.account_count() {
-            status.account_count = account_count;
-        }
         if self.core.stopped.load(Ordering::SeqCst) {
             status.lifecycle = RuntimeLifecycle::Stopped;
         }
@@ -1149,7 +1145,13 @@ fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
 #[async_trait]
 impl RuntimeCore for AuthorityRuntimeHandle {
     async fn runtime_status(&self, _caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError> {
-        Ok(self.current_status())
+        let mut status = self.current_status();
+        // The live account count is backend state; read it through the link
+        // (best-effort — a status read never fails on a count miss).
+        if let Ok(Some(account_count)) = self.core.reads.account_count().await {
+            status.account_count = account_count;
+        }
+        Ok(status)
     }
 
     async fn get_app_settings(&self, _caller: RuntimeCaller) -> Result<AppSettings, RuntimeError> {

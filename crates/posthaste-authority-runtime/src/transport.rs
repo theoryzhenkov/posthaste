@@ -163,6 +163,10 @@ impl BackendApi for LocalBackend {
         self.backend.conversation(&conversation_id)
     }
 
+    async fn account_count(&self) -> Result<Option<usize>, RuntimeError> {
+        Ok(self.backend.account_count())
+    }
+
     async fn list_accounts(&self) -> Result<RuntimeAccountList, RuntimeError> {
         self.backend.list_accounts().await
     }
