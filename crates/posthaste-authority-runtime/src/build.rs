@@ -38,7 +38,7 @@ use crate::backend::{
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
-use crate::read::{LocalReadSource, ReadCache, ReadSource, RemoteReadSource};
+use crate::read::{LocalReadSource, ReadCache, RemoteReadSource};
 use crate::transport::{InProcessTransport, RemoteTransport};
 use posthaste_link_contract::LinkTransport;
 use posthaste_link_core::{MutationId, PendingMessageMutation};
@@ -306,11 +306,18 @@ pub async fn build_authority_runtime(
         config.backend_transport_override.clone(),
         backend.clone(),
     );
-    let reads = Arc::new(ReadCache::passthrough(select_read_source(
+    let reads = Arc::new(build_read_cache(
         &config.backend_transport,
         &backend,
         &backend_link,
-    )));
+    ));
+    // A split runtime's retaining cache is kept coherent by the down-channel.
+    if matches!(config.backend_transport, BackendTransportConfig::Remote { .. }) {
+        tokio::spawn(crate::read::run_cache_coherence(
+            backend_link.clone(),
+            reads.clone(),
+        ));
+    }
     let views = Arc::new(ViewRegistry::new(
         mail_queries.clone(),
         account_reads.clone(),
@@ -352,20 +359,24 @@ pub async fn build_authority_runtime(
 /// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
 /// [`RemoteTransport`] pointed at a backend serving the link wire.
-/// Pick the runtime's read source from the same config that picks the transport.
-/// `Remote` reads through the link; `InProcess` reads the co-located far node
-/// directly. The transport *override* (a write/link test seam) does not change
-/// the read source — reads follow the deployment's transport choice.
-fn select_read_source(
+/// Build the runtime's read-through cache from the same config that picks the
+/// transport. `Remote` reads through the link and **retains** what flows back
+/// (kept coherent by the down-channel); `InProcess` reads the co-located far
+/// node directly with a **passthrough** policy (no redundant cache, instant
+/// link). The transport *override* (a write/link test seam) does not change the
+/// read path.
+fn build_read_cache(
     transport: &BackendTransportConfig,
     backend: &Arc<Backend>,
     backend_link: &BackendLink,
-) -> Arc<dyn ReadSource> {
+) -> ReadCache {
     match transport {
         BackendTransportConfig::Remote { .. } => {
-            Arc::new(RemoteReadSource::new(backend_link.clone()))
+            ReadCache::retaining(Arc::new(RemoteReadSource::new(backend_link.clone())))
         }
-        BackendTransportConfig::InProcess => Arc::new(LocalReadSource::new(backend.clone())),
+        BackendTransportConfig::InProcess => {
+            ReadCache::passthrough(Arc::new(LocalReadSource::new(backend.clone())))
+        }
     }
 }
 

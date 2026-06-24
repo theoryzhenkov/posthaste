@@ -154,11 +154,20 @@ backend's computation directly; `RemoteTransport` carries it as HTTP + SSE.
   through too, lifting the c3 blocker. The policy is **passthrough**
   (read-through every time, always fresh): a *retaining* policy is unsafe without
   coherence, so retention moves to W4d.
-- **W4d — retaining policy + coherence + eviction + coverage.** A retaining
-  `ReadCache` policy that serves hits locally, kept correct by the down-channel
-  (a cached entry dropped/updated when the backend says it changed — never
-  TTL-stale); eviction under storage pressure; `RuntimeCoverage` reports what a
-  split runtime holds; reconnect/snapshot recovery.
+- **W4d — retaining policy + coherence.** *(Core landed.)* `ReadCache` gained a
+  **retaining** policy: a message-summary cache warmed by both point reads and
+  query pages (the data that flowed back), serving point reads (detail,
+  undo-history) locally. Coherence is the down-channel: `run_cache_coherence`
+  consumes `BackendLink::subscribe` and **evicts** a message's entry on any base
+  assertion, so a cached summary is never stale (the next read re-fetches) — not
+  TTL. A split runtime gets the retaining cache + the coherence task; co-located
+  stays passthrough. Mail-list pages are not cached (the authority owns
+  membership/order; a list is a fresh read-through that warms the message
+  cache). Unit-tested deterministically (hit/miss/warm/evict); the SSE round-trip
+  is covered by the existing down-channel wire proofs. **Remaining (hardening):**
+  eviction under storage pressure (cache bounds/LRU), `RuntimeCoverage` reporting
+  what a split runtime holds, reconnect/snapshot recovery, and carrying the
+  account id on assertions to avoid cross-account over-eviction.
 - **W4e — policy surface + control config.** Expose the policy (static:
   passthrough vs retaining) in the desktop control config alongside the per-link
   transport switch; the adaptive RTT-driven policy is a later refinement, not
