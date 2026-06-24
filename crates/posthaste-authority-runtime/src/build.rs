@@ -101,6 +101,9 @@ pub enum BackendTransportConfig {
     InProcess,
     Remote {
         base_url: String,
+        /// Bearer token presented to the backend's authenticated `link_router`
+        /// (`LinkAuth::Bearer`). `None` for an unauthenticated link.
+        token: Option<String>,
     },
 }
 
@@ -463,8 +466,8 @@ fn select_backend_link(
 ) -> BackendLink {
     let base: Arc<dyn BackendApi> = match transport {
         BackendTransportConfig::InProcess => Arc::new(LocalBackend::new(backend)),
-        BackendTransportConfig::Remote { base_url } => {
-            Arc::new(RemoteBackend::new(base_url.clone()))
+        BackendTransportConfig::Remote { base_url, token } => {
+            Arc::new(RemoteBackend::with_token(base_url.clone(), token.clone()))
         }
     };
     match override_decorator {

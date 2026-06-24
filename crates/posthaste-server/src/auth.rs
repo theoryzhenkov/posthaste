@@ -23,11 +23,14 @@ mod perimeter;
 
 pub use middleware::require_auth_layer;
 pub use perimeter::{host_allowlist, origin_allowlist};
+// Shared with the runtime↔backend link auth (`link.rs`): one bearer-parse + one
+// constant-time compare + the canonical 401, so the link surface enforces the
+// same way the `/v1` perimeter does.
+pub(crate) use errors::unauthorized;
+pub(crate) use perimeter::{bearer_token, constant_time_eq};
 
 #[cfg(test)]
-use perimeter::{
-    bind_host, constant_time_eq, is_exempt_path, normalize_host_header, origin_allowed,
-};
+use perimeter::{bind_host, is_exempt_path, normalize_host_header, origin_allowed};
 
 /// The verified bearer token, placed in request extensions by
 /// [`require_auth_layer`] once authenticity is confirmed. Handlers that mint a

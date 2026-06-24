@@ -35,7 +35,7 @@ use posthaste_runtime_contract::{
     MailPresentationRequest, MailQueryPage, MailQueryRequest, MutationRequest, RuntimeCaller,
     RuntimeCore, SecretWriteMutation, ViewDescriptor,
 };
-use posthaste_server::link_router;
+use posthaste_server::{link_router, LinkAuth};
 
 #[derive(Default)]
 struct TestSecretStore {
@@ -142,7 +142,7 @@ fn seed_inbox_message(
 }
 
 async fn serve_link(backend: &posthaste_authority_runtime::AuthorityRuntimeBuild) -> String {
-    let router = link_router(backend.backend_link.transport().clone());
+    let router = link_router(backend.backend_link.transport().clone(), LinkAuth::Disabled);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -229,6 +229,7 @@ async fn remote_runtime_serves_a_mail_list_view_from_the_backend() {
     let remote = build_authority_runtime(build_config(temp_root()).with_backend_transport(
         BackendTransportConfig::Remote {
             base_url: base_url.clone(),
+            token: None,
         },
     ))
     .await
@@ -297,7 +298,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_backend_store() {
         .expect("seed applies");
 
     // Serve the backend's in-process link over the wire.
-    let router = link_router(backend.backend_link.transport().clone());
+    let router = link_router(backend.backend_link.transport().clone(), LinkAuth::Disabled);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -309,6 +310,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_backend_store() {
         build_config(temp_root())
             .with_backend_transport(BackendTransportConfig::Remote {
                 base_url: format!("http://{addr}"),
+                token: None,
             }),
     )
     .await
@@ -424,5 +426,59 @@ async fn generated_wire_round_trips_a_read_and_a_write() {
     assert!(
         summary.keywords.iter().any(|keyword| keyword == "$flagged"),
         "the generated write should be applied to the backend store"
+    );
+}
+
+// The link surface, served with `LinkAuth::Bearer`, rejects requests without a
+// matching bearer token and admits those that carry it — the gate a remote mount
+// stands behind.
+//
+// spec: docs/eph/DESIGN-L1-trust-model
+#[tokio::test]
+async fn link_auth_requires_a_matching_bearer_token() {
+    let backend = build_authority_runtime(build_config(temp_root()))
+        .await
+        .expect("backend runtime builds");
+    let account = backend
+        .handle
+        .create_account(RuntimeCaller::test(), account_mutation("auth-account"))
+        .await
+        .expect("account creates");
+
+    // Serve the link behind a required bearer token.
+    let router = link_router(
+        backend.backend_link.transport().clone(),
+        LinkAuth::Bearer("s3cret-link-token".to_string()),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let base_url = format!("http://{addr}");
+
+    // No token → rejected.
+    let anonymous = RemoteBackend::new(base_url.clone());
+    assert!(
+        anonymous.list_accounts().await.is_err(),
+        "a request with no bearer token must be rejected"
+    );
+
+    // Wrong token → rejected.
+    let wrong = RemoteBackend::with_token(base_url.clone(), Some("not-the-token".to_string()));
+    assert!(
+        wrong.list_accounts().await.is_err(),
+        "a request with the wrong bearer token must be rejected"
+    );
+
+    // Correct token → authorized, and the generated read reaches the backend.
+    let authed = RemoteBackend::with_token(base_url, Some("s3cret-link-token".to_string()));
+    let accounts = authed
+        .list_accounts()
+        .await
+        .expect("a request with the correct bearer token is authorized");
+    assert!(
+        accounts.ids.contains(&account.id),
+        "the authenticated read should see the backend's account"
     );
 }
