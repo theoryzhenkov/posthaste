@@ -47,6 +47,7 @@ impl BackendApi for StubFarNode {
     async fn subscribe(&self, _coverage: LinkCoverage) -> Result<DownStream, RuntimeError> {
         let frame = DownFrame::Base {
             assertions: vec![BaseAssertion {
+                account_id: "acct".into(),
                 message_id: "m1".into(),
                 update: BaseUpdate::Present(MessageFoldState {
                     keywords: vec!["$flagged".into()],
@@ -107,6 +108,7 @@ async fn remote_transport_reads_the_link_router_down_channel() {
         frame,
         DownFrame::Base {
             assertions: vec![BaseAssertion {
+                account_id: "acct".into(),
                 message_id: "m1".into(),
                 update: BaseUpdate::Present(MessageFoldState {
                     keywords: vec!["$flagged".into()],
