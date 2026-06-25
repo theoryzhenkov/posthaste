@@ -66,6 +66,9 @@ fn default_filter_directives(config_level: &str) -> String {
     [
         "warn".to_string(),
         format!("posthaste_server={level}"),
+        format!("posthaste_api={level}"),
+        format!("posthaste_runtime={level}"),
+        format!("posthaste_authority_runtime={level}"),
         format!("posthaste_engine={level}"),
         format!("posthaste_imap={level}"),
         format!("posthaste_store={level}"),

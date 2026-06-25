@@ -14,8 +14,16 @@ use posthaste_runtime_contract::{
 use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
+use tracing::{debug, warn};
 
 use crate::views::ViewRegistry;
+
+/// Capacity of the per-session frame broadcast channel. A burst (e.g. a sync
+/// delivering many messages at once) emits one view frame per recompute; if the
+/// SSE consumer can't drain them before the channel fills, `recv` returns
+/// `Lagged` and we recover by collapsing to current state. Sized generously so
+/// ordinary bursts never lag; the collapse path remains the safety net.
+const SESSION_FRAME_CHANNEL_CAPACITY: usize = 512;
 
 pub(crate) struct SessionRegistry {
     views: Arc<ViewRegistry>,
@@ -144,7 +152,8 @@ impl SessionRegistry {
         caller: RuntimeCaller,
     ) -> Result<RuntimeSession, RuntimeError> {
         let session_id = RuntimeSessionId::new(format!("session-{}", Id::generate()));
-        let (frames, _) = broadcast::channel(64);
+        let (frames, _) = broadcast::channel(SESSION_FRAME_CHANNEL_CAPACITY);
+        debug!(session_id = %session_id.as_str(), "runtime session opened");
         self.sessions.lock().map_err(lock_error)?.insert(
             session_id.clone(),
             StoredSession {
@@ -202,17 +211,36 @@ impl SessionRegistry {
             loop {
                 match receiver.recv().await {
                     Ok(frame) => yield frame,
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                    Err(broadcast::error::RecvError::Lagged(missed)) => {
+                        // A burst outran the consumer: `missed` frames were
+                        // dropped from the channel. Recover by collapsing to the
+                        // session's current state (idempotent for the client).
+                        // A transient collapse failure must NOT kill the stream —
+                        // keep looping so the next live frame still flows.
+                        warn!(
+                            session_id = %session_id.as_str(),
+                            missed_frames = missed,
+                            "session frame stream lagged; recovering with a collapsed snapshot",
+                        );
                         match registry.collapse_session(&session_id, caller_scope.as_deref()) {
                             Ok(frames) => {
                                 for frame in frames {
                                     yield frame;
                                 }
                             }
-                            Err(_) => break,
+                            Err(error) => {
+                                warn!(
+                                    session_id = %session_id.as_str(),
+                                    %error,
+                                    "failed to collapse session after lag; continuing the stream",
+                                );
+                            }
                         }
                     }
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        debug!(session_id = %session_id.as_str(), "session frame stream closed");
+                        break;
+                    }
                 }
             }
         };
