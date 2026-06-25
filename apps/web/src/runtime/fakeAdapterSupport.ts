@@ -100,6 +100,8 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly smartMailboxCalls: number
   readonly syncCalls: RuntimeTriggerSyncRequest[]
   emitRuntimeFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
+  /** Simulate a hard close of the runtime frame stream (fires `onClosed`). */
+  emitRuntimeFrameStreamClosed(error?: unknown): void
   emitViewFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
   queueAccount(account: AccountOverview): void
   queueAccountError(error: Error): void
