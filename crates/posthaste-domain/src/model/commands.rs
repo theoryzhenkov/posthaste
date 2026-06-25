@@ -113,6 +113,7 @@ pub struct DraftContentResult {
 /// @spec docs/eph/DESIGN-L2-optimistic-projection#4-canonical-vocabulary
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum MessageReadback {
     Present(MessageRecord),
     Removed,

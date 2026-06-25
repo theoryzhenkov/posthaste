@@ -10,26 +10,22 @@
 //!
 //! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
-
 use async_trait::async_trait;
 use futures_util::StreamExt;
 
 use posthaste_domain::{
-    AccountId,
-    ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
+    AccountId, ConversationId, ConversationView, MessageDetail, MessageId, MessageSummary,
 };
 use posthaste_link_contract::{
-    BackendApi, DownFrame, DownStream, LinkCoverage,
-    LINK_CONVERSATION_PATH, LINK_DETAIL_PATH, LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH,
-    LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
+    BackendApi, DownFrame, DownStream, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
+    LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
 use posthaste_runtime_contract::{
     MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest, RuntimeError,
     RuntimeErrorCode,
 };
 
-
-/// The default transport: the runtime calls the co-located backend directly.
+// The default transport: the runtime calls the co-located backend directly.
 
 /// The remote link transport ([replication backend-link L2 §2](../replication/backend-link/L2.md)): a near
 /// node talking to a far node that serves the link wire over HTTP. The
@@ -292,7 +288,8 @@ mod tests {
             })
         }
 
-        async fn subscribe() -> Sse<futures_util::stream::Iter<std::vec::IntoIter<Result<Event, Infallible>>>>
+        async fn subscribe(
+        ) -> Sse<futures_util::stream::Iter<std::vec::IntoIter<Result<Event, Infallible>>>>
         {
             let frame = DownFrame::Base {
                 assertions: vec![BaseAssertion {

@@ -32,7 +32,7 @@ impl MailQueryService {
     /// with pending assertions folded), never a provider fetch.
     ///
     /// @spec docs/replication/L1#retire-on-confirmation
-    pub(crate) async fn message_detail(
+    pub(crate) fn message_detail(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
