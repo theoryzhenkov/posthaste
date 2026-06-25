@@ -6,7 +6,7 @@
  * mirrors that into `canUndo`/`canRedo` and triggers `mutation.undo` /
  * `mutation.redo`. The renderer holds no history of its own.
  *
- * @spec docs/runtime/L2#mutation-pipeline-and-catalog
+ * @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
  */
 import { useCallback, useEffect, useState } from 'react'
 

@@ -778,7 +778,7 @@ impl Backend {
     /// session/undo/scope concerns around this call; this node only applies the
     /// effect and returns the resulting events.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     pub(crate) async fn apply_named_message_mutation(
         &self,
         request: &MutationRequest,

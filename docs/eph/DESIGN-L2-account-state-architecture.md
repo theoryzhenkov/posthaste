@@ -6,7 +6,7 @@ reviewed: 2026-06-21
 lifecycle: ephemeral
 type: DESIGN
 depends:
-  - path: docs/runtime/L2
+  - path: docs/runtime/adapter/L2
   - path: docs/backend/L1
   - path: docs/stale/L1-accounts
   - path: docs/stale/L1-sync

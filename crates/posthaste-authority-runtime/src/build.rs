@@ -59,8 +59,8 @@ const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 /// Roots are resolved by the host before construction so the runtime owns mail
 /// authority state without depending on renderer storage.
 ///
-/// spec: docs/runtime/L2#runtime-builder-transport-free
-/// spec: docs/runtime/L2#runtime-owned-roots
+/// spec: docs/runtime/internals/L2#runtime-builder-transport-free
+/// spec: docs/runtime/internals/L1#runtime-owned-roots
 pub struct AuthorityRuntimeBuildConfig {
     pub config_root: PathBuf,
     pub state_root: PathBuf,
@@ -171,7 +171,7 @@ impl AuthorityRuntimeBuildConfig {
 
 /// Result of building the authority runtime.
 ///
-/// spec: docs/runtime/L2#runtime-handle-transport-neutral
+/// spec: docs/runtime/internals/L1#runtime-handle-transport-neutral
 pub struct AuthorityRuntimeBuild {
     pub handle: AuthorityRuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
@@ -228,7 +228,7 @@ impl AuthorityRuntimeApiMigrationBridge {
 /// the two roles can also be composed independently by the lean binaries.
 ///
 /// spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
-/// spec: docs/runtime/L2#runtime-builder-transport-free
+/// spec: docs/runtime/internals/L2#runtime-builder-transport-free
 pub async fn build_authority_runtime(
     config: AuthorityRuntimeBuildConfig,
 ) -> Result<AuthorityRuntimeBuild, AuthorityRuntimeBuildError> {
@@ -646,7 +646,7 @@ struct AuthorityRuntimeCore {
 
 /// Cloneable authority runtime handle used by transport adapters.
 ///
-/// spec: docs/runtime/L2#runtime-handle-transport-neutral
+/// spec: docs/runtime/internals/L1#runtime-handle-transport-neutral
 /// spec: docs/backend/L2#handle-methods-transport-free
 #[derive(Clone)]
 pub struct AuthorityRuntimeHandle {
@@ -869,7 +869,7 @@ impl AuthorityRuntimeHandle {
     /// `action` is one of the existing handle methods, which already publishes
     /// the optimistic assertion and flushes the outbox.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     /// Accept a named message mutation onto the session (idempotency + history),
     /// forward it up the backend link, and settle the session stream from the
     /// backend's receipt. The `forward` future is the link's up-channel
@@ -946,7 +946,7 @@ impl AuthorityRuntimeHandle {
     /// correct even when the forward command is a partial no-op (e.g. adding a
     /// keyword that was already present).
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn keyword_inverse(
         &self,
         source_id: &str,
@@ -988,7 +988,7 @@ impl AuthorityRuntimeHandle {
     /// membership. `None` when the message can't be read, in which case the
     /// mutation is treated as non-invertible.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn mailbox_inverse(
         &self,
         source_id: &str,
@@ -1060,7 +1060,7 @@ impl AuthorityRuntimeHandle {
     /// for fresh user actions (which capture an inverse onto the undo stack) and
     /// false for the replays driven by undo/redo.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn dispatch_named_mutation(
         &self,
         caller: RuntimeCaller,
@@ -1206,7 +1206,7 @@ impl AuthorityRuntimeHandle {
     /// inverse, then make the step redoable. Errors when there is nothing to
     /// undo.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn run_undo(
         &self,
         caller: RuntimeCaller,
@@ -1244,7 +1244,7 @@ impl AuthorityRuntimeHandle {
     /// command, then make it undoable again. Errors when there is nothing to
     /// redo.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn run_redo(
         &self,
         caller: RuntimeCaller,
@@ -1554,7 +1554,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         // Undo/redo navigate the session's runtime-owned history stack; every
         // other mutation is a fresh user action that records onto it.
         //
-        // @spec docs/runtime/L2#mutation-pipeline-and-catalog
+        // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
         match request.name.as_str() {
             "mutation.undo" => self.run_undo(caller, session_id, request).await,
             "mutation.redo" => self.run_redo(caller, session_id, request).await,
@@ -1891,7 +1891,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
 /// records shutdown state so adapters already depend on the runtime-owned
 /// shutdown seam instead of tearing resources down themselves.
 ///
-/// spec: docs/runtime/L2#runtime-shutdown-handle
+/// spec: docs/runtime/internals/L2#runtime-shutdown-handle
 pub struct RuntimeShutdownHandle {
     stopped: Arc<AtomicBool>,
 }

@@ -7,7 +7,7 @@
  * cannot, because every account change re-serves the full current list and
  * open/reconnect yields the current snapshot.
  *
- * @spec docs/runtime/L2#account-status-views
+ * @spec docs/runtime/adapter/L2#account-status-views
  */
 import type { AccountOverview } from '@/api/types'
 import { queryKeys } from '@/queryKeys'

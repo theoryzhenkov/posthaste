@@ -10,7 +10,7 @@
  * URLs, and bearer headers) stay outside UI code. The token no longer appears
  * in any URL.
  *
- * @spec docs/runtime/L2#renderer-one-frame-stream
+ * @spec docs/runtime/adapter/L1#renderer-one-frame-stream
  * @spec docs/L1-ui#live-prepend-behavior
  */
 import { useEffect } from 'react'
@@ -56,7 +56,7 @@ function dispatchDomainEvent(payload: DomainEvent) {
  * (keyword changes, mailbox changes, message arrivals), and keeps the React
  * Query cache in sync.
  *
- * @spec docs/runtime/L2#renderer-one-frame-stream
+ * @spec docs/runtime/adapter/L1#renderer-one-frame-stream
  * @spec docs/L1-ui#live-prepend-behavior
  */
 export function useDaemonEvents() {

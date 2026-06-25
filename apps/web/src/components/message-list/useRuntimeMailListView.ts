@@ -83,7 +83,7 @@ export interface RuntimeMailListView {
  * snapshot + `viewReplace` frames into the query cache, and grows the window in
  * place via the runtime extend operation for infinite scroll.
  *
- * @spec docs/runtime/L2#view-operation-flow
+ * @spec docs/runtime/adapter/L2#view-operation-flow
  */
 export function useRuntimeMailListView({
   enabled,

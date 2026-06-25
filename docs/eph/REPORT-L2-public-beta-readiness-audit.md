@@ -10,7 +10,7 @@ depends:
   - path: docs/stale/L1-sync
   - path: docs/stale/L1-compose
   - path: docs/stale/L1-search
-  - path: docs/runtime/L2
+  - path: docs/runtime/adapter/L1
   - path: docs/backend/L1
   - path: docs/api/L1
   - path: docs/stale/L1-lab
