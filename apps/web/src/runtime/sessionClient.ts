@@ -35,6 +35,23 @@ let activeSession: RuntimeSession | undefined
 let activeSessionSourceId: string | null | undefined
 let unsubscribeStream: RuntimeUnsubscribe | undefined
 let streamStarting = false
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+/** Reopen a hard-closed frame stream so live updates self-heal without a page
+ * reload. The reopened stream resubscribes from the session's current state
+ * (the runtime sends a collapsed catch-up), so any frames missed while the
+ * stream was down are recovered. */
+function scheduleStreamReconnect(): void {
+  if (reconnectTimer || frameHandlers.size === 0) {
+    return
+  }
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined
+    if (frameHandlers.size > 0 && !unsubscribeStream && !streamStarting) {
+      ensureStream()
+    }
+  }, 1000)
+}
 
 function notifyPermanentError(error: unknown): void {
   for (const handlers of frameHandlers) {
@@ -115,6 +132,7 @@ function ensureStream(afterSeq?: number | null): void {
             for (const handlers of frameHandlers) {
               handlers.onClosed?.(error)
             }
+            scheduleStreamReconnect()
           },
         },
       )
@@ -130,6 +148,10 @@ function maybeCloseSession(): void {
   }
   const session = activeSession
   const sourceId = activeSessionSourceId
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
   unsubscribeStream?.()
   unsubscribeStream = undefined
   sessionPromise = undefined
