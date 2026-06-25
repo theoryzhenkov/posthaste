@@ -9,6 +9,14 @@ on:
       tag:
         description: "Existing tag to publish, for example v0.1.0"
         required: true
+      channel:
+        description: "Release channel (inferred from the tag if omitted)"
+        type: choice
+        default: ""
+        options:
+          - ""
+          - nightly
+          - stable
 
 permissions:
   contents: read
@@ -24,11 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       POSTHASTE_RELEASE_CHANNEL: ${{ steps.resolve.outputs.POSTHASTE_RELEASE_CHANNEL }}
-      POSTHASTE_INCLUDE_DEVTOOLS: ${{ steps.resolve.outputs.POSTHASTE_INCLUDE_DEVTOOLS }}
-      POSTHASTE_ENFORCE_MACOS_SIGNING: ${{ steps.resolve.outputs.POSTHASTE_ENFORCE_MACOS_SIGNING }}
-      POSTHASTE_RUN_ARTIFACT_SMOKE: ${{ steps.resolve.outputs.POSTHASTE_RUN_ARTIFACT_SMOKE }}
-      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ steps.resolve.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
-      POSTHASTE_IS_STABLE: ${{ steps.resolve.outputs.POSTHASTE_IS_STABLE }}
+      POSTHASTE_BUNDLE_VERSION: ${{ steps.resolve.outputs.POSTHASTE_BUNDLE_VERSION }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,7 +42,9 @@ jobs:
         id: resolve
         shell: bash
         run: |
-          bash tools/release/resolve-channel.sh "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          # Tag-push infers the channel from the tag; manual dispatch declares
+          # it explicitly so a typoed tag cannot silently flip the channel.
+          bash tools/release/resolve-channel.sh "$RELEASE_TAG" "${{ inputs.channel || '' }}" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
 
@@ -121,10 +127,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-      POSTHASTE_INCLUDE_DEVTOOLS: ${{ needs.resolve-channel.outputs.POSTHASTE_INCLUDE_DEVTOOLS }}
-      POSTHASTE_ENFORCE_MACOS_SIGNING: ${{ needs.resolve-channel.outputs.POSTHASTE_ENFORCE_MACOS_SIGNING }}
-      POSTHASTE_RUN_ARTIFACT_SMOKE: ${{ needs.resolve-channel.outputs.POSTHASTE_RUN_ARTIFACT_SMOKE }}
-      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ needs.resolve-channel.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
+      POSTHASTE_BUNDLE_VERSION: ${{ needs.resolve-channel.outputs.POSTHASTE_BUNDLE_VERSION }}
+      # Baked into the desktop binary (option_env!) and the web bundle so an
+      # artifact carries its channel; the smoke step greps the sentinel.
+      POSTHASTE_RELEASE_CHANNEL_SENTINEL: posthaste-release-channel=${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+      VITE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
     strategy:
       fail-fast: false
       matrix:
@@ -147,6 +154,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve channel policy
+        shell: bash
+        run: |
+          # Materialize the per-channel policy (identity, manifest, devtools,
+          # signing, updater endpoint) into GITHUB_ENV from one source of truth.
+          bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
+          cat "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -195,9 +210,8 @@ jobs:
       - name: Set desktop bundle version from tag
         shell: bash
         run: |
-          version="$(bash tools/release/bundle-version-from-tag.sh "$RELEASE_TAG")"
-          echo "Desktop bundle version: $version"
-          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')" "$version"
+          echo "Desktop bundle version: $POSTHASTE_BUNDLE_VERSION"
+          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')" "$POSTHASTE_BUNDLE_VERSION"
 
       - name: Import Apple Developer certificate
         if: runner.os == 'macOS'
@@ -256,16 +270,15 @@ jobs:
           if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
             devtools_flag="--features devtools"
           fi
-          endpoint="https://github.com/theoryzhenkov/posthaste/releases/download/${POSTHASTE_RELEASE_CHANNEL}/${POSTHASTE_UPDATER_MANIFEST_FILENAME}"
-          # Emit signed updater artifacts (.sig + macOS .app.tar.gz) only when the
-          # updater signing key is configured, so releases still build without it.
+          # Channel identity + updater endpoint are baked in at build time via
+          # --config so an artifact cannot switch channels.
           config='{"build":{"beforeBuildCommand":null}'
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             config="${config},\"bundle\":{\"createUpdaterArtifacts\":true}"
           else
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
-          config="${config},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
+          config="${config},\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\",\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are now produced.
@@ -331,7 +344,6 @@ jobs:
           if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
             devtools_flag="--features devtools"
           fi
-          endpoint="https://github.com/theoryzhenkov/posthaste/releases/download/${POSTHASTE_RELEASE_CHANNEL}/${POSTHASTE_UPDATER_MANIFEST_FILENAME}"
           # Emit signed updater artifacts only when the updater signing key is
           # configured, so releases still build without it.
           updater=""
@@ -340,12 +352,14 @@ jobs:
           else
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
+          identity_config="\"identifier\":\"$POSTHASTE_IDENTIFIER\",\"productName\":\"$POSTHASTE_PRODUCT_NAME\","
+          updater_config="\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
-            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
+            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},${identity_config}${updater_config}"
           else
             echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
-            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
+            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
           fi
 
       - name: Print sccache stats
@@ -410,13 +424,17 @@ jobs:
       id-token: write
     env:
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
-      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ needs.resolve-channel.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
-      POSTHASTE_IS_STABLE: ${{ needs.resolve-channel.outputs.POSTHASTE_IS_STABLE }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve channel policy
+        shell: bash
+        run: |
+          bash tools/release/channel-policy.sh "$POSTHASTE_RELEASE_CHANNEL" >> "$GITHUB_ENV"
+          cat "$GITHUB_ENV"
 
       - name: Install SOPS
         uses: nhedger/setup-sops@v2
@@ -459,9 +477,9 @@ jobs:
         shell: bash
         run: |
           if find release-assets -maxdepth 1 -name '*.sig' -print -quit | grep -q .; then
-            bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG" "$POSTHASTE_UPDATER_MANIFEST_FILENAME"
+            bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG" "$POSTHASTE_UPDATER_MANIFEST"
           else
-            echo "No updater signatures present; skipping $POSTHASTE_UPDATER_MANIFEST_FILENAME (updater signing key not configured)."
+            echo "No updater signatures present; skipping $POSTHASTE_UPDATER_MANIFEST (updater signing key not configured)."
           fi
 
       - name: Generate checksums

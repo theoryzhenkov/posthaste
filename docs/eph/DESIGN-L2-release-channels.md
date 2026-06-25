@@ -1,45 +1,45 @@
 ---
 scope: L2
-summary: "Release-channel split: nightly (dogfood/devtools) versus stable (public beta/release), driven by tag pattern, with separate updater manifests, rolling-tag updater URLs, macOS signing policy, and artifact smoke gates."
+summary: "Release channels as a first-class product concept: channel is declared (tag-inferred for push, explicit for manual dispatch), baked into the binary, and drives a single policy table covering distinct per-channel identity, updater manifest, devtools, macOS signing, and smoke gates."
 modified: 2026-06-25
 reviewed: 2026-06-25
 lifecycle: ephemeral
 type: DESIGN
 depends:
   - path: .github/workflows/release
-  - path: tools/release/generate-updater-manifest
-  - path: apps/desktop/tauri.conf
-  - path: tools/release/smoke-desktop-bundle
+  - path: tools/release/channel-policy
   - path: tools/release/resolve-channel
+  - path: tools/release/generate-updater-manifest
+  - path: tools/release/smoke-desktop-bundle
   - path: tools/release/update-rolling-tag
+  - path: apps/desktop/tauri.conf
+  - path: apps/desktop/src/lib
 dependents: []
 ---
 
 # Release channel design
 
-## The problem
+## Principle
 
-Posthaste currently ships every desktop release from the same tag shape
-(`v0.1.0-dogfood.N`) to the same updater manifest (`latest.json`). The single
-artifact includes the embedded authority runtime **and** the Tauri DevTools
-feature, gated at runtime. That worked for dogfood, but it does not work for a
-public beta because:
+The channel is a **first-class concept the product carries**, not a side-effect
+of a tag string inferred once in CI. Three things follow from that:
 
-- Public-beta users should not be offered dogfood builds, and dogfood users
-  should not be pulled onto a newer stable build before it is ready.
-- DevTools are acceptable for internal dogfood but must not ship in public
-  installers.
-- macOS dogfood builds are signed with Developer ID when secrets are present,
-  with an ad-hoc opt-out. Public-beta macOS builds must be fail-closed signed +
-  notarized.
-- The auto-updater has one `latest.json`; a channel split needs at least two
-  manifests.
+1. **Declared, not just inferred.** Tag-push infers the channel from the tag for
+   automation; manual dispatch declares it explicitly. Both routes produce the
+   same single output: `channel`.
+2. **Baked into the binary.** The desktop binary embeds its channel as a
+   compile-time constant and a sentinel string. The renderer receives the same
+   channel via `VITE_RELEASE_CHANNEL`. An artifact cannot silently be on the
+   wrong channel — the smoke step proves it.
+3. **Policy flows from the channel.** One committed policy table maps a channel
+   to its identity, manifest, devtools flag, signing policy, and updater
+   endpoint. Jobs read the table by channel; they do not thread six booleans.
 
 ## Channels
 
 ```text
 ┌─────────┬────────────────┬──────────────────────────────┬───────────────────────┐
-│ Channel │ Audience       │ Tag pattern                  │ Desktop build flags   │
+│ Channel │ Audience       │ Tag pattern (push trigger)    │ Desktop build flags   │
 ├─────────┼────────────────┼──────────────────────────────┼───────────────────────┤
 │ nightly │ Dogfood / dev  │ vX.Y.Z-dogfood.N             │ embedded-server +     │
 │         │                │ vX.Y.Z-nightly.*             │ devtools              │
@@ -50,144 +50,154 @@ public beta because:
 └─────────┴────────────────┴──────────────────────────────┴───────────────────────┘
 ```
 
-### Updater manifest assignment
+Selection stays **tag-based**. Release branches are not used: `stable` is a
+blessed commit promoted from `main`, not a stabilized branch. If a backport is
+ever needed (a stable fix while `main` has unfinished work), a `release/x.y`
+branch is introduced then and only then — it is a stabilization seam, not a
+channel selector.
+
+## Per-channel identity (side-by-side)
+
+Each channel is a **distinct installable app**, so nightly and stable coexist
+on the same machine without clobbering each other's data or updater state.
+
+| Channel  | Identifier                 | Product name        | Data root          |
+| -------- | -------------------------- | ------------------- | ------------------ |
+| stable   | `com.posthaste.mail`       | Posthaste           | (from identifier)  |
+| nightly  | `com.posthaste.mail.nightly` | Posthaste Nightly | (from identifier)  |
+
+Tauri derives per-platform app-data roots from the bundle identifier, so
+distinct identifiers give distinct data roots for free. The checked-in
+`tauri.conf.json` holds the stable identity as the default (so local developer
+builds are the stable identity); the release workflow overrides identifier,
+product name, and updater endpoint at build time via `--config`.
+
+> Note on the "shared runtime, two clients" fallback: that UX requires the
+> **separated-runtime topology** (one authority runtime, both clients as
+> replicas). In bundled mode each app embeds its own authority + SQLite, so two
+> distinct-identifier installs are two independent states, not one shared
+> runtime. Distinct identifiers are correct either way; the shared-runtime story
+> is a topology concern, not a release-pipeline one.
+
+## Updater manifests and rolling tags
 
 - `nightly` → `latest.json`.
 - `stable` → `latest-stable.json`.
 
-Each manifest only contains releases from its own channel. The manifest files
-are attached to every GitHub Release, but the app does **not** follow GitHub's
-`releases/latest/download/` URL because that URL would switch between channels
-whenever a different channel was published. Instead, each channel uses a rolling
-git tag:
-
-- `nightly` tag — always points to the latest nightly release.
-- `stable` tag — always points to the latest stable release.
-
-The baked-in updater endpoints are:
+The app does **not** follow GitHub's `releases/latest/download/` URL — that URL
+flips between channels whenever a different channel is published. Instead, each
+channel owns a rolling git tag that the publish job force-updates:
 
 ```text
 nightly: https://github.com/theoryzhenkov/posthaste/releases/download/nightly/latest.json
 stable:  https://github.com/theoryzhenkov/posthaste/releases/download/stable/latest-stable.json
 ```
 
-The publish job force-updates the rolling tag for the current channel after the
-release is created, so a channel's static URL always serves its latest
-manifest.
+`make_latest` is set only for stable releases (public discoverability), while
+the rolling tags keep updater traffic strictly per-channel.
 
-### macOS signing policy
+## macOS signing policy
 
-- **Nightly**: Developer ID if secrets are present; ad-hoc if
-  `POSTHASTE_MACOS_SIGNING=adhoc` is explicitly requested. This preserves the
-  current opt-out used for CI forks and unsigned internal builds.
-- **Stable**: Fail-closed Developer ID **plus** notarization credentials. The
-  workflow refuses to publish a stable macOS build that is not both signed and
-  notarized.
+- **Nightly**: Developer ID when secrets are present; ad-hoc when
+  `POSTHASTE_MACOS_SIGNING=adhoc` is explicitly requested (CI forks, unsigned
+  internal builds).
+- **Stable**: fail-closed Developer ID **plus** notarization. The build step
+  refuses to proceed on stable if notarization credentials are absent.
 
-### Artifact smoke
+## Version scheme (real semver, flipped at v0.2.0)
 
-- **Nightly**: light smoke — bundle files exist, can be extracted/listed, and
-  basic structure is valid.
-- **Stable**: full smoke — AppImage is extracted and the bundled binary answers
-  `--version` and `--help`; stable binaries/ assets must not contain dev-server
-  endpoint strings or devtools-related artifacts.
-
-## How the app knows its channel
-
-Tauri reads the updater endpoint list from `tauri.conf.json`. The checked-in
-config uses `.../releases/latest/download/latest.json` as the default so local
-developer builds follow the existing dogfood/nightly path. The release workflow
-overrides the endpoint at build time with `--config`:
-
-- `nightly` is rewritten to the `nightly` rolling-tag URL.
-- `stable` is rewritten to the `stable` rolling-tag URL.
-
-This is compile-time binding: the produced artifact cannot switch manifests.
-
-`apps/desktop/tauri.conf.json` must keep the default endpoint literal; do not
-make it environment-driven. Each channel build receives the correct literal
-via the Tauri CLI `--config` merge.
-
-## Version mapping
-
-macOS `CFBundleShortVersionString` accepts only three non-negative integers. The
-following tag-to-version mapping is used for both the embedded app version and
-the updater manifest:
+The app/manifest version is the **real semver** from the tag, preserving
+prerelease ordering so `0.2.0-beta.5 < 0.2.0-rc.1 < 0.2.0`:
 
 | Tag                         | App / manifest version |
 | --------------------------- | ---------------------- |
-| `vA.B.C-dogfood.N`          | `A.B.N`                |
-| `vA.B.C-beta.N`             | `A.B.N`                |
-| `vA.B.C-rc.N`               | `A.B.N`                |
+| `vA.B.C-dogfood.N`          | `A.B.C-dogfood.N`      |
+| `vA.B.C-beta.N`             | `A.B.C-beta.N`         |
+| `vA.B.C-rc.N`               | `A.B.C-rc.N`           |
 | `vA.B.C` (plain stable)     | `A.B.C`                |
 
-This means a `v0.2.0-beta.5` build embeds version `0.2.5`. A following plain
-`v0.2.0` release embeds `0.2.0`, which semver considers **older** than `0.2.5`.
-Installed beta users would not auto-update to the plain release. To avoid this,
-a release that follows a beta/rc cycle must use a numerically higher version
-(e.g. `v0.2.1` or `v0.3.0`). This convention is enforced by reviewer check,
-not by CI, because CI cannot know future tag intent.
+This replaces the old flattening (`vA.B.C-dogfood.N → A.B.N`), which destroyed
+prerelease ordering. Flattening is retained **only** for the legacy `0.1.0-dogfood.N`
+line so already-shipped dogfood installs (version `0.1.N`) keep updating. The
+flip happens at the `v0.2.0` cut: the next release must be `v0.2.0-*`, which is
+semver-newer than any `0.1.N`, so no installed client sees a downgrade.
 
-## Workflow changes
+### macOS 3-integer constraint
 
-1. **Add a `resolve-channel` job** that runs first and exports:
-   - `POSTHASTE_RELEASE_CHANNEL` (`nightly` | `stable`)
-   - `include_devtools` (`true` | `false`)
-   - `enforce_macos_signing` (`true` | `false`)
-   - `run_artifact_smoke` (`true` | `false`)
-   - `updater_manifest_filename` (`latest.json` | `latest-stable.json`)
-   - `is_stable` (`true` | `false`)
+macOS `CFBundleShortVersionString` wants three non-negative integers, but the
+Tauri updater compares the semver `version`. Tauri ties both to the `version`
+field, so we keep real semver as `version` and set
+`bundle.macOS.bundleVersion` to the prerelease counter (a monotonic build
+number) so `CFBundleVersion` is valid. Whether notarization accepts a prerelease
+string in `CFBundleShortVersionString` is **empirically gated**: the first
+`v0.2.0-beta.*` stable macOS build must pass notarization in CI. If it is
+rejected, add a `tauri.macos.conf.json` override that strips `version` to
+`A.B.C` for macOS and emit a per-platform manifest version. That override is the
+documented fallback; it is not pre-built.
 
-2. **`build-desktop` consumes those outputs**:
-   - Conditionally pass `--features devtools`.
-   - Override `tauri.conf.json` updater `endpoints` via `--config` to the
-     channel's rolling-tag URL.
-   - For macOS, fail the job early on stable if Developer ID and notarization
-     secrets are not all present.
+## How the app knows its channel
 
-3. **Desktop version derivation** is moved into a small shell script so the
-   inline YAML and `generate-updater-manifest.sh` use the same transform.
+Compile-time baking (the binary carries it):
 
-4. **Add a smoke step** to the desktop build job after bundle collection and
-   before artifact upload. The step runs
-   `tools/release/smoke-desktop-bundle.sh <channel> <platform> <bundle-dir>`
-   and exits non-zero on failure.
+- Rust: `const RELEASE_CHANNEL: &str = option_env!("POSTHASTE_RELEASE_CHANNEL").unwrap_or("dev");`
+- A `#[used]` sentinel string `posthaste-release-channel=<channel>` is embedded so
+  the smoke step can prove which channel a binary was built on.
+- Renderer: `VITE_RELEASE_CHANNEL` is set at web-build time and read via
+  `import.meta.env.VITE_RELEASE_CHANNEL`.
+- A Tauri command exposes the Rust constant to the renderer so the two cannot
+  silently disagree.
 
-5. **`generate-updater-manifest.sh` accepts an output filename argument**
-   instead of hard-coding `latest.json`. The publish job passes
-   `latest-stable.json` for stable tags and `latest.json` for nightly tags.
+The updater endpoint is also set at build time via `--config`, so both the
+channel identity and the endpoint are compile-time-bound to the same channel.
 
-6. **`update-rolling-tag.sh`** updates the `nightly` or `stable` lightweight
-   tag to the current release tag after publish.
+## Workflow shape
 
-7. **Publish job** force-updates the rolling `nightly` or `stable` tag to the
-   current release after creation, so each channel's static updater URL always
-   points to its latest manifest. It also sets `make_latest` only for stable
-   releases, so GitHub's release page highlights the public channel while the
-   rolling tags keep updater traffic separated.
+1. **`resolve-channel` job** emits a single output, `channel` (and the derived
+   semver `version`). For `workflow_dispatch` it reads an explicit `channel`
+   input; for tag-push it infers from the tag.
+2. **`build-desktop`** materializes the full policy for that channel into
+   `GITHUB_ENV` by calling `channel-policy.sh <channel>` once, then:
+   - passes `--features devtools` only when the policy says so;
+   - overrides `tauri.conf.json` identifier / productName / updater endpoint via
+     `--config`;
+   - sets `POSTHASTE_RELEASE_CHANNEL` and `VITE_RELEASE_CHANNEL` at build;
+   - enforces stable macOS signing + notarization.
+3. **Smoke step** extracts the AppImage, runs `--version`/`--help`, and greps
+   the binary for the `posthaste-release-channel=<channel>` sentinel — a real
+   assertion that the binary was built on the expected channel.
+4. **`generate-updater-manifest.sh`** takes the manifest filename from the
+   policy (`latest.json` / `latest-stable.json`).
+5. **Publish** force-updates the `nightly`/`stable` rolling tag and sets
+   `make_latest` only for stable.
 
 ## Assertions
 
 | ID                        | Sev.   | Assertion                                                                                  |
 | ------------------------- | ------ | ------------------------------------------------------------------------------------------ |
-| tag-detection             | MUST   | Every release tag resolves unambiguously to `nightly` or `stable`; unknown tags fail CI.     |
-| nightly-devtools          | MUST   | Nightly desktop builds compile with the `devtools` feature.                                  |
+| channel-declared          | MUST   | Every release resolves to a channel: inferred from tag on push, or explicit input on dispatch; unknown tags fail CI. |
+| channel-baked             | MUST   | Every desktop binary embeds its channel as a compile-time constant and sentinel.          |
+| channel-sentinel-smoke    | MUST   | The smoke step proves the binary's baked channel matches the release channel.             |
+| channel-policy-single     | MUST   | All per-channel policy is read from one committed policy table by channel, not threaded as booleans. |
+| distinct-identity         | MUST   | Nightly and stable use distinct bundle identifiers and product names.                     |
+| nightly-devtools           | MUST   | Nightly desktop builds compile with the `devtools` feature.                                |
 | stable-no-devtools        | MUST   | Stable desktop builds do not compile with the `devtools` feature.                          |
-| channel-rolling-tag       | MUST   | The publish job updates the `nightly` or `stable` rolling tag to the current release for the current channel. |
-| channel-updater-endpoint  | MUST   | Each built desktop artifact has its channel's rolling-tag updater endpoint baked in at compile time.     |
-| stable-manifest-name      | MUST   | Stable releases publish `latest-stable.json`; nightly releases publish `latest.json`.      |
-| macos-stable-signing      | MUST   | Stable macOS builds require Developer ID signing and notarization credentials.             |
+| channel-rolling-tag       | MUST   | The publish job updates the `nightly` or `stable` rolling tag to the current release.      |
+| channel-updater-endpoint  | MUST   | Each built desktop artifact has its channel's rolling-tag updater endpoint baked in at compile time. |
+| stable-manifest-name      | MUST   | Stable releases publish `latest-stable.json`; nightly releases publish `latest.json`.    |
+| macos-stable-signing      | MUST   | Stable macOS builds require Developer ID signing and notarization credentials.            |
 | macos-nightly-signing     | SHOULD | Nightly macOS builds sign with Developer ID when secrets are present or adhoc when opted in. |
-| version-three-integers    | MUST   | The app/manifest version derived from any tag is a valid 3-integer semver for macOS.       |
-| stable-artifact-smoke     | MUST   | Stable desktop artifacts pass full smoke (extract, version/help, no dev strings).        |
+| version-real-semver       | MUST   | App/manifest version is the real semver from the tag (prerelease ordering preserved) for the v0.2.0+ line. |
+| stable-artifact-smoke     | MUST   | Stable desktop artifacts pass full smoke (extract, version/help, channel sentinel).        |
 | nightly-artifact-smoke    | SHOULD | Nightly desktop artifacts pass light smoke before upload.                                  |
 
 ## Code anchors
 
 - Release workflow: `.github/workflows/release.yml`
-- Tauri config: `apps/desktop/tauri.conf.json`
-- Updater manifest script: `tools/release/generate-updater-manifest.sh`
-- Channel resolver: `tools/release/resolve-channel.sh`
-- Bundle version helper: `tools/release/bundle-version-from-tag.sh`
+- Channel resolver (tag/input → channel): `tools/release/resolve-channel.sh`
+- Channel policy table: `tools/release/channel-policy.sh`
+- Version helper: `tools/release/bundle-version-from-tag.sh`
+- Updater manifest: `tools/release/generate-updater-manifest.sh`
+- Rolling tag: `tools/release/update-rolling-tag.sh`
 - Bundle smoke: `tools/release/smoke-desktop-bundle.sh`
-- Rolling tag helper: `tools/release/update-rolling-tag.sh`
+- Tauri config: `apps/desktop/tauri.conf.json`
+- Channel baking: `apps/desktop/src/lib.rs`, `apps/web/src/runtime/releaseChannel.ts`

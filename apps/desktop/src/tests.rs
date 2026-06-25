@@ -621,3 +621,20 @@ fn log_token_rejects_unsafe_metadata() {
     assert_eq!(log_token(Some("mail/search".to_string())), "");
     assert_eq!(log_token(Some("x".repeat(129))), "");
 }
+
+#[test]
+fn release_channel_sentinel_matches_baked_channel() {
+    // The sentinel is what the release smoke step greps for; it must carry the
+    // same channel as RELEASE_CHANNEL so an artifact cannot be mislabeled.
+    assert!(
+        RELEASE_CHANNEL_SENTINEL.starts_with("posthaste-release-channel="),
+        "sentinel should be prefixed, got: {RELEASE_CHANNEL_SENTINEL}"
+    );
+    let sentinel_channel = RELEASE_CHANNEL_SENTINEL
+        .strip_prefix("posthaste-release-channel=")
+        .unwrap();
+    assert_eq!(
+        sentinel_channel, RELEASE_CHANNEL,
+        "sentinel channel should match RELEASE_CHANNEL"
+    );
+}
