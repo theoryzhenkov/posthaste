@@ -3,7 +3,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use posthaste_domain::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
-    MessageId, MessageRecord, MutationOutcome, PushTransport, Recipient, ReplyContext,
+    MessageId, MessageReadback, MessageRecord, MutationOutcome, PushTransport, Recipient,
+    ReplyContext,
     SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId,
 };
 
@@ -138,7 +139,11 @@ impl MailGateway for MockJmapGateway {
             .keywords
             .retain(|keyword| !command.remove.contains(keyword));
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state, SyncObject::Message))
+        let updated = state.messages.iter().find(|m| &m.id == message_id).cloned();
+        Ok(MutationOutcome {
+            message: updated.map(MessageReadback::Present),
+            ..mutation_outcome(&state, SyncObject::Message)
+        })
     }
 
     /// Replace a mock message's mailbox membership.
@@ -161,7 +166,11 @@ impl MailGateway for MockJmapGateway {
             .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
         message.mailbox_ids = mailbox_ids.to_vec();
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state, SyncObject::Message))
+        let updated = state.messages.iter().find(|m| &m.id == message_id).cloned();
+        Ok(MutationOutcome {
+            message: updated.map(MessageReadback::Present),
+            ..mutation_outcome(&state, SyncObject::Message)
+        })
     }
 
     /// Remove a message from mock state.
@@ -178,7 +187,10 @@ impl MailGateway for MockJmapGateway {
         ensure_expected_state(&state, expected_state, SyncObject::Message)?;
         state.messages.retain(|message| &message.id != message_id);
         bump_revision(&mut state);
-        Ok(mutation_outcome(&state, SyncObject::Message))
+        Ok(MutationOutcome {
+            message: Some(MessageReadback::Removed),
+            ..mutation_outcome(&state, SyncObject::Message)
+        })
     }
 
     /// Update a mock mailbox role.

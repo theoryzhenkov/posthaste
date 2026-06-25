@@ -46,5 +46,6 @@ fn sync_object_mutation_outcome(
             state,
             updated_at: domain_now_iso8601().map_err(GatewayError::Rejected)?,
         }),
+        message: None,
     })
 }

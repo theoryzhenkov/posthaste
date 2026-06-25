@@ -66,6 +66,7 @@ fn mutation_outcome(state: &mut GatewayState, object_type: SyncObject) -> Mutati
             state: format!("{}-{}", object_type.as_str(), state.revision),
             updated_at: RFC3339_EPOCH.to_string(),
         }),
+        message: None,
     }
 }
 

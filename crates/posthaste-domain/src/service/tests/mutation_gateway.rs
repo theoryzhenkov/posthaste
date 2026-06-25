@@ -92,6 +92,7 @@ impl MutationGateway {
                 state: format!("message-{}", *revision),
                 updated_at: crate::RFC3339_EPOCH.to_string(),
             }),
+            message: None,
         })
     }
 }
