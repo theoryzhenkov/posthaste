@@ -19,6 +19,51 @@ async fn set_keywords_returns_updated_message_cursor() {
     let cursor = outcome.cursor.expect("cursor should be present");
     assert_eq!(cursor.object_type, SyncObject::Message);
     assert_eq!(cursor.state, "message-2");
+
+    // set+get: the outcome carries the message's authoritative record after the
+    // change (drives optimistic settlement).
+    let MessageReadback::Present(message) = outcome.message.expect("set+get returns the message")
+    else {
+        panic!("keyword change leaves the message present");
+    };
+    assert_eq!(message.id, MessageId::from("em-001"));
+    assert!(message.keywords.iter().any(|keyword| keyword == "$flagged"));
+}
+
+#[tokio::test]
+async fn replace_mailboxes_returns_updated_message_record() {
+    let gateway = MockJmapGateway::default();
+    let outcome = gateway
+        .replace_mailboxes(
+            &AccountId::from("primary"),
+            &MessageId::from("em-001"),
+            Some("message-1"),
+            &[MailboxId::from("mb-archive")],
+        )
+        .await
+        .expect("mutation should succeed");
+
+    let MessageReadback::Present(message) = outcome.message.expect("set+get returns the message")
+    else {
+        panic!("a mailbox replace leaves the message present");
+    };
+    assert_eq!(message.mailbox_ids, vec![MailboxId::from("mb-archive")]);
+}
+
+#[tokio::test]
+async fn destroy_message_returns_no_record() {
+    let gateway = MockJmapGateway::default();
+    let outcome = gateway
+        .destroy_message(
+            &AccountId::from("primary"),
+            &MessageId::from("em-001"),
+            Some("message-1"),
+        )
+        .await
+        .expect("mutation should succeed");
+
+    // The message is destroyed — self-describing as Removed, not an overloaded None.
+    assert!(matches!(outcome.message, Some(MessageReadback::Removed)));
 }
 
 #[tokio::test]

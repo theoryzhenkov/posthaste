@@ -10,6 +10,7 @@ pub(super) fn mutation_outcome(state: &MockState, object_type: SyncObject) -> Mu
             state: format!("{prefix}-{}", state.revision),
             updated_at: "2026-03-31T10:00:00Z".to_string(),
         }),
+        message: None,
     }
 }
 

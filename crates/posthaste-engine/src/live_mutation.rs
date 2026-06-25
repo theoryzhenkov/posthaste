@@ -2,7 +2,8 @@ mod outcome;
 mod requests;
 
 use posthaste_domain::{
-    GatewayError, MailboxId, MailboxRole, MessageId, MutationOutcome, SetKeywordsCommand,
+    GatewayError, MailboxId, MailboxRole, MessageId, MessageReadback, MutationOutcome,
+    SetKeywordsCommand,
 };
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
@@ -35,7 +36,15 @@ pub(crate) async fn set_keywords(
     let response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    set_keywords_mutation_outcome(response, message_id)
+    let mut outcome = set_keywords_mutation_outcome(response, message_id)?;
+    // The `get` half of set+get: read the message back so settlement has the
+    // provider's authoritative record. Best-effort — a failed read-back leaves
+    // `message: None` (settle falls back to sync), never failing a succeeded set.
+    outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
+        .await
+        .ok()
+        .map(MessageReadback::Present);
+    Ok(outcome)
 }
 
 /// Update a mailbox role via `Mailbox/set`.
@@ -107,7 +116,12 @@ pub(crate) async fn replace_mailboxes(
     let response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    message_mutation_outcome(response.new_state().to_string())
+    let mut outcome = message_mutation_outcome(response.new_state().to_string())?;
+    outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
+        .await
+        .ok()
+        .map(MessageReadback::Present);
+    Ok(outcome)
 }
 
 /// Permanently destroy a message via `Email/set`.
@@ -129,7 +143,9 @@ pub(crate) async fn destroy_message(
     let response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    message_mutation_outcome(response.new_state().to_string())
+    let mut outcome = message_mutation_outcome(response.new_state().to_string())?;
+    outcome.message = Some(MessageReadback::Removed);
+    Ok(outcome)
 }
 
 fn validate_mailbox_role(role: Option<&str>) -> Result<(), GatewayError> {

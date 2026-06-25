@@ -1,10 +1,37 @@
 use jmap_client::email;
 use posthaste_domain::{
     synthesize_plain_text_raw_mime_with_recipients, BlobId, FetchedBody, GatewayError,
-    MessageAttachment, MessageId,
+    MessageAttachment, MessageId, MessageRecord,
 };
 
 use crate::live::{map_gateway_error, required_method_response, LiveJmapGateway};
+
+/// Read a single message's authoritative metadata record via `Email/get` — the
+/// `get` half of a mutation's set+get. Returns the provider's current state of
+/// the message after the change (including any concurrent external change),
+/// which drives optimistic settlement at the runtime.
+///
+/// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+/// @spec docs/L1-jmap#methods-used
+pub(crate) async fn fetch_message_record(
+    gateway: &LiveJmapGateway,
+    message_id: &MessageId,
+) -> Result<MessageRecord, GatewayError> {
+    let mut request = gateway.client().build();
+    request
+        .get_email()
+        .ids([message_id.as_str()])
+        .properties(crate::sync::email_metadata_properties());
+    let mut response = gateway.send_request(request).await?;
+    let mut emails = required_method_response(response.pop_method_response(), "Email/get")?
+        .unwrap_get_email()
+        .map_err(map_gateway_error)?
+        .take_list();
+    let email = emails
+        .pop()
+        .ok_or_else(|| GatewayError::Rejected("message not found after mutation".to_string()))?;
+    Ok(crate::conversions::to_message_record(&email))
+}
 
 /// Lazily fetch the body content of a single message via `Email/get`.
 ///

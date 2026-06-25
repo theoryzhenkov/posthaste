@@ -269,7 +269,7 @@ async fn fetch_email_full_streamed(
     ))
 }
 
-pub(super) fn email_metadata_properties() -> [email::Property; 17] {
+pub(crate) fn email_metadata_properties() -> [email::Property; 17] {
     [
         email::Property::Id,
         email::Property::ThreadId,
