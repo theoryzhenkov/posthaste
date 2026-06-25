@@ -127,7 +127,7 @@ fn planner_uses_full_snapshot_when_flag_delta_is_unavailable() {
 }
 
 #[test]
-fn planner_uses_full_snapshot_for_gmail_label_canonicalization() {
+fn planner_uses_qresync_delta_for_gmail_because_x_gm_msgid_canonicalizes() {
     let capabilities =
         ImapCapabilities::from_tokens(["IMAP4rev1", "ENABLE", "QRESYNC", "X-GM-EXT-1"]);
     let stored = stored_state();
@@ -142,8 +142,10 @@ fn planner_uses_full_snapshot_for_gmail_label_canonicalization() {
 
     assert_eq!(
         plan,
-        ImapMailboxSyncPlan::FullSnapshot {
-            reason: ImapFullSyncReason::ProviderCanonicalizationRequired,
+        ImapMailboxSyncPlan::QresyncDelta {
+            uid_validity: ImapUidValidity(7),
+            since_modseq: ImapModSeq(300),
+            after_uid: Some(ImapUid(42)),
         }
     );
 }
@@ -201,11 +203,8 @@ fn provider_features_use_gmail_extension_for_deduplication_and_threads() {
     let features = ImapProviderFeatures::from_capabilities(&capabilities);
 
     assert_eq!(profile.kind(), ProviderKind::Gmail);
-    assert_eq!(
-        profile.imap().required_full_sync_reason(),
-        Some(ImapFullSyncReason::ProviderCanonicalizationRequired)
-    );
-    assert!(!profile.imap().allows_status_skip());
+    assert_eq!(profile.imap().required_full_sync_reason(), None);
+    assert!(profile.imap().allows_status_skip());
     assert_eq!(
         features,
         ImapProviderFeatures {

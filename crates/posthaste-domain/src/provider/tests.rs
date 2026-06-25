@@ -9,10 +9,8 @@ fn profile_from_hint_groups_protocol_policies_under_provider_kind() {
         profile.jmap().remote_observation().idle_scope(),
         RemoteIdleScope::Account
     );
-    assert_eq!(
-        profile.imap().required_full_sync_reason(),
-        Some(ImapFullSyncReason::ProviderCanonicalizationRequired)
-    );
+    assert_eq!(profile.imap().required_full_sync_reason(), None);
+    assert!(profile.imap().allows_status_skip());
     assert_eq!(
         profile.smtp().sent_copy(),
         SmtpSentCopyPolicy::ProviderManaged
