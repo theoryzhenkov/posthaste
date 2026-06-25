@@ -101,13 +101,38 @@ pub struct DraftContentResult {
     pub events: Vec<DomainEvent>,
 }
 
-/// Server-side outcome of a gateway mutation, carrying an updated sync cursor.
+/// The message's authoritative state read back after a mutation (the `get` of
+/// set+get): present with its provider record, or removed (destroyed).
+///
+/// Mirrors link-core's `MessageOutcome` (`Present`/`Removed`) at the
+/// provider-record layer, so `Removed` is self-describing rather than an
+/// overloaded absence. `MutationOutcome.message` is `None` only when the gateway
+/// did not read the message back at all (non-message mutation, or a gateway that
+/// does not yet read back).
+///
+/// @spec docs/eph/DESIGN-L2-optimistic-projection#4-canonical-vocabulary
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MessageReadback {
+    Present(MessageRecord),
+    Removed,
+}
+
+/// Server-side outcome of a gateway mutation: the updated sync cursor and, when
+/// the gateway read the message back (`set`+`get`), its authoritative state
+/// after the change.
+///
+/// The readback drives optimistic settlement — the runtime overwrites the
+/// canonical row with `replay(record, remaining unsettled assertions)`, or
+/// removes it on `Removed`.
 ///
 /// @spec docs/L1-sync#conflict-model
+/// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MutationOutcome {
     pub cursor: Option<SyncCursor>,
+    pub message: Option<MessageReadback>,
 }
 
 /// JMAP sender identity for an account.

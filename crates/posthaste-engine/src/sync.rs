@@ -13,8 +13,7 @@ pub(crate) use cursor::decode_email_cursor_state;
 pub(crate) use cursor::encode_email_cursor_state;
 #[cfg(test)]
 use cursor::non_empty_state;
-#[cfg(test)]
-use email_sync::email_metadata_properties;
+pub(crate) use email_sync::email_metadata_properties;
 pub(crate) use email_sync::{fetch_email_sync, fetch_email_sync_streamed, StreamedEmailSync};
 pub(crate) use mailbox::fetch_mailbox_sync;
 
