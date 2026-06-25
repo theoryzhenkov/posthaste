@@ -20,9 +20,12 @@ impl ImapProviderPolicy {
                     thread_identity: ImapThreadIdentitySource::GmailThreadId,
                     label_source: ImapLabelSource::GmailLabels,
                 },
-                required_full_sync_reason: Some(
-                    ImapFullSyncReason::ProviderCanonicalizationRequired,
-                ),
+                // Gmail's X-GM-EXT-1 extension gives every message a stable
+                // X-GM-MSGID and a complete X-GM-LABELS list, so delta syncs can
+                // canonicalize and project mailbox membership from any single
+                // observed copy. Full snapshots are no longer required for
+                // canonicalization once stored MODSEQ state is available.
+                required_full_sync_reason: None,
                 remote_observation: RemoteObservationPolicy::selected_mailbox_idle()
                     .with_incomplete_hints(),
                 mailbox_role_aliases: ImapMailboxRoleAliasPolicy::Gmail,
