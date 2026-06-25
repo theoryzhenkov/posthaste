@@ -4082,11 +4082,16 @@ dependencies = [
  "anyhow",
  "criterion",
  "dhat",
+ "futures-util",
  "iai-callgrind",
+ "posthaste-authority-runtime",
  "posthaste-domain",
+ "posthaste-runtime-contract",
  "posthaste-store",
  "pprof",
+ "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
