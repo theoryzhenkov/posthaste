@@ -8,7 +8,6 @@
 //! @spec docs/L1-outbox#operation-model
 //! @spec docs/L1-outbox#state-machine
 
-
 use super::message_queries::project_record;
 use super::*;
 use crate::{MessageReadback, MessageRecord, MutationOutcome, SyncBatch};
@@ -42,6 +41,7 @@ fn classify_gateway_error(error: GatewayError) -> FlushError {
 }
 
 /// Result of pushing one operation to the provider.
+#[allow(clippy::large_enum_variant)]
 enum Pushed {
     /// A non-message entity op (draft/send): settle and remove; an
     /// `assigned_entity_id` reconciles a temporary draft id to the provider id.
@@ -132,10 +132,7 @@ impl MailService {
     /// missing dependency reads as satisfied, so a dependent no longer cancels.
     ///
     /// @spec docs/L1-outbox#state-machine
-    pub fn discard_operation(
-        &self,
-        operation_id: &OperationId,
-    ) -> Result<bool, ServiceError> {
+    pub fn discard_operation(&self, operation_id: &OperationId) -> Result<bool, ServiceError> {
         let Some(operation) = self.outbox.get_operation(operation_id)? else {
             return Ok(false);
         };
@@ -154,10 +151,7 @@ impl MailService {
     /// recorded error. Only failed ops are retryable.
     ///
     /// @spec docs/L1-outbox#state-machine
-    pub fn retry_operation(
-        &self,
-        operation_id: &OperationId,
-    ) -> Result<bool, ServiceError> {
+    pub fn retry_operation(&self, operation_id: &OperationId) -> Result<bool, ServiceError> {
         let Some(operation) = self.outbox.get_operation(operation_id)? else {
             return Ok(false);
         };
@@ -515,12 +509,9 @@ impl MailService {
                     // (its readback is the unchanged row) and emits the recompute.
                     //
                     // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
-                    events.extend(self.settle_message_operation(
-                        account_id,
-                        &operation,
-                        readback,
-                        rejected,
-                    )?);
+                    events.extend(
+                        self.settle_message_operation(account_id, &operation, readback, rejected)?,
+                    );
                 }
                 Err(FlushError::Transient(message)) => {
                     self.outbox.update_operation_state(
@@ -627,7 +618,11 @@ impl MailService {
             OperationKind::SetKeywords => {
                 let command = parse_payload::<SetKeywordsCommand>(operation)?;
                 let target = MessageId::from(operation.entity.id.as_str());
-                message_pushed(gateway.set_keywords(account_id, &target, None, &command).await)
+                message_pushed(
+                    gateway
+                        .set_keywords(account_id, &target, None, &command)
+                        .await,
+                )
             }
             OperationKind::ReplaceMailboxes => {
                 let command = parse_payload::<ReplaceMailboxesCommand>(operation)?;
