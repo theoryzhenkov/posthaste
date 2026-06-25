@@ -175,7 +175,6 @@ fn parse_bool_flag(value: &str) -> Option<bool> {
     }
 }
 
-
 /// Default config root: `$XDG_CONFIG_HOME/mail` or `~/.config/mail`.
 fn default_config_root() -> PathBuf {
     xdg_dir("XDG_CONFIG_HOME", ".config").join(APP_DIR_NAME)

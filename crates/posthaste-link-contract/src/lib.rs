@@ -119,7 +119,11 @@ pub struct BaseAssertion {
 /// failed one drives the near node's recompute back to authoritative state
 /// ([replication L1 §5.3, §5.5](../replication/L1.md)).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum DownFrame {
     /// A batch of ordered authoritative base updates to apply to the base cache.
     Base { assertions: Vec<BaseAssertion> },
@@ -332,10 +336,7 @@ pub trait BackendApi: Send + Sync {
     }
 
     /// Read channel: the tag summaries for a scope.
-    async fn list_tags(
-        &self,
-        scope: AccountScopeRequest,
-    ) -> Result<Vec<TagSummary>, RuntimeError> {
+    async fn list_tags(&self, scope: AccountScopeRequest) -> Result<Vec<TagSummary>, RuntimeError> {
         let _ = scope;
         Err(read_channel_unsupported())
     }
@@ -762,7 +763,9 @@ impl BackendLink {
         message_id: MessageId,
         command: SetKeywordsCommand,
     ) -> Result<CommandAck, RuntimeError> {
-        self.transport.set_keywords(account_id, message_id, command).await
+        self.transport
+            .set_keywords(account_id, message_id, command)
+            .await
     }
 
     /// Write: add a message to a mailbox.
@@ -772,7 +775,9 @@ impl BackendLink {
         message_id: MessageId,
         command: AddToMailboxCommand,
     ) -> Result<CommandAck, RuntimeError> {
-        self.transport.add_to_mailbox(account_id, message_id, command).await
+        self.transport
+            .add_to_mailbox(account_id, message_id, command)
+            .await
     }
 
     /// Write: remove a message from a mailbox.
@@ -815,7 +820,9 @@ impl BackendLink {
         mailbox_id: MailboxId,
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
-        self.transport.set_mailbox_role(account_id, mailbox_id, role).await
+        self.transport
+            .set_mailbox_role(account_id, mailbox_id, role)
+            .await
     }
 
     /// Write: queue a local-first send for an account.
@@ -834,7 +841,9 @@ impl BackendLink {
         draft_id: Option<MessageId>,
         request: SendMessageRequest,
     ) -> Result<Operation, RuntimeError> {
-        self.transport.save_draft(account_id, draft_id, request).await
+        self.transport
+            .save_draft(account_id, draft_id, request)
+            .await
     }
 
     /// Write: delete a draft.
@@ -857,7 +866,9 @@ impl BackendLink {
         account_id: AccountId,
         operation_id: OperationId,
     ) -> Result<(), RuntimeError> {
-        self.transport.retry_operation(account_id, operation_id).await
+        self.transport
+            .retry_operation(account_id, operation_id)
+            .await
     }
 
     /// Write: drive an explicit account sync.
@@ -955,7 +966,9 @@ impl BackendLink {
         account_id: AccountId,
         enabled: bool,
     ) -> Result<(), RuntimeError> {
-        self.transport.set_account_enabled(account_id, enabled).await
+        self.transport
+            .set_account_enabled(account_id, enabled)
+            .await
     }
 
     /// Write: reload configuration from disk.
@@ -1269,7 +1282,10 @@ mod tests {
             .expect("forward");
         assert_eq!(receipt.client_mutation_id, ClientMutationId::new("c1"));
 
-        let mut down = link.subscribe(LinkCoverage::Complete).await.expect("subscribe");
+        let mut down = link
+            .subscribe(LinkCoverage::Complete)
+            .await
+            .expect("subscribe");
         assert_eq!(down.next().await, Some(DownFrame::Heartbeat));
     }
 }

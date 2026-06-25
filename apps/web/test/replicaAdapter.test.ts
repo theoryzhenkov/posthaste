@@ -71,9 +71,7 @@ class FakeHandle implements ReplicaHandle {
           mailboxIds = [...op.assertion.mailboxIds]
         } else if (op.assertion.kind === 'applyDiff') {
           const diff = op.assertion.diff
-          keywords = keywords.filter(
-            (k) => !diff.keywords.removed.includes(k),
-          )
+          keywords = keywords.filter((k) => !diff.keywords.removed.includes(k))
           keywords.push(
             ...diff.keywords.added.filter((k) => !keywords.includes(k)),
           )

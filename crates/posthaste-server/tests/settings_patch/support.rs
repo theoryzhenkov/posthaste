@@ -84,13 +84,14 @@ impl SettingsHarness {
         ));
         Self {
             state: Arc::new(AppState {
-                runtime: posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
-                    service.clone(),
-                    store.clone(),
-                    secret_store.clone(),
-                    event_sender.clone(),
-                    supervisor,
-                ),
+                runtime:
+                    posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
+                        service.clone(),
+                        store.clone(),
+                        secret_store.clone(),
+                        event_sender.clone(),
+                        supervisor,
+                    ),
                 account_logo_root: state_root.join("account-assets/logos"),
                 auth_token: "test-token".to_string(),
                 macaroon_root_key: posthaste_server::token::RootKey::from_test_bytes([0u8; 32]),

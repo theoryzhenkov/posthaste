@@ -639,9 +639,8 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
 #[test]
 fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime_build =
-        fs::read_to_string(server_dir.join("../posthaste-runtime/src/build.rs"))
-            .expect("authority runtime build source should be readable");
+    let runtime_build = fs::read_to_string(server_dir.join("../posthaste-runtime/src/build.rs"))
+        .expect("authority runtime build source should be readable");
     let core_start = runtime_build
         .find("struct AuthorityRuntimeCore")
         .expect("authority runtime core struct should exist");

@@ -31,7 +31,9 @@ use posthaste_link_contract::{
     BackendApi, DownFrame, LinkCoverage, LINK_CONVERSATION_PATH, LINK_DETAIL_PATH,
     LINK_FORWARD_MUTATION_PATH, LINK_QUERY_PATH, LINK_SUBSCRIBE_PATH, LINK_SUMMARY_PATH,
 };
-use posthaste_runtime_contract::{MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest};
+use posthaste_runtime_contract::{
+    MailQueryPage, MailQueryRequest, MutationReceipt, MutationRequest,
+};
 use serde::Deserialize;
 
 use crate::api::ApiError;

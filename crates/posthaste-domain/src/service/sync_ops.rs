@@ -359,7 +359,11 @@ mod guard_tests {
     #[test]
     fn drops_unsettled_upserts_and_deletes_keeps_the_rest() {
         let unsettled = HashSet::from(["message-1".to_string()]);
-        let mut b = batch(&["message-1", "message-2"], &["message-1", "message-3"], false);
+        let mut b = batch(
+            &["message-1", "message-2"],
+            &["message-1", "message-3"],
+            false,
+        );
         guard_unsettled(&mut b, &unsettled);
         // message-1 (unsettled) is removed from both the upserts and the deletes,
         // so the provider's view cannot clobber its in-flight optimistic write.

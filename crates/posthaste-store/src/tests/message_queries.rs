@@ -312,8 +312,16 @@ fn command_writes_are_reflected_in_indexed_reads_and_counts() -> Result<(), Stor
             .find(|mailbox| mailbox.id == MailboxId::from(id))
             .map_or(-1, |mailbox| mailbox.total_emails)
     };
-    assert_eq!(total("inbox"), 0, "inbox count decremented by the move (trigger)");
-    assert_eq!(total("archive"), 1, "archive count incremented by the move (trigger)");
+    assert_eq!(
+        total("inbox"),
+        0,
+        "inbox count decremented by the move (trigger)"
+    );
+    assert_eq!(
+        total("archive"),
+        1,
+        "archive count incremented by the move (trigger)"
+    );
 
     Ok(())
 }

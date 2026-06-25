@@ -314,7 +314,9 @@ async fn permanent_failure_of_a_message_assertion_emits_a_base_correction() {
         .expect("flush returns ok");
 
     assert!(
-        events.iter().any(|event| event.topic == "operation.settled"),
+        events
+            .iter()
+            .any(|event| event.topic == "operation.settled"),
         "failure still settles the operation"
     );
     let correction = events
@@ -326,7 +328,10 @@ async fn permanent_failure_of_a_message_assertion_emits_a_base_correction() {
         Some("m1")
     );
     assert_eq!(correction.payload["reverted"], serde_json::json!(true));
-    assert_eq!(correction.payload["changes"]["keywords"], serde_json::json!(true));
+    assert_eq!(
+        correction.payload["changes"]["keywords"],
+        serde_json::json!(true)
+    );
 }
 
 #[tokio::test]
@@ -377,7 +382,10 @@ async fn queue_and_fail_one(
             serde_json::to_value(draft_request("Hello")).unwrap(),
         )
         .expect("queue create");
-    service.flush_account(account, gateway).await.expect("flush");
+    service
+        .flush_account(account, gateway)
+        .await
+        .expect("flush");
     let failed = service.list_pending_operations(account).expect("pending");
     assert_eq!(failed[0].state, OperationState::Failed);
     failed[0].id.clone()

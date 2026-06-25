@@ -53,7 +53,10 @@ pub async fn apply_imap_keyword_delta_by_location(
             .map_err(ImapAdapterError::from)?;
     }
 
-    Ok(MutationOutcome { cursor: None, message: None })
+    Ok(MutationOutcome {
+        cursor: None,
+        message: None,
+    })
 }
 
 /// Copy one IMAP message to another mailbox.
@@ -120,7 +123,10 @@ pub async fn mark_imap_message_deleted_by_location(
         .await
         .map_err(ImapAdapterError::from)?;
 
-    Ok(MutationOutcome { cursor: None, message: None })
+    Ok(MutationOutcome {
+        cursor: None,
+        message: None,
+    })
 }
 
 /// Mark and permanently expunge one IMAP message using UID EXPUNGE.
@@ -142,7 +148,10 @@ pub async fn expunge_imap_message_by_location(
         .map_err(ImapAdapterError::from)?;
     let _expunged = uid_expunge(&mut client, location).await?;
 
-    Ok(MutationOutcome { cursor: None, message: None })
+    Ok(MutationOutcome {
+        cursor: None,
+        message: None,
+    })
 }
 
 #[cfg(test)]

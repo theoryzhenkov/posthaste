@@ -142,7 +142,9 @@ pub(crate) async fn replace_mailboxes(
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
     if let Err(error) = set_response.updated(message_id.as_str()) {
-        return Err(message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await);
+        return Err(
+            message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await,
+        );
     }
     let mut outcome = message_mutation_outcome(set_response.new_state().to_string())?;
     outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
@@ -173,7 +175,9 @@ pub(crate) async fn destroy_message(
         .map_err(map_gateway_error)?;
     let new_state = set_response.new_state().to_string();
     if let Err(error) = set_response.destroyed(message_id.as_str()) {
-        return Err(message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await);
+        return Err(
+            message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await,
+        );
     }
     let mut outcome = message_mutation_outcome(new_state)?;
     outcome.message = Some(MessageReadback::Removed);

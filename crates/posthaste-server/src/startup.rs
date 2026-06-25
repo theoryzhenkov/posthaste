@@ -82,7 +82,13 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         }
     }
 
-    let state = build_app_state(runtime_handle, &secret_store, &roots, &daemon, &server_config);
+    let state = build_app_state(
+        runtime_handle,
+        &secret_store,
+        &roots,
+        &daemon,
+        &server_config,
+    );
 
     // The `/v1` router = the near API router merged with the far OAuth router
     // (its own state + the same macaroon perimeter).

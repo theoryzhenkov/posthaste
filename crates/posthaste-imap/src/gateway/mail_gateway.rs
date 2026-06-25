@@ -93,7 +93,10 @@ impl MailGateway for LiveImapSmtpGateway {
             .set_mailbox_role_override(account_id, mailbox_id, role, clear_role_from)
             .map_err(store_error_to_gateway)?;
 
-        Ok(MutationOutcome { cursor: None, message: None })
+        Ok(MutationOutcome {
+            cursor: None,
+            message: None,
+        })
     }
 
     async fn fetch_identity(&self, _account_id: &AccountId) -> Result<Identity, GatewayError> {

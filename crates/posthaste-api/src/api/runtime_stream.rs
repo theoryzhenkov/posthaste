@@ -44,7 +44,6 @@ pub struct ExtendRuntimeSessionViewRequest {
     pub count: usize,
 }
 
-
 pub(crate) mod mutations;
 pub(crate) mod sessions;
 pub(crate) mod views;

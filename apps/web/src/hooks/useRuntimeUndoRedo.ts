@@ -41,25 +41,22 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
     return unsubscribe
   }, [])
 
-  const runApplyDiff = useCallback(
-    (step: DiffStep, inverse: boolean) => {
-      void runtimeSessionClient
-        .runMutation({
-          name: 'message.applyDiff',
-          args: {
-            sourceId: step.sourceId,
-            messageId: step.messageId,
-            diff: inverse ? invertMessageChangeDiff(step.diff) : step.diff,
-            [inverse ? 'undoOf' : 'redoOf']: step.seq,
-          },
-        })
-        .catch(() => {
-          // Transient failures are non-fatal; availability is corrected by the
-          // next mutationHistory frame.
-        })
-    },
-    [],
-  )
+  const runApplyDiff = useCallback((step: DiffStep, inverse: boolean) => {
+    void runtimeSessionClient
+      .runMutation({
+        name: 'message.applyDiff',
+        args: {
+          sourceId: step.sourceId,
+          messageId: step.messageId,
+          diff: inverse ? invertMessageChangeDiff(step.diff) : step.diff,
+          [inverse ? 'undoOf' : 'redoOf']: step.seq,
+        },
+      })
+      .catch(() => {
+        // Transient failures are non-fatal; availability is corrected by the
+        // next mutationHistory frame.
+      })
+  }, [])
 
   const undo = useCallback(() => {
     const step = undoTop
