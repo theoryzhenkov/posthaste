@@ -27,22 +27,24 @@ linux_smoke() {
   local appimage
   appimage="$(find "$bundle_dir" -maxdepth 1 -type f -name '*_amd64.AppImage' -print -quit | head -n1)"
   [ -n "$appimage" ] || fail "no AppImage bundle found in $bundle_dir"
-  # resolve to an absolute path before we cd into the extraction directory
-  appimage="$(realpath "$appimage")"
+  # Resolve to an absolute path before we cd into the extraction directory.
+  appimage="$(realpath -e "$appimage")"
+  [ -f "$appimage" ] || fail "AppImage file not readable: $appimage"
   [ -x "$appimage" ] || chmod +x "$appimage"
 
-  local extract_dir
-  extract_dir="$(mktemp -d)"
-  cleanup_extract() { rm -rf "$extract_dir"; }
+  # Keep this global: the EXIT trap is left behind after linux_smoke returns
+  # and a local variable would be out of scope when the trap fires.
+  linux_extract_dir="$(mktemp -d)"
+  cleanup_extract() { rm -rf "$linux_extract_dir"; }
   trap cleanup_extract EXIT
 
-  (cd "$extract_dir" && "$(realpath "$appimage")" --appimage-extract >/dev/null) || \
+  (cd "$linux_extract_dir" && "$appimage" --appimage-extract >/dev/null) || \
     fail "AppImage extraction failed"
 
   local bin
-  bin="$(find "$extract_dir/squashfs-root/usr/bin" -maxdepth 1 -type f -executable -print -quit | head -n1)"
+  bin="$(find "$linux_extract_dir/squashfs-root/usr/bin" -maxdepth 1 -type f -executable -print -quit | head -n1)"
   if [ -z "$bin" ]; then
-    bin="$(find "$extract_dir/squashfs-root" -maxdepth 1 -type f -executable -print -quit | head -n1)"
+    bin="$(find "$linux_extract_dir/squashfs-root" -maxdepth 1 -type f -executable -print -quit | head -n1)"
   fi
   [ -n "$bin" ] || fail "no executable found in extracted AppImage"
 
