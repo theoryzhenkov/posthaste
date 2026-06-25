@@ -399,13 +399,6 @@ async fn flush_settles_message_assertion_from_readback_and_removes_it() {
         .list_pending_operations(&account)
         .expect("pending list")
         .is_empty());
-    assert!(
-        service
-            .applied_message_assertions(&account)
-            .expect("applied list")
-            .is_empty(),
-        "a flushed assertion is settled and removed, not rested in applied",
-    );
 
     // Canonical reflects the settled readback.
     assert_eq!(
@@ -436,61 +429,6 @@ fn observe_batch(record: MessageRecord) -> SyncBatch {
             updated_at: crate::RFC3339_EPOCH.to_string(),
         }],
     }
-}
-
-#[tokio::test]
-async fn sync_retires_applied_assertion_when_projection_satisfies_it() {
-    // Convergence: a flushed assertion rests in `applied`, and the sync that
-    // observes the provider's matching state into the projection retires it.
-    // Content-based, so retirement happens exactly when folding is a no-op.
-    //
-    // @spec docs/replication/L1#retire-on-confirmation
-    let account = sample_source();
-    let account_id = account.id.clone();
-    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-    *store.rule_page.lock().expect("rule page lock poisoned") =
-        vec![sample_message_summary("message-1", Vec::new())];
-    let config = Arc::new(TestConfig {
-        sources: vec![account],
-        ..Default::default()
-    });
-    let service = MailService::new(store.clone(), config);
-
-    service
-        .replace_mailboxes(
-            &account_id,
-            &MessageId::from("message-1"),
-            &ReplaceMailboxesCommand {
-                mailbox_ids: vec![MailboxId::from("archive")],
-            },
-        )
-        .await
-        .expect("archive assertion queues");
-
-    // The provider reflects the move: the observe returns message-1 in archive.
-    let mut record = sample_message_record("message-1", 0, false);
-    record.mailbox_ids = vec![MailboxId::from("archive")];
-    let gateway = MutationGateway::with_sync_batch(1, observe_batch(record));
-
-    service
-        .sync_account(&account_id, SyncTrigger::Manual, &gateway, None)
-        .await
-        .expect("sync converges");
-
-    assert!(
-        service
-            .applied_message_assertions(&account_id)
-            .expect("applied list")
-            .is_empty(),
-        "assertion retired once the projection satisfies it",
-    );
-    assert_eq!(
-        store
-            .get_message_mailboxes(&account_id, &MessageId::from("message-1"))
-            .expect("mailbox lookup"),
-        vec![MailboxId::from("archive")],
-        "projection holds the provider-confirmed state",
-    );
 }
 
 #[tokio::test]

@@ -8,7 +8,6 @@
 //! @spec docs/L1-outbox#operation-model
 //! @spec docs/L1-outbox#state-machine
 
-use std::collections::BTreeSet;
 
 use super::message_queries::project_record;
 use super::*;
@@ -175,87 +174,6 @@ impl MailService {
             None,
         )?;
         Ok(true)
-    }
-
-    /// Message state assertions resting in `applied` (flushed, accepted by the
-    /// provider, folded by the read overlay, awaiting convergence).
-    ///
-    /// @spec docs/replication/L1#retire-on-confirmation
-    pub(crate) fn applied_message_assertions(
-        &self,
-        account_id: &AccountId,
-    ) -> Result<Vec<Operation>, ServiceError> {
-        Ok(self
-            .outbox
-            .list_unsettled_operations(account_id)?
-            .into_iter()
-            .filter(|op| {
-                op.state == OperationState::Applied
-                    && op.entity.kind == OperationEntityKind::Message
-                    && op.kind.is_state_assertion()
-            })
-            .collect())
-    }
-
-    /// Retire every applied message assertion the authoritative projection now
-    /// satisfies. Folding a satisfied assertion is already a no-op, so removing
-    /// it is invisible — which is why convergence cannot flicker and need not
-    /// be timed against the observe. Called after each authoritative observe.
-    ///
-    /// @spec docs/replication/L1#retire-on-confirmation
-    pub(crate) fn retire_satisfied_operations(
-        &self,
-        account_id: &AccountId,
-    ) -> Result<(), ServiceError> {
-        for op in self.applied_message_assertions(account_id)? {
-            if self.projection_satisfies(account_id, &op)? {
-                self.outbox.remove_operation(&op.id)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Whether the authoritative projection already reflects a message
-    /// assertion's desired state. When true, the optimistic fold is a no-op and
-    /// the operation can be retired. A message that no longer exists satisfies
-    /// any assertion against it (the optimistic state is moot).
-    ///
-    /// @spec docs/replication/L1#retire-on-confirmation
-    fn projection_satisfies(
-        &self,
-        account_id: &AccountId,
-        operation: &Operation,
-    ) -> Result<bool, ServiceError> {
-        let message_id = MessageId::from(operation.entity.id.clone());
-        match operation.kind {
-            OperationKind::ReplaceMailboxes => {
-                let command: ReplaceMailboxesCommand = parse_operation_payload(operation)?;
-                let current = self
-                    .message_mailboxes
-                    .get_message_mailboxes(account_id, &message_id)?;
-                let want: BTreeSet<&MailboxId> = command.mailbox_ids.iter().collect();
-                let have: BTreeSet<&MailboxId> = current.iter().collect();
-                Ok(want == have)
-            }
-            OperationKind::SetKeywords => {
-                // Body-free: the no-op check needs only the keyword set.
-                let Some(summary) = self
-                    .message_detail_reader
-                    .get_message_summary(account_id, &message_id)?
-                else {
-                    return Ok(true);
-                };
-                let command: SetKeywordsCommand = parse_operation_payload(operation)?;
-                let keywords = &summary.keywords;
-                Ok(command.add.iter().all(|k| keywords.contains(k))
-                    && command.remove.iter().all(|k| !keywords.contains(k)))
-            }
-            OperationKind::Destroy => Ok(self
-                .message_detail_reader
-                .get_message_summary(account_id, &message_id)?
-                .is_none()),
-            _ => Ok(false),
-        }
     }
 
     /// Construct and enqueue an operation, capturing creation timestamps and
@@ -853,19 +771,6 @@ impl MailService {
             )
             .map_err(Into::into)
     }
-}
-
-/// Parse an operation payload into `T`, mapping failures to a `ServiceError`
-/// (used off the flush path, e.g. the convergence satisfaction check).
-fn parse_operation_payload<T: serde::de::DeserializeOwned>(
-    operation: &Operation,
-) -> Result<T, ServiceError> {
-    serde_json::from_value(operation.payload.clone()).map_err(|error| {
-        ServiceError::from(GatewayError::Rejected(format!(
-            "invalid {:?} payload: {error}",
-            operation.kind
-        )))
-    })
 }
 
 fn parse_payload<T: serde::de::DeserializeOwned>(operation: &Operation) -> Result<T, FlushError> {
