@@ -124,21 +124,27 @@ reconcile the three-binary naming in the durable docs down to the two that exist
 (or add the named lean binaries as thin wrappers if naming clarity is worth it).
 
 **Phase 1 — Make config 2 a real product** (nearer; mechanism + tests landed).
-1. **Compile-time leanness** for the near node (matrix decision) — the one piece
-   of new architecture; everything else is productization. **[done at the
-   crate level, 2026-06-25]** `posthaste-authority-runtime` now has a default-on
-   `backend` feature gating `store`/`engine`/`imap` (made optional); the
-   far-node assembly (`supervisor`, `build_backend*`, `Backend`/`LocalBackend`,
-   the account-mutation service, the migration helpers, the OAuth-holdout field)
-   is `#[cfg(feature = "backend")]`. Mutation-arg parsers were split out of
-   `backend.rs` into a lean `mutation_args` module since the near-node handle
-   needs them. `cargo check -p posthaste-authority-runtime --no-default-features`
-   compiles and `cargo tree` confirms store/engine/imap are absent; the default
-   build and all 7 `backend_link_split` tests are unchanged. **Remaining:** push
-   the same `backend` feature passthrough up through `posthaste-server` so the
-   near-node *binary* (`posthaste` with `[link] backend_url`) can build
-   `--no-default-features` — gating the in-process branch of `start_server` and
-   `start_backend`. That is the next slice; it intersects decision 2 (naming).
+1. **Compile-time leanness** for the near node — the one piece of new
+   architecture; everything else is productization. **[done at the crate level,
+   2026-06-25]** Done as a **crate split**, not a feature gate (see decision 1):
+   the renderer-facing near node moved to a new **`posthaste-runtime`** crate
+   (deps: domain/runtime-contract/link-{contract,core,replica}; **no**
+   store/engine/imap). `posthaste-authority-runtime` is now the far node, depends
+   on `posthaste-runtime`, and re-exports its surface so hosts keep one import.
+   The far crate composes an in-process runtime via the near crate's
+   `assemble_runtime`; `mutation_args` is a shared module; the OAuth holdout left
+   the near handle (option B — a backend op the server calls directly). No cfg,
+   no `dead_code` allow. Workspace + tests green. **Lean binary done
+   (2026-06-25):** `posthaste-server` was further split — the `/v1` HTTP platform
+   (REST + the client-link runtime sessions, auth/authz/sanitize/openapi,
+   `AppState`, serve glue) extracted into a near-only **`posthaste-api`** crate
+   (deps: `posthaste-runtime` only); the OAuth-flow routes stay in
+   `posthaste-server` on an `OAuthState` merged into the `/v1` router (bundled
+   OpenAPI = near + OAuth, lean node serves the OAuth-free doc). New lean daemon
+   binary **`posthaste-runtimed`** (= `posthaste-api` + `posthaste-runtime`) runs
+   `build_remote_runtime` + serves `/v1`; `cargo tree` confirms it links no
+   store/engine/imap. Every source file < 300 lines. **Remaining for config-2:**
+   steps 2–5 below (connection UX, packaging, TLS, live two-host shakeout).
 2. **Connection config UX**: point a local runtime at a remote backend (URL +
    token) — reconcile with `feature/deployment-modes` connection profiles.
 3. **Package the daemons**: `posthaste-backend` + the near-node `posthaste` as a
@@ -167,13 +173,15 @@ thin desktop-client build (web app covers most of the thin-client need).
 
 ## 4. Decisions to settle (Phase 0 close-out)
 
-1. **Build matrix mechanism:** **decided: option 1 (feature gate), landed at the
-   crate level.** The spike found the near-node needs the whole runtime core
-   (not just `BackendApi` + link crates), so option 2's premise was false and a
-   crate extract would relocate the core for no gain. The core is already
-   domain-trait-only; only `supervisor` + `build_backend`'s `DatabaseStore` +
-   `LocalBackend` + the OAuth-holdout `AccountMutationService` field bound it to
-   the concrete crates, all now gated.
+1. **Build matrix mechanism:** **decided: crate split (extract
+   `posthaste-runtime`), landed.** The feature-gate spike worked but produced
+   cfg-per-function + a `dead_code` allow — a code smell, and a runtime boundary
+   forced through the compiler. A crate boundary is the right unit (a crate is
+   wholly shared or not). The near node's only real coupling to the far node was
+   the OAuth holdout, resolved by moving it off the handle (option B). Result:
+   each crate links exactly what it uses, no conditional compilation. The shared
+   replica/outbox spine (`link-replica`/`link-wasm`) was already factored
+   correctly; this split brings the runtime crate to the same standard.
 2. **Binary naming:** keep the two real binaries and correct the docs, or add
    `posthaste-runtime` / `posthaste-daemon` as thin role-named wrappers for
    operator clarity. *Rec: correct the docs; the config-selected `posthaste` is

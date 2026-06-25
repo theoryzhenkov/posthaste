@@ -4042,6 +4042,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-api"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "dirs",
+ "futures-util",
+ "http-body-util",
+ "jsonwebtoken",
+ "keyring",
+ "macaroon",
+ "posthaste-config",
+ "posthaste-domain",
+ "posthaste-observability",
+ "posthaste-runtime",
+ "posthaste-runtime-contract",
+ "posthaste-store",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "toml 0.8.2",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "url",
+ "utoipa",
+ "utoipa-swagger-ui",
+ "uuid",
+]
+
+[[package]]
 name = "posthaste-authority-runtime"
 version = "0.1.0"
 dependencies = [
@@ -4051,7 +4090,6 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "jsonwebtoken",
- "keyring",
  "oauth2",
  "posthaste-config",
  "posthaste-domain",
@@ -4061,6 +4099,7 @@ dependencies = [
  "posthaste-link-core",
  "posthaste-link-replica",
  "posthaste-observability",
+ "posthaste-runtime",
  "posthaste-runtime-contract",
  "posthaste-store",
  "reqwest 0.12.28",
@@ -4249,6 +4288,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "posthaste-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "futures-util",
+ "keyring",
+ "posthaste-domain",
+ "posthaste-link-contract",
+ "posthaste-link-core",
+ "posthaste-link-replica",
+ "posthaste-runtime-contract",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+]
+
+[[package]]
 name = "posthaste-runtime-contract"
 version = "0.1.0"
 dependencies = [
@@ -4258,6 +4320,15 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa",
+]
+
+[[package]]
+name = "posthaste-runtimed"
+version = "0.1.0"
+dependencies = [
+ "posthaste-api",
+ "posthaste-runtime",
+ "tokio",
 ]
 
 [[package]]
@@ -4277,6 +4348,7 @@ dependencies = [
  "keyring",
  "macaroon",
  "oauth2",
+ "posthaste-api",
  "posthaste-authority-runtime",
  "posthaste-config",
  "posthaste-domain",

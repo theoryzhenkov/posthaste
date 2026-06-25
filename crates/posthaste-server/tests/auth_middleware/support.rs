@@ -97,7 +97,7 @@ pub(super) fn build_state(require_auth: bool) -> Arc<AppState> {
         Duration::from_secs(60),
     ));
     Arc::new(AppState {
-        runtime: AppState::runtime_handle_with_account_runtime_provider_for_migration(
+        runtime: posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
             service,
             store.clone(),
             secret_store.clone(),
@@ -105,7 +105,6 @@ pub(super) fn build_state(require_auth: bool) -> Arc<AppState> {
             supervisor,
         ),
         account_logo_root: state_root.join("account-assets/logos"),
-        oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
         auth_token: valid_token(),
         macaroon_root_key: test_root_key(),
         require_auth,

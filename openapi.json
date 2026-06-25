@@ -7747,10 +7747,6 @@
       "description": "Account configuration and lifecycle"
     },
     {
-      "name": "oauth",
-      "description": "Provider OAuth authorization flows"
-    },
-    {
       "name": "mailboxes",
       "description": "Mailboxes and navigation sidebar"
     },
@@ -7789,6 +7785,10 @@
     {
       "name": "auth",
       "description": "Capability-token minting"
+    },
+    {
+      "name": "oauth",
+      "description": "Provider OAuth authorization flows"
     }
   ]
 }
