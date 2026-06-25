@@ -8,7 +8,7 @@ profile = "profile.lab.empty.dev"
 runners = ["runner.cargo.test.dev"]
 tags = ["api", "health", "fast", "lab-smoke"]
 paths = [
-  "crates/posthaste-server/src/api.rs",
+  "crates/posthaste-server/src/lib.rs",
   "crates/posthaste-server/tests/api_boundary_contracts.rs",
 ]
 command = "cargo test -p posthaste-server health"
@@ -22,7 +22,7 @@ profile = "profile.lab.empty.dev"
 runners = ["runner.cargo.test.dev"]
 tags = ["api", "settings", "fast"]
 paths = [
-  "crates/posthaste-server/src/api/settings.rs",
+  "crates/posthaste-server/src/lib.rs",
   "crates/posthaste-server/tests/settings_patch.rs",
 ]
 command = "cargo test -p posthaste-server --test settings_patch"
