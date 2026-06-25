@@ -60,6 +60,7 @@ pub const DATABASE_OPENED: LogEvent = LogEvent::new("database.opened");
 pub const DATABASE_CORRUPT_REPAIRED: LogEvent = LogEvent::new("database.corrupt.repaired");
 pub const DAEMON_EVENT_MALFORMED: LogEvent = LogEvent::new("daemon.event.malformed");
 pub const DESKTOP_BACKEND_STARTED: LogEvent = LogEvent::new("desktop.backend.started");
+pub const DESKTOP_RELEASE_CHANNEL: LogEvent = LogEvent::new("desktop.release_channel");
 pub const FRONTEND_CONSOLE_OUTPUT: LogEvent = LogEvent::new("frontend.console.output");
 pub const FRONTEND_ERROR_UNCAUGHT: LogEvent = LogEvent::new("frontend.error.uncaught");
 pub const FRONTEND_ERROR_UNHANDLED_REJECTION: LogEvent =

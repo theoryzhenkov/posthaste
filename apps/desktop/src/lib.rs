@@ -1,8 +1,6 @@
-#[cfg(feature = "embedded-server")]
-use posthaste_observability::{events, ph_info};
 use posthaste_observability::{
-    ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
-    ph_forwarded_warn,
+    events, ph_forwarded_debug, ph_forwarded_error, ph_forwarded_info, ph_forwarded_trace,
+    ph_forwarded_warn, ph_info,
 };
 #[cfg(feature = "embedded-server")]
 use posthaste_server::ServerConfig;
@@ -47,6 +45,33 @@ const CLOSE_WINDOW_MENU_ID: &str = "close-window";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
 
+/// Compile-time release channel ("nightly" | "stable" | "dev"). Set via the
+/// `POSTHASTE_RELEASE_CHANNEL` env var at build time; defaults to "dev" for
+/// local builds. Drives in-product channel display and the updater-endpoint
+/// binding (see docs/eph/DESIGN-L2-release-channels.md).
+pub(crate) const RELEASE_CHANNEL: &str = match option_env!("POSTHASTE_RELEASE_CHANNEL") {
+    Some(channel) => channel,
+    None => "dev",
+};
+
+/// Sentinel baked into the binary so the release smoke step can prove which
+/// channel a binary was built on by grepping for `posthaste-release-channel=`.
+/// The CI sets `POSTHASTE_RELEASE_CHANNEL_SENTINEL` to the full sentinel; local
+/// builds default to the dev sentinel. `concat!` cannot take a const, so the
+/// full string is supplied by the build environment rather than built here.
+#[used]
+static RELEASE_CHANNEL_SENTINEL: &str = match option_env!("POSTHASTE_RELEASE_CHANNEL_SENTINEL") {
+    Some(sentinel) => sentinel,
+    None => "posthaste-release-channel=dev",
+};
+
+/// Return the compile-time release channel to the renderer so the desktop binary
+/// and the web bundle cannot silently disagree.
+#[tauri::command]
+fn release_channel() -> &'static str {
+    RELEASE_CHANNEL
+}
+
 #[cfg(all(feature = "e2e-testing", not(target_os = "linux")))]
 compile_error!("PostHaste e2e-testing is Linux-only; macOS release smoke remains manual");
 
@@ -77,6 +102,7 @@ pub fn run() {
         open_external_url,
         open_surface_window,
         toggle_devtools,
+        release_channel,
         client_connection::client_connections_read,
         client_connection::client_connections_write,
         client_connection::client_token_get,
@@ -92,6 +118,7 @@ pub fn run() {
         open_external_url,
         open_surface_window,
         toggle_devtools,
+        release_channel,
         client_connection::client_connections_read,
         client_connection::client_connections_write,
         client_connection::client_token_get,
@@ -102,6 +129,15 @@ pub fn run() {
     ]);
 
     let builder = builder.setup(|app| {
+        // Log the baked release channel so the sentinel is reachable (survives
+        // linker GC) and so the channel is observable in diagnostics.
+        ph_info!(
+            events::DESKTOP_RELEASE_CHANNEL,
+            channel = RELEASE_CHANNEL,
+            "desktop release channel"
+        );
+        let _ = RELEASE_CHANNEL_SENTINEL;
+
         #[cfg(feature = "embedded-server")]
         let backend = {
             let config = ServerConfig {
