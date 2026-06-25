@@ -27,6 +27,8 @@ linux_smoke() {
   local appimage
   appimage="$(find "$bundle_dir" -maxdepth 1 -type f -name '*_amd64.AppImage' -print -quit | head -n1)"
   [ -n "$appimage" ] || fail "no AppImage bundle found in $bundle_dir"
+  # resolve to an absolute path before we cd into the extraction directory
+  appimage="$(realpath "$appimage")"
   [ -x "$appimage" ] || chmod +x "$appimage"
 
   local extract_dir
