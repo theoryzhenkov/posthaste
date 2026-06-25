@@ -31,6 +31,7 @@ import type {
   ReplicaAssertion,
   ReplicaHandle,
   ReplicaHandleFactory,
+  MessageChangeDiff,
 } from './handle'
 import {
   applyOptimisticRows,
@@ -107,6 +108,13 @@ function toAssertion(
       }
     case 'message.destroy':
       return { messageId, assertion: { kind: 'destroy' } }
+    case 'message.applyDiff': {
+      const diff = args.diff as MessageChangeDiff | undefined
+      if (!diff) {
+        return null
+      }
+      return { messageId, assertion: { kind: 'applyDiff', diff } }
+    }
     default:
       return null
   }
