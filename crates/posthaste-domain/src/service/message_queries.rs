@@ -427,7 +427,7 @@ impl MailService {
 /// folded, and mapped back, so the *effect* is defined once and is identical to
 /// the one the WASM replica runs (`single-local-effect`).
 ///
-/// @spec docs/replication/L2#3-the-shared-predictor-crate
+/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
 fn apply_operations_to_summary(
     mut summary: MessageSummary,
     operations: &[Operation],

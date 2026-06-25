@@ -55,7 +55,7 @@ impl MailService {
         // proportional to body size on attachment-shaped messages — regression-
         // gated by `message_mutation_settlement_payload_excludes_the_message_body`.
         //
-        // @spec docs/replication/L3#7-hardening-w5-and-the-failure-path
+        // @spec docs/replication/client-link/L3#5-the-failure-path-and-remaining-gaps
         let projected_mailboxes = self
             .message_mailboxes
             .get_message_mailboxes(account_id, message_id)?;

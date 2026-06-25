@@ -13,7 +13,7 @@
 //! read-replication piece still ahead (L4 §4.3 / W4 coverage). This test covers
 //! the write path.
 //!
-//! @spec docs/replication/L4#3-the-link-contract-backendlink
+//! @spec docs/replication/backend-link/L1#3-the-backendapi-contract
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -152,7 +152,7 @@ async fn serve_link(backend: &posthaste_authority_runtime::AuthorityRuntimeBuild
     format!("http://{addr}")
 }
 
-// spec: docs/eph/DESIGN-L4-read-replication#6-co-located-is-the-same-code-collapsed
+// spec: docs/replication/backend-link/L3#4-co-located-no-op-short-circuits
 #[tokio::test]
 async fn remote_transport_reads_a_real_query_over_the_link() {
     // The backend computes the query (the authority owns the query engine); a
@@ -212,7 +212,7 @@ fn mail_list_descriptor(query: &str) -> ViewDescriptor {
     }
 }
 
-// spec: docs/eph/DESIGN-L4-read-replication#2-the-model-one-read-through-cache-policy-per-link
+// spec: docs/replication/backend-link/L1#4-reads-are-read-through
 #[tokio::test]
 async fn remote_runtime_serves_a_mail_list_view_from_the_backend() {
     // The backend holds the data; a Remote runtime holds none of it locally.
@@ -380,7 +380,7 @@ async fn remote_runtime_forwards_a_mutation_into_the_backend_store() {
 // a read and a write end to end: production `RemoteBackend` (generated client)
 // -> `link_router` (generated handler) -> in-process `Backend`.
 //
-// spec: docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+// spec: docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 #[tokio::test]
 async fn generated_wire_round_trips_a_read_and_a_write() {
     let backend = build_authority_runtime(build_config(temp_root()))
@@ -489,7 +489,7 @@ async fn link_auth_requires_a_matching_bearer_token() {
 // no runtime near node) served over the link drives reads AND writes — incl.
 // account CRUD — for a remote runtime.
 //
-// spec: docs/replication/L5
+// spec: docs/replication/backend-link/L2#7-the-build-seam-and-role-binaries
 #[tokio::test]
 async fn standalone_backend_node_serves_the_link() {
     let node = build_backend_node(build_config(temp_root()))
@@ -527,7 +527,7 @@ async fn standalone_backend_node_serves_the_link() {
 // backend — no store/service/supervisor) drives a standalone backend entirely
 // over the link, through the normal RuntimeCore handle clients use.
 //
-// spec: docs/replication/L5
+// spec: docs/replication/backend-link/L2#7-the-build-seam-and-role-binaries
 #[tokio::test]
 async fn lean_remote_runtime_drives_the_backend_over_the_link() {
     // A standalone backend served over the link.

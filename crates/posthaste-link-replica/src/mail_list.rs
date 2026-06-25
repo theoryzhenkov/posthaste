@@ -28,7 +28,7 @@ pub struct MailListRow {
 /// membership predicate rejects its folded state (e.g. archived out of the
 /// viewed mailbox); everything else is corrected by the next served base.
 ///
-/// @spec docs/replication/L2#6-working-set-coverage
+/// @spec docs/replication/client-link/L2#5-working-set-coverage
 #[derive(Clone, Debug, Default)]
 pub struct MailListReplica {
     engine: MessageReplica,

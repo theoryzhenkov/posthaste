@@ -118,7 +118,7 @@ pub struct RuntimeCallerCapabilities {
     /// The caller's session can apply incremental mail-list view deltas
     /// ([`RuntimeFrame::ViewDelta`]) rather than whole-view replaces. When set,
     /// the runtime sends only the rows that changed instead of re-serializing
-    /// the entire view on each recompute ([replication L6](../../replication/L6.md)).
+    /// the entire view on each recompute ([replication client-link L1](../../replication/client-link/L1.md)).
     /// Default `false`, so a client that does not understand deltas keeps
     /// receiving whole `ViewReplace` frames.
     #[serde(default)]
@@ -361,7 +361,7 @@ pub enum RuntimeFrame {
     },
     /// An incremental mail-list update: only the rows that changed since the
     /// last snapshot, for a session that opted into deltas
-    /// ([replication L6](../../replication/L6.md)). Replaces a whole `ViewReplace`
+    /// ([replication client-link L1](../../replication/client-link/L1.md)). Replaces a whole `ViewReplace`
     /// for row-local changes (flags, reads, removals).
     ViewDelta {
         #[serde(rename = "sessionSeq")]
@@ -570,7 +570,7 @@ pub struct MailListRowState {
     pub pending_markers: Vec<RuntimeMutationId>,
 }
 
-/// An incremental mail-list view update ([replication L6](../../replication/L6.md)):
+/// An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):
 /// the rows that changed since the last snapshot, instead of the whole view. The
 /// client reconciles it against its held rows — drop rows absent from `order`,
 /// reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a

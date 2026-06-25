@@ -9,7 +9,7 @@
  * which is why this module is the sole sanctioned IndexedDB user
  * (`rendererStorageBoundary` allow-list).
  *
- * @spec docs/replication/L3#4-indexeddb-persistence
+ * @spec docs/replication/client-link/L3#3-indexeddb-persistence
  */
 import type { ReplicaAssertion } from './handle'
 

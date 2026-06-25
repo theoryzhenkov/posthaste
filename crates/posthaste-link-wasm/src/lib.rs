@@ -1,13 +1,13 @@
 //! wasm-bindgen boundary for the client-layer replica.
 //!
 //! Exposes the portable [`posthaste_link_replica`] view layer to JavaScript so
-//! the web `replicaAdapter` ([replication L2 §8](../replication/L2.md)) can drive
+//! the web `replicaAdapter` ([client-link L2 §6](../replication/client-link/L2.md)) can drive
 //! it in the browser. The host (JS) owns transport (fetch/SSE to the remote
 //! runtime) and persistence (IndexedDB); this boundary is pure compute over
 //! values passed as JSON strings, which keeps the dependency surface to
 //! `wasm-bindgen` alone (no `serde-wasm-bindgen`) and the type contract explicit.
 //!
-//! @spec docs/replication/L3#2-the-wasm-boundary
+//! @spec docs/replication/client-link/L2#3-the-wasm-boundary-posthaste-link-wasm
 
 use serde::Deserialize;
 use serde_json::Value;

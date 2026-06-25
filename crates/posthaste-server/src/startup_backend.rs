@@ -12,11 +12,11 @@ pub struct BackendServerHandle {
 }
 
 /// Start the standalone `posthaste-backend` role: build the backend far node and
-/// serve ONLY the authenticated runtime↔backend link ([replication L5 §4](../replication/L5.md),
+/// serve ONLY the authenticated runtime↔backend link ([replication backend-link L2 §7](../replication/backend-link/L2.md),
 /// assertion `backend-builds-standalone`). No `/v1` client API and no renderer —
 /// a remote `posthaste-runtime` drives this backend over the link.
 ///
-/// @spec docs/replication/L5
+/// @spec docs/replication/backend-link/L2#7-the-build-seam-and-role-binaries
 pub async fn start_backend(server_config: ServerConfig) -> BackendServerHandle {
     #[cfg(debug_assertions)]
     dotenv().ok();

@@ -1647,7 +1647,7 @@ export interface components {
             security: components["schemas"]["TransportSecurity"];
         };
         /**
-         * @description An incremental mail-list view update ([replication L6](../../replication/L6.md)):
+         * @description An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):
          *     the rows that changed since the last snapshot, instead of the whole view. The
          *     client reconciles it against its held rows — drop rows absent from `order`,
          *     reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
@@ -3285,7 +3285,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;
@@ -3331,7 +3331,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;
@@ -3389,7 +3389,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;
@@ -3520,7 +3520,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;
@@ -3591,7 +3591,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;
@@ -3651,7 +3651,7 @@ export interface operations {
                 sourceId?: string | null;
                 /**
                  * @description The session can apply incremental mail-list deltas
-                 *     ([replication L6](../../../docs/replication/L6.md)); when `true` the
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
                  *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
                  */
                 viewDelta?: boolean | null;

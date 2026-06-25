@@ -126,7 +126,7 @@ export interface RuntimeMailListViewState {
 }
 
 /**
- * An incremental mail-list update (replication L6): only the rows that changed.
+ * An incremental mail-list update (replication client-link): only the rows that changed.
  * Reconcile against the held rows — when `order` is present, drop rows whose key
  * is absent and reorder to it; then apply `upserts` by `rowKey`.
  */
@@ -218,7 +218,7 @@ export interface RuntimeSession {
 
 export interface RuntimeOpenSessionRequest {
   sourceId?: string | null
-  /** Opt into incremental mail-list view deltas (replication L6). */
+  /** Opt into incremental mail-list view deltas (replication client-link). */
   viewDelta?: boolean
 }
 

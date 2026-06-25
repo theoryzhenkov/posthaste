@@ -1,7 +1,7 @@
 //! Client-layer replica view layer.
 //!
 //! Wraps the [`posthaste_link_core`] convergence engine with the working-set
-//! view logic ([replication L2 §4–§6](../replication/L2.md)): it takes the
+//! view logic ([client-link L2 §2](../replication/client-link/L2.md)): it takes the
 //! runtime's served mail-list rows as its confirmed base, folds the outbox of
 //! pending mutations over them with the shared predictor, and serves optimistic
 //! rows to the renderer — so an archive/flag/read shows instantly instead of
@@ -14,7 +14,7 @@
 //! otherwise deferred to the runtime's authoritative recompute — that is the
 //! later coverage/atoms layer, not this one.
 //!
-//! @spec docs/replication/L2#4-the-replica-node
+//! @spec docs/replication/client-link/L2#2-the-replica-node-posthaste-link-replica
 
 mod mail_list;
 

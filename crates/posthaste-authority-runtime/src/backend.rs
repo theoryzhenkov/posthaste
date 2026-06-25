@@ -1,7 +1,7 @@
 //! The backend far node: the single owner of message-command backend access.
 //!
 //! This is the **far node** of the runtime↔backend coherent link
-//! ([replication L4 §2-§3](../replication/L4.md)). It owns the `MailService` +
+//! ([replication backend-link L1 §2-§3](../replication/backend-link/L1.md)). It owns the `MailService` +
 //! store and is the one place message-state commands cross from the runtime into
 //! the backend: each applies the command to the service, publishes the resulting
 //! authoritative domain events, and nudges the provider outbox to flush.
@@ -17,7 +17,7 @@
 //! runtime's served views onto a near-node base cache fed by this node's
 //! down-channel, at which point reads stop crossing the link too.
 //!
-//! @spec docs/replication/L4#3-the-link-contract-backendlink
+//! @spec docs/replication/backend-link/L1#3-the-backendapi-contract
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -131,7 +131,7 @@ pub(crate) struct MessageTargetArgs {
     pub message_id: String,
 }
 
-/// The backend far node ([replication L4 §3](../replication/L4.md)): owns the
+/// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and
 /// applies message-state commands to them.
 pub(crate) struct Backend {
@@ -379,7 +379,7 @@ impl Backend {
     }
 
     /// Read channel: compute a page of a mail-list query — the query engine is
-    /// the authority's ([replication L4 W4](../replication/L4.md)). A near node
+    /// the authority's ([replication backend-link L3](../replication/backend-link/L3.md)). A near node
     /// reads through here.
     pub(crate) async fn query_mail_page(
         &self,
@@ -449,7 +449,7 @@ impl Backend {
     /// events do not all carry the full post-state (a mailbox move event omits
     /// keywords), but `MessageReplica`'s base is a whole-message replace, so the
     /// down-channel reads the current summary to assert the complete state
-    /// ([replication L4 §3](../replication/L4.md)).
+    /// ([replication backend-link L1 §3](../replication/backend-link/L1.md)).
     pub(crate) fn current_fold_state(
         &self,
         account_id: &AccountId,
@@ -774,7 +774,7 @@ impl Backend {
     /// is the dispatch from a transport-neutral named mutation
     /// (`message.setKeywords` / `message.archive` / …) to the typed command,
     /// moved here from the runtime: the backend "accepts named mutations"
-    /// ([replication L4 §3](../replication/L4.md)). The runtime keeps the
+    /// ([replication backend-link L1 §3](../replication/backend-link/L1.md)). The runtime keeps the
     /// session/undo/scope concerns around this call; this node only applies the
     /// effect and returns the resulting events.
     ///
