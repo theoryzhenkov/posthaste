@@ -5,7 +5,7 @@
  * artifact. Production resolves it from the generated bundle via
  * {@link loadReplicaHandleFactory}; tests substitute an in-memory fake.
  *
- * @spec docs/replication/L3#2-the-wasm-boundary
+ * @spec docs/replication/client-link/L2#3-the-wasm-boundary-posthaste-link-wasm
  */
 export type SettlementVerdict = 'confirmed' | 'failed'
 

@@ -69,7 +69,7 @@ pub struct AuthorityRuntimeBuildConfig {
     pub secret_store: Option<Arc<dyn SecretStore>>,
     pub event_channel_capacity: usize,
     pub poll_interval: Duration,
-    /// Which transport carries the runtime↔backend link ([replication L4 §5](../replication/L4.md)).
+    /// Which transport carries the runtime↔backend link ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
     /// Chosen from configuration, not at build time; the default is in-process
     /// co-located (assertion `transport-selected-by-config`).
     pub backend_transport: BackendTransportConfig,
@@ -94,7 +94,7 @@ pub type BackendTransportDecorator =
 /// `InProcess` (default) is the co-located far node — zero serialization, byte
 /// for byte the pre-link behavior. `Remote` points the link at a backend that
 /// serves the link wire (POST up + SSE down) elsewhere; switching is a config
-/// change, not a rebuild ([replication L4 §5](../replication/L4.md)).
+/// change, not a rebuild ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum BackendTransportConfig {
     #[default]
@@ -188,7 +188,7 @@ pub struct AuthorityRuntimeBuild {
     /// transport over the link wire (`link_router`) so a remote runtime can
     /// connect; the in-process runtime already holds the same link internally.
     ///
-    /// @spec docs/replication/L4#3-the-link-contract-backendlink
+    /// @spec docs/replication/backend-link/L1#3-the-backendapi-contract
     pub backend_link: BackendLink,
 }
 
@@ -222,7 +222,7 @@ impl AuthorityRuntimeApiMigrationBridge {
 
 /// Build the authority runtime without binding HTTP or depending on Tauri.
 ///
-/// The bundled/daemon composition ([replication L5 §4](../replication/L5.md)):
+/// The bundled/daemon composition ([replication backend-link L2 §7](../replication/backend-link/L2.md)):
 /// build the backend far node, then the runtime near node over it (in-process
 /// link by default). Behavior-preserving — the same graph as before, factored so
 /// the two roles can also be composed independently by the lean binaries.
@@ -236,7 +236,7 @@ pub async fn build_authority_runtime(
     Ok(build_runtime(backend, config))
 }
 
-/// A standalone backend far node ([replication L5 §4](../replication/L5.md),
+/// A standalone backend far node ([replication backend-link L2 §7](../replication/backend-link/L2.md),
 /// assertion `backend-builds-standalone`): the store + service + account
 /// supervisor + the L4 [`Backend`], with NO runtime near node. The
 /// `posthaste-backend` role binary serves [`transport`](BackendNode::transport)
@@ -276,7 +276,7 @@ pub async fn build_backend_node(
     })
 }
 
-/// A lean runtime near node ([replication L5 §4](../replication/L5.md)): the
+/// A lean runtime near node ([replication backend-link L2 §7](../replication/backend-link/L2.md)): the
 /// session / view / outbox machinery over a REMOTE backend link, with NO local
 /// backend (no store, service, or supervisor). The `posthaste-runtime` role (the
 /// daemon configured with a remote backend) builds this — reads + writes cross
@@ -385,7 +385,7 @@ pub fn build_remote_runtime(
 /// supervisor) + the L4 [`Backend`], built with no runtime near node. The
 /// `posthaste-backend` binary serves this over the link; the bundled/daemon
 /// compositions hand it to [`build_runtime`]
-/// ([replication L5 §4](../replication/L5.md), assertion `backend-builds-standalone`).
+/// ([replication backend-link L2 §7](../replication/backend-link/L2.md), assertion `backend-builds-standalone`).
 pub(crate) struct BackendBuild {
     secret_store: Arc<dyn SecretStore>,
     event_sender: broadcast::Sender<DomainEvent>,
@@ -599,7 +599,7 @@ fn build_read_cache(
 }
 
 /// Build the runtime↔backend [`BackendLink`] over its config-selected transport
-/// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
+/// ([replication backend-link L2 §6](../replication/backend-link/L2.md), assertion `transport-selected-by-config`).
 /// The co-located default wraps the in-process far node; `Remote` wraps a
 /// [`RemoteBackend`] pointed at a backend serving the link wire. An override
 /// decorator, when present, composes over that real transport (delegating what

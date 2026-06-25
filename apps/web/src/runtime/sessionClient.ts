@@ -48,7 +48,7 @@ function ensureSession(sourceId?: string | null): Promise<RuntimeSession> {
   }
   activeSessionSourceId = sourceId
   sessionPromise = runtimeStream
-    // Opt into incremental mail-list deltas (replication L6). Both client read
+    // Opt into incremental mail-list deltas (replication client-link). Both client read
     // paths apply them: the default renderer reconciles directly, and the
     // replica adapter folds the delta into its served base.
     .openSession({

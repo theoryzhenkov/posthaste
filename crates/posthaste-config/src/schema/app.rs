@@ -27,7 +27,7 @@ pub struct AppToml {
 /// Runtime↔backend link settings (`[link]`). Default: in-process, link not
 /// served — the bundled single-process deployment is unaffected.
 ///
-/// @spec docs/replication/L5
+/// @spec docs/replication/L1#10-deployment-topology
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct LinkToml {
     /// Backend role: serve the runtime↔backend link over HTTP for a remote

@@ -869,7 +869,7 @@ async fn runtime_mutation_streams_settlement_frames() {
 /// large the message's cached body is — otherwise archive/delete/keyword ops on
 /// attachment-shaped messages pay a load + serialize + transfer tax for data the
 /// client discards. This is the regression that shipped; the bound makes it
-/// catchable. See docs/replication/L3 §7 / mutation-pipeline cost notes.
+/// catchable. See docs/replication/client-link/L3 §5 / mutation-pipeline cost notes.
 #[tokio::test]
 async fn message_mutation_settlement_payload_excludes_the_message_body() {
     let root = temp_root();
@@ -2431,7 +2431,7 @@ fn flagged(state: &MailListViewState, message_id: &str) -> bool {
         .expect("isFlagged should be a bool")
 }
 
-// spec: docs/replication/L4#43-one-replica-two-consumers-the-read-model-twin
+// spec: docs/replication/backend-link/L2#5-the-runtime-near-node-read-replica-outbox
 #[tokio::test]
 async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_flight() {
     let entered = Arc::new(tokio::sync::Notify::new());

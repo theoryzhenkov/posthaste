@@ -67,7 +67,7 @@ pub struct SettlementResult {
 /// transport, and view recomputation are the node's responsibility; this type
 /// only holds the base + outbox and runs the rebase loop.
 ///
-/// @spec docs/replication/L2#5-convergence-in-the-replica
+/// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MessageReplica {
     base: BTreeMap<String, MessageFoldState>,

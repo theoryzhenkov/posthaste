@@ -3,7 +3,7 @@
  * and the replica handle's JSON surface. Kept side-effect-free so the host glue
  * is a thin orchestration over tested transforms.
  *
- * @spec docs/replication/L3#5-transport-injection-and-the-contract-replica-mapping
+ * @spec docs/replication/client-link/L3#4-transport-injection-and-the-contract-replica-mapping
  */
 import type {
   RuntimeMailListRowState,

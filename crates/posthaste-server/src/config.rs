@@ -41,7 +41,7 @@ pub struct DaemonSettings {
     /// remote runtime can drive this backend over HTTP. Default `false` (the
     /// bundled single-process deployment never exposes the link).
     ///
-    /// @spec docs/replication/L5
+    /// @spec docs/replication/L1#10-deployment-topology
     pub link_serve: bool,
     /// Shared bearer token for the link surface — required from connecting
     /// runtimes when serving, and presented to the remote backend when

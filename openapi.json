@@ -1075,7 +1075,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1151,7 +1151,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1237,7 +1237,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1433,7 +1433,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1548,7 +1548,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -1643,7 +1643,7 @@
           {
             "name": "viewDelta",
             "in": "query",
-            "description": "The session can apply incremental mail-list deltas\n([replication L6](../../../docs/replication/L6.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
+            "description": "The session can apply incremental mail-list deltas\n([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the\nruntime sends `ViewDelta` frames instead of whole `ViewReplace`s.",
             "required": false,
             "schema": {
               "type": [
@@ -5362,7 +5362,7 @@
       },
       "MailListDelta": {
         "type": "object",
-        "description": "An incremental mail-list view update ([replication L6](../../replication/L6.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nsession that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
+        "description": "An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):\nthe rows that changed since the last snapshot, instead of the whole view. The\nclient reconciles it against its held rows — drop rows absent from `order`,\nreorder to `order`, then apply `upserts` by `row_key`. Emitted only to a\nsession that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),\nand only when the change is row-local (structural changes still send a whole\n`ViewReplace`).",
         "required": [
           "upserts"
         ],
@@ -6616,7 +6616,7 @@
           },
           {
             "type": "object",
-            "description": "An incremental mail-list update: only the rows that changed since the\nlast snapshot, for a session that opted into deltas\n([replication L6](../../replication/L6.md)). Replaces a whole `ViewReplace`\nfor row-local changes (flags, reads, removals).",
+            "description": "An incremental mail-list update: only the rows that changed since the\nlast snapshot, for a session that opted into deltas\n([replication client-link L1](../../replication/client-link/L1.md)). Replaces a whole `ViewReplace`\nfor row-local changes (flags, reads, removals).",
             "required": [
               "sessionSeq",
               "viewId",

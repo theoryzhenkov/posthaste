@@ -1,6 +1,6 @@
 //! The runtime as a near node of the runtime↔backend link.
 //!
-//! Two pieces ([replication L4 §4.3](../replication/L4.md)):
+//! Two pieces ([replication backend-link L2 §5](../replication/backend-link/L2.md)):
 //!
 //! - [`RuntimeBackendOutbox`] — the runtime's outbox **toward the backend**: the
 //!   mutations it has forwarded but the backend has not yet confirmed. A
@@ -16,7 +16,7 @@
 //!   served rows are the base; the outbox is the pending set; the projection is
 //!   the optimistic result.
 //!
-//! @spec docs/replication/L4#43-one-replica-two-consumers-the-read-model-twin
+//! @spec docs/replication/backend-link/L2#5-the-runtime-near-node-read-replica-outbox
 
 use std::sync::Mutex;
 

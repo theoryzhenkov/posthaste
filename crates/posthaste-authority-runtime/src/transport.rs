@@ -1,14 +1,14 @@
 //! The two [`BackendApi`] implementations the runtime↔backend link selects between.
 //!
-//! [`LocalBackend`] is the default ([replication L4 §4](../replication/L4.md)):
+//! [`LocalBackend`] is the default ([replication backend-link L2 §2](../replication/backend-link/L2.md)):
 //! direct calls to a co-located [`Backend`] far node, zero serialization, instant
 //! confirmation — byte-for-byte the pre-link behavior (`colocated-unchanged`).
 //! [`RemoteBackend`] is the split case: the up-channel `POST`s named mutations,
 //! the reads `POST` request/response, and the down-channel is an SSE stream of
 //! base-assertion frames — so the backend can live on another process or host.
-//! Both are config-selected ([replication L5 §5](../replication/L5.md)).
+//! Both are config-selected ([replication backend-link L2 §6](../replication/backend-link/L2.md)).
 //!
-//! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+//! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
 use std::sync::Arc;
 
@@ -473,7 +473,7 @@ impl BackendApi for LocalBackend {
     }
 }
 
-/// The remote link transport ([replication L4 §4](../replication/L4.md)): a near
+/// The remote link transport ([replication backend-link L2 §2](../replication/backend-link/L2.md)): a near
 /// node talking to a far node that serves the link wire over HTTP. The
 /// up-channel `POST`s named mutations; the down-channel is an SSE stream of
 /// base-assertion frames. This is what lets the backend live on another

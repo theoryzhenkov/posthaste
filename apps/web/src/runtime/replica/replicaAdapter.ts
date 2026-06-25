@@ -9,7 +9,7 @@
  * resolves. The runtime's served bases (down-channel) replace the handle base
  * (keeping pending), and `mutationSettlement` retires or reverts the pending op.
  *
- * @spec docs/replication/L3#6-the-replicaadapter-w4
+ * @spec docs/replication/client-link/L2#6-the-replicaadapter
  */
 import type {
   RuntimeAdapter,
@@ -55,7 +55,7 @@ interface ViewEntry {
 }
 
 /**
- * Reconcile a runtime mail-list delta (replication L6) into a served row set:
+ * Reconcile a runtime mail-list delta (replication client-link) into a served row set:
  * when `order` is present, reorder to it and drop rows whose key is absent;
  * then apply `upserts` by `rowKey`. Produces the same served base a whole
  * `viewReplace` would, which the replica then re-ingests (keeping pending).

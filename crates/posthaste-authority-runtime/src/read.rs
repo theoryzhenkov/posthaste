@@ -1,6 +1,6 @@
 //! The runtime's read path as a read-through cache over the backend.
 //!
-//! Reads ([replication L4 W4](../replication/L4.md), `DESIGN-L4-read-replication`)
+//! Reads ([replication backend-link L3](../replication/backend-link/L3.md))
 //! go through a [`ReadCache`] over a [`BackendApi`]: the query engine lives at
 //! the authority (the far node), and a near node retains the data that flowed
 //! back under a **policy** chosen from link cost. The primitive is read-through;
@@ -13,7 +13,7 @@
 //! deployment behaves exactly as before (`colocated-unchanged`); a split runtime
 //! gets the **retaining** policy kept coherent by the down-channel.
 //!
-//! @spec docs/eph/DESIGN-L4-read-replication#6-co-located-is-the-same-code-collapsed
+//! @spec docs/replication/backend-link/L3#2-retaining-policy-and-coherence-by-eviction
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -281,7 +281,7 @@ impl ReadCache {
 /// (`ViewRegistry`'s event pump + `subscribe_events`) recomputes and pushes
 /// frames to clients. This is the runtime↔backend half of the recursive
 /// down-channel; the runtime→client half is the shipped view-frame protocol it
-/// feeds ([replication L4 §4.3](../replication/L4.md)). In-process the runtime
+/// feeds ([replication backend-link L3](../replication/backend-link/L3.md)). In-process the runtime
 /// shares the backend's event bus directly, so this is spawned only for a split
 /// (remote) runtime; it returns when the stream closes.
 pub(crate) async fn run_backend_down_channel(

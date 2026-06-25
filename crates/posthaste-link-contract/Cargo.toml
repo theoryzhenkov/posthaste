@@ -3,7 +3,7 @@ name = "posthaste-link-contract"
 version = "0.1.0"
 edition = "2021"
 
-# The shared coherent-link contract (docs/replication/L4 §3-§4): the
+# The shared coherent-link contract (docs/replication/backend-link/L1): the
 # transport-neutral replication subset both the client<->runtime and
 # runtime<->backend links speak. It is only the two replication channels —
 # named mutations up, authoritative base assertions + per-mutation confirmation
