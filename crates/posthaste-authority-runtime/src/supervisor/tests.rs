@@ -177,7 +177,7 @@ async fn stale_runtime_generation_cannot_overwrite_current_runtime_status() {
     assert_eq!(overview.last_sync_error, None);
 }
 
-// spec: docs/runtime/L2#runtime-health
+// spec: docs/runtime/adapter/L2#account-status-views
 #[tokio::test]
 async fn supervisor_account_count_tracks_known_accounts() {
     let account = test_account("primary");

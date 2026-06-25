@@ -93,7 +93,7 @@ pub struct ServerHandle {
     pub log_guard: WorkerGuard,
     /// Owns graceful runtime shutdown for the server process.
     ///
-    /// @spec docs/runtime/L2#runtime-shutdown-handle
+    /// @spec docs/runtime/internals/L2#runtime-shutdown-handle
     pub runtime_shutdown: RuntimeShutdownHandle,
     /// Per-process bearer token, exposed so the embedded host can inject it
     /// into the webview as `window.__POSTHASTE_TOKEN__`.

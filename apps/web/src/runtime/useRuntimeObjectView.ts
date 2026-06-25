@@ -16,7 +16,7 @@ import type { RuntimeViewSnapshot } from '@/runtime/types'
  * and (for detail) the provider body fetch; this hook layers runtime-served
  * updates on top via `merge`. `merge` defaults to replacing the cached value.
  *
- * @spec docs/runtime/L2#view-operation-flow
+ * @spec docs/runtime/adapter/L2#view-operation-flow
  */
 export function useRuntimeObjectView<TData>({
   enabled,

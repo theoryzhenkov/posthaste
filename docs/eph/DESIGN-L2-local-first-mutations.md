@@ -8,7 +8,7 @@ type: DESIGN
 depends:
   - path: docs/stale/L1-outbox
   - path: docs/stale/L1-sync
-  - path: docs/runtime/L2
+  - path: docs/runtime/mutations/L1
   - path: docs/backend/L1
   - path: docs/client/L1
   - path: docs/eph/DESIGN-L2-account-state-architecture

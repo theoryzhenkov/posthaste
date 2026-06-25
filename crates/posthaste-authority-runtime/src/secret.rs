@@ -10,7 +10,7 @@ const KEYRING_SERVICE_NAME: &str = "posthaste";
 /// The authority runtime owns provider-secret resolution; adapters receive only
 /// runtime outputs, never provider credentials.
 ///
-/// spec: docs/runtime/L2#provider-secrets-runtime-store
+/// spec: docs/runtime/internals/L1#provider-secrets-runtime-store
 pub struct SystemSecretStore;
 
 impl SystemSecretStore {

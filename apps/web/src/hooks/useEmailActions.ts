@@ -9,7 +9,7 @@
  * stack (so a move toast's "Undo" reverses the last action).
  *
  * @spec docs/L1-ui#data-fetching
- * @spec docs/runtime/L2#mutation-pipeline-and-catalog
+ * @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
  */
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'

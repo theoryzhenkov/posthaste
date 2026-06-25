@@ -8,7 +8,7 @@ type: DESIGN
 depends:
   - path: docs/replication/L1
     section: "5. Down-channel: authoritative assertions"
-  - path: docs/runtime/L2
+  - path: docs/runtime/adapter/L2
     section: "7. View operation flow"
   - path: docs/eph/DESIGN-L2-account-state-architecture
   - path: docs/stale/L1-accounts
@@ -72,7 +72,7 @@ Two pillars realize this for accounts.
 
 ## 4. Pillar A — Accounts as a served runtime view
 
-Implement the **`accountStatus` view family** already specified in runtime/L2
+Implement the **`accountStatus` view family** already specified in runtime/adapter/L2
 §5.7 (currently spec'd but unimplemented), peer to `mailList`/`messageDetail`/
 `conversation`. Its all-accounts variant serves the list the renderer already
 consumes: `Vec<AccountOverview>` — config folded with the supervisor's runtime

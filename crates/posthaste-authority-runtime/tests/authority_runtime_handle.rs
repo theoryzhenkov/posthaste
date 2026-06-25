@@ -312,7 +312,7 @@ fn imap_smtp_account_mutation(
 }
 
 // spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
-// spec: docs/runtime/L2#runtime-builder-transport-free
+// spec: docs/runtime/internals/L2#runtime-builder-transport-free
 // spec: docs/backend/L2#runtime-build-before-adapters
 #[tokio::test]
 async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
@@ -356,7 +356,7 @@ async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
     assert_eq!(stopped_status.lifecycle, RuntimeLifecycle::Stopped);
 }
 
-// spec: docs/runtime/L4#authority-build-order
+// spec: docs/runtime/internals/L3#authority-build-order
 #[tokio::test]
 async fn stopped_runtime_rejects_reads_but_keeps_status_readable() {
     let root = temp_root();
@@ -391,7 +391,7 @@ async fn stopped_runtime_rejects_reads_but_keeps_status_readable() {
     assert_eq!(error.envelope().details["lifecycle"], "stopped");
 }
 
-// spec: docs/runtime/L4#authority-build-order
+// spec: docs/runtime/internals/L3#authority-build-order
 #[tokio::test]
 async fn stopped_runtime_rejects_mutations_before_mutation_service_lookup() {
     let root = temp_root();
@@ -420,7 +420,7 @@ async fn stopped_runtime_rejects_mutations_before_mutation_service_lookup() {
     assert_eq!(error.envelope().message, "runtime is stopped");
 }
 
-// spec: docs/runtime/L4#authority-build-order
+// spec: docs/runtime/internals/L3#authority-build-order
 #[tokio::test]
 async fn active_migration_handle_without_mutations_reports_missing_mutation_service() {
     let root = temp_root();
@@ -457,7 +457,7 @@ async fn active_migration_handle_without_mutations_reports_missing_mutation_serv
     );
 }
 
-// spec: docs/runtime/L4#authority-build-order
+// spec: docs/runtime/internals/L3#authority-build-order
 #[tokio::test]
 async fn authority_builder_handle_supports_account_mutations() {
     let root = temp_root();
@@ -1126,7 +1126,7 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
     assert_eq!(message["isFlagged"], true);
 }
 
-// spec: docs/runtime/L2#mutation-pipeline-and-catalog
+// spec: docs/runtime/mutations/L1#mutation-pipeline-and-catalog
 #[tokio::test]
 async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
     // A catalog mutation beyond setKeywords routes to its handle action and
@@ -1988,7 +1988,7 @@ async fn create_account_duplicate_id_conflicts_without_overwriting_config_or_sec
 }
 
 // spec: docs/backend/L3#account-assets-runtime-backed
-// spec: docs/runtime/L4#account-resource-linkage-runtime-owned
+// spec: docs/runtime/internals/L3#account-resource-linkage-runtime-owned
 #[tokio::test]
 async fn delete_account_removes_secret_config_and_publishes_event_through_runtime() {
     let root = temp_root();
@@ -2080,7 +2080,7 @@ async fn delete_account_removes_secret_config_and_publishes_event_through_runtim
 }
 
 // spec: docs/backend/L3#account-mutations-runtime-backed
-// spec: docs/runtime/L4#account-mutation-contract-pattern
+// spec: docs/runtime/internals/L3#account-mutation-contract-pattern
 #[tokio::test]
 async fn oauth_token_persistence_writes_secret_and_patches_account_through_runtime() {
     let root = temp_root();
@@ -2175,7 +2175,7 @@ async fn oauth_token_persistence_writes_secret_and_patches_account_through_runti
     assert_eq!(account.transport.auth, ProviderAuthKind::OAuth2);
 }
 
-// spec: docs/runtime/L3#event-subscription-runtime-backed
+// spec: docs/runtime/internals/L3#event-subscription-runtime-backed
 #[tokio::test]
 async fn event_subscription_replays_backlog_then_filters_live_events() {
     let root = temp_root();

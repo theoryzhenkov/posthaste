@@ -7,7 +7,7 @@ lifecycle: ephemeral
 type: PLAN
 depends:
   - path: docs/runtime/L1
-  - path: docs/runtime/L2
+  - path: docs/runtime/internals/L1
   - path: docs/client/L1
   - path: docs/client/L2
   - path: docs/backend/L2
