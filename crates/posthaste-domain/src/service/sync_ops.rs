@@ -249,12 +249,6 @@ impl MailService {
                 post_commit_errors.push(error.code().to_string());
             }
         }
-        // RETIRE: drop every applied message assertion the projection now
-        // satisfies (folding it has become a no-op). Content-based, so it never
-        // retires before the projection reflects the effect.
-        //
-        // @spec docs/replication/L1#retire-on-confirmation
-        self.retire_satisfied_operations(account_id)?;
         let sync_event = self.events.append_event(
         account_id,
         EVENT_TOPIC_SYNC_COMPLETED,
@@ -300,7 +294,6 @@ impl MailService {
         // S3 unsettled-guard: computed after FLUSH so just-settled ops are excluded.
         guard_unsettled(&mut batch, &self.unsettled_message_ids(account_id)?);
         events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
-        self.retire_satisfied_operations(account_id)?;
         Ok(events)
     }
 
