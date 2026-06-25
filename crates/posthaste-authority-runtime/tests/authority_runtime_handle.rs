@@ -10,6 +10,7 @@ use posthaste_authority_runtime::{
     build_authority_runtime, from_api_bridge_for_migration, AuthorityRuntimeBuildConfig,
     AuthorityRuntimeBuildError,
 };
+use posthaste_engine::MockJmapGateway;
 use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
@@ -2618,5 +2619,119 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
     assert!(
         !flagged(&mail_list_state(&settled), "message-1"),
         "the overlay should retire once the forward completes"
+    );
+}
+
+// spec: docs/L1-sync#sync-loop
+#[tokio::test]
+async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
+    let root = temp_root();
+    let config = AuthorityRuntimeBuildConfig::new(
+        root.join("config"),
+        root.join("state"),
+        root.join("cache"),
+    )
+    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+
+    let mut mutation = mock_account_mutation("rapid-burst-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+
+    // Establish a baseline after an explicit sync; this also ensures the
+    // runtime task is running before the burst arrives.
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    let baseline = build
+        .account_supervisor
+        .sync_cycle_count(&account.id)
+        .await;
+    assert!(
+        baseline >= 1,
+        "startup or explicit sync should execute at least one cycle"
+    );
+
+    seed_single_message_batch(&build, &account.id, "em-001", "mb-inbox");
+
+    // Slow down the mock provider sync so concurrent mutation triggers overlap
+    // with an in-flight sync and exercise the coalescing path.
+    MockJmapGateway::set_sync_delay_for_tests(50);
+
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+
+    // Fire 15 rapid flag/unflag toggles concurrently. Under the old behavior
+    // each toggle would enqueue a full provider sync; with coalescing they
+    // collapse into at most one in-flight + one pending follow-up cycle.
+    let handle = build.handle.clone();
+    let session_id = session.session_id.clone();
+    let account_id = account.id.clone();
+    let mut burst = Vec::with_capacity(15);
+    for i in 0..15 {
+        let handle = handle.clone();
+        let session_id = session_id.clone();
+        let account_id = account_id.clone();
+        let (add, remove) = if i % 2 == 0 {
+            (vec!["$flagged"], Vec::<&str>::new())
+        } else {
+            (Vec::<&str>::new(), vec!["$flagged"])
+        };
+        burst.push(tokio::spawn(async move {
+            handle
+                .run_mutation(
+                    RuntimeCaller::test(),
+                    MutationRequest {
+                        session_id: Some(session_id),
+                        name: "message.setKeywords".to_string(),
+                        args: serde_json::json!({
+                            "sourceId": account_id.as_str(),
+                            "messageId": "em-001",
+                            "command": {"add": add, "remove": remove}
+                        }),
+                        client_mutation_id: ClientMutationId::new(format!("burst-{i}")),
+                        context: None,
+                    },
+                )
+                .await
+                .expect("burst mutation should run");
+        }));
+    }
+    for task in burst {
+        task.await.expect("burst task should not panic");
+    }
+
+    // Release the delay so the settle wait is fast and other tests are unaffected.
+    MockJmapGateway::clear_sync_delay_for_tests();
+
+    // Wait until no new sync cycle starts for a short interval, proving the
+    // burst has drained. Mock syncs are fast; cap total wait at 2 seconds.
+    let final_count = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let count = build.account_supervisor.sync_cycle_count(&account.id).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if build.account_supervisor.sync_cycle_count(&account.id).await == count {
+                return count;
+            }
+        }
+    })
+    .await
+    .expect("sync cycles should settle within timeout");
+
+    let additional_cycles = final_count.saturating_sub(baseline);
+    assert!(
+        additional_cycles <= 2,
+        "15 rapid mutations should produce at most 2 additional provider sync cycles, got {additional_cycles}"
     );
 }

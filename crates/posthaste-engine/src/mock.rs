@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use posthaste_domain::{
@@ -59,6 +61,24 @@ impl Default for MockJmapGateway {
     }
 }
 
+/// Test-only hook: every `MockJmapGateway::sync` call will sleep for this many
+/// milliseconds. Used by integration tests that need a slow provider sync so that
+/// concurrent mutation triggers observe `is_syncing == true` and coalesce.
+static SYNC_DELAY_MILLIS: AtomicUsize = AtomicUsize::new(0);
+
+impl MockJmapGateway {
+    /// Set a delay applied to all subsequent `sync` calls across all mock
+    /// gateway instances. Call `clear_sync_delay` after the test.
+    pub fn set_sync_delay_for_tests(millis: usize) {
+        SYNC_DELAY_MILLIS.store(millis, Ordering::SeqCst);
+    }
+
+    /// Clear the global sync delay.
+    pub fn clear_sync_delay_for_tests() {
+        SYNC_DELAY_MILLIS.store(0, Ordering::SeqCst);
+    }
+}
+
 /// Build a mock mutation outcome from the current revision.
 #[async_trait]
 impl MailGateway for MockJmapGateway {
@@ -69,6 +89,10 @@ impl MailGateway for MockJmapGateway {
         _cursors: &[SyncCursor],
         _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
+        let delay_millis = SYNC_DELAY_MILLIS.load(Ordering::SeqCst);
+        if delay_millis > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_millis as u64)).await;
+        }
         let state = self
             .state
             .lock()

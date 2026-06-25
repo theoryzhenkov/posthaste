@@ -50,10 +50,72 @@ impl RuntimeGeneration {
     }
 }
 
+/// Coordinates fire-and-forget sync triggers between the supervisor and the
+/// per-account runtime task. When the runtime is already executing a sync
+/// cycle, additional `TriggerOnly` requests are coalesced into a single
+/// pending trigger rather than enqueueing a full sync for each request.
+///
+/// This prevents a burst of local mutations (e.g. rapid flag toggles) from
+/// producing one provider sync per mutation. One sync cycle drains all pending
+/// local-first operations, so coalescing preserves correctness while avoiding
+/// serial sync storms.
+pub(crate) struct SyncTriggerState {
+    /// True while the account runtime task is inside a sync cycle.
+    is_syncing: AtomicBool,
+    /// A coalesced follow-up trigger that arrived while a sync was in progress.
+    /// Only the most recent trigger is kept; `SyncTrigger::Manual` is the
+    /// expected value for mutation-driven flushes.
+    pending: Mutex<Option<SyncTrigger>>,
+    /// Number of sync cycles executed by this account runtime. Used as an
+    /// observability/test seam to verify that bursts of mutations do not
+    /// produce one provider sync per mutation.
+    sync_cycle_count: AtomicUsize,
+}
+
+impl SyncTriggerState {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            is_syncing: AtomicBool::new(false),
+            pending: Mutex::new(None),
+            sync_cycle_count: AtomicUsize::new(0),
+        })
+    }
+
+    pub(crate) fn is_syncing(&self) -> bool {
+        self.is_syncing.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn start_sync(&self) {
+        self.is_syncing.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn finish_sync(&self) {
+        self.is_syncing.store(false, Ordering::SeqCst);
+    }
+
+    pub(crate) async fn set_pending(&self, trigger: SyncTrigger) {
+        let mut pending = self.pending.lock().await;
+        *pending = Some(trigger);
+    }
+
+    pub(crate) async fn take_pending(&self) -> Option<SyncTrigger> {
+        self.pending.lock().await.take()
+    }
+
+    pub(crate) fn increment_sync_cycle_count(&self) {
+        self.sync_cycle_count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn sync_cycle_count(&self) -> usize {
+        self.sync_cycle_count.load(Ordering::SeqCst)
+    }
+}
+
 /// A running account task and its command channel.
 pub(crate) struct ManagedRuntime {
     pub(crate) command_tx: mpsc::Sender<RuntimeCommand>,
     pub(crate) handle: JoinHandle<()>,
+    pub(crate) sync_state: Arc<SyncTriggerState>,
 }
 
 /// Commands sent to a running account runtime via the mpsc channel.
@@ -128,5 +190,53 @@ impl AccountRuntimeConnectionState {
 
     pub(crate) fn disconnect(&mut self) {
         *self = Self::Disconnected;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sync_trigger_state_starts_idle() {
+        let state = SyncTriggerState::new();
+        assert!(!state.is_syncing());
+        assert!(state.take_pending().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn sync_trigger_state_tracks_pending_across_sync_cycle() {
+        let state = SyncTriggerState::new();
+
+        // Runtime begins a sync.
+        state.start_sync();
+        assert!(state.is_syncing());
+
+        // A mutation arrives while the sync is running and is coalesced.
+        state.set_pending(SyncTrigger::Manual).await;
+        assert!(state.is_syncing());
+
+        // Runtime finishes the first sync and immediately observes the pending
+        // follow-up trigger.
+        state.finish_sync();
+        let pending = state.take_pending().await;
+        assert_eq!(pending, Some(SyncTrigger::Manual));
+
+        // After the follow-up is taken, the state is idle and empty again.
+        assert!(!state.is_syncing());
+        assert!(state.take_pending().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn sync_trigger_state_keeps_most_recent_pending_trigger() {
+        let state = SyncTriggerState::new();
+        state.start_sync();
+
+        state.set_pending(SyncTrigger::Manual).await;
+        state.set_pending(SyncTrigger::Push).await;
+        state.set_pending(SyncTrigger::Manual).await;
+
+        let pending = state.take_pending().await;
+        assert_eq!(pending, Some(SyncTrigger::Manual));
     }
 }

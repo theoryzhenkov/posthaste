@@ -9,6 +9,7 @@ pub(crate) async fn run_account_runtime(
     account: AccountSettings,
     generation: RuntimeGeneration,
     mut command_rx: mpsc::Receiver<RuntimeCommand>,
+    sync_state: Arc<SyncTriggerState>,
 ) {
     let account_id = account.id.clone();
     let mut connection = AccountRuntimeConnectionState::default();
@@ -35,7 +36,8 @@ pub(crate) async fn run_account_runtime(
         .await;
 
     // Initial sync + gateway setup
-    let _ = process_sync_trigger(
+    let _ = process_sync_trigger_with_state(
+        &sync_state,
         &shared,
         &account,
         generation,
@@ -57,7 +59,7 @@ pub(crate) async fn run_account_runtime(
 
         tokio::select! {
             _ = interval.tick() => {
-                handle_poll_tick(&shared, &account, generation, &mut connection).await;
+                handle_poll_tick(&sync_state, &shared, &account, generation, &mut connection).await;
                 interval = sync_poll_interval(shared.poll_interval);
             }
             _ = backfill_interval.tick() => {
@@ -74,6 +76,7 @@ pub(crate) async fn run_account_runtime(
             }
             Some(command) = command_rx.recv() => {
                 if handle_runtime_command(
+                    &sync_state,
                     &shared,
                     &account,
                     &account_id,
@@ -85,7 +88,7 @@ pub(crate) async fn run_account_runtime(
                 }
             }
             Some(event) = next_push => {
-                if handle_push_event(&shared, &account, &account_id, generation, &mut connection, event).await {
+                if handle_push_event(&sync_state, &shared, &account, &account_id, generation, &mut connection, event).await {
                     interval = sync_poll_interval(shared.poll_interval);
                 }
             }
@@ -93,13 +96,51 @@ pub(crate) async fn run_account_runtime(
     }
 }
 
+/// Run a single sync cycle, keeping [`SyncTriggerState`] informed so that
+/// fire-and-forget triggers can be coalesced. After the requested cycle
+/// finishes, any trigger that was coalesced into `pending` while it was running
+/// is drained by running exactly one follow-up cycle.
+pub(crate) async fn process_sync_trigger_with_state(
+    sync_state: &Arc<SyncTriggerState>,
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    generation: RuntimeGeneration,
+    trigger: SyncTrigger,
+    mode: SyncMode,
+    connection: &mut AccountRuntimeConnectionState,
+    reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
+) {
+    let mut next = Some((trigger, mode, reply));
+    while let Some((trigger, mode, reply)) = next {
+        sync_state.increment_sync_cycle_count();
+        sync_state.start_sync();
+        let _ = process_sync_trigger(
+            shared,
+            account,
+            generation,
+            trigger,
+            mode,
+            connection,
+            reply,
+        )
+        .await;
+        sync_state.finish_sync();
+        next = sync_state
+            .take_pending()
+            .await
+            .map(|trigger| (trigger, SyncMode::Incremental, None));
+    }
+}
+
 pub(crate) async fn handle_poll_tick(
+    sync_state: &Arc<SyncTriggerState>,
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     generation: RuntimeGeneration,
     connection: &mut AccountRuntimeConnectionState,
 ) {
-    let _ = process_sync_trigger(
+    let _ = process_sync_trigger_with_state(
+        sync_state,
         shared,
         account,
         generation,
@@ -137,6 +178,7 @@ pub(crate) async fn handle_cache_tick(
 }
 
 pub(crate) async fn handle_runtime_command(
+    sync_state: &Arc<SyncTriggerState>,
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     account_id: &AccountId,
@@ -150,7 +192,8 @@ pub(crate) async fn handle_runtime_command(
             mode,
             reply,
         } => {
-            let _ = process_sync_trigger(
+            let _ = process_sync_trigger_with_state(
+                sync_state,
                 shared,
                 account,
                 generation,
@@ -163,7 +206,8 @@ pub(crate) async fn handle_runtime_command(
             true
         }
         RuntimeCommand::TriggerOnly { trigger } => {
-            let _ = process_sync_trigger(
+            let _ = process_sync_trigger_with_state(
+                sync_state,
                 shared,
                 account,
                 generation,
@@ -193,6 +237,7 @@ pub(crate) async fn handle_runtime_command(
 }
 
 pub(crate) async fn handle_push_event(
+    sync_state: &Arc<SyncTriggerState>,
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     account_id: &AccountId,
@@ -216,7 +261,8 @@ pub(crate) async fn handle_push_event(
             if !push_notification_triggers_sync(remote_observation, notification) {
                 return false;
             }
-            let _ = process_sync_trigger(
+            let _ = process_sync_trigger_with_state(
+                sync_state,
                 shared,
                 account,
                 generation,
