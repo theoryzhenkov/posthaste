@@ -69,17 +69,3 @@ export function buildViewStreamUrl(input: {
   return `${baseUrl()}/views/${encodeURIComponent(input.viewId)}/stream${search ? `?${search}` : ''}`
 }
 
-export function buildEventsUrl(input?: {
-  accountId?: string
-  afterSeq?: number | null
-}): string {
-  const params = new URLSearchParams()
-  if (input?.accountId) {
-    params.set('accountId', input.accountId)
-  }
-  if (input?.afterSeq != null) {
-    params.set('afterSeq', String(input.afterSeq))
-  }
-  const search = params.toString()
-  return `${baseUrl()}/events${search ? `?${search}` : ''}`
-}

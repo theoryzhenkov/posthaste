@@ -102,9 +102,7 @@ pub use smart_mailboxes::{
     list_smart_mailbox_conversations, list_smart_mailbox_messages, list_smart_mailboxes,
     patch_smart_mailbox, reset_default_smart_mailboxes,
 };
-pub use sync_events::{
-    stream_events, trigger_sync, EventsQuery, TriggerSyncRequest, TriggerSyncResponse,
-};
+pub use sync_events::{trigger_sync, TriggerSyncRequest, TriggerSyncResponse};
 pub use views::{open_view, stream_view, OpenViewRequest, OpenViewResponse, ViewStreamQuery};
 
 #[cfg(test)]
@@ -116,8 +114,8 @@ use account_support::{
 };
 use account_support::{internal_error, validate_logo_image_id};
 use cursor_support::{
-    conversation_limit, conversation_page_response, event_to_sse, message_limit,
-    message_page_response, parse_conversation_cursor, parse_message_cursor,
+    conversation_limit, conversation_page_response, message_limit, message_page_response,
+    parse_conversation_cursor, parse_message_cursor,
 };
 use search_support::{
     account_query, expect_conversation_page, expect_message_page, join_query, mailbox_query,

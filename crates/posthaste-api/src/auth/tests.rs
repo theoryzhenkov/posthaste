@@ -27,7 +27,6 @@ fn exempt_path_check_handles_the_v1_nest_prefix() {
     // Everything else requires an authentic token in the Authorization
     // header — including the previously query-token routes (events, logos,
     // attachments), which now authenticate via header (fetch/blob fetch).
-    assert!(!is_exempt_path("/v1/events"));
     assert!(!is_exempt_path("/v1/account-assets/logos/img-1"));
     assert!(!is_exempt_path("/v1/sources"));
 }
