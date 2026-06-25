@@ -9,6 +9,10 @@ use crate::{MessageRecord, SyncBatch, SyncChunkSink, SyncWriteStore};
 struct ServiceSyncSink<'a> {
     sync_writer: &'a dyn SyncWriteStore,
     account_id: &'a AccountId,
+    /// Messages with an unsettled optimistic op: the sync must not overwrite
+    /// their canonical row (S3 unsettled-guard). Reconciled at settle instead,
+    /// from a fresh readback.
+    unsettled: std::collections::HashSet<String>,
     publish: &'a mut (dyn FnMut(&[DomainEvent]) + Send),
     applied_events: Vec<DomainEvent>,
     messages: Vec<MessageRecord>,
@@ -18,8 +22,27 @@ struct ServiceSyncSink<'a> {
     error: Option<ServiceError>,
 }
 
+/// Drop messages with an unsettled optimistic op from a provider sync batch so
+/// it cannot clobber an in-flight optimistic write (S3). A `replace_all`
+/// snapshot is left unfiltered — dropping a message there would let the store
+/// prune it; guarding the snapshot path needs store-internal support.
+///
+/// TODO(S3): replace_all snapshot does not yet guard unsettled messages.
+fn guard_unsettled(batch: &mut SyncBatch, unsettled: &std::collections::HashSet<String>) {
+    if unsettled.is_empty() || batch.replace_all_messages {
+        return;
+    }
+    batch
+        .messages
+        .retain(|message| !unsettled.contains(message.id.as_str()));
+    batch
+        .deleted_message_ids
+        .retain(|id| !unsettled.contains(id.as_str()));
+}
+
 impl SyncChunkSink for ServiceSyncSink<'_> {
     fn emit(&mut self, mut batch: SyncBatch) -> Result<(), GatewayError> {
+        guard_unsettled(&mut batch, &self.unsettled);
         match self.sync_writer.apply_sync_batch(self.account_id, &batch) {
             Ok(events) => {
                 (self.publish)(&events);
@@ -112,6 +135,9 @@ impl MailService {
             let mut sink = ServiceSyncSink {
                 sync_writer: self.sync_writer.as_ref(),
                 account_id,
+                // Computed after FLUSH above, so just-settled ops (now removed)
+                // are excluded and the sync applies their authoritative effect.
+                unsettled: self.unsettled_message_ids(account_id)?,
                 publish,
                 applied_events: Vec::new(),
                 messages: Vec::new(),
@@ -270,7 +296,9 @@ impl MailService {
     ) -> Result<Vec<DomainEvent>, ServiceError> {
         let mut events = self.flush_account(account_id, gateway).await?;
         let cursors = self.sync_state.get_sync_cursors(account_id)?;
-        let batch = gateway.sync(account_id, &cursors, None).await?;
+        let mut batch = gateway.sync(account_id, &cursors, None).await?;
+        // S3 unsettled-guard: computed after FLUSH so just-settled ops are excluded.
+        guard_unsettled(&mut batch, &self.unsettled_message_ids(account_id)?);
         events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
         self.retire_satisfied_operations(account_id)?;
         Ok(events)
@@ -305,5 +333,72 @@ impl MailService {
             }),
         )
         .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::guard_unsettled;
+    use crate::{MessageId, MessageRecord, SyncBatch};
+    use std::collections::HashSet;
+
+    fn batch(upserts: &[&str], deletes: &[&str], replace_all_messages: bool) -> SyncBatch {
+        SyncBatch {
+            mailboxes: Vec::new(),
+            messages: upserts
+                .iter()
+                .map(|id| MessageRecord {
+                    id: MessageId::from(*id),
+                    ..Default::default()
+                })
+                .collect(),
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: Vec::new(),
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: deletes.iter().map(|id| MessageId::from(*id)).collect(),
+            replace_all_mailboxes: false,
+            replace_all_messages,
+            cursors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn drops_unsettled_upserts_and_deletes_keeps_the_rest() {
+        let unsettled = HashSet::from(["message-1".to_string()]);
+        let mut b = batch(&["message-1", "message-2"], &["message-1", "message-3"], false);
+        guard_unsettled(&mut b, &unsettled);
+        // message-1 (unsettled) is removed from both the upserts and the deletes,
+        // so the provider's view cannot clobber its in-flight optimistic write.
+        assert_eq!(
+            b.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["message-2"],
+        );
+        assert_eq!(
+            b.deleted_message_ids
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["message-3"],
+        );
+    }
+
+    #[test]
+    fn keeps_everything_when_nothing_is_unsettled() {
+        let unsettled = HashSet::new();
+        let mut b = batch(&["message-1", "message-2"], &["message-1"], false);
+        guard_unsettled(&mut b, &unsettled);
+        assert_eq!(b.messages.len(), 2);
+        assert_eq!(b.deleted_message_ids.len(), 1);
+    }
+
+    #[test]
+    fn leaves_replace_all_snapshots_unfiltered() {
+        // A replace_all snapshot is left untouched (dropping a message there would
+        // let the store prune it) — TODO(S3) guards that path with store support.
+        let unsettled = HashSet::from(["message-1".to_string()]);
+        let mut b = batch(&["message-1"], &[], true);
+        guard_unsettled(&mut b, &unsettled);
+        assert_eq!(b.messages.len(), 1);
     }
 }
