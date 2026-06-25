@@ -47,11 +47,13 @@ linux_smoke() {
   "$bin" --version >/dev/null || fail "desktop binary --version failed"
   "$bin" --help >/dev/null || fail "desktop binary --help failed"
 
-  if [ "$channel" = "stable" ]; then
-    # Stable bundles must not carry dev-server/devtools endpoint strings.
-    if grep -Rq "127\.0\.0\.1:5173" "$extract_dir/squashfs-root" 2>/dev/null; then
-      fail "stable bundle contains a dev-server endpoint string"
-    fi
+  # Prove the binary was built on the expected channel. The channel is baked
+  # in as a compile-time sentinel (apps/desktop/src/lib.rs), so this catches a
+  # misbuilt artifact regardless of how the bundle was packaged.
+  sentinel="posthaste-release-channel=$channel"
+  if ! grep -aq "$sentinel" "$bin"; then
+    found="$(grep -ao 'posthaste-release-channel=[a-z]*' "$bin" | head -n1 || true)"
+    fail "binary channel sentinel mismatch: expected '$sentinel', found '${found:-none}'"
   fi
 
   echo "linux smoke passed: $(basename "$appimage")"

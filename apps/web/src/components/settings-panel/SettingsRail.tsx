@@ -8,6 +8,7 @@ import {
 
 import { brandAccents } from '../../design/tokens'
 import { cn } from '../../lib/utils'
+import { isNightly, releaseChannel } from '../../runtime/releaseChannel'
 import type { SettingsSurfaceCategory } from '../../surfaces'
 import { Button } from '../ui/button'
 
@@ -125,6 +126,18 @@ export function SettingsRail({
           })}
         </div>
       </nav>
+
+      <div className="hidden shrink-0 items-center px-4 py-3 md:flex">
+        <span
+          className={cn(
+            'font-mono text-[10px] font-semibold uppercase tracking-[0.8px]',
+            isNightly ? 'text-amber-500' : 'text-sidebar-foreground/40',
+          )}
+          title={`Posthaste ${releaseChannel} build`}
+        >
+          {releaseChannel}
+        </span>
+      </div>
     </aside>
   )
 }
