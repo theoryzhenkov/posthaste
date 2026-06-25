@@ -60,6 +60,14 @@ export function createFakeRuntimeAdapter(
     emitRuntimeFrame(frame) {
       for (const handlers of runtimeFrameHandlers) handlers.onFrame(frame)
     },
+    emitRuntimeFrameStreamClosed(error) {
+      // Simulate a hard transport close (e.g. an intermittent WKWebView drop):
+      // notify the current frame subscribers and detach them, as a real closed
+      // stream would. The session client should then reconnect on its own.
+      const closing = [...runtimeFrameHandlers]
+      runtimeFrameHandlers.clear()
+      for (const handlers of closing) handlers.onClosed?.(error)
+    },
     emitViewFrame(frame) {
       for (const handlers of viewHandlers) handlers.onFrame(frame)
     },
