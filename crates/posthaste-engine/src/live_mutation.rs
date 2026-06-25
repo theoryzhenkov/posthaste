@@ -36,15 +36,40 @@ pub(crate) async fn set_keywords(
     let response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    let mut outcome = set_keywords_mutation_outcome(response, message_id)?;
-    // The `get` half of set+get: read the message back so settlement has the
-    // provider's authoritative record. Best-effort — a failed read-back leaves
-    // `message: None` (settle falls back to sync), never failing a succeeded set.
-    outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
-        .await
-        .ok()
-        .map(MessageReadback::Present);
-    Ok(outcome)
+    match set_keywords_mutation_outcome(response, message_id) {
+        Ok(mut outcome) => {
+            // The `get` half of set+get: read the message back so settlement has
+            // the provider's authoritative record.
+            outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
+                .await
+                .ok()
+                .map(MessageReadback::Present);
+            Ok(outcome)
+        }
+        // Provider rejected the set: still `get` the (unchanged) state so the
+        // settle write reverts, and surface it as a typed rejection.
+        Err(GatewayError::Rejected(reason)) => {
+            Err(message_rejected(gateway, message_id, reason).await)
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// Build a `MutationRejected` carrying the message's current state as the
+/// readback (the `get` of set+get on a rejected set). If the read-back itself
+/// fails (transport), surface that error so the op retries rather than reverting.
+async fn message_rejected(
+    gateway: &LiveJmapGateway,
+    message_id: &MessageId,
+    reason: String,
+) -> GatewayError {
+    match crate::live_message::fetch_message_record(gateway, message_id).await {
+        Ok(record) => GatewayError::MutationRejected {
+            readback: Box::new(MessageReadback::Present(record)),
+            reason,
+        },
+        Err(error) => error,
+    }
 }
 
 /// Update a mailbox role via `Mailbox/set`.
@@ -113,10 +138,13 @@ pub(crate) async fn replace_mailboxes(
     set.update(message_id.as_str())
         .mailbox_ids(mailbox_ids.iter().map(MailboxId::as_str));
     let mut response = gateway.send_request(request).await?;
-    let response = required_method_response(response.pop_method_response(), "Email/set")?
+    let mut set_response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    let mut outcome = message_mutation_outcome(response.new_state().to_string())?;
+    if let Err(error) = set_response.updated(message_id.as_str()) {
+        return Err(message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await);
+    }
+    let mut outcome = message_mutation_outcome(set_response.new_state().to_string())?;
     outcome.message = crate::live_message::fetch_message_record(gateway, message_id)
         .await
         .ok()
@@ -140,10 +168,14 @@ pub(crate) async fn destroy_message(
     }
     set.destroy([message_id.as_str()]);
     let mut response = gateway.send_request(request).await?;
-    let response = required_method_response(response.pop_method_response(), "Email/set")?
+    let mut set_response = required_method_response(response.pop_method_response(), "Email/set")?
         .unwrap_set_email()
         .map_err(map_gateway_error)?;
-    let mut outcome = message_mutation_outcome(response.new_state().to_string())?;
+    let new_state = set_response.new_state().to_string();
+    if let Err(error) = set_response.destroyed(message_id.as_str()) {
+        return Err(message_rejected(gateway, message_id, map_gateway_error(error).to_string()).await);
+    }
+    let mut outcome = message_mutation_outcome(new_state)?;
     outcome.message = Some(MessageReadback::Removed);
     Ok(outcome)
 }

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -12,7 +13,9 @@ mod samples;
 mod state;
 
 use samples::{sample_attachment_bytes, sample_attachments, sample_mailboxes, sample_messages};
-use state::{bump_revision, ensure_expected_state, mutation_outcome, validate_mailbox_role};
+use state::{
+    bump_revision, ensure_expected_state, mutation_outcome, reject_if_marked, validate_mailbox_role,
+};
 
 /// In-memory `MailGateway` for tests and local development.
 ///
@@ -27,6 +30,20 @@ struct MockState {
     revision: u64,
     mailboxes: Vec<MailboxRecord>,
     messages: Vec<MessageRecord>,
+    /// Message ids the mock should reject mutations for (test hook): the
+    /// mutation returns `MutationRejected` with the unchanged record as readback.
+    rejected: HashSet<MessageId>,
+}
+
+impl MockJmapGateway {
+    /// Test hook: make subsequent message mutations on `message_id` reject
+    /// (provider returns the unchanged state), exercising the revert + surface
+    /// settle path.
+    pub fn reject_message(&self, message_id: MessageId) {
+        if let Ok(mut state) = self.state.lock() {
+            state.rejected.insert(message_id);
+        }
+    }
 }
 
 impl Default for MockJmapGateway {
@@ -36,6 +53,7 @@ impl Default for MockJmapGateway {
                 revision: 1,
                 mailboxes: sample_mailboxes(),
                 messages: sample_messages(),
+                rejected: HashSet::new(),
             }),
         }
     }
@@ -125,6 +143,7 @@ impl MailGateway for MockJmapGateway {
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
         ensure_expected_state(&state, expected_state, SyncObject::Message)?;
+        reject_if_marked(&state, message_id)?;
         let message = state
             .messages
             .iter_mut()
@@ -159,6 +178,7 @@ impl MailGateway for MockJmapGateway {
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
         ensure_expected_state(&state, expected_state, SyncObject::Message)?;
+        reject_if_marked(&state, message_id)?;
         let message = state
             .messages
             .iter_mut()
@@ -185,6 +205,7 @@ impl MailGateway for MockJmapGateway {
             .lock()
             .map_err(|_| GatewayError::Rejected("mock state poisoned".to_string()))?;
         ensure_expected_state(&state, expected_state, SyncObject::Message)?;
+        reject_if_marked(&state, message_id)?;
         state.messages.retain(|message| &message.id != message_id);
         bump_revision(&mut state);
         Ok(MutationOutcome {

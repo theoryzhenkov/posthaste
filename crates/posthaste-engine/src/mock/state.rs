@@ -1,6 +1,30 @@
-use posthaste_domain::{GatewayError, MutationOutcome, SyncCursor, SyncObject};
+use posthaste_domain::{
+    GatewayError, MessageId, MessageReadback, MutationOutcome, SyncCursor, SyncObject,
+};
 
 use super::MockState;
+
+/// Test hook: if `message_id` is marked for rejection, return `MutationRejected`
+/// carrying the unchanged record as the readback (the provider rejected the set
+/// but the get reads current state).
+pub(super) fn reject_if_marked(
+    state: &MockState,
+    message_id: &MessageId,
+) -> Result<(), GatewayError> {
+    if state.rejected.contains(message_id) {
+        let record = state
+            .messages
+            .iter()
+            .find(|message| &message.id == message_id)
+            .cloned()
+            .ok_or_else(|| GatewayError::Rejected("unknown message".to_string()))?;
+        return Err(GatewayError::MutationRejected {
+            readback: Box::new(MessageReadback::Present(record)),
+            reason: "mock rejected the mutation".to_string(),
+        });
+    }
+    Ok(())
+}
 
 pub(super) fn mutation_outcome(state: &MockState, object_type: SyncObject) -> MutationOutcome {
     let prefix = object_type.as_str();

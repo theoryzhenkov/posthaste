@@ -49,12 +49,12 @@ async fn sync_applies_matching_automation_tag() {
         .expect("sync should apply action");
 
     assert!(
-        store
+        !store
             .keyword_adds
             .lock()
             .expect("keyword adds lock poisoned")
             .is_empty(),
-        "automation assertions do not mutate the authoritative projection",
+        "the automation assertion writes through to the canonical projection (S2)",
     );
     assert_eq!(
         *gateway.revision.lock().expect("revision lock poisoned"),
@@ -106,12 +106,12 @@ async fn automation_backfill_processes_one_bounded_batch() {
 
     assert!(has_more);
     assert!(
-        store
+        !store
             .keyword_adds
             .lock()
             .expect("keyword adds lock poisoned")
             .is_empty(),
-        "automation assertions do not mutate the authoritative projection",
+        "the automation assertion writes through to the canonical projection (S2)",
     );
     assert_eq!(
         *gateway.revision.lock().expect("revision lock poisoned"),

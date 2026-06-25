@@ -428,14 +428,20 @@ impl MailService {
 /// the one the WASM replica runs (`single-local-effect`).
 ///
 /// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
-fn apply_operations_to_summary(
-    mut summary: MessageSummary,
+/// Derive the ordered message assertions a message id's operations assert — the
+/// single op→assertion mapping shared by the read overlay
+/// ([`apply_operations_to_summary`]) and the settle write-back
+/// ([`project_record`]).
+///
+/// @spec docs/eph/DESIGN-L2-optimistic-projection#4-canonical-vocabulary
+pub(crate) fn message_assertions(
     operations: &[Operation],
-) -> Result<Option<MessageSummary>, ServiceError> {
+    message_id: &str,
+) -> Result<Vec<MessageAssertion>, ServiceError> {
     let mut assertions = Vec::new();
     for operation in operations
         .iter()
-        .filter(|operation| operation.entity.id == summary.id.as_str())
+        .filter(|operation| operation.entity.id == message_id)
     {
         match operation.kind {
             OperationKind::SetKeywords => {
@@ -471,7 +477,14 @@ fn apply_operations_to_summary(
             _ => {}
         }
     }
+    Ok(assertions)
+}
 
+fn apply_operations_to_summary(
+    mut summary: MessageSummary,
+    operations: &[Operation],
+) -> Result<Option<MessageSummary>, ServiceError> {
+    let assertions = message_assertions(operations, summary.id.as_str())?;
     let base = MessageFoldState {
         keywords: std::mem::take(&mut summary.keywords),
         mailbox_ids: summary
@@ -488,6 +501,36 @@ fn apply_operations_to_summary(
             summary.is_read = summary.keywords.iter().any(|keyword| keyword == "$seen");
             summary.is_flagged = summary.keywords.iter().any(|keyword| keyword == "$flagged");
             Ok(Some(summary))
+        }
+    }
+}
+
+/// Settle write-back: fold the still-unsettled assertions over a provider
+/// readback record (the new base) and yield the canonical row to persist, or
+/// `None` when the message folds to removed. Uses the same `replay_message` the
+/// read overlay uses; `is_read`/`is_flagged` are derived from keywords on the
+/// store write.
+///
+/// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+pub(crate) fn project_record(
+    mut record: crate::MessageRecord,
+    remaining_ops: &[Operation],
+) -> Result<Option<crate::MessageRecord>, ServiceError> {
+    let assertions = message_assertions(remaining_ops, record.id.as_str())?;
+    let base = MessageFoldState {
+        keywords: std::mem::take(&mut record.keywords),
+        mailbox_ids: record
+            .mailbox_ids
+            .iter()
+            .map(|mailbox_id| mailbox_id.0.clone())
+            .collect(),
+    };
+    match replay_message(base, &assertions) {
+        MessageOutcome::Removed => Ok(None),
+        MessageOutcome::Present(state) => {
+            record.keywords = state.keywords;
+            record.mailbox_ids = state.mailbox_ids.into_iter().map(MailboxId).collect();
+            Ok(Some(record))
         }
     }
 }

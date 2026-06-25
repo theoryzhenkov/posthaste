@@ -10,7 +10,9 @@
 
 use std::collections::BTreeSet;
 
+use super::message_queries::project_record;
 use super::*;
+use crate::{MessageReadback, MessageRecord, MutationOutcome, SyncBatch};
 
 /// Outcome of attempting to push one operation to the provider.
 enum FlushError {
@@ -37,6 +39,70 @@ fn classify_gateway_error(error: GatewayError) -> FlushError {
         GatewayError::StateMismatch => FlushError::Permanent("provider state diverged".to_string()),
         GatewayError::Rejected(message) => FlushError::Permanent(message),
         other => FlushError::Permanent(other.to_string()),
+    }
+}
+
+/// Result of pushing one operation to the provider.
+enum Pushed {
+    /// A non-message entity op (draft/send): settle and remove; an
+    /// `assigned_entity_id` reconciles a temporary draft id to the provider id.
+    Entity { assigned_entity_id: Option<String> },
+    /// A message state assertion: settle now via the provider readback.
+    /// `rejected` is `Some(reason)` when the provider rejected the change — the
+    /// readback then carries the unchanged state, so the settle write reverts.
+    Message {
+        readback: Option<MessageReadback>,
+        rejected: Option<String>,
+    },
+}
+
+/// Normalize a message-mutation gateway result into a [`Pushed::Message`]:
+/// `Ok` (accepted) and `MutationRejected` (rejected) both carry a readback and
+/// settle in one path; only a transport error is a flush error (retry).
+fn message_pushed(result: Result<MutationOutcome, GatewayError>) -> Result<Pushed, FlushError> {
+    match result {
+        Ok(outcome) => Ok(Pushed::Message {
+            readback: outcome.message,
+            rejected: None,
+        }),
+        Err(GatewayError::MutationRejected { readback, reason }) => Ok(Pushed::Message {
+            readback: Some(*readback),
+            rejected: Some(reason),
+        }),
+        Err(transport) => Err(classify_gateway_error(transport)),
+    }
+}
+
+/// A single-message authoritative upsert batch (no cursor advance, no mailbox
+/// changes) — the settle write reuses the sync write path for one record.
+fn upsert_message_batch(record: MessageRecord) -> SyncBatch {
+    SyncBatch {
+        mailboxes: Vec::new(),
+        messages: vec![record],
+        imap_mailbox_states: Vec::new(),
+        imap_message_locations: Vec::new(),
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: Vec::new(),
+        replace_all_mailboxes: false,
+        replace_all_messages: false,
+        cursors: Vec::new(),
+    }
+}
+
+/// A single-message delete batch (the readback folded to removed).
+fn delete_message_batch(message_id: &MessageId) -> SyncBatch {
+    SyncBatch {
+        mailboxes: Vec::new(),
+        messages: Vec::new(),
+        imap_mailbox_states: Vec::new(),
+        imap_message_locations: Vec::new(),
+        deleted_imap_message_locations: Vec::new(),
+        deleted_mailbox_ids: Vec::new(),
+        deleted_message_ids: vec![message_id.clone()],
+        replace_all_mailboxes: false,
+        replace_all_messages: false,
+        cursors: Vec::new(),
     }
 }
 
@@ -496,8 +562,8 @@ impl MailService {
                 operation.last_error.as_deref(),
             )?;
             match self.push_operation(account_id, &operation, gateway).await {
-                Ok(settlement) => {
-                    if let Some(new_id) = settlement.assigned_entity_id.as_deref() {
+                Ok(Pushed::Entity { assigned_entity_id }) => {
+                    if let Some(new_id) = assigned_entity_id.as_deref() {
                         if new_id != operation.entity.id {
                             self.outbox.reconcile_operation_entity_id(
                                 account_id,
@@ -513,33 +579,30 @@ impl MailService {
                             )?;
                         }
                     }
-                    // A message state assertion rests in `applied`, folded by
-                    // the read overlay, until a sync observes the provider's
-                    // post-mutation state into the projection and
-                    // `retire_satisfied_operations` removes it once the
-                    // projection satisfies the assertion (retire-on-
-                    // confirmation). Entity ops (drafts/sends) are not folded
-                    // into message reads, so they prune on flush.
+                    // Entity ops (drafts/sends) are not folded into message
+                    // reads, so they settle and prune on flush.
+                    let settlement = OperationSettlement {
+                        id: operation.id.clone(),
+                        outcome: OperationOutcome::Applied,
+                        assigned_entity_id,
+                        error: None,
+                    };
+                    events.push(self.emit_settlement(account_id, &operation, &settlement)?);
+                    self.outbox.remove_operation(&operation.id)?;
+                }
+                Ok(Pushed::Message { readback, rejected }) => {
+                    // Settle now from the provider readback: remove the op, fold
+                    // the remaining unsettled assertions over the readback, and
+                    // write canonical — the settle write reverts a rejected change
+                    // (its readback is the unchanged row) and emits the recompute.
                     //
-                    // @spec docs/replication/L1#retire-on-confirmation
-                    let rests_until_converged = operation.entity.kind
-                        == OperationEntityKind::Message
-                        && operation.kind.is_state_assertion();
-                    if rests_until_converged {
-                        self.outbox.update_operation_state(
-                            &operation.id,
-                            OperationState::Applied,
-                            operation.attempts + 1,
-                            None,
-                        )?;
-                        events.push(self.emit_settlement(account_id, &operation, &settlement)?);
-                    } else {
-                        // Settle then remove in one step: no intermediate
-                        // `applied`, so a crash here leaves the op recoverable
-                        // as `inflight` rather than orphaned in `applied`.
-                        events.push(self.emit_settlement(account_id, &operation, &settlement)?);
-                        self.outbox.remove_operation(&operation.id)?;
-                    }
+                    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+                    events.extend(self.settle_message_operation(
+                        account_id,
+                        &operation,
+                        readback,
+                        rejected,
+                    )?);
                 }
                 Err(FlushError::Transient(message)) => {
                     self.outbox.update_operation_state(
@@ -600,13 +663,7 @@ impl MailService {
         account_id: &AccountId,
         operation: &Operation,
         gateway: &dyn MailGateway,
-    ) -> Result<OperationSettlement, FlushError> {
-        let applied = |assigned: Option<String>| OperationSettlement {
-            id: operation.id.clone(),
-            outcome: OperationOutcome::Applied,
-            assigned_entity_id: assigned,
-            error: None,
-        };
+    ) -> Result<Pushed, FlushError> {
         match operation.kind {
             OperationKind::DraftCreate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
@@ -614,7 +671,9 @@ impl MailService {
                     .save_draft(account_id, &request, None)
                     .await
                     .map_err(classify_gateway_error)?;
-                Ok(applied(Some(new_id.to_string())))
+                Ok(Pushed::Entity {
+                    assigned_entity_id: Some(new_id.to_string()),
+                })
             }
             OperationKind::DraftUpdate => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
@@ -623,7 +682,9 @@ impl MailService {
                     .save_draft(account_id, &request, Some(&replace))
                     .await
                     .map_err(classify_gateway_error)?;
-                Ok(applied(Some(new_id.to_string())))
+                Ok(Pushed::Entity {
+                    assigned_entity_id: Some(new_id.to_string()),
+                })
             }
             OperationKind::DraftDelete => {
                 let target = MessageId::from(operation.entity.id.as_str());
@@ -631,7 +692,9 @@ impl MailService {
                     .delete_draft(account_id, &target)
                     .await
                     .map_err(classify_gateway_error)?;
-                Ok(applied(None))
+                Ok(Pushed::Entity {
+                    assigned_entity_id: None,
+                })
             }
             OperationKind::Send => {
                 let request = parse_payload::<SendMessageRequest>(operation)?;
@@ -639,84 +702,84 @@ impl MailService {
                     .send_message(account_id, &request)
                     .await
                     .map_err(classify_gateway_error)?;
-                Ok(applied(None))
+                Ok(Pushed::Entity {
+                    assigned_entity_id: None,
+                })
             }
             OperationKind::SetKeywords => {
                 let command = parse_payload::<SetKeywordsCommand>(operation)?;
                 let target = MessageId::from(operation.entity.id.as_str());
-                match gateway
-                    .set_keywords(account_id, &target, None, &command)
-                    .await
-                {
-                    Ok(_) => Ok(applied(None)),
-                    Err(GatewayError::StateMismatch) => {
-                        self.refresh_after_provider_state_mismatch(account_id, gateway)
-                            .await?;
-                        gateway
-                            .set_keywords(account_id, &target, None, &command)
-                            .await
-                            .map_err(classify_gateway_error)?;
-                        Ok(applied(None))
-                    }
-                    Err(error) => Err(classify_gateway_error(error)),
-                }
+                message_pushed(gateway.set_keywords(account_id, &target, None, &command).await)
             }
             OperationKind::ReplaceMailboxes => {
                 let command = parse_payload::<ReplaceMailboxesCommand>(operation)?;
                 let target = MessageId::from(operation.entity.id.as_str());
-                match gateway
-                    .replace_mailboxes(account_id, &target, None, &command.mailbox_ids)
-                    .await
-                {
-                    Ok(_) => Ok(applied(None)),
-                    Err(GatewayError::StateMismatch) => {
-                        self.refresh_after_provider_state_mismatch(account_id, gateway)
-                            .await?;
-                        gateway
-                            .replace_mailboxes(account_id, &target, None, &command.mailbox_ids)
-                            .await
-                            .map_err(classify_gateway_error)?;
-                        Ok(applied(None))
-                    }
-                    Err(error) => Err(classify_gateway_error(error)),
-                }
+                message_pushed(
+                    gateway
+                        .replace_mailboxes(account_id, &target, None, &command.mailbox_ids)
+                        .await,
+                )
             }
             OperationKind::Destroy => {
                 let target = MessageId::from(operation.entity.id.as_str());
-                match gateway.destroy_message(account_id, &target, None).await {
-                    Ok(_) => Ok(applied(None)),
-                    Err(GatewayError::StateMismatch) => {
-                        self.refresh_after_provider_state_mismatch(account_id, gateway)
-                            .await?;
-                        gateway
-                            .destroy_message(account_id, &target, None)
-                            .await
-                            .map_err(classify_gateway_error)?;
-                        Ok(applied(None))
-                    }
-                    Err(error) => Err(classify_gateway_error(error)),
-                }
+                message_pushed(gateway.destroy_message(account_id, &target, None).await)
             }
         }
     }
 
-    async fn refresh_after_provider_state_mismatch(
+    /// Settle a message state assertion from the provider readback: remove the
+    /// op, fold the remaining unsettled assertions for the message over the
+    /// readback (the new base), and write canonical via the sync write path.
+    /// `Removed`/folded-to-removed deletes the row; a `None` readback (a gateway
+    /// that did not read back, e.g. IMAP) leaves the optimistic write for a later
+    /// sync to reconcile.
+    ///
+    /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    fn settle_message_operation(
         &self,
         account_id: &AccountId,
-        gateway: &dyn MailGateway,
-    ) -> Result<(), FlushError> {
-        let cursors = self
-            .sync_state
-            .get_sync_cursors(account_id)
-            .map_err(|error| FlushError::Permanent(error.to_string()))?;
-        let batch = gateway
-            .sync(account_id, &cursors, None)
-            .await
-            .map_err(classify_gateway_error)?;
-        self.sync_writer
-            .apply_sync_batch(account_id, &batch)
-            .map_err(|error| FlushError::Permanent(error.to_string()))?;
-        Ok(())
+        operation: &Operation,
+        readback: Option<MessageReadback>,
+        rejected: Option<String>,
+    ) -> Result<Vec<DomainEvent>, ServiceError> {
+        let message_id = MessageId::from(operation.entity.id.as_str());
+        // Remove the settled op FIRST so `remaining` excludes it and the
+        // canonical write is no longer guarded as unsettled (S3).
+        self.outbox.remove_operation(&operation.id)?;
+        let remaining: Vec<Operation> = self
+            .outbox
+            .list_unsettled_operations(account_id)?
+            .into_iter()
+            .filter(|op| {
+                op.entity.kind == OperationEntityKind::Message
+                    && op.kind.is_state_assertion()
+                    && op.entity.id == message_id.as_str()
+            })
+            .collect();
+        let mut events = Vec::new();
+        let batch = match readback {
+            Some(MessageReadback::Present(record)) => match project_record(record, &remaining)? {
+                Some(record) => Some(upsert_message_batch(record)),
+                None => Some(delete_message_batch(&message_id)),
+            },
+            Some(MessageReadback::Removed) => Some(delete_message_batch(&message_id)),
+            None => None,
+        };
+        if let Some(batch) = batch {
+            events.extend(self.sync_writer.apply_sync_batch(account_id, &batch)?);
+        }
+        let settlement = OperationSettlement {
+            id: operation.id.clone(),
+            outcome: if rejected.is_some() {
+                OperationOutcome::Failed
+            } else {
+                OperationOutcome::Applied
+            },
+            assigned_entity_id: None,
+            error: rejected,
+        };
+        events.push(self.emit_settlement(account_id, operation, &settlement)?);
+        Ok(events)
     }
 
     /// When a message state-assertion op fails, its optimistic effect leaves the

@@ -1,7 +1,10 @@
 use super::*;
 
 #[tokio::test]
-async fn archive_assertion_moves_message_in_read_overlay_without_projection_write() {
+async fn archive_mutation_writes_through_to_projection_and_overlay() {
+    // S2 write-through: a message mutation applies its assertion to the canonical
+    // projection immediately (no longer overlay-only), and reads stay consistent
+    // because the overlay folds the still-pending op idempotently over it.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     *store.rule_page.lock().expect("rule page lock poisoned") =
@@ -23,8 +26,8 @@ async fn archive_assertion_moves_message_in_read_overlay_without_projection_writ
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
             .expect("projection mailbox lookup"),
-        vec![MailboxId::from("inbox")],
-        "authoritative projection remains provider-owned",
+        vec![MailboxId::from("archive")],
+        "the mutation writes its assertion through to the canonical projection",
     );
     assert!(service
         .list_messages(&account, Some(&MailboxId::from("inbox")))
@@ -273,7 +276,7 @@ async fn sidebar_and_smart_mailbox_counts_reflect_pending_archive() {
 }
 
 #[tokio::test]
-async fn mixed_message_mutations_apply_locally_without_chaining_assertions() {
+async fn mixed_message_mutations_write_through_to_projection() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     let config = Arc::new(TestConfig::default());
@@ -308,14 +311,14 @@ async fn mixed_message_mutations_apply_locally_without_chaining_assertions() {
             .expect("cursor should exist")
             .state,
         "message-1",
-        "provider cursor advances only by sync, not local optimistic apply",
+        "provider cursor advances only by sync, not local optimistic write-through",
     );
     assert_eq!(
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
             .expect("mailbox lookup should succeed"),
-        vec![MailboxId::from("inbox")],
-        "local-first assertions do not mutate the authoritative projection",
+        vec![MailboxId::from("archive")],
+        "both assertions write through to the canonical projection (last one wins on mailbox)",
     );
     let pending = service
         .list_pending_operations(&account)
@@ -423,19 +426,27 @@ async fn get_conversation_folds_pending_assertions_over_its_messages() {
 }
 
 #[tokio::test]
-async fn flush_rests_message_assertion_in_applied_and_overlay_keeps_folding() {
-    // Retire-on-confirmation: a flushed message assertion is accepted by the
-    // provider but stays folded by the read overlay until a sync observes its
-    // effect into the projection. It is not pruned on flush, so reads never
-    // flip new -> old -> new while the projection catches up.
+async fn flush_settles_message_assertion_from_readback_and_removes_it() {
+    // S2: a flushed message assertion settles from the provider readback (set+get)
+    // and is removed at flush — it no longer rests in `applied` awaiting a sync.
+    // The readback is the new base; remaining unsettled ops fold over it; canonical
+    // reflects the result.
     //
-    // @spec docs/replication/L1#retire-on-confirmation
+    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     *store.rule_page.lock().expect("rule page lock poisoned") =
         vec![sample_message_summary("message-1", Vec::new())];
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
+    // The provider applied the archive: set+get reads the message back in archive.
+    let mut readback = sample_message_record("message-1", 0, false);
+    readback.mailbox_ids = vec![MailboxId::from("archive")];
+    gateway
+        .readbacks
+        .lock()
+        .expect("readbacks lock poisoned")
+        .push(crate::MessageReadback::Present(readback));
 
     service
         .replace_mailboxes(
@@ -455,41 +466,26 @@ async fn flush_rests_message_assertion_in_applied_and_overlay_keeps_folding() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].topic, EVENT_TOPIC_OPERATION_SETTLED);
 
-    // The op rests in `applied`: excluded from the pending/UI list, but still
-    // present for the overlay and not yet retired.
+    // Settled and removed at flush — nothing rests in applied or pending.
     assert!(service
         .list_pending_operations(&account)
         .expect("pending list")
         .is_empty());
-    assert_eq!(
+    assert!(
         service
             .applied_message_assertions(&account)
             .expect("applied list")
-            .len(),
-        1,
-        "a flushed assertion rests in applied until a sync retires it",
+            .is_empty(),
+        "a flushed assertion is settled and removed, not rested in applied",
     );
 
-    // The overlay keeps folding the applied assertion, so reads show the moved
-    // message while the authoritative projection is unchanged.
+    // Canonical reflects the settled readback.
     assert_eq!(
         store
             .get_message_mailboxes(&account, &MessageId::from("message-1"))
             .expect("projection lookup"),
-        vec![MailboxId::from("inbox")],
-        "projection stays provider-owned until sync",
-    );
-    assert!(service
-        .list_messages(&account, Some(&MailboxId::from("inbox")))
-        .expect("inbox overlay read")
-        .is_empty());
-    let archive = service
-        .list_messages(&account, Some(&MailboxId::from("archive")))
-        .expect("archive overlay read");
-    assert_eq!(
-        archive.len(),
-        1,
-        "applied assertion still folds into the view"
+        vec![MailboxId::from("archive")],
+        "settle wrote the provider readback to canonical",
     );
 }
 
@@ -570,18 +566,16 @@ async fn sync_retires_applied_assertion_when_projection_satisfies_it() {
 }
 
 #[tokio::test]
-async fn sync_keeps_assertion_applied_when_projection_does_not_match() {
-    // No premature retire: if the observe does not yet reflect the mutation
-    // (provider lag / partial coverage), the assertion stays applied and folded
-    // so the row never flips back. This is the property the earlier capture-set
-    // retire could not guarantee.
+async fn sync_flushes_and_settles_the_pending_assertion() {
+    // S2: `sync_account` flushes the outbox after observing, so a pending
+    // assertion settles from the readback and is removed — settlement rides the
+    // flush whether triggered directly or by a sync's post-flush. (The old
+    // rest-in-applied/no-premature-retire mechanism this test used is gone.)
     //
-    // @spec docs/replication/L1#retire-on-confirmation
+    // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
     let account = sample_source();
     let account_id = account.id.clone();
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-    *store.rule_page.lock().expect("rule page lock poisoned") =
-        vec![sample_message_summary("message-1", Vec::new())];
     let config = Arc::new(TestConfig {
         sources: vec![account],
         ..Default::default()
@@ -599,8 +593,9 @@ async fn sync_keeps_assertion_applied_when_projection_does_not_match() {
         .await
         .expect("archive assertion queues");
 
-    // The observe still shows the message in inbox (move not yet visible).
-    let record = sample_message_record("message-1", 0, false);
+    // The provider applied the archive; the observe reflects it.
+    let mut record = sample_message_record("message-1", 0, false);
+    record.mailbox_ids = vec![MailboxId::from("archive")];
     let gateway = MutationGateway::with_sync_batch(1, observe_batch(record));
 
     service
@@ -608,20 +603,218 @@ async fn sync_keeps_assertion_applied_when_projection_does_not_match() {
         .await
         .expect("sync runs");
 
-    assert_eq!(
+    assert!(
         service
-            .applied_message_assertions(&account_id)
-            .expect("applied list")
-            .len(),
-        1,
-        "assertion stays applied until the projection matches",
+            .list_pending_operations(&account_id)
+            .expect("pending list")
+            .is_empty(),
+        "sync's post-flush settles and removes the pending assertion",
     );
-    let archive = service
-        .list_messages(&account_id, Some(&MailboxId::from("archive")))
-        .expect("archive overlay read");
     assert_eq!(
-        archive.len(),
-        1,
-        "overlay still folds the assertion (no flip)"
+        store
+            .get_message_mailboxes(&account_id, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("archive")],
+        "canonical converges to the archived state",
     );
+}
+
+// --- S2: optimistic write-through + settle from readback -----------------------
+
+#[tokio::test]
+async fn keyword_mutation_writes_through_to_projection() {
+    // S2 write-through for keywords: a setKeywords applies to canonical at once.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("message-1"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("keyword assertion queues");
+
+    let adds = store.keyword_adds.lock().expect("keyword adds lock poisoned");
+    assert_eq!(adds.len(), 1, "the keyword assertion writes through to canonical");
+    assert!(adds[0].1.iter().any(|keyword| keyword == "$flagged"));
+}
+
+#[tokio::test]
+async fn settle_adopts_the_readback_over_the_optimistic_value() {
+    // Settle is authoritative: when the provider's readback differs from the
+    // optimistic write-through (e.g. a server-side rule moved the message),
+    // canonical adopts the readback, not the local guess.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let mut readback = sample_message_record("message-1", 0, false);
+    readback.mailbox_ids = vec![MailboxId::from("spam")];
+    gateway
+        .readbacks
+        .lock()
+        .expect("readbacks lock poisoned")
+        .push(crate::MessageReadback::Present(readback));
+
+    service
+        .replace_mailboxes(
+            &account,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("archive")],
+        "optimistic write-through before flush",
+    );
+
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush should succeed");
+
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("spam")],
+        "settle adopts the provider readback over the optimistic value",
+    );
+}
+
+#[tokio::test]
+async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
+    // settle-completeness: settling one op preserves the others. `project_record`
+    // folds the still-unsettled assertions over the provider readback.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    service
+        .set_keywords(
+            &account,
+            &MessageId::from("message-1"),
+            &SetKeywordsCommand {
+                add: vec!["$flagged".to_string()],
+                remove: Vec::new(),
+            },
+        )
+        .await
+        .expect("flag assertion queues");
+    service
+        .replace_mailboxes(
+            &account,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+
+    let pending = service
+        .list_pending_operations(&account)
+        .expect("pending list");
+    let archive_op = pending
+        .iter()
+        .find(|op| op.kind == OperationKind::ReplaceMailboxes)
+        .expect("archive op should be pending")
+        .clone();
+
+    // The flag's readback: the provider applied the flag but not (yet) the archive.
+    let mut readback = sample_message_record("message-1", 0, false);
+    readback.keywords = vec!["$flagged".to_string()];
+    let projected = super::super::message_queries::project_record(
+        readback,
+        std::slice::from_ref(&archive_op),
+    )
+    .expect("project_record succeeds")
+    .expect("the message is still present");
+
+    assert_eq!(
+        projected.mailbox_ids,
+        vec![MailboxId::from("archive")],
+        "the still-unsettled archive op is preserved when the flag settles",
+    );
+    assert!(
+        projected.keywords.iter().any(|keyword| keyword == "$flagged"),
+        "the settled flag is carried in the readback base",
+    );
+}
+
+#[tokio::test]
+async fn rejected_mutation_reverts_canonical_and_settles_failed() {
+    // A provider rejection still carries a readback (the unchanged state); settle
+    // writes it (reverting the optimistic change) and the settlement is Failed so
+    // the failure can surface.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+    let gateway = MutationGateway::with_revision(1);
+    let unchanged = sample_message_record("message-1", 0, false); // mailbox_ids = [inbox]
+    *gateway.reject_next.lock().expect("reject_next lock poisoned") = Some((
+        crate::MessageReadback::Present(unchanged),
+        "permission denied".to_string(),
+    ));
+
+    service
+        .replace_mailboxes(
+            &account,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("archive")],
+        "optimistic write-through before flush",
+    );
+
+    let events = service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush should succeed");
+
+    assert_eq!(
+        store
+            .get_message_mailboxes(&account, &MessageId::from("message-1"))
+            .expect("projection lookup"),
+        vec![MailboxId::from("inbox")],
+        "the rejected change is reverted from the readback",
+    );
+    assert!(
+        service
+            .list_pending_operations(&account)
+            .expect("pending list")
+            .is_empty(),
+        "the rejected op is settled and removed",
+    );
+    let settled = events
+        .iter()
+        .find(|event| event.topic == EVENT_TOPIC_OPERATION_SETTLED)
+        .expect("a settlement event is emitted");
+    let settlement: OperationSettlement =
+        serde_json::from_value(settled.payload.clone()).expect("settlement payload");
+    assert!(
+        matches!(settlement.outcome, OperationOutcome::Failed),
+        "the rejection settles as Failed",
+    );
+    assert_eq!(settlement.error.as_deref(), Some("permission denied"));
 }
