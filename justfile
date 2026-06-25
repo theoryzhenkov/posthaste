@@ -70,8 +70,13 @@ build-replica-wasm:
     cargo build -p posthaste-link-wasm --release --target wasm32-unknown-unknown
     wasm-bindgen target/wasm32-unknown-unknown/release/posthaste_link_wasm.wasm \
         --out-dir apps/web/src/runtime/wasm --target web
-    wasm-opt -Oz apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm \
-        -o apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm
+    # Skip wasm-opt when SKIP_WASM_OPT is set (e.g. CI smoke tests where the
+    # available binaryen version produces a table-max that is incompatible with
+    # the committed wasm-bindgen JS glue). Release builds still optimize.
+    if [ -z "${SKIP_WASM_OPT:-}" ]; then \
+        wasm-opt -Oz apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm \
+            -o apps/web/src/runtime/wasm/posthaste_link_wasm_bg.wasm; \
+    fi
 
 # Build the browser-localhost distributable assets and server binary.
 build-serve:
