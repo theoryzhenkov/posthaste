@@ -47,26 +47,6 @@ async fn read_only_token_reads_conversation_lists() {
     );
 }
 
-// -- Low finding: duplicate query key fails closed. A Filter route that still
-//    declares a query axis (/events on accountId) must DENY when the key appears
-//    twice, rather than first-wins authorizing `?accountId=a&accountId=b`. --
-
-#[tokio::test]
-async fn duplicate_filter_param_is_denied() {
-    let t = mint_with_caveats(&test_root_key(), &["account = acct-a"]);
-    // First-wins would have matched `acct-a` and allowed; we fail closed → 403.
-    assert_eq!(
-        status(&t, "GET", "/v1/events?accountId=acct-a&accountId=acct-b").await,
-        StatusCode::FORBIDDEN,
-        "a duplicated filter key must fail closed (deny), not take the first value"
-    );
-    // Order-independent: duplicate is denied even if the matching value is last.
-    assert_eq!(
-        status(&t, "GET", "/v1/events?accountId=acct-b&accountId=acct-a").await,
-        StatusCode::FORBIDDEN
-    );
-}
-
 // -- Global route + scoped token. --
 
 #[tokio::test]

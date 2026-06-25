@@ -2,7 +2,6 @@ import type {
   AccountOverview,
   ConversationView,
   CreateAccountInput,
-  DomainEvent,
   Mailbox,
   MessageCommandResult,
   MessageDetail,
@@ -20,7 +19,6 @@ import type {
 import type {
   RuntimeAdapter,
   RuntimeCloseSessionRequest,
-  RuntimeEventSubscriptionRequest,
   RuntimeFrame,
   RuntimeFrameSubscriptionRequest,
   RuntimeMailListViewState,
@@ -53,9 +51,6 @@ export type AccountUpdateCall = {
   accountId: string
   input: UpdateAccountInput
 }
-export type EventSubscriptionCall = {
-  request: RuntimeEventSubscriptionRequest
-}
 export type ViewSubscriptionCall = {
   request: RuntimeViewSubscriptionRequest
 }
@@ -84,7 +79,6 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly accountUpdateCalls: AccountUpdateCall[]
   readonly accountVerificationCalls: string[]
   readonly conversationCalls: string[]
-  readonly eventSubscriptionCalls: EventSubscriptionCall[]
   readonly runtimeSessionCalls: RuntimeOpenSessionRequest[]
   readonly runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   readonly runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
@@ -105,7 +99,6 @@ export interface FakeRuntimeAdapter extends RuntimeAdapter {
   readonly resourceCalls: ResourceCall[]
   readonly smartMailboxCalls: number
   readonly syncCalls: RuntimeTriggerSyncRequest[]
-  emitDomainEvent(event: DomainEvent): void
   emitRuntimeFrame(frame: RuntimeFrame<RuntimeMailListViewState>): void
   emitViewFrame(frame: RuntimeViewFrame<RuntimeMailListViewState>): void
   queueAccount(account: AccountOverview): void
@@ -161,7 +154,6 @@ export type FakeCallRecords = {
   accountUpdateCalls: AccountUpdateCall[]
   accountVerificationCalls: string[]
   conversationCalls: string[]
-  eventSubscriptionCalls: EventSubscriptionCall[]
   runtimeSessionCalls: RuntimeOpenSessionRequest[]
   runtimeSessionCloseCalls: RuntimeCloseSessionRequest[]
   runtimeSessionViewOpenCalls: RuntimeSessionViewRequest[]
@@ -251,7 +243,6 @@ export function createFakeCallRecords(): FakeCallRecords {
     accountUpdateCalls: [],
     accountVerificationCalls: [],
     conversationCalls: [],
-    eventSubscriptionCalls: [],
     runtimeSessionCalls: [],
     runtimeSessionCloseCalls: [],
     runtimeSessionViewOpenCalls: [],
@@ -282,7 +273,6 @@ export function resetFakeCallRecords(calls: FakeCallRecords): void {
   calls.accountUpdateCalls.length = 0
   calls.accountVerificationCalls.length = 0
   calls.conversationCalls.length = 0
-  calls.eventSubscriptionCalls.length = 0
   calls.runtimeSessionCalls.length = 0
   calls.runtimeSessionCloseCalls.length = 0
   calls.runtimeSessionViewOpenCalls.length = 0

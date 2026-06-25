@@ -161,27 +161,6 @@ async fn expired_token_is_forbidden_future_is_allowed() {
     assert_eq!(status(&future, "GET", "/v1/accounts").await, StatusCode::OK);
 }
 
-// -- Filter route still backed by a result-side-filtered handler: GET /events
-//    (keyed on accountId). A matching filter satisfies the caveat; a missing or
-//    non-matching one denies. --
-
-#[tokio::test]
-async fn events_filter_route_requires_matching_account_filter() {
-    let t = mint_with_caveats(&test_root_key(), &["account = acct-a"]);
-    // Matching filter → allowed.
-    assert_eq!(
-        status(&t, "GET", "/v1/events?accountId=acct-a").await,
-        StatusCode::OK
-    );
-    // No filter → the account axis is None → unsatisfiable → 403.
-    assert_eq!(status(&t, "GET", "/v1/events").await, StatusCode::FORBIDDEN);
-    // Non-matching filter → 403.
-    assert_eq!(
-        status(&t, "GET", "/v1/events?accountId=acct-b").await,
-        StatusCode::FORBIDDEN
-    );
-}
-
 // -- Conversation-list routes are now result-side scoped on `sourceId` (Tier-1):
 //    an account-scoped token is allowed WITH a matching `?sourceId` (the handler
 //    restricts results to that account in every branch) and denied otherwise.

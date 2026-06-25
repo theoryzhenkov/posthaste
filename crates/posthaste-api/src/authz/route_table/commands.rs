@@ -89,18 +89,4 @@ pub(super) const ROUTES: &[Entry] = &[
         template: "/config:reload",
         authz: gate(Action::Manage, ResourceShape::empty()),
     },
-    // SSE event stream: a cross-account read feed. It accepts an `accountId`
-    // filter, so it is a Filter aggregate keyed on that query param.
-    Entry {
-        method: "GET",
-        template: "/events",
-        authz: filter(
-            Action::Read,
-            ResourceShape {
-                account: Some("accountId"),
-                mailbox: Some("mailboxId"),
-                message: None,
-            },
-        ),
-    },
 ];

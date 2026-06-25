@@ -73,16 +73,6 @@ describe('embedded resolution matches the legacy frozen consts', () => {
 })
 
 describe('client builders read the active connection without a URL token', () => {
-  it('builds the SSE events URL with no access_token query param', async () => {
-    // The stream is consumed via fetchEventSource, which authenticates with the
-    // Authorization header; the token never appears in the URL.
-    const { buildEventsUrl } = await import('../src/api/client')
-    expect(buildEventsUrl()).toBe(`http://127.0.0.1:${PORT}/v1/events`)
-    expect(buildEventsUrl({ accountId: 'acct-1', afterSeq: 7 })).toBe(
-      `http://127.0.0.1:${PORT}/v1/events?accountId=acct-1&afterSeq=7`,
-    )
-  })
-
   it('builds attachment + logo URLs with no token (loaded via authed blob fetch)', async () => {
     const { buildMessageAttachmentUrl, buildAccountLogoUrl } =
       await import('../src/api/client')
