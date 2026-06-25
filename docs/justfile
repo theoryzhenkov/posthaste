@@ -2,10 +2,14 @@
 
 set working-directory := '..'
 
+# Regenerate the API endpoint inventory from openapi.json (committed artifact)
+gen-endpoints:
+    python3 tools/docs/gen_endpoints.py
+
 # Serve docs locally
-serve:
+serve: gen-endpoints
     uv run mkdocs serve
 
 # Build docs
-build:
+build: gen-endpoints
     uv run mkdocs build --strict
