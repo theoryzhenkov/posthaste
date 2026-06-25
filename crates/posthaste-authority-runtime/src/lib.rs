@@ -13,26 +13,30 @@ mod backend;
 mod bootstrap;
 mod build;
 mod live_accounts;
+mod local_backend;
 mod mail_queries;
 mod mutations;
-mod near_node;
-mod read;
-mod transport;
 pub mod oauth;
 mod push;
-mod secret;
-mod sessions;
 pub mod supervisor;
-mod views;
 
+// The far-node crate's own assembly surface.
 pub use account_reads::AccountRuntimeOverviewProvider;
 pub use build::{
-    build_authority_runtime, build_backend_node, build_remote_runtime,
-    AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuild, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeBuildError, AuthorityRuntimeHandle, AuthorityRuntimeShutdownError, BackendNode,
-    BackendTransportConfig, RemoteRuntimeBuild, RuntimeShutdownHandle,
+    build_authority_runtime, build_backend_node, from_api_bridge_for_migration,
+    from_api_bridge_with_account_supervisor_for_migration,
+    from_api_bridge_with_providers_for_migration,
+    from_api_bridge_with_status_provider_for_migration, AuthorityRuntimeApiMigrationBridge,
+    AuthorityRuntimeBuild, BackendNode, MigrationRuntime,
 };
 pub use live_accounts::{LiveAccountRuntimeProvider, UnavailableLiveAccountRuntimeProvider};
-pub use transport::RemoteBackend;
-pub use secret::SystemSecretStore;
+pub use mutations::AccountMutationService;
 pub use supervisor::AccountSupervisor;
+
+// The near node lives in `posthaste-runtime`; re-export its public surface so
+// hosts (the server, benches) keep a single `posthaste_authority_runtime` import.
+pub use posthaste_runtime::{
+    build_remote_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
+    AuthorityRuntimeHandle, AuthorityRuntimeShutdownError, BackendTransportConfig, RemoteBackend,
+    RemoteRuntimeBuild, RuntimeShutdownHandle, SystemSecretStore,
+};

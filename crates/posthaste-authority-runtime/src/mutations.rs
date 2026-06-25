@@ -46,7 +46,7 @@ pub struct AccountMutationService {
 }
 
 impl AccountMutationService {
-    pub fn new(
+    pub(crate) fn new(
         service: Arc<MailService>,
         store: Arc<dyn MailStore>,
         account_repository: Arc<AccountRepository>,

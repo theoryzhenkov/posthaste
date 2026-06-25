@@ -1,0 +1,19 @@
+[package]
+name = "posthaste-runtimed"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "posthaste-runtimed"
+path = "src/main.rs"
+
+# The lean remote runtime daemon: a runtime near node over a remote backend that
+# serves the `/v1` platform to local clients. Depends ONLY on the near crates
+# (`posthaste-api` + `posthaste-runtime`) — it never links store/engine/imap.
+[dependencies]
+posthaste-api = { path = "../posthaste-api" }
+posthaste-runtime = { path = "../posthaste-runtime" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+
+[lints]
+workspace = true

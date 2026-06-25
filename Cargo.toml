@@ -14,7 +14,10 @@ default-members = [
   "crates/posthaste-link-core",
   "crates/posthaste-link-replica",
   "crates/posthaste-observability",
+  "crates/posthaste-api",
+  "crates/posthaste-runtime",
   "crates/posthaste-runtime-contract",
+  "crates/posthaste-runtimed",
   "crates/posthaste-server",
   "crates/posthaste-store",
 ]

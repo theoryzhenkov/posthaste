@@ -1,0 +1,38 @@
+[package]
+name = "posthaste-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "posthaste_runtime"
+path = "src/lib.rs"
+
+# The runtime near node: the renderer-facing authority runtime that serves views
+# and forwards mutations over the backend link. It is transport- and store-free —
+# it reaches its backend through `posthaste-link-contract` and never links the
+# far-node roles (store/engine/imap), so it is shared by the bundled daemon, a
+# standalone runtime near node, and (in spirit) the client replica.
+[dependencies]
+async-stream = "0.3"
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+keyring = { workspace = true }
+posthaste-domain = { path = "../posthaste-domain" }
+posthaste-link-contract = { path = "../posthaste-link-contract" }
+posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-link-replica = { path = "../posthaste-link-replica" }
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true }
+
+[lints]
+workspace = true

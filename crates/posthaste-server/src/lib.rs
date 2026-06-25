@@ -1,74 +1,64 @@
-pub mod api;
-pub mod auth;
-pub mod authz;
-pub mod config;
-pub mod link;
-pub mod logging;
+//! The far server: the in-process bundled daemon + the standalone backend role.
+//!
+//! Layers the backend assembly (store/engine/imap via `posthaste-authority-runtime`)
+//! and the OAuth provider-flow routes underneath the near `/v1` platform
+//! (`posthaste-api`), and serves the runtime↔backend `link_router`. The near
+//! platform is re-exported so existing `crate::X` paths (and the integration
+//! tests) keep resolving.
+
+// Facade: re-export the near `/v1` platform so far code + tests keep their
+// `crate::api`/`crate::auth`/… paths and the public `posthaste_server::` surface.
+pub use posthaste_api::{
+    api, auth, authz, build_api_router, build_app_state, config, logging, observability,
+    read_daemon_settings, resolve_roots, sanitize, secret, serve, token, write_secure_file,
+    AppState, DaemonSettings, ResolvedRoots, ServeOptions, ServerConfig, ServerHandle,
+    SystemSecretStore,
+};
+
+/// The bundled server's OpenAPI document = the near `/v1` platform + the OAuth
+/// routes it serves on top (the lean near node serves the OAuth-free near doc).
+pub mod openapi;
+
+/// Re-export of `posthaste_authority_runtime::oauth` for the OAuth provider flow.
 pub mod oauth {
     pub use posthaste_authority_runtime::oauth::*;
 }
-pub mod observability;
-pub mod openapi;
-pub mod sanitize;
-pub mod secret;
+/// Re-export of the account supervisor for migration/test harnesses.
 pub mod supervisor {
     pub use posthaste_authority_runtime::supervisor::*;
 }
-pub mod token;
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+pub mod link;
+pub mod oauth_routes;
 
-use axum::extract::DefaultBodyLimit;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
-use axum::{middleware, Router};
-#[cfg(debug_assertions)]
-use dotenvy::dotenv;
-use posthaste_authority_runtime::{
-    build_authority_runtime, build_backend_node, build_remote_runtime,
-    AuthorityRuntimeApiMigrationBridge, AuthorityRuntimeBuildConfig, AuthorityRuntimeHandle,
-    BackendTransportConfig, RuntimeShutdownHandle,
-};
-use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{DomainEvent, MailService, MailStore, SecretStore};
-use posthaste_link_contract::BackendApi;
-use posthaste_observability::{events, ph_info};
-use tokio::sync::broadcast;
-use tower_http::cors::{AllowOrigin, CorsLayer};
-use tower_http::services::ServeDir;
-use tower_http::trace::TraceLayer;
-use tracing::{field, info_span, Span};
-use tracing_appender::non_blocking::WorkerGuard;
-
-use crate::config::resolve_roots;
-use crate::oauth::OAuthFlowStore;
-use posthaste_authority_runtime::AccountSupervisor;
-
-const SEND_MESSAGE_BODY_LIMIT_BYTES: usize = 40 * 1024 * 1024;
-
-/// Shared application state threaded through all Axum handlers.
-///
-/// @spec docs/L0-api#axum
-/// @spec docs/L1-api#endpoint-table
-mod app_state;
-mod router;
-mod secure_file;
-mod spa;
+mod migration;
 mod startup;
 mod startup_backend;
 
-pub use app_state::{AppState, ServerConfig, ServerHandle};
 pub use link::{link_router, LinkAuth};
-pub use router::build_api_router;
-pub use secure_file::write_secure_file;
+pub use migration::{
+    runtime_handle_for_migration, runtime_handle_with_account_runtime_provider_for_migration,
+};
+pub use oauth_routes::{build_oauth_router, OAuthState};
 pub use startup::start_server;
 pub use startup_backend::{start_backend, BackendServerHandle};
 
-pub(crate) use spa::spa_fallback_service;
+// Far prelude: items the far modules reach through `use super::*`
+// (`startup`, `startup_backend`).
+use std::sync::Arc;
+use std::time::Duration;
+
+#[cfg(debug_assertions)]
+use dotenvy::dotenv;
+use posthaste_authority_runtime::{
+    build_authority_runtime, build_backend_node, build_remote_runtime, AuthorityRuntimeBuildConfig,
+    BackendTransportConfig,
+};
+use posthaste_config::TomlConfigRepository;
+use posthaste_observability::{events, ph_info};
+use tower_http::trace::TraceLayer;
+use tracing::{field, info_span, Span};
+use tracing_appender::non_blocking::WorkerGuard;
 
 #[cfg(test)]
 mod tests;

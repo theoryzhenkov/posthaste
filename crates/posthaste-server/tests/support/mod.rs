@@ -112,7 +112,7 @@ impl Harness {
         ));
         let root = test_root_key();
         let state = Arc::new(AppState {
-            runtime: AppState::runtime_handle_with_account_runtime_provider_for_migration(
+            runtime: posthaste_server::runtime_handle_with_account_runtime_provider_for_migration(
                 service.clone(),
                 store.clone(),
                 secret_store.clone(),
@@ -120,7 +120,6 @@ impl Harness {
                 supervisor.clone(),
             ),
             account_logo_root: state_root.join("account-assets/logos"),
-            oauth_flows: Arc::new(posthaste_server::oauth::OAuthFlowStore::default()),
             auth_token: mint_full_scope_token(&root),
             macaroon_root_key: root.clone(),
             require_auth: true,

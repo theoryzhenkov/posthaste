@@ -7,7 +7,7 @@
 //! authoritative domain events, and nudges the provider outbox to flush.
 //!
 //! Today it is reached **in-process** (co-located), through
-//! [`InProcessTransport`](crate::transport::InProcessTransport): the runtime
+//! [`LocalBackend`](crate::local_backend::LocalBackend): the runtime
 //! calls it directly, zero serialization, identical to the pre-link behavior
 //! (assertion `colocated-unchanged`). Extracting it as a named type is the W1
 //! seam — the runtime no longer reaches the backend by scattered direct
@@ -39,97 +39,17 @@ use posthaste_runtime_contract::{
     PatchAppSettingsMutation, PatchSmartMailboxMutation, RuntimeAccountList, RuntimeError,
     RuntimeErrorCode, RuntimeResourceBytes,
 };
-use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
+use posthaste_runtime::mutation_args::{
+    keyword_toggle, parse_args, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
+    MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
+    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
+};
 use crate::mutations::AccountMutationService;
-
-/// Build a single-keyword add/remove command from a desired presence. Shared by
-/// the backend's read-state/flagged-state application and the runtime's history
-/// capture for the same mutations.
-pub(crate) fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
-    if present {
-        SetKeywordsCommand {
-            add: vec![keyword.to_string()],
-            remove: Vec::new(),
-        }
-    } else {
-        SetKeywordsCommand {
-            add: Vec::new(),
-            remove: vec![keyword.to_string()],
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageSetKeywordsMutationArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub command: SetKeywordsCommand,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageSetReadStateArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub read: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageSetFlaggedStateArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub flagged: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageSetUserTagsArgs {
-    pub source_id: String,
-    pub message_id: String,
-    #[serde(default)]
-    pub add: Vec<String>,
-    #[serde(default)]
-    pub remove: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageMoveToMailboxArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub mailbox_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageMoveToRoleArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub role: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageReplaceMailboxesArgs {
-    pub source_id: String,
-    pub message_id: String,
-    pub mailbox_ids: Vec<String>,
-}
-
-/// A message mutation that targets one message by id (archive/trash/destroy).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageTargetArgs {
-    pub source_id: String,
-    pub message_id: String,
-}
 
 /// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and
@@ -437,7 +357,7 @@ impl Backend {
 
     /// A receiver on the authoritative domain-event broadcast — the raw signal
     /// the link's down-channel is built from
-    /// ([`InProcessTransport::subscribe`](crate::transport::InProcessTransport)).
+    /// ([`LocalBackend`](crate::local_backend::LocalBackend)).
     pub(crate) fn subscribe_events(&self) -> broadcast::Receiver<DomainEvent> {
         self.event_sender.subscribe()
     }
@@ -885,17 +805,4 @@ impl Backend {
 /// runtime handle used before these reads moved to the far node.
 fn store_error_to_runtime_error(error: StoreError) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::Internal, error.to_string())
-}
-
-pub(crate) fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(request.args.clone()).map_err(|error| {
-        RuntimeError::with_details(
-            posthaste_runtime_contract::RuntimeErrorCode::InvalidMutation,
-            format!("invalid args for mutation '{}'", request.name),
-            serde_json::json!({ "error": error.to_string() }),
-        )
-    })
 }

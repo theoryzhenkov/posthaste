@@ -13,7 +13,6 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 futures-util = { workspace = true }
 jsonwebtoken = { workspace = true }
-keyring = { workspace = true }
 oauth2 = { workspace = true }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain" }
@@ -23,6 +22,7 @@ posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
 posthaste-link-replica = { path = "../posthaste-link-replica" }
 posthaste-observability = { path = "../posthaste-observability" }
+posthaste-runtime = { path = "../posthaste-runtime" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
 reqwest = { workspace = true, features = ["json", "stream"] }

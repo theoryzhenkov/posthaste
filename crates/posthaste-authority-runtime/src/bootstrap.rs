@@ -8,7 +8,7 @@ use posthaste_domain::{
 };
 use serde::Deserialize;
 
-use crate::build::AuthorityRuntimeBuildError;
+use crate::AuthorityRuntimeBuildError;
 
 /// Initialize an empty config repository from a bootstrap file, or from default
 /// config and smart mailboxes when no bootstrap is supplied.
