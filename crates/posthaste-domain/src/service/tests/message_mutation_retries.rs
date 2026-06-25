@@ -1,14 +1,14 @@
 use super::*;
 
 #[tokio::test]
-async fn archive_mutation_writes_through_to_projection_and_overlay() {
+async fn archive_mutation_writes_through_to_canonical_projection() {
     // S2 write-through: a message mutation applies its assertion to the canonical
-    // projection immediately (no longer overlay-only), and reads stay consistent
-    // because the overlay folds the still-pending op idempotently over it.
+    // projection immediately (no longer overlay-only). That reads then reflect it
+    // is a store property (the indexed query/triggers read canonical) covered in
+    // posthaste-store; TestStore decouples its rule/list fixtures from the write
+    // path, so here we assert the write-through reaches the projection.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-    *store.rule_page.lock().expect("rule page lock poisoned") =
-        vec![sample_message_summary("message-1", Vec::new())];
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
 
     service
@@ -20,7 +20,7 @@ async fn archive_mutation_writes_through_to_projection_and_overlay() {
             },
         )
         .await
-        .expect("archive assertion queues");
+        .expect("archive assertion applies");
 
     assert_eq!(
         store
@@ -29,15 +29,6 @@ async fn archive_mutation_writes_through_to_projection_and_overlay() {
         vec![MailboxId::from("archive")],
         "the mutation writes its assertion through to the canonical projection",
     );
-    assert!(service
-        .list_messages(&account, Some(&MailboxId::from("inbox")))
-        .expect("inbox overlay read")
-        .is_empty(),);
-    let archive = service
-        .list_messages(&account, Some(&MailboxId::from("archive")))
-        .expect("archive overlay read");
-    assert_eq!(archive.len(), 1);
-    assert_eq!(archive[0].id, MessageId::from("message-1"));
 }
 
 #[tokio::test]
@@ -220,62 +211,6 @@ async fn destroy_supersedes_pending_assertions() {
 }
 
 #[tokio::test]
-async fn sidebar_and_smart_mailbox_counts_reflect_pending_archive() {
-    let account = AccountId::from("primary");
-    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
-    *store.rule_page.lock().expect("rule page lock poisoned") =
-        vec![sample_message_summary("message-1", Vec::new())];
-    let config = Arc::new(TestConfig {
-        sources: vec![sample_source()],
-        ..Default::default()
-    });
-    let service = MailService::new(store, config);
-
-    let inbox_rule = SmartMailboxRule {
-        root: SmartMailboxGroup {
-            operator: SmartMailboxGroupOperator::All,
-            negated: false,
-            nodes: vec![SmartMailboxRuleNode::Condition(SmartMailboxCondition {
-                field: SmartMailboxField::MailboxRole,
-                operator: SmartMailboxOperator::Equals,
-                negated: false,
-                value: SmartMailboxValue::String("inbox".to_string()),
-            })],
-        },
-    };
-
-    service
-        .replace_mailboxes(
-            &account,
-            &MessageId::from("message-1"),
-            &ReplaceMailboxesCommand {
-                mailbox_ids: vec![MailboxId::from("archive")],
-            },
-        )
-        .await
-        .expect("archive queues");
-
-    let mailboxes = service.list_mailboxes(&account).expect("sidebar list");
-    let inbox = mailboxes
-        .iter()
-        .find(|mailbox| mailbox.id == MailboxId::from("inbox"))
-        .expect("inbox present");
-    let archive = mailboxes
-        .iter()
-        .find(|mailbox| mailbox.id == MailboxId::from("archive"))
-        .expect("archive present");
-    assert_eq!((inbox.unread_emails, inbox.total_emails), (0, 0));
-    assert_eq!((archive.unread_emails, archive.total_emails), (1, 1));
-    assert_eq!(
-        service
-            .count_messages_by_rule(&inbox_rule)
-            .expect("inbox count"),
-        (0, 0),
-        "smart-mailbox count folds the pending move out of inbox",
-    );
-}
-
-#[tokio::test]
 async fn mixed_message_mutations_write_through_to_projection() {
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
@@ -376,12 +311,12 @@ async fn stale_local_cursor_does_not_conflict_message_assertion_flush() {
 }
 
 #[tokio::test]
-async fn get_conversation_folds_pending_assertions_over_its_messages() {
-    // A conversation read folds the overlay over its messages so a pending
-    // archive/keyword/destroy assertion is reflected (the gap where
-    // get_conversation read raw projection).
-    //
-    // @spec docs/replication/L1#retire-on-confirmation
+async fn get_conversation_reads_canonical_without_overlay_fold() {
+    // S4: get_conversation returns the canonical conversation view directly — it
+    // no longer folds the outbox overlay over it. Optimism is written through to
+    // canonical, so the conversation_reader already reflects pending assertions
+    // in production; here (TestStore's conversation_view is a fixture decoupled
+    // from the write path) we assert get_conversation returns it verbatim.
     let account = AccountId::from("primary");
     let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
     *store
@@ -394,15 +329,8 @@ async fn get_conversation_folds_pending_assertions_over_its_messages() {
     });
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
 
-    let view = service
-        .get_conversation(&ConversationId::from("conv-1"))
-        .expect("conversation reads");
-    assert_eq!(
-        view.messages[0].mailbox_ids,
-        vec![MailboxId::from("inbox")],
-        "no overlay -> projection state",
-    );
-
+    // A pending archive does not fold into the read (no overlay); the view
+    // reflects whatever canonical holds.
     service
         .replace_mailboxes(
             &account,
@@ -412,16 +340,16 @@ async fn get_conversation_folds_pending_assertions_over_its_messages() {
             },
         )
         .await
-        .expect("archive assertion queues");
+        .expect("archive assertion applies");
 
     let view = service
         .get_conversation(&ConversationId::from("conv-1"))
         .expect("conversation reads");
     assert_eq!(view.messages.len(), 1);
     assert_eq!(
-        view.messages[0].mailbox_ids,
-        vec![MailboxId::from("archive")],
-        "pending archive assertion folds into the conversation",
+        view.messages[0].id,
+        MessageId::from("message-1"),
+        "get_conversation returns the canonical view verbatim — no overlay fold",
     );
 }
 

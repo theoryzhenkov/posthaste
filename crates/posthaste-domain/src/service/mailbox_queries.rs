@@ -1,23 +1,18 @@
 use super::*;
 
 impl MailService {
-    /// List all mailboxes for an account, with counts folded over pending
-    /// message assertions so the sidebar matches the read-time overlay.
-    ///
-    /// @spec docs/L1-outbox#overlay-fold
+    /// List all mailboxes for an account. Counts come straight from canonical:
+    /// the `message_mailbox`/`is_read` triggers maintain the denormalized mailbox
+    /// counters, and S2 writes optimism through to those rows, so the sidebar
+    /// reflects pending assertions with no overlay (folding again would
+    /// double-count).
     pub fn list_mailboxes(
         &self,
         account_id: &AccountId,
     ) -> Result<Vec<MailboxSummary>, ServiceError> {
-        let mut mailboxes = self.mailbox_reader.list_mailboxes(account_id)?;
-        let deltas = self.mailbox_count_overlay(account_id)?;
-        for mailbox in &mut mailboxes {
-            if let Some(delta) = deltas.get(&mailbox.id) {
-                mailbox.total_emails = (mailbox.total_emails + delta.total).max(0);
-                mailbox.unread_emails = (mailbox.unread_emails + delta.unread).max(0);
-            }
-        }
-        Ok(mailboxes)
+        self.mailbox_reader
+            .list_mailboxes(account_id)
+            .map_err(Into::into)
     }
 
     /// List user-facing tags for one account.

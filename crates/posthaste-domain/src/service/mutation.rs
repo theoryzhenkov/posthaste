@@ -265,13 +265,12 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Vec<MailboxId>, ServiceError> {
-        // Body-free: this needs only mailbox membership, so read the summary and
-        // fold the overlay over it rather than materializing the detail.
+        // Body-free: this needs only mailbox membership. Canonical holds the
+        // optimistic membership (written through, S2), so read the summary
+        // directly — no overlay fold.
         let Some(summary) = self
             .message_detail_reader
             .get_message_summary(account_id, message_id)?
-            .and_then(|summary| self.apply_summary_overlay(account_id, summary).transpose())
-            .transpose()?
         else {
             return Err(ServiceError::from(StoreError::NotFound(format!(
                 "message:{}",
