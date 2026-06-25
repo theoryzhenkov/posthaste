@@ -40,6 +40,7 @@ pub(crate) async fn sync_imap_account(
         supports_qresync = discovery.capabilities.supports_qresync(),
         supports_condstore = discovery.capabilities.supports_condstore(),
         supports_gmail_extensions = discovery.capabilities.supports_gmail_extensions(),
+        capabilities = %discovery.capabilities.joined(),
         "IMAP sync discovery complete"
     );
     let updated_at = now_iso8601().map_err(GatewayError::Rejected)?;

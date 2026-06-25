@@ -21,6 +21,17 @@ impl ImapCapabilities {
         self.tokens.contains(&token.to_ascii_uppercase())
     }
 
+    /// The normalized capability tokens as a space-joined string, for
+    /// diagnostics (e.g. to confirm whether a server actually advertised
+    /// `CONDSTORE`/`QRESYNC` rather than inferring from the derived flags).
+    pub fn joined(&self) -> String {
+        self.tokens
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     pub fn supports_enable(&self) -> bool {
         self.contains("ENABLE")
     }
