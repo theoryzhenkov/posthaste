@@ -41,20 +41,33 @@ of a tag string inferred once in CI. Three things follow from that:
 ┌─────────┬────────────────┬──────────────────────────────┬───────────────────────┐
 │ Channel │ Audience       │ Tag pattern (push trigger)    │ Desktop build flags   │
 ├─────────┼────────────────┼──────────────────────────────┼───────────────────────┤
-│ nightly │ Dogfood / dev  │ vX.Y.Z-dogfood.N             │ embedded-server +     │
-│         │                │ vX.Y.Z-nightly.*             │ devtools              │
+│ nightly │ Experimental   │ vX.Y.Z-nightly.N             │ embedded-server +     │
+│         │ (me + anyone)  │                              │ devtools              │
 ├─────────┼────────────────┼──────────────────────────────┼───────────────────────┤
-│ stable  │ Public beta /  │ vX.Y.Z-beta.N                │ embedded-server only, │
-│         │ release        │ vX.Y.Z-rc.N                  │ no devtools           │
-│         │                │ vX.Y.Z (plain)               │                       │
+│ stable  │ Testers /      │ vX.Y.Z-rc.N                  │ embedded-server only, │
+│         │ release        │ vX.Y.Z (plain)               │ no devtools           │
 └─────────┴────────────────┴──────────────────────────────┴───────────────────────┘
 ```
 
-Selection stays **tag-based**. Release branches are not used: `stable` is a
-blessed commit promoted from `main`, not a stabilized branch. If a backport is
-ever needed (a stable fix while `main` has unfinished work), a `release/x.y`
-branch is introduced then and only then — it is a stabilization seam, not a
-channel selector.
+Selection stays **tag-based**. Release branches are not used. Tags are chosen from
+three accepted patterns that feed two channels:
+
+- `vX.Y.Z-nightly.N` → nightly channel, prerelease = yes.
+- `vX.Y.Z-rc.N`     → stable channel, prerelease = yes.
+- `vX.Y.Z`           → stable channel, prerelease = no.
+
+`-rc` lives in the stable channel so testers auto-update along the same
+manifest as the eventual release: `0.2.0-rc.1 < 0.2.0-rc.2 < 0.2.0`. It does
+*not* get its own channel, manifest, or rolling tag — that would be a third
+stream of overhead for one developer.
+
+`nightly` is the experimental stream and gets the devtools feature plus an
+adhoc macOS signing opt-out. `stable` (both rc and plain) omits devtools and
+requires signed/notarized macOS builds.
+
+If a backport is ever needed (a stable fix while `main` has unfinished work), a
+`release/x.y` branch is introduced then and only then — it is a stabilization
+seam, not a channel selector.
 
 ## Per-channel identity (side-by-side)
 
@@ -93,8 +106,9 @@ nightly: https://github.com/theoryzhenkov/posthaste/releases/download/nightly/la
 stable:  https://github.com/theoryzhenkov/posthaste/releases/download/stable/latest-stable.json
 ```
 
-`make_latest` is set only for stable releases (public discoverability), while
-the rolling tags keep updater traffic strictly per-channel.
+`make_latest` is set only for plain stable releases (public discoverability); rc
+and nightly releases are marked GitHub prereleases. The rolling tags keep
+updater traffic strictly per-channel.
 
 ## macOS signing policy
 
@@ -106,21 +120,21 @@ the rolling tags keep updater traffic strictly per-channel.
 
 ## Version scheme (real semver, flipped at v0.2.0)
 
-The app/manifest version is the **real semver** from the tag, preserving
-prerelease ordering so `0.2.0-beta.5 < 0.2.0-rc.1 < 0.2.0`:
+The app/manifest version is the **real semver** from the tag for the `v0.2.0+`
+accepted patterns, so prerelease ordering survives
+(`0.2.0-rc.1 < 0.2.0-rc.2 < 0.2.0`):
 
 | Tag                         | App / manifest version |
 | --------------------------- | ---------------------- |
-| `vA.B.C-dogfood.N`          | `A.B.C-dogfood.N`      |
 | `vA.B.C-nightly.N`          | `A.B.C-nightly.N`      |
-| `vA.B.C-beta.N`             | `A.B.C-beta.N`         |
 | `vA.B.C-rc.N`               | `A.B.C-rc.N`           |
 | `vA.B.C` (plain stable)     | `A.B.C`                |
 
-This replaces the old flattening (`vA.B.C-dogfood.N → A.B.N`), which destroyed
-prerelease ordering. Flattening is retained **only** for the legacy `0.1.0-dogfood.N`
-line so already-shipped dogfood installs (version `0.1.N`) keep updating. The
-flip happens at the `v0.2.0` cut: the next release must be `v0.2.0-*`, which is
+The legacy `v0.1.0-dogfood.N` line keeps the old flattening (`0.1.N`) so
+already-shipped dogfood installs keep auto-updating until they move to the
+`0.2.0-nightly` stream. New `-dogfood` or `-beta` tags are not accepted.
+
+The flip to real semver happens at the `v0.2.0` cut: a `v0.2.0-*` release is
 semver-newer than any `0.1.N`, so no installed client sees a downgrade.
 
 ### macOS 3-integer constraint
@@ -131,7 +145,7 @@ field, so we keep real semver as `version` and set
 `bundle.macOS.bundleVersion` to the prerelease counter (a monotonic build
 number) so `CFBundleVersion` is valid. Whether notarization accepts a prerelease
 string in `CFBundleShortVersionString` is **empirically gated**: the first
-`v0.2.0-beta.*` stable macOS build must pass notarization in CI. If it is
+`v0.2.0-rc.*` stable macOS build must pass notarization in CI. If it is
 rejected, add a `tauri.macos.conf.json` override that strips `version` to
 `A.B.C` for macOS and emit a per-platform manifest version. That override is the
 documented fallback; it is not pre-built.
@@ -153,23 +167,19 @@ channel identity and the endpoint are compile-time-bound to the same channel.
 
 ## Workflow shape
 
-1. **`resolve-channel` job** emits a single output, `channel` (and the derived
-   semver `version`). For `workflow_dispatch` it reads an explicit `channel`
-   input; for tag-push it infers from the tag.
-2. **`build-desktop`** materializes the full policy for that channel into
-   `GITHUB_ENV` by calling `channel-policy.sh <channel>` once, then:
-   - passes `--features devtools` only when the policy says so;
-   - overrides `tauri.conf.json` identifier / productName / updater endpoint via
-     `--config`;
-   - sets `POSTHASTE_RELEASE_CHANNEL` and `VITE_RELEASE_CHANNEL` at build;
-   - enforces stable macOS signing + notarization.
+1. **`resolve-channel` job** emits `channel`, semver `version`, and `prerelease`
+   (derived from the tag; manual dispatch can override the channel).
+2. **`build-desktop`** materializes the per-channel policy once via
+   `channel-policy.sh` and overrides identity, product name, and updater endpoint
+   via `--config`.
 3. **Smoke step** extracts the AppImage, runs `--version`/`--help`, and greps
    the binary for the `posthaste-release-channel=<channel>` sentinel — a real
    assertion that the binary was built on the expected channel.
 4. **`generate-updater-manifest.sh`** takes the manifest filename from the
    policy (`latest.json` / `latest-stable.json`).
-5. **Publish** force-updates the `nightly`/`stable` rolling tag and sets
-   `make_latest` only for stable.
+5. **Publish** uses the `prerelease` flag so rc/nightlies are marked GitHub
+   prereleases and only plain stable releases become GitHub's "latest". It then
+   force-updates the channel's rolling tag.
 
 ## Assertions
 
@@ -188,7 +198,7 @@ channel identity and the endpoint are compile-time-bound to the same channel.
 | macos-stable-signing      | MUST   | Stable macOS builds require Developer ID signing and notarization credentials.            |
 | macos-nightly-signing     | SHOULD | Nightly macOS builds sign with Developer ID when secrets are present or adhoc when opted in. |
 | version-real-semver       | MUST   | App/manifest version is the real semver from the tag (prerelease ordering preserved) for the v0.2.0+ line. |
-| stable-artifact-smoke     | MUST   | Stable desktop artifacts pass full smoke (extract, version/help, channel sentinel).        |
+| stable-latest-only        | MUST   | Only plain stable releases are marked GitHub `latest`; rc and nightly releases are marked `prerelease`. |
 | nightly-artifact-smoke    | SHOULD | Nightly desktop artifacts pass light smoke before upload.                                  |
 
 ## Code anchors
