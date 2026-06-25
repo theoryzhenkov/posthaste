@@ -14,6 +14,7 @@ set -euo pipefail
 #
 #   v0.1.0-dogfood.N  -> 0.1.N            (legacy, preserves shipped installs)
 #   vA.B.C-dogfood.N  -> A.B.C-dogfood.N  (v0.2.0+ real semver)
+#   vA.B.C-nightly.N  -> A.B.C-nightly.N
 #   vA.B.C-beta.N     -> A.B.C-beta.N
 #   vA.B.C-rc.N       -> A.B.C-rc.N
 #   vA.B.C            -> A.B.C
@@ -26,7 +27,7 @@ tag="${tag#v}"
 
 if [[ "$tag" =~ ^0\.1\.0-dogfood\.([0-9]+)$ ]]; then
   echo "0.1.${BASH_REMATCH[1]}"
-elif [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc|dogfood)\.[0-9]+)?$ ]]; then
+elif [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc|dogfood|nightly)\.[0-9]+)?$ ]]; then
   echo "$tag"
 else
   echo "error: cannot derive bundle version from tag '$tag'" >&2

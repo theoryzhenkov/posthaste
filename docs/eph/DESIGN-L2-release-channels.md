@@ -112,6 +112,7 @@ prerelease ordering so `0.2.0-beta.5 < 0.2.0-rc.1 < 0.2.0`:
 | Tag                         | App / manifest version |
 | --------------------------- | ---------------------- |
 | `vA.B.C-dogfood.N`          | `A.B.C-dogfood.N`      |
+| `vA.B.C-nightly.N`          | `A.B.C-nightly.N`      |
 | `vA.B.C-beta.N`             | `A.B.C-beta.N`         |
 | `vA.B.C-rc.N`               | `A.B.C-rc.N`           |
 | `vA.B.C` (plain stable)     | `A.B.C`                |
