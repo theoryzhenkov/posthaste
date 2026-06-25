@@ -273,6 +273,8 @@ pub(super) const SCHEMA_SQL: &str = "
                 ON message_keyword (account_id, keyword);
             CREATE INDEX IF NOT EXISTS idx_message_attachment_blob
                 ON message_attachment (account_id, blob_id);
+            CREATE INDEX IF NOT EXISTS idx_outbox_operation_account_entity
+                ON outbox_operation (account_id, entity_id);
             CREATE INDEX IF NOT EXISTS idx_event_log_lookup
                 ON event_log (account_id, topic, mailbox_id, seq);
             CREATE INDEX IF NOT EXISTS idx_outbox_account_state

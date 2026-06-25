@@ -818,3 +818,46 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
     );
     assert_eq!(settlement.error.as_deref(), Some("permission denied"));
 }
+
+#[tokio::test]
+async fn unsettled_message_ids_tracks_queued_then_settled_assertions() {
+    // The S3 sync-guard skips exactly the messages this set names. A queued
+    // optimistic mutation puts its message in the set; settling it (flush)
+    // removes it, so the sync resumes applying provider state to that message.
+    let account = AccountId::from("primary");
+    let store = Arc::new(TestStore::with_message_state("message-1", &["inbox"]));
+    let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
+
+    service
+        .replace_mailboxes(
+            &account,
+            &MessageId::from("message-1"),
+            &ReplaceMailboxesCommand {
+                mailbox_ids: vec![MailboxId::from("archive")],
+            },
+        )
+        .await
+        .expect("archive assertion queues");
+
+    let unsettled = service
+        .unsettled_message_ids(&account)
+        .expect("unsettled set");
+    assert!(
+        unsettled.contains("message-1"),
+        "a queued optimistic mutation marks its message unsettled (sync-guarded)",
+    );
+
+    // Flush settles + removes the op, so the message is no longer guarded.
+    let gateway = MutationGateway::with_revision(1);
+    service
+        .flush_account(&account, &gateway)
+        .await
+        .expect("flush settles the assertion");
+    assert!(
+        service
+            .unsettled_message_ids(&account)
+            .expect("unsettled set")
+            .is_empty(),
+        "once settled, the message is no longer unsettled and sync applies to it",
+    );
+}

@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use mail_parser::{Address, MessageParser};
 use posthaste_link_core::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
@@ -418,6 +418,24 @@ impl MailService {
                     })
                     .collect()
             })
+    }
+
+    /// The ids of messages with an unsettled state-assertion op — the messages a
+    /// provider sync must not overwrite (their canonical row holds an in-flight
+    /// optimistic write that the sync's view may predate). The settle write is
+    /// unaffected: it removes its op first, then writes through `apply_sync_batch`
+    /// unfiltered.
+    ///
+    /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    pub(crate) fn unsettled_message_ids(
+        &self,
+        account_id: &AccountId,
+    ) -> Result<HashSet<String>, ServiceError> {
+        Ok(self
+            .overlay_operations(account_id)?
+            .into_iter()
+            .map(|operation| operation.entity.id)
+            .collect())
     }
 }
 
