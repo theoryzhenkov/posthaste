@@ -18,6 +18,45 @@ export type ReplicaAssertion =
   | { kind: 'setKeywords'; add: string[]; remove: string[] }
   | { kind: 'replaceMailboxes'; mailboxIds: string[] }
   | { kind: 'destroy' }
+  | { kind: 'applyDiff'; diff: MessageChangeDiff }
+
+/** An add/remove delta over one facet of a message's mutable state. */
+export interface KeywordDelta {
+  added: string[]
+  removed: string[]
+}
+
+/**
+ * An invertible change-diff over a message's mutable state: keywords + mailbox
+ * membership, each an add/remove pair. Mirrors `posthaste-link-core`'s
+ * `MessageChangeDiff`; `invertMessageChangeDiff` swaps added↔removed for both.
+ */
+export interface MessageChangeDiff {
+  keywords: KeywordDelta
+  mailboxes: KeywordDelta
+}
+
+/**
+ * One recorded reversible step on the session's undo/redo history, broadcast via
+ * the `mutationHistory` frame's `undoTop`/`redoTop`. The client constructs the
+ * undo/redo `message.applyDiff` mutation from it (undo applies the inverse diff,
+ * redo applies the diff), carrying `seq` as the `undoOf`/`redoOf` hint.
+ */
+export interface DiffStep {
+  seq: number
+  messageId: string
+  sourceId: string
+  diff: MessageChangeDiff
+}
+
+/** Swap added↔removed for both facets — the diff that reverses this one. */
+export function invertMessageChangeDiff(diff: MessageChangeDiff): MessageChangeDiff {
+  const invert = (delta: KeywordDelta): KeywordDelta => ({
+    added: delta.removed,
+    removed: delta.added,
+  })
+  return { keywords: invert(diff.keywords), mailboxes: invert(diff.mailboxes) }
+}
 
 export interface ReplicaHandle {
   /** Adopt a served base: a JSON array of `{messageId, projection}`. */

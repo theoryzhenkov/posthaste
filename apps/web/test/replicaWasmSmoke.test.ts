@@ -66,4 +66,62 @@ describe.skipIf(!artifactsPresent)('replica WASM boundary smoke', () => {
     expect(reverted).toBe(false)
     expect(handle.hasPending()).toBe(false)
   })
+
+  it('folds an applyDiff assertion over keywords and mailboxes', async () => {
+    const { initSync, MailListReplicaHandle } = (await import(loaderPath)) as {
+      initSync: (module: { module: BufferSource }) => unknown
+      MailListReplicaHandle: new () => {
+        ingestJson(rows: string): void
+        acceptJson(accept: string): void
+        hasPending(): boolean
+        settle(mutationId: string, outcome: string): boolean
+        projectJson(mailboxId?: string | null): string
+      }
+    }
+
+    initSync({ module: readFileSync(binaryPath) })
+
+    const handle = new MailListReplicaHandle()
+    handle.ingestJson(
+      JSON.stringify([
+        {
+          messageId: 'm1',
+          projection: {
+            id: 'm1',
+            keywords: ['$seen'],
+            mailboxIds: ['inbox'],
+          },
+        },
+      ]),
+    )
+
+    handle.acceptJson(
+      JSON.stringify({
+        mutationId: 'c2',
+        messageId: 'm1',
+        assertion: {
+          kind: 'applyDiff',
+          diff: {
+            keywords: { added: ['$flagged'], removed: ['$seen'] },
+            mailboxes: { added: [], removed: ['inbox'] },
+          },
+        },
+      }),
+    )
+
+    const optimistic = JSON.parse(handle.projectJson()) as Array<{
+      id: string
+      keywords: string[]
+      mailboxIds: string[]
+    }>
+    const folded = optimistic.find((row) => row.id === 'm1')
+    expect(folded?.keywords).toContain('$flagged')
+    expect(folded?.keywords).not.toContain('$seen')
+    expect(folded?.mailboxIds).not.toContain('inbox')
+
+    const inboxView = JSON.parse(handle.projectJson('inbox')) as Array<{
+      id: string
+    }>
+    expect(inboxView.some((row) => row.id === 'm1')).toBe(false)
+  })
 })

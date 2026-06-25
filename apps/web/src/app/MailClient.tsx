@@ -70,8 +70,8 @@ export function MailClient({
     [searchQuery],
   )
   const theme = useDesignTheme()
-  const actions = useEmailActions()
   const undoRedo = useRuntimeUndoRedo()
+  const actions = useEmailActions({ undo: undoRedo.undo })
 
   const mailNavigationBootstrap = useMailNavigationReadBootstrap()
   // Observed (not `enabled: false`): the bootstrap read seeds this cache, but

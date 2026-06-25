@@ -36,6 +36,7 @@ import type {
   VerificationResponse,
 } from '../api/types'
 import type { OperationContext } from '../observability'
+import type { DiffStep } from './replica/handle'
 
 /**
  * Runtime-level request for a message command.
@@ -208,6 +209,10 @@ export type RuntimeFrame<TData = unknown> =
       sessionSeq: number
       canUndo: boolean
       canRedo: boolean
+      /** The current top of the undo stack (an invertible diff), or absent. */
+      undoTop?: DiffStep | null
+      /** The current top of the redo stack (an invertible diff), or absent. */
+      redoTop?: DiffStep | null
     }
   | { type: 'heartbeat'; sessionSeq: number }
 

@@ -1,15 +1,18 @@
 /**
  * Renderer access to the runtime-owned undo/redo history.
  *
- * The runtime keeps the per-session undo/redo stack (one inverse per invertible
- * mutation) and broadcasts availability via `mutationHistory` frames; this hook
- * mirrors that into `canUndo`/`canRedo` and triggers `mutation.undo` /
- * `mutation.redo`. The renderer holds no history of its own.
+ * The runtime computes and broadcasts the current top of each stack via
+ * `mutationHistory` frames (`undoTop` / `redoTop`). This hook mirrors the
+ * availability bits and constructs ordinary optimistic `message.applyDiff`
+ * mutations to execute undo/redo, so they flow through the same local-first
+ * guard as any user action.
  *
  * @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import type { DiffStep } from '@/runtime/replica/handle'
+import { invertMessageChangeDiff } from '@/runtime/replica/handle'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
 
 export interface RuntimeUndoRedo {
@@ -20,20 +23,16 @@ export interface RuntimeUndoRedo {
 }
 
 export function useRuntimeUndoRedo(): RuntimeUndoRedo {
-  const [availability, setAvailability] = useState({
-    canRedo: false,
-    canUndo: false,
-  })
+  const [undoTop, setUndoTop] = useState<DiffStep | null>(null)
+  const [redoTop, setRedoTop] = useState<DiffStep | null>(null)
 
   useEffect(() => {
     const unsubscribe = runtimeSessionClient.subscribe(
       {
         onFrame(frame) {
           if (frame.type === 'mutationHistory') {
-            setAvailability({
-              canRedo: frame.canRedo,
-              canUndo: frame.canUndo,
-            })
+            setUndoTop(frame.undoTop ?? null)
+            setRedoTop(frame.redoTop ?? null)
           }
         },
       },
@@ -42,24 +41,41 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
     return unsubscribe
   }, [])
 
+  const runApplyDiff = useCallback(
+    (step: DiffStep, inverse: boolean) => {
+      void runtimeSessionClient
+        .runMutation({
+          name: 'message.applyDiff',
+          args: {
+            sourceId: step.sourceId,
+            messageId: step.messageId,
+            diff: inverse ? invertMessageChangeDiff(step.diff) : step.diff,
+            [inverse ? 'undoOf' : 'redoOf']: step.seq,
+          },
+        })
+        .catch(() => {
+          // Transient failures are non-fatal; availability is corrected by the
+          // next mutationHistory frame.
+        })
+    },
+    [],
+  )
+
   const undo = useCallback(() => {
-    void runtimeSessionClient
-      .runMutation({ name: 'mutation.undo', args: {} })
-      .catch(() => {
-        // Nothing-to-undo and transient failures are non-fatal; availability is
-        // corrected by the next mutationHistory frame.
-      })
-  }, [])
+    const step = undoTop
+    if (!step) return
+    runApplyDiff(step, true)
+  }, [undoTop, runApplyDiff])
 
   const redo = useCallback(() => {
-    void runtimeSessionClient
-      .runMutation({ name: 'mutation.redo', args: {} })
-      .catch(() => {})
-  }, [])
+    const step = redoTop
+    if (!step) return
+    runApplyDiff(step, false)
+  }, [redoTop, runApplyDiff])
 
   return {
-    canRedo: availability.canRedo,
-    canUndo: availability.canUndo,
+    canRedo: redoTop !== null,
+    canUndo: undoTop !== null,
     redo,
     undo,
   }
