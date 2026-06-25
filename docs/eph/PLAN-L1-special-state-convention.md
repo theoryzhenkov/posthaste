@@ -83,10 +83,10 @@ Markers exist only while a gap exists, so they cannot rot into lies.
 ### Domain-state ledger (the payoff)
 
 ```
-grep -rn '\[::state' docs
+grep -rFn '[::state' docs
 ```
 
-yields the entire map of where the project's reality and intent diverge, by
+(`-F` fixed-string avoids regex/shell quoting pitfalls with the `[`.) Yields the entire map of where the project's reality and intent diverge, by
 section, with pointers to the tracking work. This is the machine-readable
 domain-state index agents consult before planning.
 
