@@ -148,6 +148,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y binaryen
       - name: Build the replica WASM bundle
+        env:
+          SKIP_WASM_OPT: 1
         run: just build-replica-wasm
       - name: Verify committed JS bindings are fresh
         # The .wasm binary is not byte-diffed (binaryen output can vary across
