@@ -184,6 +184,16 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: tools/release/import-macos-certificate.sh
 
+      - name: Require Apple developer signing for macOS release
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ]; then
+            echo "macOS release builds must be signed with an Apple Developer ID." >&2
+            echo "Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets, or set POSTHASTE_MACOS_SIGNING=adhoc explicitly for an unsigned internal build." >&2
+            exit 1
+          fi
+
       - name: Configure App Store Connect API key
         if: runner.os == 'macOS'
         shell: bash
