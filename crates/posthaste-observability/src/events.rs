@@ -184,6 +184,8 @@ pub const SUPERVISOR_SYNC_FAILED: LogEvent = LogEvent::new("supervisor.sync.fail
 pub const SUPERVISOR_SYNC_STARTED: LogEvent = LogEvent::new("supervisor.sync.started");
 pub const SUPERVISOR_SYNC_TRIGGER_IGNORED: LogEvent =
     LogEvent::new("supervisor.sync.trigger_ignored");
+pub const SUPERVISOR_SYNC_TRIGGER_COALESCED: LogEvent =
+    LogEvent::new("supervisor.sync.trigger_coalesced");
 
 pub const DOMAIN_AUTOMATION_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.automation.post_sync_failed");

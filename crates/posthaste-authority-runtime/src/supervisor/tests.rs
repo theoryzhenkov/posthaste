@@ -368,8 +368,10 @@ async fn checkpoint_only_push_notification_triggers_sync() {
         checkpoint: Some("event-42".to_string()),
     };
 
+    let sync_state = SyncTriggerState::new();
     let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
+        &sync_state,
         &shared,
         &account,
         &account.id,
@@ -412,8 +414,10 @@ async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync
         checkpoint: None,
     };
 
+    let sync_state = SyncTriggerState::new();
     let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
+        &sync_state,
         &shared,
         &account,
         &account.id,
@@ -461,8 +465,10 @@ async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
         checkpoint: None,
     };
 
+    let sync_state = SyncTriggerState::new();
     let generation = shared.next_runtime_generation(&account.id).await;
     let triggered = handle_push_event(
+        &sync_state,
         &shared,
         &account,
         &account.id,

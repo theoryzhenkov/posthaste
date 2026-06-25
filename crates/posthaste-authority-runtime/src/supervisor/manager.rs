@@ -63,19 +63,26 @@ impl AccountSupervisor {
             "starting account runtime"
         );
         let (command_tx, command_rx) = mpsc::channel(32);
+        let sync_state = SyncTriggerState::new();
         let shared = self.shared.clone();
         let account = account.clone();
         let account_id = account.id.clone();
+        let runtime_sync_state = sync_state.clone();
         let span = info_span!("supervisor.runtime", account_id = %account_id);
         let handle = tokio::spawn(
             async move {
-                run_account_runtime(shared, account, generation, command_rx).await;
+                run_account_runtime(shared, account, generation, command_rx, runtime_sync_state)
+                    .await;
             }
             .instrument(span),
         );
         self.runtimes.write().await.insert(
             account_id.to_string(),
-            ManagedRuntime { command_tx, handle },
+            ManagedRuntime {
+                command_tx,
+                handle,
+                sync_state,
+            },
         );
     }
 
@@ -146,6 +153,11 @@ impl AccountSupervisor {
     }
 
     /// Request a runtime sync without waiting for completion.
+    ///
+    /// If the account runtime is already inside a sync cycle, the trigger is
+    /// coalesced into a single pending follow-up trigger instead of enqueueing
+    /// another full sync. The runtime runs the follow-up cycle when the current
+    /// one finishes, and a single sync drains all queued local-first operations.
     pub async fn trigger_account_sync(
         &self,
         account_id: &AccountId,
@@ -155,11 +167,29 @@ impl AccountSupervisor {
         let runtime = runtimes
             .get(account_id.as_str())
             .ok_or_else(|| GatewayError::Unavailable(account_id.to_string()))?;
-        runtime
+
+        // Reserve a command-slot before checking sync state. This guarantees
+        // that a trigger is never dropped if the runtime stops between our check
+        // and the send, and prevents spurious channel-pressure from coalesced
+        // triggers (the reserved slot is released when coalescing).
+        let permit = runtime
             .command_tx
-            .send(RuntimeCommand::TriggerOnly { trigger })
+            .reserve()
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
+
+        if runtime.sync_state.is_syncing() {
+            ph_debug!(
+                events::SUPERVISOR_SYNC_TRIGGER_COALESCED,
+                account_id = %account_id,
+                trigger = trigger.as_str(),
+                "sync trigger coalesced while runtime is already syncing"
+            );
+            runtime.sync_state.set_pending(trigger).await;
+            drop(permit);
+            return Ok(());
+        }
+        permit.send(RuntimeCommand::TriggerOnly { trigger });
         Ok(())
     }
 
@@ -182,6 +212,17 @@ impl AccountSupervisor {
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
         Ok(())
+    }
+
+    /// Return the number of sync cycles executed by the account runtime since
+    /// it was started. Used by tests and observability to verify that bursts
+    /// of local mutations do not trigger one provider sync per mutation.
+    pub async fn sync_cycle_count(&self, account_id: &AccountId) -> usize {
+        let runtimes = self.runtimes.read().await;
+        runtimes
+            .get(account_id.as_str())
+            .map(|runtime| runtime.sync_state.sync_cycle_count())
+            .unwrap_or(0)
     }
 
     /// Get the current runtime status snapshot for an account.
