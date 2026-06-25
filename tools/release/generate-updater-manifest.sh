@@ -48,7 +48,8 @@ for platform in "${!platform_glob[@]}"; do
     continue
   fi
   signature="$(cat "$sig_file")"
-  url="${download_base}/$(basename "$bundle")"
+  filename="$(basename "$bundle")"
+  url="${download_base}/$(python3 -c "import urllib.parse; print(urllib.parse.quote('$filename'))")"
   platforms_json="$(jq \
     --arg platform "$platform" \
     --arg signature "$signature" \
