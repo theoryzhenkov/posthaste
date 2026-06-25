@@ -118,7 +118,7 @@ impl ApiError {
 
     /// Map a runtime-contract error to the `/v1` error envelope.
     ///
-    /// @spec docs/backend/L4#runtime-error-to-api
+    /// @spec docs/backend/L3#runtime-error-to-api
     pub fn from_runtime_error(error: RuntimeError) -> Self {
         let envelope = error.envelope();
         let (status, code) = runtime_error_status_code(&envelope.code);
