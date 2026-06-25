@@ -24,11 +24,11 @@ use std::sync::Arc;
 
 use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
-    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailService,
-    MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary, Operation,
-    RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext, ServiceErrorKind,
-    SetKeywordsCommand, SharedGateway, SmartMailbox, SmartMailboxId, SmartMailboxSummary,
-    OperationId, SendMessageRequest, StoreError, SyncMode, SyncTrigger, TagSummary,
+    ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity,
+    MailService, MailStore, MailboxId, MailboxSummary, MessageDetail, MessageId, MessageSummary,
+    Operation, OperationId, RemoveFromMailboxCommand, ReplaceMailboxesCommand, ReplyContext,
+    SendMessageRequest, ServiceErrorKind, SetKeywordsCommand, SharedGateway, SmartMailbox,
+    SmartMailboxId, SmartMailboxSummary, StoreError, SyncMode, SyncTrigger, TagSummary,
 };
 use posthaste_link_core::MessageFoldState;
 use posthaste_observability::{events, ph_warn};
@@ -44,12 +44,13 @@ use tokio::sync::broadcast;
 use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
-use posthaste_runtime::mutation_args::{
-    keyword_toggle, parse_args, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
-    MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
-    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
-};
 use crate::mutations::AccountMutationService;
+use posthaste_runtime::mutation_args::{
+    keyword_toggle, parse_args, MessageApplyDiffArgs, MessageMoveToMailboxArgs,
+    MessageMoveToRoleArgs, MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs,
+    MessageSetKeywordsMutationArgs, MessageSetReadStateArgs, MessageSetUserTagsArgs,
+    MessageTargetArgs,
+};
 
 /// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and
@@ -145,9 +146,7 @@ impl Backend {
     }
 
     /// Read channel: the smart-mailbox summaries.
-    pub(crate) fn list_smart_mailboxes(
-        &self,
-    ) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
+    pub(crate) fn list_smart_mailboxes(&self) -> Result<Vec<SmartMailboxSummary>, RuntimeError> {
         Ok(self.account_reads.list_smart_mailboxes()?)
     }
 
@@ -194,9 +193,7 @@ impl Backend {
     }
 
     /// Read channel: the cached sender addresses.
-    pub(crate) fn list_sender_addresses(
-        &self,
-    ) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
+    pub(crate) fn list_sender_addresses(&self) -> Result<Vec<CachedSenderAddress>, RuntimeError> {
         self.store
             .list_sender_address_cache()
             .map_err(store_error_to_runtime_error)
@@ -270,7 +267,12 @@ impl Backend {
                 })?;
                 let bytes = self
                     .service
-                    .download_blob(&account_id, &message_id, &attachment.blob_id, gateway.as_ref())
+                    .download_blob(
+                        &account_id,
+                        &message_id,
+                        &attachment.blob_id,
+                        gateway.as_ref(),
+                    )
                     .await?;
                 Ok(RuntimeResourceBytes {
                     bytes,
@@ -324,12 +326,12 @@ impl Backend {
 
     /// Read channel: a message's detail (header + attachments, body-free) for the
     /// `messageDetail` view.
-    pub(crate) async fn message_detail(
+    pub(crate) fn message_detail(
         &self,
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.mail_queries.message_detail(account_id, message_id).await
+        self.mail_queries.message_detail(account_id, message_id)
     }
 
     /// Read channel: an overlay-folded conversation for the `conversation` view.
@@ -470,7 +472,10 @@ impl Backend {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<CommandAck, RuntimeError> {
-        let result = self.service.destroy_message(&account_id, &message_id).await?;
+        let result = self
+            .service
+            .destroy_message(&account_id, &message_id)
+            .await?;
         self.publish_events(&result.events);
         self.trigger_outbox_flush(&account_id).await;
         Ok(result)
@@ -539,10 +544,7 @@ impl Backend {
     }
 
     /// Write: discard a pending outbox operation.
-    pub(crate) fn discard_operation(
-        &self,
-        operation_id: OperationId,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) fn discard_operation(&self, operation_id: OperationId) -> Result<(), RuntimeError> {
         self.service.discard_operation(&operation_id)?;
         Ok(())
     }
@@ -633,10 +635,7 @@ impl Backend {
             .await
     }
 
-    pub(crate) async fn delete_account(
-        &self,
-        account_id: AccountId,
-    ) -> Result<(), RuntimeError> {
+    pub(crate) async fn delete_account(&self, account_id: AccountId) -> Result<(), RuntimeError> {
         self.account_mutations()?.delete_account(account_id).await
     }
 
@@ -792,6 +791,55 @@ impl Backend {
                 let args: MessageTargetArgs = parse_args(request)?;
                 self.destroy(AccountId(args.source_id), MessageId(args.message_id))
                     .await
+            }
+            // `message.applyDiff` is the undo/redo vehicle: apply the invertible
+            // diff as the equivalent keyword add/remove plus a mailbox add/remove.
+            // Keywords are a delta (`SetKeywordsCommand`); mailboxes are computed
+            // against the current membership and applied as one replace. This is
+            // the far-node mirror of the near-node `ApplyDiff` assertion fold.
+            "message.applyDiff" => {
+                let args: MessageApplyDiffArgs = parse_args(request)?;
+                let account_id = AccountId(args.source_id);
+                let message_id = MessageId(args.message_id);
+                let mut events = Vec::new();
+                if !args.diff.keywords.added.is_empty() || !args.diff.keywords.removed.is_empty() {
+                    let ack = self
+                        .set_keywords(
+                            account_id.clone(),
+                            message_id.clone(),
+                            SetKeywordsCommand {
+                                add: args.diff.keywords.added,
+                                remove: args.diff.keywords.removed,
+                            },
+                        )
+                        .await?;
+                    events.extend(ack.events);
+                }
+                if !args.diff.mailboxes.added.is_empty() || !args.diff.mailboxes.removed.is_empty()
+                {
+                    let mut mailbox_ids: Vec<MailboxId> = self
+                        .current_summary(&account_id, &message_id)
+                        .await?
+                        .map(|summary| summary.mailbox_ids)
+                        .unwrap_or_default();
+                    for added in &args.diff.mailboxes.added {
+                        let id = MailboxId(added.clone());
+                        if !mailbox_ids.contains(&id) {
+                            mailbox_ids.push(id);
+                        }
+                    }
+                    mailbox_ids
+                        .retain(|id| !args.diff.mailboxes.removed.iter().any(|r| r == id.as_str()));
+                    let ack = self
+                        .replace_mailboxes(
+                            account_id,
+                            message_id,
+                            ReplaceMailboxesCommand { mailbox_ids },
+                        )
+                        .await?;
+                    events.extend(ack.events);
+                }
+                Ok(CommandAck { events })
             }
             _ => Err(RuntimeError::invalid_mutation(format!(
                 "unknown runtime mutation '{}'",

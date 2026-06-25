@@ -12,11 +12,100 @@ pub struct MessageFoldState {
     pub mailbox_ids: Vec<String>,
 }
 
+/// A symmetric add/remove delta over one facet of a message's mutable state.
+/// `inverse` swaps added↔removed. Reused for keywords and mailbox membership.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeywordDelta {
+    #[serde(default)]
+    pub added: Vec<String>,
+    #[serde(default)]
+    pub removed: Vec<String>,
+}
+
+impl KeywordDelta {
+    /// Swap added↔removed — the inverse applies the opposite transition.
+    pub fn inverse(&self) -> Self {
+        Self {
+            added: self.removed.clone(),
+            removed: self.added.clone(),
+        }
+    }
+
+    /// Whether the delta carries no change. An empty diff's inverse is itself a
+    /// no-op, so a non-invertible (no-op) mutation records nothing.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty()
+    }
+}
+
+/// An invertible change-diff over a message's mutable state: keywords + mailbox
+/// membership, each an add/remove pair. `inverse` swaps both; applying
+/// `inverse(diff)` over `curr` reconstructs `prev`, so the wire carries
+/// `curr + diff` rather than `curr + prev`. This is the unit the runtime records
+/// per reversible mutation and broadcasts for undo/redo — undo applies
+/// `inverse(diff)`, redo applies `diff` — so undo/redo become ordinary optimistic
+/// mutations through the existing outbox + replay guard (no command-based stack,
+/// no opaque `mutation.undo`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageChangeDiff {
+    #[serde(default)]
+    pub keywords: KeywordDelta,
+    #[serde(default)]
+    pub mailboxes: KeywordDelta,
+}
+
+impl MessageChangeDiff {
+    /// Swap added↔removed for both facets — the diff that reverses this one.
+    pub fn inverse(&self) -> Self {
+        Self {
+            keywords: self.keywords.inverse(),
+            mailboxes: self.mailboxes.inverse(),
+        }
+    }
+
+    /// The uniform delta between two fold states: `added = curr \ prev`,
+    /// `removed = prev \ curr`, per facet. Stable sorted order (BTreeSet) so a
+    /// diff is order-independent and compares equal across reorderings. The
+    /// runtime captures a mutation's diff from a before/after read, so this is
+    /// correct for every message mutation — including role moves, which need no
+    /// near-node role→mailbox resolution (the after-state already reflects it).
+    pub fn from_before_after(prev: &MessageFoldState, curr: &MessageFoldState) -> Self {
+        Self {
+            keywords: delta(&prev.keywords, &curr.keywords),
+            mailboxes: delta(&prev.mailbox_ids, &curr.mailbox_ids),
+        }
+    }
+
+    /// Whether the diff carries no change for either facet.
+    pub fn is_empty(&self) -> bool {
+        self.keywords.is_empty() && self.mailboxes.is_empty()
+    }
+}
+
+/// The add/remove delta between two sets: `added = curr \ prev`,
+/// `removed = prev \ curr`, stable-sorted.
+fn delta(prev: &[String], curr: &[String]) -> KeywordDelta {
+    let prev_set: BTreeSet<&String> = prev.iter().collect();
+    let curr_set: BTreeSet<&String> = curr.iter().collect();
+    KeywordDelta {
+        added: curr_set
+            .difference(&prev_set)
+            .map(|item| (*item).clone())
+            .collect(),
+        removed: prev_set
+            .difference(&curr_set)
+            .map(|item| (*item).clone())
+            .collect(),
+    }
+}
+
 /// A named mutation's local effect on one message. Keyword changes are an
 /// add/remove pair (idempotent: adding a present keyword or removing an absent
 /// one is a no-op); mailbox membership is a full desired-state replace; destroy
-/// removes the message. These mirror the outbox operation kinds the runtime
-/// already enqueues.
+/// removes the message; `ApplyDiff` applies an invertible add/remove diff to
+/// both facets at once — the undo/redo vehicle (undo applies `inverse(diff)`,
+/// redo applies `diff`). These mirror the outbox operation kinds the runtime
+/// enqueues.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MessageAssertion {
@@ -30,6 +119,11 @@ pub enum MessageAssertion {
         mailbox_ids: Vec<String>,
     },
     Destroy,
+    /// Apply an invertible diff: add/remove keywords and add/remove mailboxes as
+    /// deltas (set semantics, idempotent).
+    ApplyDiff {
+        diff: MessageChangeDiff,
+    },
 }
 
 /// Result of folding assertions over a message: its new state, or removed
@@ -67,6 +161,25 @@ pub fn apply_message_assertion(
             state.mailbox_ids = mailbox_ids.clone();
             MessageOutcome::Present(state)
         }
+        MessageAssertion::ApplyDiff { diff } => {
+            let mut keywords: BTreeSet<String> = state.keywords.into_iter().collect();
+            for keyword in &diff.keywords.added {
+                keywords.insert(keyword.clone());
+            }
+            for keyword in &diff.keywords.removed {
+                keywords.remove(keyword);
+            }
+            state.keywords = keywords.into_iter().collect();
+            let mut mailbox_ids: BTreeSet<String> = state.mailbox_ids.into_iter().collect();
+            for mailbox in &diff.mailboxes.added {
+                mailbox_ids.insert(mailbox.clone());
+            }
+            for mailbox in &diff.mailboxes.removed {
+                mailbox_ids.remove(mailbox);
+            }
+            state.mailbox_ids = mailbox_ids.into_iter().collect();
+            MessageOutcome::Present(state)
+        }
         MessageAssertion::Destroy => MessageOutcome::Removed,
     }
 }
@@ -101,6 +214,18 @@ pub fn coalesce_message_assertions(assertions: &[MessageAssertion]) -> Vec<Messa
         return vec![MessageAssertion::Destroy];
     }
 
+    // An ApplyDiff carries an add/remove delta for both facets; the coalesce
+    // vocabulary (SetKeywords + ReplaceMailboxes) cannot express a mailbox
+    // delta without the base, so when one is present we leave the sequence
+    // uncoalesced. ApplyDiff is the undo/redo vehicle (rare, transient), and the
+    // idempotent fold already makes the uncoalesced result visually correct.
+    if assertions
+        .iter()
+        .any(|assertion| matches!(assertion, MessageAssertion::ApplyDiff { .. }))
+    {
+        return assertions.to_vec();
+    }
+
     let mut added: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
     let mut latest_mailboxes: Option<Vec<String>> = None;
@@ -128,6 +253,7 @@ pub fn coalesce_message_assertions(assertions: &[MessageAssertion]) -> Vec<Messa
                 latest_mailboxes = Some(mailbox_ids.clone());
             }
             MessageAssertion::Destroy => unreachable!("handled above"),
+            MessageAssertion::ApplyDiff { .. } => unreachable!("guarded above"),
         }
     }
 
@@ -297,5 +423,101 @@ mod tests {
         let direct = replay_message(base.clone(), &assertions);
         let coalesced = replay_message(base, &coalesce_message_assertions(&assertions));
         assert_eq!(direct, coalesced);
+    }
+
+    fn diff(
+        kw_added: &[&str],
+        kw_removed: &[&str],
+        mb_added: &[&str],
+        mb_removed: &[&str],
+    ) -> MessageChangeDiff {
+        MessageChangeDiff {
+            keywords: KeywordDelta {
+                added: kw_added.iter().map(|s| s.to_string()).collect(),
+                removed: kw_removed.iter().map(|s| s.to_string()).collect(),
+            },
+            mailboxes: KeywordDelta {
+                added: mb_added.iter().map(|s| s.to_string()).collect(),
+                removed: mb_removed.iter().map(|s| s.to_string()).collect(),
+            },
+        }
+    }
+
+    #[test]
+    fn diff_inverse_swaps_added_and_removed_for_both_facets() {
+        let d = diff(&["$flagged"], &["$seen"], &["archive"], &["inbox"]);
+        assert_eq!(
+            d.inverse(),
+            diff(&["$seen"], &["$flagged"], &["inbox"], &["archive"])
+        );
+        // inverse is an involution.
+        assert_eq!(d.inverse().inverse(), d);
+    }
+
+    #[test]
+    fn diff_from_before_after_is_the_uniform_delta() {
+        let prev = state(&["$seen"], &["inbox", "drafts"]);
+        let curr = state(&["$seen", "$flagged"], &["inbox", "archive"]);
+        let d = MessageChangeDiff::from_before_after(&prev, &curr);
+        assert_eq!(d.keywords.added, vec!["$flagged".to_string()]);
+        assert!(d.keywords.removed.is_empty());
+        assert_eq!(d.mailboxes.added, vec!["archive".to_string()]);
+        assert_eq!(d.mailboxes.removed, vec!["drafts".to_string()]);
+        // A no-op change (prev == curr) yields an empty diff.
+        assert!(MessageChangeDiff::from_before_after(&prev, &prev).is_empty());
+    }
+
+    #[test]
+    fn apply_diff_folds_keywords_and_mailboxes_as_deltas() {
+        let result = present(apply_message_assertion(
+            state(&["$seen"], &["inbox"]),
+            &MessageAssertion::ApplyDiff {
+                diff: diff(&["$flagged"], &["$seen"], &["archive"], &["inbox"]),
+            },
+        ));
+        assert_eq!(result.keywords, vec!["$flagged".to_string()]);
+        assert_eq!(result.mailbox_ids, vec!["archive".to_string()]);
+    }
+
+    #[test]
+    fn apply_diff_inverse_undoes_the_forward_diff() {
+        let base = state(&["$seen"], &["inbox"]);
+        let d = diff(&["$flagged"], &[], &["archive"], &["inbox"]);
+        // Forward then inverse reconstructs the base (undo semantics).
+        let forward = present(apply_message_assertion(
+            base.clone(),
+            &MessageAssertion::ApplyDiff { diff: d.clone() },
+        ));
+        let restored = present(apply_message_assertion(
+            forward.clone(),
+            &MessageAssertion::ApplyDiff { diff: d.inverse() },
+        ));
+        assert_eq!(restored, base);
+    }
+
+    #[test]
+    fn apply_diff_is_idempotent() {
+        let assertion = MessageAssertion::ApplyDiff {
+            diff: diff(&["$flagged"], &[], &["archive"], &[]),
+        };
+        let once = present(apply_message_assertion(state(&[], &["inbox"]), &assertion));
+        let twice = present(apply_message_assertion(once.clone(), &assertion));
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn coalesce_leaves_an_apply_diff_sequence_uncoalesced() {
+        let assertions = vec![
+            MessageAssertion::SetKeywords {
+                add: vec!["$flagged".into()],
+                remove: vec![],
+            },
+            MessageAssertion::ApplyDiff {
+                diff: diff(&[], &["$flagged"], &[], &[]),
+            },
+        ];
+        let coalesced = coalesce_message_assertions(&assertions);
+        // Uncoalesced: the input is returned as-is (still folds to the same state).
+        assert_eq!(coalesced, assertions);
     }
 }

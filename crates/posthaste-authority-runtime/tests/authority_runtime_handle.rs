@@ -20,9 +20,9 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationRequest, MutationSettlementState,
-    RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeLifecycle,
-    RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor, ViewFrame,
-    ViewRevision,
+    RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeFrameSubscription,
+    RuntimeLifecycle, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor,
+    ViewFrame, ViewRevision,
 };
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -433,10 +433,8 @@ async fn active_migration_handle_without_mutations_reports_missing_mutation_serv
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
-    let handle = from_api_bridge_for_migration(
-        build.api_bridge.clone(),
-        build.runtime_status.account_count,
-    );
+    let handle =
+        from_api_bridge_for_migration(build.api_bridge.clone(), build.runtime_status.account_count);
 
     let status = handle
         .runtime_status(RuntimeCaller::test())
@@ -1445,6 +1443,20 @@ async fn inbox_message_flagged(
         .unwrap_or(false)
 }
 
+/// Drain the session frame stream until the next `mutationHistory` frame.
+async fn next_history_frame(subscription: &mut RuntimeFrameSubscription) -> RuntimeFrame {
+    loop {
+        let frame =
+            tokio::time::timeout(std::time::Duration::from_secs(2), subscription.live.next())
+                .await
+                .expect("a mutationHistory frame should arrive")
+                .expect("runtime stream should remain open");
+        if matches!(frame, RuntimeFrame::MutationHistory { .. }) {
+            return frame;
+        }
+    }
+}
+
 #[tokio::test]
 async fn runtime_undo_redo_navigates_the_session_history_stack() {
     // Undo reverses the most recent reversible mutation; redo replays it; a
@@ -1477,6 +1489,15 @@ async fn runtime_undo_redo_navigates_the_session_history_stack() {
         .open_session(RuntimeCaller::test())
         .await
         .expect("session should open");
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
 
     let flag = |cmid: &str| MutationRequest {
         session_id: Some(session.session_id.clone()),
@@ -1489,12 +1510,28 @@ async fn runtime_undo_redo_navigates_the_session_history_stack() {
         client_mutation_id: ClientMutationId::new(cmid),
         context: None,
     };
-    let control = |name: &str, cmid: &str| MutationRequest {
-        session_id: Some(session.session_id.clone()),
-        name: name.to_string(),
-        args: serde_json::json!({}),
-        client_mutation_id: ClientMutationId::new(cmid),
-        context: None,
+    let apply_diff = |cmid: &str,
+                      diff: serde_json::Value,
+                      undo_of: Option<RuntimeSessionSeq>,
+                      redo_of: Option<RuntimeSessionSeq>| {
+        let mut args = serde_json::json!({
+            "sourceId": account.id.as_str(),
+            "messageId": "em-001",
+            "diff": diff,
+        });
+        if let Some(seq) = undo_of {
+            args["undoOf"] = serde_json::json!(seq);
+        }
+        if let Some(seq) = redo_of {
+            args["redoOf"] = serde_json::json!(seq);
+        }
+        MutationRequest {
+            session_id: Some(session.session_id.clone()),
+            name: "message.applyDiff".to_string(),
+            args,
+            client_mutation_id: ClientMutationId::new(cmid),
+            context: None,
+        }
     };
 
     assert!(
@@ -1502,68 +1539,113 @@ async fn runtime_undo_redo_navigates_the_session_history_stack() {
         "message starts unflagged"
     );
 
-    // Nothing to undo yet.
-    assert!(
-        build
-            .handle
-            .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-0"))
-            .await
-            .is_err(),
-        "undo with an empty stack is rejected"
-    );
-
-    // Flag it.
+    // Flag it; the runtime records the change-diff and broadcasts it.
     build
         .handle
         .run_mutation(RuntimeCaller::test(), flag("flag-1"))
         .await
         .expect("flag mutation should run");
     assert!(inbox_message_flagged(&build, &account.id, "em-001").await);
+    let history = next_history_frame(&mut subscription).await;
+    let RuntimeFrame::MutationHistory {
+        undo_top,
+        can_undo,
+        can_redo,
+        ..
+    } = history
+    else {
+        panic!("expected a mutationHistory frame after a reversible mutation");
+    };
+    assert!(can_undo, "canUndo after a reversible mutation");
+    assert!(!can_redo, "redo is empty after a fresh mutation");
+    let undo_step = undo_top.expect("undo top set after a flag");
+    assert_eq!(undo_step.message_id, "em-001");
+    assert_eq!(undo_step.source_id, account.id.as_str());
+    assert_eq!(undo_step.diff.keywords.added, vec!["$flagged".to_string()]);
 
-    // Undo replays the captured inverse (a setKeywords) and reverts the flag.
+    // Undo: apply the inverse diff (remove $flagged) as an ordinary mutation.
     let undo = build
         .handle
-        .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-1"))
+        .run_mutation(
+            RuntimeCaller::test(),
+            apply_diff(
+                "u-1",
+                serde_json::to_value(undo_step.diff.inverse()).unwrap(),
+                Some(undo_step.seq),
+                None,
+            ),
+        )
         .await
         .expect("undo should run");
-    assert_eq!(undo.name, "message.setKeywords");
+    assert_eq!(undo.name, "message.applyDiff");
     assert_eq!(undo.state, MutationSettlementState::Confirmed);
     assert!(
         !inbox_message_flagged(&build, &account.id, "em-001").await,
         "undo reverts the flag"
     );
+    let history = next_history_frame(&mut subscription).await;
+    let RuntimeFrame::MutationHistory {
+        undo_top, redo_top, ..
+    } = history
+    else {
+        panic!("expected a mutationHistory frame after undo");
+    };
+    assert!(undo_top.is_none(), "undo history is empty after the undo");
+    let redo_step = redo_top.expect("redo top set after an undo");
+    assert_eq!(redo_step.diff.keywords.added, vec!["$flagged".to_string()]);
 
-    // Redo replays the original forward command and re-flags.
+    // Redo: apply the forward diff (re-add $flagged).
     let redo = build
         .handle
-        .run_mutation(RuntimeCaller::test(), control("mutation.redo", "r-1"))
+        .run_mutation(
+            RuntimeCaller::test(),
+            apply_diff(
+                "r-1",
+                serde_json::to_value(&redo_step.diff).unwrap(),
+                None,
+                Some(redo_step.seq),
+            ),
+        )
         .await
         .expect("redo should run");
-    assert_eq!(redo.name, "message.setFlaggedState");
+    assert_eq!(redo.name, "message.applyDiff");
     assert!(
         inbox_message_flagged(&build, &account.id, "em-001").await,
         "redo re-applies the flag"
     );
 
-    // Undo again, then a fresh mutation must clear the redo stack.
+    // Undo again, then a fresh mutation must clear the redo history. Under
+    // last-writer-wins the runtime never rejects a stale undo/redo, so the
+    // clear is observed via `canRedo`, not a rejection.
+    let history = next_history_frame(&mut subscription).await;
+    let RuntimeFrame::MutationHistory { undo_top, .. } = history else {
+        panic!("expected a mutationHistory frame after redo");
+    };
+    let undo_step2 = undo_top.expect("undo top set after redo");
     build
         .handle
-        .run_mutation(RuntimeCaller::test(), control("mutation.undo", "u-2"))
+        .run_mutation(
+            RuntimeCaller::test(),
+            apply_diff(
+                "u-2",
+                serde_json::to_value(undo_step2.diff.inverse()).unwrap(),
+                Some(undo_step2.seq),
+                None,
+            ),
+        )
         .await
         .expect("second undo should run");
+    let _ = next_history_frame(&mut subscription).await;
     build
         .handle
         .run_mutation(RuntimeCaller::test(), flag("flag-2"))
         .await
         .expect("fresh flag should run");
-    assert!(
-        build
-            .handle
-            .run_mutation(RuntimeCaller::test(), control("mutation.redo", "r-2"))
-            .await
-            .is_err(),
-        "a fresh mutation clears the redo stack"
-    );
+    let history = next_history_frame(&mut subscription).await;
+    let RuntimeFrame::MutationHistory { can_redo, .. } = history else {
+        panic!("expected a mutationHistory frame after the fresh mutation");
+    };
+    assert!(!can_redo, "a fresh mutation clears the redo history");
 }
 
 #[tokio::test]
@@ -2460,7 +2542,10 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
         .expect("authority runtime should build");
     let account = build
         .handle
-        .create_account(RuntimeCaller::test(), mock_account_mutation("optimism-account"))
+        .create_account(
+            RuntimeCaller::test(),
+            mock_account_mutation("optimism-account"),
+        )
         .await
         .expect("account should create");
     seed_message_batch(&build, &account.id);

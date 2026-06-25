@@ -4,12 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use posthaste_domain::{DomainEvent, Id};
+use posthaste_link_core::MessageChangeDiff;
 use posthaste_runtime_contract::{
-    ClientMutationId, MailListDelta, MailListRowState, MailListViewState, MutationReceipt,
-    MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller, RuntimeError,
-    RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId, RuntimeMutationSettlement,
-    RuntimeSession, RuntimeSessionId, RuntimeSessionSeq, RuntimeViewSubscription, ViewDescriptor,
-    ViewFrame, ViewId, ViewSnapshot,
+    ClientMutationId, DiffStep, MailListDelta, MailListRowState, MailListViewState,
+    MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,
+    RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId,
+    RuntimeMutationSettlement, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
+    RuntimeViewSubscription, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
 };
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -43,12 +44,13 @@ struct StoredSession {
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
     latest_mutations: HashMap<RuntimeMutationId, StoredMutation>,
     mutations_by_client_id: HashMap<ClientMutationId, RuntimeMutationId>,
-    /// Reversible mutations the session has applied, oldest first. `mutation.undo`
-    /// reverses the most recent.
-    undo_stack: Vec<HistoryEntry>,
-    /// Steps moved off `undo_stack` by an undo, oldest first. `mutation.redo`
-    /// replays the most recent. Cleared whenever a new user mutation is recorded.
-    redo_stack: Vec<HistoryEntry>,
+    /// Reversible mutations the session has applied, oldest first. Each step is
+    /// an invertible change-diff; undo applies `inverse(diff)`, redo applies
+    /// `diff`, both as ordinary `message.applyDiff` mutations.
+    undo_history: Vec<DiffStep>,
+    /// Steps moved off `undo_history` by an undo, oldest first. Redo replays the
+    /// most recent. Cleared whenever a new user mutation's diff is recorded.
+    redo_history: Vec<DiffStep>,
     event_task: Option<AbortHandle>,
 }
 
@@ -65,38 +67,6 @@ struct StoredMutation {
     state: MutationSettlementState,
     error: Option<RuntimeAdapterError>,
     output: Value,
-}
-
-/// A named mutation (name + args). Used both as the forward command recorded on
-/// the undo stack and as the inverse that reverses it.
-///
-/// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-#[derive(Clone)]
-pub(crate) struct MutationCommand {
-    pub(crate) name: String,
-    pub(crate) args: Value,
-}
-
-/// One reversible step on a session's undo/redo history. `forward` is the
-/// command that was applied (replayed on redo); `inverse` reverses it (run on
-/// undo). Non-invertible mutations (destroy) are never recorded.
-///
-/// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-#[derive(Clone)]
-pub(crate) struct HistoryEntry {
-    pub(crate) forward: MutationCommand,
-    pub(crate) inverse: MutationCommand,
-}
-
-/// How `accept_mutation` should touch the session's undo/redo history.
-pub(crate) enum HistoryRecord {
-    /// A new user mutation: push `{forward, inverse}` onto the undo stack and
-    /// clear the redo stack. `forward` is taken from the request.
-    Record(MutationCommand),
-    /// Leave the stacks untouched — the mutation is non-invertible, or it is the
-    /// replay driven by `mutation.undo`/`mutation.redo` (which manage the stacks
-    /// themselves).
-    Skip,
 }
 
 pub(crate) enum MutationAcceptance {
@@ -165,8 +135,8 @@ impl SessionRegistry {
                 latest_snapshots: HashMap::new(),
                 latest_mutations: HashMap::new(),
                 mutations_by_client_id: HashMap::new(),
-                undo_stack: Vec::new(),
-                redo_stack: Vec::new(),
+                undo_history: Vec::new(),
+                redo_history: Vec::new(),
                 event_task: None,
             },
         );
@@ -352,7 +322,6 @@ impl SessionRegistry {
         &self,
         caller: RuntimeCaller,
         request: &MutationRequest,
-        history: HistoryRecord,
     ) -> Result<MutationAcceptance, RuntimeError> {
         let session_id = request.session_id.as_ref().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
@@ -390,20 +359,6 @@ impl SessionRegistry {
             error: None,
             output: Value::Null,
         };
-        let recorded = matches!(history, HistoryRecord::Record(_));
-        if let HistoryRecord::Record(inverse) = history {
-            push_capped(
-                &mut session.undo_stack,
-                HistoryEntry {
-                    forward: MutationCommand {
-                        name: request.name.clone(),
-                        args: request.args.clone(),
-                    },
-                    inverse,
-                },
-            );
-            session.redo_stack.clear();
-        }
         session
             .mutations_by_client_id
             .insert(request.client_mutation_id.clone(), mutation_id.clone());
@@ -414,75 +369,105 @@ impl SessionRegistry {
         let sender = session.frames.clone();
         drop(sessions);
         let _ = sender.send(frame);
-        if recorded {
-            self.emit_history_frame(session_id)?;
-        }
         Ok(MutationAcceptance::New { mutation_id })
     }
 
-    /// Take the most recent reversible step off the undo stack so the caller can
-    /// run its inverse. On success the caller calls [`push_redo`]; on failure it
-    /// restores it with [`restore_undo`].
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    pub(crate) fn pop_undo(
+    /// Record a reversible mutation's invertible diff onto the session's undo
+    /// history (the step's seq is assigned here), clearing the redo history, and
+    /// broadcast the new availability. Called after the backend confirms a
+    /// diff-eligible message mutation; the before/after read produced `diff`.
+    pub(crate) fn record_diff(
         &self,
         session_id: &RuntimeSessionId,
-    ) -> Result<Option<HistoryEntry>, RuntimeError> {
+        source_id: String,
+        message_id: String,
+        diff: MessageChangeDiff,
+    ) -> Result<(), RuntimeError> {
         let mut sessions = self.sessions.lock().map_err(lock_error)?;
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        Ok(session.undo_stack.pop())
+        let step = DiffStep {
+            seq: next_seq(session),
+            source_id,
+            message_id,
+            diff,
+        };
+        push_capped(&mut session.undo_history, step);
+        session.redo_history.clear();
+        let frame = history_frame(session);
+        let sender = session.frames.clone();
+        drop(sessions);
+        let _ = sender.send(frame);
+        Ok(())
     }
 
-    /// Take the most recent undone step off the redo stack so the caller can
-    /// replay its forward command.
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    pub(crate) fn pop_redo(
+    /// Take the undo step with the given seq off the undo history so the caller
+    /// can run its inverse (`message.applyDiff { undoOf }`). On success the
+    /// caller pushes it to redo with [`push_redo`]; on failure it restores it with
+    /// [`push_undo`]. `None` when no step matches (a stale `undoOf`: under
+    /// last-writer-wins the applyDiff still runs, it just does not navigate).
+    pub(crate) fn pop_undo_by_seq(
         &self,
         session_id: &RuntimeSessionId,
-    ) -> Result<Option<HistoryEntry>, RuntimeError> {
+        seq: RuntimeSessionSeq,
+    ) -> Result<Option<DiffStep>, RuntimeError> {
         let mut sessions = self.sessions.lock().map_err(lock_error)?;
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        Ok(session.redo_stack.pop())
+        Ok(remove_by_seq(&mut session.undo_history, seq))
     }
 
-    /// Make a just-undone step redoable. Does not clear the redo stack.
+    /// Take the redo step with the given seq off the redo history so the caller
+    /// can replay its forward diff (`message.applyDiff { redoOf }`).
+    pub(crate) fn pop_redo_by_seq(
+        &self,
+        session_id: &RuntimeSessionId,
+        seq: RuntimeSessionSeq,
+    ) -> Result<Option<DiffStep>, RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        Ok(remove_by_seq(&mut session.redo_history, seq))
+    }
+
+    /// Push a step onto the undo history (capped), without clearing redo. Used to
+    /// commit a redo replay (the step returns to undo) or to roll back a failed
+    /// undo (the step returns to where it was popped from).
+    pub(crate) fn push_undo(
+        &self,
+        session_id: &RuntimeSessionId,
+        step: DiffStep,
+    ) -> Result<(), RuntimeError> {
+        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let session = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        push_capped(&mut session.undo_history, step);
+        Ok(())
+    }
+
+    /// Push a step onto the redo history (capped), without clearing it. Used to
+    /// commit an undo (the undone step becomes redoable).
     pub(crate) fn push_redo(
         &self,
         session_id: &RuntimeSessionId,
-        entry: HistoryEntry,
+        step: DiffStep,
     ) -> Result<(), RuntimeError> {
         let mut sessions = self.sessions.lock().map_err(lock_error)?;
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        push_capped(&mut session.redo_stack, entry);
+        push_capped(&mut session.redo_history, step);
         Ok(())
     }
 
-    /// Return a step to the undo stack — either after a redo replayed it, or to
-    /// roll back a failed undo. Does not clear the redo stack (unlike recording a
-    /// fresh user mutation).
-    pub(crate) fn restore_undo(
-        &self,
-        session_id: &RuntimeSessionId,
-        entry: HistoryEntry,
-    ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        push_capped(&mut session.undo_stack, entry);
-        Ok(())
-    }
-
-    /// Broadcast the session's current undo/redo availability so the renderer can
-    /// drive undo/redo button state. Called whenever the stacks change.
+    /// Broadcast the session's current undo/redo availability — `canUndo`/
+    /// `canRedo` plus the current top of each stack as an invertible diff — so
+    /// the renderer can drive button state and construct the undo/redo
+    /// `message.applyDiff` mutation. Called whenever the histories change.
     ///
     /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     pub(crate) fn emit_history_frame(
@@ -493,11 +478,7 @@ impl SessionRegistry {
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let frame = RuntimeFrame::MutationHistory {
-            session_seq: next_seq(session),
-            can_undo: !session.undo_stack.is_empty(),
-            can_redo: !session.redo_stack.is_empty(),
-        };
+        let frame = history_frame(session);
         let sender = session.frames.clone();
         drop(sessions);
         let _ = sender.send(frame);
@@ -712,10 +693,18 @@ fn mail_list_delta(old: &ViewSnapshot, new: &ViewSnapshot) -> Option<MailListDel
         .iter()
         .map(|row| (row.row_key.as_str(), row))
         .collect();
-    let old_order: Vec<&str> = old_state.rows.iter().map(|row| row.row_key.as_str()).collect();
-    let new_order: Vec<&str> = new_state.rows.iter().map(|row| row.row_key.as_str()).collect();
-    let order = (old_order != new_order)
-        .then(|| new_order.iter().map(|key| key.to_string()).collect());
+    let old_order: Vec<&str> = old_state
+        .rows
+        .iter()
+        .map(|row| row.row_key.as_str())
+        .collect();
+    let new_order: Vec<&str> = new_state
+        .rows
+        .iter()
+        .map(|row| row.row_key.as_str())
+        .collect();
+    let order =
+        (old_order != new_order).then(|| new_order.iter().map(|key| key.to_string()).collect());
     let mut upserts = Vec::new();
     for new_row in &new_state.rows {
         let changed = match old_by_key.get(new_row.row_key.as_str()) {
@@ -813,11 +802,34 @@ fn next_seq(session: &mut StoredSession) -> RuntimeSessionSeq {
 
 /// Push onto a history stack, evicting the oldest entry once `MAX_HISTORY` is
 /// exceeded so a session's undo/redo state stays bounded.
-fn push_capped(stack: &mut Vec<HistoryEntry>, entry: HistoryEntry) {
+fn push_capped<T>(stack: &mut Vec<T>, entry: T) {
     stack.push(entry);
     if stack.len() > MAX_HISTORY {
         stack.remove(0);
     }
+}
+
+/// Build the `MutationHistory` frame for a session's current undo/redo state:
+/// availability flags plus the top diff of each stack. The client needs only the
+/// current top of each stack to construct the undo/redo `message.applyDiff`
+/// mutation (it never needs the full history).
+fn history_frame(session: &mut StoredSession) -> RuntimeFrame {
+    let undo_top = session.undo_history.last().cloned();
+    let redo_top = session.redo_history.last().cloned();
+    RuntimeFrame::MutationHistory {
+        session_seq: next_seq(session),
+        can_undo: undo_top.is_some(),
+        can_redo: redo_top.is_some(),
+        undo_top,
+        redo_top,
+    }
+}
+
+/// Remove the step with the given seq from a history, searching from the most
+/// recent (the top), preserving the order of the remaining steps.
+fn remove_by_seq(history: &mut Vec<DiffStep>, seq: RuntimeSessionSeq) -> Option<DiffStep> {
+    let position = history.iter().rposition(|step| step.seq == seq)?;
+    Some(history.remove(position))
 }
 
 fn event_matches_session_scope(event: &DomainEvent, account_scope: Option<&[String]>) -> bool {

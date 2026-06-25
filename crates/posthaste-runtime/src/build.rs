@@ -7,14 +7,15 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use posthaste_domain::{
-    ConfigError, ServiceError, StoreError,
-    AccountId, AddToMailboxCommand, AppSettings, DomainEvent, EventFilter, MailboxId,
+    AccountId, AddToMailboxCommand, AppSettings, ConfigError, DomainEvent, EventFilter, MailboxId,
     MailboxSummary, MessageId, Operation, OperationId, RemoveFromMailboxCommand,
-    ReplaceMailboxesCommand, SecretStore, SendMessageRequest, SetKeywordsCommand, SmartMailboxId,
-    SyncMode,
+    ReplaceMailboxesCommand, SecretStore, SendMessageRequest, ServiceError, SetKeywordsCommand,
+    SmartMailboxId, StoreError, SyncMode,
 };
 use posthaste_link_contract::{BackendApi, BackendLink};
-use posthaste_link_core::{MutationId, PendingMessageMutation};
+use posthaste_link_core::{
+    MessageChangeDiff, MessageFoldState, MutationId, PendingMessageMutation,
+};
 use posthaste_runtime_contract::{
     AccountScopeRequest, AccountVerificationResult, CreateAccountMutation, MailQueryPage,
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
@@ -28,14 +29,14 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::mutation_args::{
-    keyword_toggle, parse_args, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
+    parse_args, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
     MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
     MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
 };
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
-use crate::sessions::{HistoryRecord, MutationAcceptance, MutationCommand, SessionRegistry};
+use crate::sessions::{MutationAcceptance, SessionRegistry};
 use crate::transport::RemoteBackend;
 use crate::views::ViewRegistry;
 
@@ -390,24 +391,19 @@ impl AuthorityRuntimeHandle {
         Ok(())
     }
 
-    /// Accept a named message mutation (idempotency), run its command, and
-    /// settle confirmed/failed on the session stream. The shared
-    /// accept -> execute -> settle flow for every message mutation; the command
-    /// `action` is one of the existing handle methods, which already publishes
-    /// the optimistic assertion and flushes the outbox.
+    /// Accept a named message mutation onto the session (idempotency), forward it
+    /// up the backend link, and settle the session stream from the backend's
+    /// receipt. The `forward` future is the link's up-channel
+    /// (`BackendLink::forward_mutation`); its receipt carries the command's
+    /// events as `output` and the backend's confirmation id. Scope is the
+    /// runtime's (near-node) concern, resolved before this call; the undo-history
+    /// diff is captured in `dispatch_named_mutation` after settlement.
     ///
     /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    /// Accept a named message mutation onto the session (idempotency + history),
-    /// forward it up the backend link, and settle the session stream from the
-    /// backend's receipt. The `forward` future is the link's up-channel
-    /// (`BackendLink::forward_mutation`); its receipt carries the command's
-    /// events as `output` and the backend's confirmation id. Scope and history
-    /// are the runtime's (near-node) concern and are resolved before this call.
     async fn run_message_mutation<Fut>(
         &self,
         caller: RuntimeCaller,
         request: &MutationRequest,
-        history: HistoryRecord,
         forward: Fut,
     ) -> Result<MutationReceipt, RuntimeError>
     where
@@ -416,11 +412,7 @@ impl AuthorityRuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mutation_id = match self
-            .core
-            .sessions
-            .accept_mutation(caller, request, history)?
-        {
+        let mutation_id = match self.core.sessions.accept_mutation(caller, request)? {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
@@ -450,88 +442,51 @@ impl AuthorityRuntimeHandle {
         }
     }
 
-    /// Read the message's current overlay-folded summary (keywords + mailbox
-    /// membership) without provider work, for computing an undo inverse.
-    async fn current_message_summary(
+    /// Read a message's current fold state (keywords + mailbox membership)
+    /// straight through the backend, bypassing the summary cache. Used to capture
+    /// a mutation's before/after diff: the cache is evicted by the down-channel,
+    /// but that eviction races the post-apply read, so a diff read must not serve
+    /// a stale pre-apply entry. `None` when the message is not held.
+    async fn read_fold_state(
         &self,
         source_id: &str,
         message_id: &str,
-    ) -> Result<Option<posthaste_domain::MessageSummary>, RuntimeError> {
-        // Read through the far node (W4a passthrough; W4c serves from cache or
-        // reads through over the link). This is the c3 split-runtime read.
-        self.core
+    ) -> Result<Option<MessageFoldState>, RuntimeError> {
+        Ok(self
+            .core
             .reads
-            .current_summary(
+            .fresh_summary(
                 &AccountId(source_id.to_string()),
                 &MessageId(message_id.to_string()),
             )
-            .await
-    }
-
-    /// The precise keyword command that restores the message's current keyword
-    /// set after `command` is applied. Reads current keywords so the inverse is
-    /// correct even when the forward command is a partial no-op (e.g. adding a
-    /// keyword that was already present).
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    async fn keyword_inverse(
-        &self,
-        source_id: &str,
-        message_id: &str,
-        command: &SetKeywordsCommand,
-    ) -> Result<MutationCommand, RuntimeError> {
-        let present: std::collections::HashSet<String> = self
-            .current_message_summary(source_id, message_id)
             .await?
-            .map(|summary| summary.keywords)
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        // Re-add keywords that were present and would be removed; remove keywords
-        // that were absent and would be added. Untouched keywords stay as-is.
-        let add: Vec<String> = command
-            .remove
-            .iter()
-            .filter(|keyword| present.contains(*keyword))
-            .cloned()
-            .collect();
-        let remove: Vec<String> = command
-            .add
-            .iter()
-            .filter(|keyword| !present.contains(*keyword))
-            .cloned()
-            .collect();
-        Ok(MutationCommand {
-            name: "message.setKeywords".to_string(),
-            args: serde_json::json!({
-                "sourceId": source_id,
-                "messageId": message_id,
-                "command": { "add": add, "remove": remove },
-            }),
-        })
+            .map(|summary| MessageFoldState {
+                keywords: summary.keywords,
+                mailbox_ids: summary
+                    .mailbox_ids
+                    .into_iter()
+                    .map(|id| id.as_str().to_string())
+                    .collect(),
+            }))
     }
 
-    /// The `replaceMailboxes` command that restores the message's current mailbox
-    /// membership. `None` when the message can't be read, in which case the
-    /// mutation is treated as non-invertible.
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    async fn mailbox_inverse(
+    /// The invertible change-diff a confirmed mutation produced, from a
+    /// before/after read of the message's fold state. `None` when the before or
+    /// after state is unavailable (the message is not held). An empty diff (a
+    /// no-op mutation) is returned so the caller can skip recording it.
+    async fn capture_diff(
         &self,
         source_id: &str,
         message_id: &str,
-    ) -> Result<Option<MutationCommand>, RuntimeError> {
-        let Some(summary) = self.current_message_summary(source_id, message_id).await? else {
+        before: Option<MessageFoldState>,
+    ) -> Result<Option<MessageChangeDiff>, RuntimeError> {
+        let Some(before) = before else {
             return Ok(None);
         };
-        Ok(Some(MutationCommand {
-            name: "message.replaceMailboxes".to_string(),
-            args: serde_json::json!({
-                "sourceId": source_id,
-                "messageId": message_id,
-                "mailboxIds": summary.mailbox_ids,
-            }),
-        }))
+        let Some(after) = self.read_fold_state(source_id, message_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(MessageChangeDiff::from_before_after(&before, &after)))
     }
 
     fn event_matches_filter(event: &DomainEvent, filter: &EventFilter) -> bool {
@@ -581,11 +536,12 @@ impl AuthorityRuntimeHandle {
         stream.boxed()
     }
 
-    /// Route a single named message mutation to its handle action (which
-    /// enqueues the outbox op, publishes the optimistic assertion, and flushes)
-    /// wrapped in the shared accept -> execute -> settle flow. `record` is true
-    /// for fresh user actions (which capture an inverse onto the undo stack) and
-    /// false for the replays driven by undo/redo.
+    /// Route a single named message mutation through the shared accept → forward
+    /// → settle flow, folding its optimistic assertion into the outbox, and — for
+    /// a diff-eligible user mutation — record the invertible change-diff onto the
+    /// session's undo history once the backend confirms it. `message.applyDiff`
+    /// (undo/redo) goes through [`run_apply_diff`] instead, which wraps this flow
+    /// with history navigation.
     ///
     /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     async fn dispatch_named_mutation(
@@ -593,75 +549,69 @@ impl AuthorityRuntimeHandle {
         caller: RuntimeCaller,
         session_id: RuntimeSessionId,
         request: MutationRequest,
-        record: bool,
     ) -> Result<MutationReceipt, RuntimeError> {
         let session_scope = self
             .core
             .sessions
             .session_scope(&session_id, caller.account_scope.as_deref())?;
-        // Runtime (near-node) concerns: scope enforcement and undo-history
-        // capture, both per mutation. The command application itself is the
-        // backend's; it is forwarded up the link below, uniform across names.
-        let history = match request.name.as_str() {
+        // Runtime (near-node) concern: scope enforcement per mutation. The
+        // command application is the backend's; it is forwarded up the link
+        // below, uniform across names. `diff_eligible` marks mutations whose
+        // change-diff is recorded for undo (destroy is non-invertible; applyDiff
+        // is the undo/redo replay and never records a fresh diff).
+        let (source_id, message_id, diff_eligible) = match request.name.as_str() {
             "message.setKeywords" => {
                 let args: MessageSetKeywordsMutationArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.keyword_history(record, &args.source_id, &args.message_id, &args.command)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.setReadState" => {
                 let args: MessageSetReadStateArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let command = keyword_toggle("$seen", args.read);
-                self.keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.setFlaggedState" => {
                 let args: MessageSetFlaggedStateArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let command = keyword_toggle("$flagged", args.flagged);
-                self.keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.setUserTags" => {
                 let args: MessageSetUserTagsArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                let command = SetKeywordsCommand {
-                    add: args.add,
-                    remove: args.remove,
-                };
-                self.keyword_history(record, &args.source_id, &args.message_id, &command)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.moveToMailbox" => {
                 let args: MessageMoveToMailboxArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.replaceMailboxes" => {
                 let args: MessageReplaceMailboxesArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.moveToRole" => {
                 let args: MessageMoveToRoleArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.archive" | "message.trash" | "message.restoreToInbox" => {
                 let args: MessageTargetArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                self.mailbox_history(record, &args.source_id, &args.message_id)
-                    .await?
+                (args.source_id, args.message_id, true)
             }
             "message.destroy" => {
                 let args: MessageTargetArgs = parse_args(&request)?;
                 Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
                 // Destroy is the one non-invertible message mutation.
-                HistoryRecord::Skip
+                (args.source_id, args.message_id, false)
+            }
+            "message.applyDiff" => {
+                let args: MessageApplyDiffArgs = parse_args(&request)?;
+                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+                // applyDiff is the undo/redo vehicle; its history navigation is
+                // owned by `run_apply_diff`. It never records a fresh diff.
+                (args.source_id, args.message_id, false)
             }
             _ => {
                 return Err(RuntimeError::invalid_mutation(format!(
@@ -669,6 +619,13 @@ impl AuthorityRuntimeHandle {
                     request.name
                 )))
             }
+        };
+        // Before-read for the diff (diff-eligible mutations only). Read before
+        // forwarding so the diff captures the pre-apply state.
+        let before = if diff_eligible {
+            self.read_fold_state(&source_id, &message_id).await?
+        } else {
+            None
         };
         // Accept the mutation into the runtime's outbox toward the backend so
         // recomputed views fold it optimistically while it is in flight; retire
@@ -686,123 +643,77 @@ impl AuthorityRuntimeHandle {
         });
         // Up-channel: forward the named mutation to the backend far node.
         let forward = self.core.backend_link.forward_mutation(request.clone());
-        let result = self
-            .run_message_mutation(caller, &request, history, forward)
-            .await;
+        let result = self.run_message_mutation(caller, &request, forward).await;
         if let Some(id) = optimistic {
             self.core.outbox.retire(&id);
+        }
+        // Record the invertible change-diff once the backend has confirmed, so
+        // undo/redo can replay it. A no-op mutation (empty diff, e.g. adding a
+        // keyword that was already present) is not recorded.
+        if diff_eligible && result.is_ok() {
+            if let Some(diff) = self.capture_diff(&source_id, &message_id, before).await? {
+                if !diff.is_empty() {
+                    self.core
+                        .sessions
+                        .record_diff(&session_id, source_id, message_id, diff)?;
+                }
+            }
         }
         result
     }
 
-    /// History plan for a keyword mutation: capture the inverse when this is a
-    /// fresh user action, otherwise skip (the replay driven by undo/redo).
-    async fn keyword_history(
-        &self,
-        record: bool,
-        source_id: &str,
-        message_id: &str,
-        command: &SetKeywordsCommand,
-    ) -> Result<HistoryRecord, RuntimeError> {
-        if !record {
-            return Ok(HistoryRecord::Skip);
-        }
-        Ok(HistoryRecord::Record(
-            self.keyword_inverse(source_id, message_id, command).await?,
-        ))
-    }
-
-    /// History plan for a mailbox mutation. Skips recording for undo/redo
-    /// replays and when the message can't be read (non-invertible).
-    async fn mailbox_history(
-        &self,
-        record: bool,
-        source_id: &str,
-        message_id: &str,
-    ) -> Result<HistoryRecord, RuntimeError> {
-        if !record {
-            return Ok(HistoryRecord::Skip);
-        }
-        Ok(match self.mailbox_inverse(source_id, message_id).await? {
-            Some(inverse) => HistoryRecord::Record(inverse),
-            None => HistoryRecord::Skip,
-        })
-    }
-
-    /// Reverse the most recent reversible mutation by replaying its captured
-    /// inverse, then make the step redoable. Errors when there is nothing to
-    /// undo.
+    /// Run an undo/redo as an ordinary `message.applyDiff` mutation — its diff is
+    /// folded into the outbox and forwarded like any user action — while
+    /// navigating the runtime-owned diff history around it: the step named by
+    /// `undoOf`/`redoOf` is popped (held) before execution and committed to the
+    /// opposite stack on success, restored on failure (a desktop editor's
+    /// rollback). Execution itself is uniform (outbox + replay guard +
+    /// last-writer-wins); the seq hints are history-bookkeeping only.
     ///
     /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    async fn run_undo(
+    async fn run_apply_diff(
         &self,
         caller: RuntimeCaller,
         session_id: RuntimeSessionId,
         request: MutationRequest,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let Some(entry) = self.core.sessions.pop_undo(&session_id)? else {
-            return Err(RuntimeError::invalid_mutation("nothing to undo"));
+        let args: MessageApplyDiffArgs = parse_args(&request)?;
+        let session_scope = self
+            .core
+            .sessions
+            .session_scope(&session_id, caller.account_scope.as_deref())?;
+        Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
+        // Pop the named step off the runtime's history (hold it across
+        // execution). A stale `undoOf`/`redoOf` (no matching step) still runs the
+        // applyDiff — last-writer-wins — but does not navigate; the next history
+        // frame resyncs the client.
+        let (is_undo, held) = if let Some(seq) = args.undo_of {
+            (true, self.core.sessions.pop_undo_by_seq(&session_id, seq)?)
+        } else if let Some(seq) = args.redo_of {
+            (false, self.core.sessions.pop_redo_by_seq(&session_id, seq)?)
+        } else {
+            (false, None)
         };
-        let replay = MutationRequest {
-            session_id: Some(session_id.clone()),
-            name: entry.inverse.name.clone(),
-            args: entry.inverse.args.clone(),
-            client_mutation_id: request.client_mutation_id,
-            context: request.context,
-        };
-        match self
-            .dispatch_named_mutation(caller, session_id.clone(), replay, false)
-            .await
-        {
-            Ok(receipt) => {
-                self.core.sessions.push_redo(&session_id, entry)?;
-                self.core.sessions.emit_history_frame(&session_id)?;
-                Ok(receipt)
+        let result = self
+            .dispatch_named_mutation(caller, session_id.clone(), request)
+            .await;
+        if let Some(step) = held {
+            // Commit: undo → redo, redo → undo. Restore to the source stack on
+            // failure so the step stays navigable.
+            let push_to_redo = match (is_undo, result.is_ok()) {
+                (true, true) => true,   // undo succeeded: step becomes redoable
+                (true, false) => false, // undo failed: restore to undo
+                (false, true) => false, // redo succeeded: step becomes undoable
+                (false, false) => true, // redo failed: restore to redo
+            };
+            if push_to_redo {
+                self.core.sessions.push_redo(&session_id, step)?;
+            } else {
+                self.core.sessions.push_undo(&session_id, step)?;
             }
-            Err(error) => {
-                // The replay failed before it took effect; keep the step undoable.
-                self.core.sessions.restore_undo(&session_id, entry)?;
-                Err(error)
-            }
+            self.core.sessions.emit_history_frame(&session_id)?;
         }
-    }
-
-    /// Re-apply the most recently undone mutation by replaying its forward
-    /// command, then make it undoable again. Errors when there is nothing to
-    /// redo.
-    ///
-    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
-    async fn run_redo(
-        &self,
-        caller: RuntimeCaller,
-        session_id: RuntimeSessionId,
-        request: MutationRequest,
-    ) -> Result<MutationReceipt, RuntimeError> {
-        let Some(entry) = self.core.sessions.pop_redo(&session_id)? else {
-            return Err(RuntimeError::invalid_mutation("nothing to redo"));
-        };
-        let replay = MutationRequest {
-            session_id: Some(session_id.clone()),
-            name: entry.forward.name.clone(),
-            args: entry.forward.args.clone(),
-            client_mutation_id: request.client_mutation_id,
-            context: request.context,
-        };
-        match self
-            .dispatch_named_mutation(caller, session_id.clone(), replay, false)
-            .await
-        {
-            Ok(receipt) => {
-                self.core.sessions.restore_undo(&session_id, entry)?;
-                self.core.sessions.emit_history_frame(&session_id)?;
-                Ok(receipt)
-            }
-            Err(error) => {
-                // The replay failed before it took effect; keep the step redoable.
-                self.core.sessions.push_redo(&session_id, entry)?;
-                Err(error)
-            }
-        }
+        result
     }
 }
 
@@ -952,10 +863,7 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         _caller: RuntimeCaller,
     ) -> Result<Vec<posthaste_domain::SmartMailboxSummary>, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core
-            .backend_link
-            .reset_default_smart_mailboxes()
-            .await
+        self.core.backend_link.reset_default_smart_mailboxes().await
     }
 
     async fn list_tags(
@@ -1078,15 +986,15 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         let session_id = request.session_id.clone().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        // Undo/redo navigate the session's runtime-owned history stack; every
-        // other mutation is a fresh user action that records onto it.
+        // Undo/redo are ordinary `message.applyDiff` mutations that also navigate
+        // the runtime-owned diff history; every other mutation is a fresh user
+        // action whose change-diff is recorded onto it.
         //
         // @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
         match request.name.as_str() {
-            "mutation.undo" => self.run_undo(caller, session_id, request).await,
-            "mutation.redo" => self.run_redo(caller, session_id, request).await,
+            "message.applyDiff" => self.run_apply_diff(caller, session_id, request).await,
             _ => {
-                self.dispatch_named_mutation(caller, session_id, request, true)
+                self.dispatch_named_mutation(caller, session_id, request)
                     .await
             }
         }
@@ -1123,7 +1031,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         request: SendMessageRequest,
     ) -> Result<(), RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.send_message(account_id, request).await
+        self.core
+            .backend_link
+            .send_message(account_id, request)
+            .await
     }
 
     async fn save_draft(
@@ -1147,7 +1058,10 @@ impl RuntimeCore for AuthorityRuntimeHandle {
         draft_id: MessageId,
     ) -> Result<Operation, RuntimeError> {
         self.ensure_runtime_active()?;
-        self.core.backend_link.delete_draft(account_id, draft_id).await
+        self.core
+            .backend_link
+            .delete_draft(account_id, draft_id)
+            .await
     }
 
     async fn list_pending_operations(

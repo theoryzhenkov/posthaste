@@ -7,7 +7,8 @@
 //! them. They were factored out of `backend.rs` for exactly this reason.
 
 use posthaste_domain::SetKeywordsCommand;
-use posthaste_runtime_contract::{MutationRequest, RuntimeError};
+use posthaste_link_core::MessageChangeDiff;
+use posthaste_runtime_contract::{MutationRequest, RuntimeError, RuntimeSessionSeq};
 use serde::Deserialize;
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by
@@ -92,6 +93,24 @@ pub struct MessageReplaceMailboxesArgs {
 pub struct MessageTargetArgs {
     pub source_id: String,
     pub message_id: String,
+}
+
+/// `message.applyDiff`: apply an invertible change-diff (add/remove keywords +
+/// add/remove mailboxes) to one message. The undo/redo vehicle — undo submits
+/// `inverse(diff)` with `undoOf`, redo submits `diff` with `redoOf`. Execution is
+/// an ordinary optimistic mutation through the outbox + replay guard; the
+/// `undoOf`/`redoOf` seq hints are history-bookkeeping metadata the runtime uses
+/// to navigate its own seq-ordered diff history (they do not gate execution).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageApplyDiffArgs {
+    pub source_id: String,
+    pub message_id: String,
+    pub diff: MessageChangeDiff,
+    #[serde(default)]
+    pub undo_of: Option<RuntimeSessionSeq>,
+    #[serde(default)]
+    pub redo_of: Option<RuntimeSessionSeq>,
 }
 
 pub fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
