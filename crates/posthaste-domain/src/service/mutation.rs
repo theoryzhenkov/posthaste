@@ -1,5 +1,5 @@
 use crate::{
-    AccountId, AddToMailboxCommand, CommandAck, GatewayError, MailboxId, MessageId,
+    AccountId, AddToMailboxCommand, CommandAck, GatewayError, MailboxId, MessageId, Operation,
     OperationEntity, OperationEntityKind, OperationKind, RemoveFromMailboxCommand,
     ReplaceMailboxesCommand, ServiceError, SetKeywordsCommand, StoreError,
     EVENT_TOPIC_MESSAGE_UPDATED,
@@ -60,6 +60,16 @@ impl MailService {
             .message_mailboxes
             .get_message_mailboxes(account_id, message_id)?;
         let operation = self.queue_message_operation(account_id, message_id, kind, payload)?;
+        // Write-through: apply the assertion to the canonical row so SQLite
+        // reflects the optimistic state directly. The read overlay still folds
+        // the same assertion idempotently until S4, so reads are unchanged this
+        // slice. On a local write failure, retract the op (as for an event-
+        // append failure) so the outbox and canonical do not diverge.
+        //
+        // @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+        if let Err(error) = self.apply_assertion_to_canonical(account_id, message_id, &operation) {
+            return Err(self.remove_operation_after_local_failure(&operation, error));
+        }
         let event = match self.events.append_event(
             account_id,
             EVENT_TOPIC_MESSAGE_UPDATED,
@@ -76,6 +86,47 @@ impl MailService {
         Ok(CommandAck {
             events: vec![event],
         })
+    }
+
+    /// Apply a message assertion's effect to the canonical row (optimistic
+    /// write-through), deserializing the operation payload by kind. Reuses the
+    /// `MessageCommandStore` local-write methods.
+    ///
+    /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    fn apply_assertion_to_canonical(
+        &self,
+        account_id: &AccountId,
+        message_id: &MessageId,
+        operation: &Operation,
+    ) -> Result<(), ServiceError> {
+        match operation.kind {
+            OperationKind::SetKeywords => {
+                let command: SetKeywordsCommand =
+                    serde_json::from_value(operation.payload.clone()).map_err(|error| {
+                        ServiceError::from(GatewayError::Rejected(format!(
+                            "invalid setKeywords payload: {error}"
+                        )))
+                    })?;
+                self.message_commands
+                    .set_keywords(account_id, message_id, None, &command)?;
+            }
+            OperationKind::ReplaceMailboxes => {
+                let command: ReplaceMailboxesCommand =
+                    serde_json::from_value(operation.payload.clone()).map_err(|error| {
+                        ServiceError::from(GatewayError::Rejected(format!(
+                            "invalid replaceMailboxes payload: {error}"
+                        )))
+                    })?;
+                self.message_commands
+                    .replace_mailboxes(account_id, message_id, None, &command)?;
+            }
+            OperationKind::Destroy => {
+                self.message_commands
+                    .destroy_message(account_id, message_id, None)?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Add/remove JMAP keywords on a message, local-first.

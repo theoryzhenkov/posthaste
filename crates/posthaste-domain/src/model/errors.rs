@@ -17,6 +17,17 @@ pub enum GatewayError {
     CannotCalculateChanges,
     #[error("gateway rejected the request: {0}")]
     Rejected(String),
+    /// The provider rejected a message mutation, but a `set`+`get` still read the
+    /// message's current (unchanged) state back. The readback drives optimistic
+    /// settlement — writing it reverts the rejected change — while the typed
+    /// error lets the flush surface the failure to the user.
+    ///
+    /// @spec docs/eph/DESIGN-L2-optimistic-projection#3-the-runtime-write-through-mechanics
+    #[error("gateway rejected the mutation: {reason}")]
+    MutationRejected {
+        readback: Box<MessageReadback>,
+        reason: String,
+    },
 }
 
 /// Errors from the local SQLite store.
@@ -110,7 +121,10 @@ impl ServiceError {
             Self::Gateway(GatewayError::CannotCalculateChanges) => {
                 ServiceErrorKind::CannotCalculateChanges
             }
-            Self::Gateway(GatewayError::Rejected(_)) => ServiceErrorKind::GatewayRejected,
+            Self::Gateway(GatewayError::Rejected(_))
+            | Self::Gateway(GatewayError::MutationRejected { .. }) => {
+                ServiceErrorKind::GatewayRejected
+            }
             Self::Secret(SecretStoreError::Unavailable(_)) => ServiceErrorKind::SecretUnavailable,
             Self::Secret(SecretStoreError::Unsupported(_)) => ServiceErrorKind::SecretUnsupported,
             Self::Store(StoreError::NotFound(_)) | Self::Config(ConfigError::NotFound(_)) => {
