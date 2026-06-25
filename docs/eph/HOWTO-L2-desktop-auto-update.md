@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "How the desktop auto-updater works and the one-time signing-key setup required to activate it"
-modified: 2026-06-21
-reviewed: 2026-06-21
+modified: 2026-06-25
+reviewed: 2026-06-25
 lifecycle: ephemeral
 type: HOWTO
 depends:
@@ -12,8 +12,9 @@ depends:
 # Desktop auto-update
 
 The desktop app checks for updates on launch and offers a one-click
-"Install & restart". Updates are served from the GitHub Releases `latest.json`
-manifest and verified against a bundled public key before install.
+"Install & restart". Updates are served from the channel's GitHub Releases
+manifest (`latest.json` for nightly, `latest-stable.json` for stable) and
+verified against a bundled public key before install.
 
 ## How it works
 
@@ -23,25 +24,27 @@ manifest and verified against a bundled public key before install.
   shows a toast with an install action that downloads, installs, and relaunches.
   The browser-localhost build and secondary surface windows are no-ops.
 - **Config**: `apps/desktop/tauri.conf.json` `plugins.updater` holds the public
-  key and the manifest endpoint
-  (`.../releases/latest/download/latest.json`). The matching capability
-  permissions are `updater:default` and `process:allow-restart`.
+  key and a default manifest endpoint
+  (`.../releases/latest/download/latest.json`) for unsupervised local builds.
+  The release workflow overrides the endpoint at build time via `--config` so
+  that nightly artifacts follow the `nightly` rolling tag and stable artifacts
+  follow the `stable` rolling tag.
 - **Release**: the `release.yml` desktop build emits signed updater artifacts
   (`.sig`, plus the macOS `.app.tar.gz`) **only when the signing key is present**
   (`createUpdaterArtifacts` is injected via `--config`, not hardcoded, so
-  releases still build without it). The Linux/Windows builds must **not** pass
-  `tauri build --no-sign`: that flag also skips *updater* signing (the bundler
-  logs `Updater signing is skipped due to --no-sign flag`), which silently drops
-  those platforms from `latest.json`. Code signing is a no-op on Linux/Windows
-  here anyway (no certs configured). The publish job runs
-  `tools/release/generate-updater-manifest.sh` to assemble `latest.json` from the
-  collected `.sig` files and uploads it with the release.
+  releases still build without it). The manifest file is now channel-scoped:
+  `latest.json` for nightly builds and `latest-stable.json` for stable builds.
+  The publish job uses `tools/release/generate-updater-manifest.sh` with the
+  correct output filename and then updates the `nightly` or `stable` rolling tag
+  so each channel has a stable URL. Linux/Windows builds still must not pass
+  `tauri build --no-sign`, because that flag also skips *updater* signing and
+  would silently drop those platforms from the manifest.
 
 ## One-time activation (required)
 
 The public key is committed; the **private** key is the secret. Until the
 secrets below are set, releases build normally but produce no updater artifacts
-and no `latest.json`, so installed apps simply never see an update.
+and no channel manifest, so installed apps simply never see an update.
 
 1. The generated private key lives **outside the repo** at
    `~/.secrets/posthaste-updater.key` on the dev VM (mode 600), and its password
@@ -54,8 +57,10 @@ and no `latest.json`, so installed apps simply never see an update.
      `~/.secrets/posthaste-updater.key.password`.
 3. After adding the secrets, delete the local private-key and password files
    once they are safely stored in GitHub secrets (and a personal backup).
-4. Cut a release as usual. Verify the release contains `latest.json` and the
-   per-platform `.sig` (and macOS `.app.tar.gz`) assets.
+4. Cut a release as usual. Verify the release contains the channel's manifest
+   (`latest.json` for nightly, `latest-stable.json` for stable), the per-platform
+   `.sig` files (and macOS `.app.tar.gz`), and that the channel's rolling tag
+   (`nightly` or `stable`) points to it.
 
 ## Manual check
 
@@ -64,25 +69,33 @@ It reuses the same helpers as the launch check (`src/desktopUpdates.ts`) and
 reports "up to date" explicitly. The launch check is silent unless an update is
 found.
 
-## Channels (single channel for now)
+## Channels
 
-The app ships a **single rolling channel**: the endpoint points at
-`releases/latest/download/latest.json`, and releases are marked `make_latest`,
-so every installed build updates to the newest release.
+Releases are split into two channels by tag pattern:
 
-A stable/beta split is intentionally deferred. Tauri v2 has **no `{{channel}}`
-endpoint variable** (only `{{current_version}}`, `{{target}}`, `{{arch}}`), and
-the JavaScript `check()` cannot switch endpoints at runtime. Proper channels
-therefore require either:
+- **Nightly**: `vX.Y.Z-dogfood.N` or any `vX.Y.Z-nightly.*`. These builds include
+  the `devtools` feature, can fall back to ad-hoc macOS signing when opted in,
+  and write `latest.json`.
+- **Stable**: `vX.Y.Z-beta.N`, `vX.Y.Z-rc.N`, or plain `vX.Y.Z`. These builds
+  omit `devtools`, require Developer ID + notarization on macOS, and write
+  `latest-stable.json`.
 
-- a Rust command that builds `app.updater_builder().endpoints([channel_url])`
-  per the user's channel setting and drives check/download/install from Rust, or
-- per-channel manifests hosted at stable URLs (e.g. a fixed `updater`-tagged
-  release whose `stable.json` / `beta.json` assets CI clobbers each build, or
-  manifests served from `posthaste.theor.net`), since GitHub's `/latest/` only
-  resolves to non-prerelease releases.
+The app gets its endpoint at compile time, so a single artifact cannot switch
+channels. GitHub's `releases/latest/download/` URL is intentionally avoided:
+instead, CI maintains lightweight `nightly` and `stable` tags that always point
+at the latest release in each channel. The static asset URLs are:
 
-Add this once the base updater is proven in a release.
+```text
+nightly: https://github.com/theoryzhenkov/posthaste/releases/download/nightly/latest.json
+stable:  https://github.com/theoryzhenkov/posthaste/releases/download/stable/latest-stable.json
+```
+
+Only stable releases are marked `make_latest` on GitHub, so the public releases
+page highlights the stable channel while the rolling tags keep updater traffic
+separated.
+
+See `docs/eph/DESIGN-L2-release-channels.md` for the full channel design,
+version mapping, and the workflow shape.
 
 ## Scope and limitations
 
