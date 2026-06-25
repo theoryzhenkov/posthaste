@@ -226,7 +226,10 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1", state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
         assert!(replica.has_pending());
     }
 
@@ -244,7 +247,10 @@ mod tests {
         let result = replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         assert!(result.retired && !result.reverted);
         assert!(!replica.has_pending());
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
     }
 
     #[test]
@@ -259,7 +265,10 @@ mod tests {
             MessageBaseUpdate::Present(state(&["$flagged"], &["inbox"])),
         )]);
         assert!(replica.has_pending());
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
     }
 
     #[test]
@@ -272,7 +281,10 @@ mod tests {
             MessageBaseUpdate::Present(state(&[], &["inbox"])),
         )]);
         assert!(replica.has_pending());
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
     }
 
     #[test]
@@ -293,7 +305,10 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1", state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
         let result = replica.settle(&MutationId("op1".into()), SettlementOutcome::Failed);
         assert!(result.retired && result.reverted);
         assert!(present(&replica, "m1").keywords.is_empty());
@@ -336,7 +351,10 @@ mod tests {
         ]);
         // Pending survived and re-folds over the new base.
         assert!(replica.has_pending());
-        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+        assert_eq!(
+            present(&replica, "m1").keywords,
+            vec!["$flagged".to_string()]
+        );
         assert_eq!(present(&replica, "m2").keywords, Vec::<String>::new());
     }
 

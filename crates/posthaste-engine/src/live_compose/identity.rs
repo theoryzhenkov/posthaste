@@ -74,9 +74,10 @@ pub(crate) fn resolve_draft_sender(
     let Some(requested_from) = requested_from else {
         // No requested sender: fall back to the provider's default identity,
         // which is the only source of an address in this case.
-        return identities.into_iter().next_back().ok_or_else(|| {
-            GatewayError::Rejected("no identity available".to_string())
-        });
+        return identities
+            .into_iter()
+            .next_back()
+            .ok_or_else(|| GatewayError::Rejected("no identity available".to_string()));
     };
     let requested_email = requested_from.email.trim();
     if requested_email.is_empty() {

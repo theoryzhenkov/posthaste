@@ -131,7 +131,6 @@ pub async fn delete_draft(
         .map_err(ApiError::from_runtime_error)
 }
 
-
 pub(crate) fn validate_send_message_request(request: &SendMessageRequest) -> Result<(), ApiError> {
     if request.from.as_ref().is_some_and(recipient_email_is_empty) {
         return Err(ApiError::new(

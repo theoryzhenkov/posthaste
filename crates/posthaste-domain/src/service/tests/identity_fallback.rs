@@ -37,8 +37,5 @@ async fn fetch_identity_propagates_error_without_a_configured_address() {
     let service = MailService::new(Arc::new(TestStore::default()), config);
     let gateway = MutationGateway::with_revision(1);
 
-    assert!(service
-        .fetch_identity(&account_id, &gateway)
-        .await
-        .is_err());
+    assert!(service.fetch_identity(&account_id, &gateway).await.is_err());
 }

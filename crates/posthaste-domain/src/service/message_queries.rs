@@ -34,7 +34,14 @@ impl MailService {
         // Indexed SQL seek pagination over canonical (optimism written through,
         // S2) — was list_messages + in-memory sort + skip/take.
         self.message_lister
-            .list_message_page(account_id, mailbox_id, limit, cursor, sort_field, sort_direction)
+            .list_message_page(
+                account_id,
+                mailbox_id,
+                limit,
+                cursor,
+                sort_field,
+                sort_direction,
+            )
             .map_err(ServiceError::from)
     }
 

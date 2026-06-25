@@ -23,24 +23,27 @@ pub(crate) fn query_message_detail_tx(
     let detail = statement
         .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
             let draft_id: Option<String> = row.get(14)?;
-            Ok((draft_id, MessageSummary {
-                id: MessageId(row.get(0)?),
-                source_id: AccountId(row.get(1)?),
-                source_name: row.get(2)?,
-                source_thread_id: ThreadId(row.get(3)?),
-                conversation_id: ConversationId(row.get(4)?),
-                subject: row.get(5)?,
-                from_name: row.get(6)?,
-                from_email: row.get(7)?,
-                to: parse_recipients_json(row.get(8)?)?,
-                preview: row.get(9)?,
-                received_at: row.get(10)?,
-                has_attachment: row.get::<_, i64>(11)? != 0,
-                is_read: row.get::<_, i64>(12)? != 0,
-                is_flagged: row.get::<_, i64>(13)? != 0,
-                mailbox_ids: Vec::new(),
-                keywords: Vec::new(),
-            }))
+            Ok((
+                draft_id,
+                MessageSummary {
+                    id: MessageId(row.get(0)?),
+                    source_id: AccountId(row.get(1)?),
+                    source_name: row.get(2)?,
+                    source_thread_id: ThreadId(row.get(3)?),
+                    conversation_id: ConversationId(row.get(4)?),
+                    subject: row.get(5)?,
+                    from_name: row.get(6)?,
+                    from_email: row.get(7)?,
+                    to: parse_recipients_json(row.get(8)?)?,
+                    preview: row.get(9)?,
+                    received_at: row.get(10)?,
+                    has_attachment: row.get::<_, i64>(11)? != 0,
+                    is_read: row.get::<_, i64>(12)? != 0,
+                    is_flagged: row.get::<_, i64>(13)? != 0,
+                    mailbox_ids: Vec::new(),
+                    keywords: Vec::new(),
+                },
+            ))
         })
         .optional()
         .map_err(sql_to_store_error)?;

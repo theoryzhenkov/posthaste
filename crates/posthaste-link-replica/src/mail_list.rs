@@ -51,25 +51,37 @@ impl MailListReplica {
         // the window leave the base — but keep the pending outbox so unconfirmed
         // optimism re-folds over the new base (it retires only on settlement).
         // (Resetting the engine here would silently drop pending intent.)
-        self.engine.replace_base(
-            rows.iter()
-                .map(|row| (row.message_id.clone(), fold_state_from_projection(&row.projection))),
-        );
+        self.engine.replace_base(rows.iter().map(|row| {
+            (
+                row.message_id.clone(),
+                fold_state_from_projection(&row.projection),
+            )
+        }));
         self.rows = rows;
     }
 
     /// Accept an optimistic message mutation into the outbox (idempotent on
     /// mutation id).
-    pub fn accept(&mut self, mutation_id: MutationId, message_id: String, assertion: MessageAssertion) {
-        self.engine.accept(posthaste_link_core::PendingMessageMutation {
-            id: mutation_id,
-            message_id,
-            assertion,
-        });
+    pub fn accept(
+        &mut self,
+        mutation_id: MutationId,
+        message_id: String,
+        assertion: MessageAssertion,
+    ) {
+        self.engine
+            .accept(posthaste_link_core::PendingMessageMutation {
+                id: mutation_id,
+                message_id,
+                assertion,
+            });
     }
 
     /// Settle a pending mutation by its terminal outcome (`Confirmed`/`Failed`).
-    pub fn settle(&mut self, mutation_id: &MutationId, outcome: SettlementOutcome) -> SettlementResult {
+    pub fn settle(
+        &mut self,
+        mutation_id: &MutationId,
+        outcome: SettlementOutcome,
+    ) -> SettlementResult {
         self.engine.settle(mutation_id, outcome)
     }
 
@@ -243,8 +255,15 @@ mod tests {
     #[test]
     fn optimistic_destroy_drops_the_row_unconditionally() {
         let mut replica = MailListReplica::new();
-        replica.ingest(vec![row("m1", &[], &["inbox"], "A"), row("m2", &[], &["inbox"], "B")]);
-        replica.accept(MutationId("op1".into()), "m1".into(), MessageAssertion::Destroy);
+        replica.ingest(vec![
+            row("m1", &[], &["inbox"], "A"),
+            row("m2", &[], &["inbox"], "B"),
+        ]);
+        replica.accept(
+            MutationId("op1".into()),
+            "m1".into(),
+            MessageAssertion::Destroy,
+        );
         assert_eq!(ids(&replica.project_all()), vec!["m2"]);
     }
 
@@ -272,10 +291,14 @@ mod tests {
     fn confirmation_retires_pending_then_base_carries_it() {
         let mut replica = MailListReplica::new();
         replica.ingest(vec![row("m1", &[], &["inbox"], "A")]);
-        replica.accept(MutationId("op1".into()), "m1".into(), MessageAssertion::SetKeywords {
-            add: vec!["$flagged".into()],
-            remove: vec![],
-        });
+        replica.accept(
+            MutationId("op1".into()),
+            "m1".into(),
+            MessageAssertion::SetKeywords {
+                add: vec!["$flagged".into()],
+                remove: vec![],
+            },
+        );
         // Runtime applies it and re-serves the base with the flag, then settles.
         replica.ingest(vec![row("m1", &["$flagged"], &["inbox"], "A")]);
         replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
@@ -298,7 +321,10 @@ mod tests {
     #[test]
     fn ingest_replaces_the_base_and_drops_windowed_out_rows() {
         let mut replica = MailListReplica::new();
-        replica.ingest(vec![row("m1", &[], &["inbox"], "A"), row("m2", &[], &["inbox"], "B")]);
+        replica.ingest(vec![
+            row("m1", &[], &["inbox"], "A"),
+            row("m2", &[], &["inbox"], "B"),
+        ]);
         // A later served base no longer includes m1 (scrolled/refiltered).
         replica.ingest(vec![row("m2", &[], &["inbox"], "B")]);
         assert_eq!(ids(&replica.project_all()), vec!["m2"]);
