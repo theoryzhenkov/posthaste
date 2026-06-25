@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use posthaste_bench::workloads;
+use posthaste_bench::{runtime_workload, workloads};
 
 // dhat hooks the global allocator. With no active `dhat::Profiler` the overhead
 // is negligible, so leaving it installed for the CPU phase is acceptable.
@@ -62,6 +62,27 @@ fn main() -> Result<()> {
     let session = workloads::open_seeded(count);
     profile("session_loop", &out, &mut || {
         workloads::session_loop(&session, workloads::DEFAULT_SESSION_ROUNDS);
+    })?;
+
+    // Runtime-tier workload: the full co-located mutation -> view-recompute ->
+    // frame path through the authority runtime, not just the store. Driven on a
+    // CURRENT-THREAD tokio runtime so pprof samples one thread and the
+    // flamegraph is coherent (a multi-thread runtime would scatter the work
+    // across workers). The runtime's background tasks run cooperatively inside
+    // each `block_on`, so the recompute lands on the profiled thread.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build current-thread tokio runtime")?;
+    let mut inbox = rt
+        .block_on(runtime_workload::open_runtime_inbox(count))
+        .context("open runtime inbox fixture")?;
+    let counter = std::cell::Cell::new(0usize);
+    profile("runtime_mutation_view", &out, &mut || {
+        let i = counter.get();
+        counter.set(i + 1);
+        rt.block_on(runtime_workload::mutate_and_await_view(&mut inbox, i))
+            .expect("runtime mutation view workload");
     })?;
 
     Ok(())

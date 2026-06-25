@@ -22,10 +22,17 @@ path = "src/main.rs"
 [dependencies]
 posthaste-domain = { path = "../posthaste-domain" }
 posthaste-store = { path = "../posthaste-store" }
+# Runtime-tier workload: drive the full mutation -> view-recompute -> frame path
+# (not just the store), so the harness can profile the link-bus hot path.
+posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 anyhow = "1"
 pprof = { version = "0.15", features = ["flamegraph", "protobuf-codec"] }
 dhat = "0.3"
 tempfile = "3"
+tokio = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
