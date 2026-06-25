@@ -19,6 +19,12 @@ pub(super) struct MutationGateway {
     /// Results returned by `set_keywords`, popped front-first; empty falls back
     /// to the revision-based success path.
     pub(super) set_keywords_results: Mutex<Vec<Result<MutationOutcome, GatewayError>>>,
+    /// Readbacks attached to each accepted message mutation's `MutationOutcome`,
+    /// popped front-first (the `get` of set+get). Empty => `message: None`.
+    pub(super) readbacks: Mutex<Vec<crate::MessageReadback>>,
+    /// When set, the next message mutation is rejected: returns
+    /// `Err(MutationRejected { readback, reason })` so the flush reverts + surfaces.
+    pub(super) reject_next: Mutex<Option<(crate::MessageReadback, String)>>,
 }
 
 impl MutationGateway {
@@ -44,40 +50,37 @@ impl MutationGateway {
             delete_draft_calls: Mutex::new(Vec::new()),
             send_calls: Mutex::new(Vec::new()),
             set_keywords_results: Mutex::new(Vec::new()),
+            readbacks: Mutex::new(Vec::new()),
+            reject_next: Mutex::new(None),
         }
     }
 
     pub(super) fn with_sync_batch(revision: u64, batch: SyncBatch) -> Self {
         Self {
-            revision: Mutex::new(revision),
             batch: Some(batch),
-            stream: None,
-            fetch_body_result: Mutex::new(None),
-            fetch_attempts: Mutex::new(Vec::new()),
-            save_draft_results: Mutex::new(Vec::new()),
-            save_draft_calls: Mutex::new(Vec::new()),
-            delete_draft_calls: Mutex::new(Vec::new()),
-            send_calls: Mutex::new(Vec::new()),
-            set_keywords_results: Mutex::new(Vec::new()),
+            ..Self::with_revision(revision)
         }
     }
 
     pub(super) fn with_fetch_body_result(result: Result<FetchedBody, GatewayError>) -> Self {
         Self {
-            revision: Mutex::new(1),
-            batch: None,
-            stream: None,
             fetch_body_result: Mutex::new(Some(result)),
-            fetch_attempts: Mutex::new(Vec::new()),
-            save_draft_results: Mutex::new(Vec::new()),
-            save_draft_calls: Mutex::new(Vec::new()),
-            delete_draft_calls: Mutex::new(Vec::new()),
-            send_calls: Mutex::new(Vec::new()),
-            set_keywords_results: Mutex::new(Vec::new()),
+            ..Self::with_revision(1)
         }
     }
 
     fn apply(&self, expected_state: Option<&str>) -> Result<MutationOutcome, GatewayError> {
+        if let Some((readback, reason)) = self
+            .reject_next
+            .lock()
+            .expect("reject_next lock poisoned")
+            .take()
+        {
+            return Err(GatewayError::MutationRejected {
+                readback: Box::new(readback),
+                reason,
+            });
+        }
         let mut revision = self.revision.lock().expect("revision lock poisoned");
         if let Some(expected_state) = expected_state {
             let current = format!("message-{}", *revision);
@@ -86,13 +89,15 @@ impl MutationGateway {
             }
         }
         *revision += 1;
+        let mut readbacks = self.readbacks.lock().expect("readbacks lock poisoned");
+        let message = (!readbacks.is_empty()).then(|| readbacks.remove(0));
         Ok(MutationOutcome {
             cursor: Some(SyncCursor {
                 object_type: SyncObject::Message,
                 state: format!("message-{}", *revision),
                 updated_at: crate::RFC3339_EPOCH.to_string(),
             }),
-            message: None,
+            message,
         })
     }
 }
