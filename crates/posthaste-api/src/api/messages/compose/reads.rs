@@ -123,4 +123,3 @@ pub async fn get_draft_content(
         .map(Json)
         .map_err(ApiError::from_runtime_error)
 }
-

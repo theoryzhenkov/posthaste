@@ -57,8 +57,11 @@ impl MailListReplicaHandle {
     pub fn accept_json(&mut self, accept_json: &str) -> Result<(), JsError> {
         let args: AcceptArgs =
             serde_json::from_str(accept_json).map_err(|error| JsError::new(&error.to_string()))?;
-        self.inner
-            .accept(MutationId(args.mutation_id), args.message_id, args.assertion);
+        self.inner.accept(
+            MutationId(args.mutation_id),
+            args.message_id,
+            args.assertion,
+        );
         Ok(())
     }
 
@@ -70,7 +73,11 @@ impl MailListReplicaHandle {
         let outcome = match outcome {
             "confirmed" => SettlementOutcome::Confirmed,
             "failed" => SettlementOutcome::Failed,
-            other => return Err(JsError::new(&format!("unknown settlement outcome: {other}"))),
+            other => {
+                return Err(JsError::new(&format!(
+                    "unknown settlement outcome: {other}"
+                )))
+            }
         };
         Ok(self
             .inner

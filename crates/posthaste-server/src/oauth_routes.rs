@@ -18,8 +18,8 @@ use posthaste_runtime_contract::{RuntimeCaller, RuntimeCore, RuntimeError};
 
 use axum::http::StatusCode;
 use posthaste_api::api::{
-    ApiError, ApiErrorBody, ApiErrorCode, OAuthCallbackQuery, StartOAuthRequest, StartOAuthResponse,
-    StartProviderOAuthRequest,
+    ApiError, ApiErrorBody, ApiErrorCode, OAuthCallbackQuery, StartOAuthRequest,
+    StartOAuthResponse, StartProviderOAuthRequest,
 };
 use posthaste_api::AppState;
 use posthaste_authority_runtime::oauth::{

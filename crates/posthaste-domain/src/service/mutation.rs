@@ -101,8 +101,8 @@ impl MailService {
     ) -> Result<(), ServiceError> {
         match operation.kind {
             OperationKind::SetKeywords => {
-                let command: SetKeywordsCommand =
-                    serde_json::from_value(operation.payload.clone()).map_err(|error| {
+                let command: SetKeywordsCommand = serde_json::from_value(operation.payload.clone())
+                    .map_err(|error| {
                         ServiceError::from(GatewayError::Rejected(format!(
                             "invalid setKeywords payload: {error}"
                         )))

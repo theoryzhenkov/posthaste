@@ -57,9 +57,16 @@ impl MailService {
         else {
             return Ok(None);
         };
-        let name = account.full_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(
-            || email.split('@').next().unwrap_or(email.as_str()).to_string(),
-        );
+        let name = account
+            .full_name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| {
+                email
+                    .split('@')
+                    .next()
+                    .unwrap_or(email.as_str())
+                    .to_string()
+            });
         Ok(Some(Identity {
             id: format!("config:{}", account_id.as_str()),
             name,

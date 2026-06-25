@@ -50,7 +50,9 @@ export interface DiffStep {
 }
 
 /** Swap added↔removed for both facets — the diff that reverses this one. */
-export function invertMessageChangeDiff(diff: MessageChangeDiff): MessageChangeDiff {
+export function invertMessageChangeDiff(
+  diff: MessageChangeDiff,
+): MessageChangeDiff {
   const invert = (delta: KeywordDelta): KeywordDelta => ({
     added: delta.removed,
     removed: delta.added,

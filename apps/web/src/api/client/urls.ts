@@ -68,4 +68,3 @@ export function buildViewStreamUrl(input: {
   const search = params.toString()
   return `${baseUrl()}/views/${encodeURIComponent(input.viewId)}/stream${search ? `?${search}` : ''}`
 }
-

@@ -506,8 +506,15 @@ async fn keyword_mutation_writes_through_to_projection() {
         .await
         .expect("keyword assertion queues");
 
-    let adds = store.keyword_adds.lock().expect("keyword adds lock poisoned");
-    assert_eq!(adds.len(), 1, "the keyword assertion writes through to canonical");
+    let adds = store
+        .keyword_adds
+        .lock()
+        .expect("keyword adds lock poisoned");
+    assert_eq!(
+        adds.len(),
+        1,
+        "the keyword assertion writes through to canonical"
+    );
     assert!(adds[0].1.iter().any(|keyword| keyword == "$flagged"));
 }
 
@@ -602,12 +609,10 @@ async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
     // The flag's readback: the provider applied the flag but not (yet) the archive.
     let mut readback = sample_message_record("message-1", 0, false);
     readback.keywords = vec!["$flagged".to_string()];
-    let projected = super::super::message_queries::project_record(
-        readback,
-        std::slice::from_ref(&archive_op),
-    )
-    .expect("project_record succeeds")
-    .expect("the message is still present");
+    let projected =
+        super::super::message_queries::project_record(readback, std::slice::from_ref(&archive_op))
+            .expect("project_record succeeds")
+            .expect("the message is still present");
 
     assert_eq!(
         projected.mailbox_ids,
@@ -615,7 +620,10 @@ async fn settle_folds_remaining_unsettled_ops_over_the_readback() {
         "the still-unsettled archive op is preserved when the flag settles",
     );
     assert!(
-        projected.keywords.iter().any(|keyword| keyword == "$flagged"),
+        projected
+            .keywords
+            .iter()
+            .any(|keyword| keyword == "$flagged"),
         "the settled flag is carried in the readback base",
     );
 }
@@ -630,7 +638,10 @@ async fn rejected_mutation_reverts_canonical_and_settles_failed() {
     let service = MailService::new(store.clone(), Arc::new(TestConfig::default()));
     let gateway = MutationGateway::with_revision(1);
     let unchanged = sample_message_record("message-1", 0, false); // mailbox_ids = [inbox]
-    *gateway.reject_next.lock().expect("reject_next lock poisoned") = Some((
+    *gateway
+        .reject_next
+        .lock()
+        .expect("reject_next lock poisoned") = Some((
         crate::MessageReadback::Present(unchanged),
         "permission denied".to_string(),
     ));

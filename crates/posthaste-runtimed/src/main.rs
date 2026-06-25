@@ -14,7 +14,9 @@ use std::time::Duration;
 use posthaste_api::{
     build_api_router, build_app_state, logging, resolve_roots, serve, ServeOptions, ServerConfig,
 };
-use posthaste_runtime::{build_remote_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig};
+use posthaste_runtime::{
+    build_remote_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig,
+};
 
 #[tokio::main]
 async fn main() {
@@ -43,7 +45,13 @@ async fn main() {
     let build = build_remote_runtime(build_config).expect("failed to build remote runtime");
 
     let server_config = ServerConfig::default();
-    let state = build_app_state(build.handle, &build.secret_store, &roots, &daemon, &server_config);
+    let state = build_app_state(
+        build.handle,
+        &build.secret_store,
+        &roots,
+        &daemon,
+        &server_config,
+    );
 
     let mut cors_origins = vec![daemon.cors_origin.clone()];
     cors_origins.extend(server_config.extra_cors_origins.iter().cloned());

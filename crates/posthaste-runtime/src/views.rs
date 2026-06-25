@@ -19,7 +19,6 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
 
-
 /// The parsed, family-specific identity of a runtime view. The registry is
 /// generic over families: each carries what `build_snapshot` and the event
 /// pump need, so adding a family is a new variant rather than new registry

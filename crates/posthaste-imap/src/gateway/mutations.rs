@@ -37,7 +37,10 @@ pub(crate) async fn replace_message_mailboxes(
         .await
         .map_err(imap_error_to_gateway)?;
 
-        return Ok(MutationOutcome { cursor: None, message: None });
+        return Ok(MutationOutcome {
+            cursor: None,
+            message: None,
+        });
     }
 
     let source_location = locations.first().cloned().ok_or_else(|| {
@@ -73,7 +76,10 @@ pub(crate) async fn replace_message_mailboxes(
             .map_err(imap_error_to_gateway)?;
     }
 
-    Ok(MutationOutcome { cursor: None, message: None })
+    Ok(MutationOutcome {
+        cursor: None,
+        message: None,
+    })
 }
 
 pub(crate) async fn destroy_message_by_imap(
@@ -104,5 +110,8 @@ pub(crate) async fn destroy_message_by_imap(
         }
     }
 
-    Ok(MutationOutcome { cursor: None, message: None })
+    Ok(MutationOutcome {
+        cursor: None,
+        message: None,
+    })
 }

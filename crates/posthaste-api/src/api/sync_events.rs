@@ -62,4 +62,3 @@ pub async fn trigger_sync(
         mode: mode.as_str().to_string(),
     }))
 }
-

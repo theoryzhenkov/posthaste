@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use posthaste_domain::{
     AccountId, BlobId, FetchedBody, GatewayError, Identity, MailGateway, MailboxId, MailboxRecord,
     MessageId, MessageReadback, MessageRecord, MutationOutcome, PushTransport, Recipient,
-    ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject, ThreadId,
+    ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
+    ThreadId,
 };
 
 mod samples;
