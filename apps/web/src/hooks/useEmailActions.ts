@@ -5,8 +5,9 @@
  * Each method submits a runtime named mutation directly. The renderer keeps no
  * optimistic overlay or undo history of its own: the runtime applies the
  * mutation, the optimistic/authoritative state flows back through view frames
- * and domain-event cache updates, and undo is the runtime-owned `mutation.undo`
- * stack (so a move toast's "Undo" reverses the last action).
+ * and domain-event cache updates, and undo is the runtime-owned
+ * `message.applyDiff` stack (so a move toast's "Undo" reverses the latest
+ * reversible action via the supplied {@link undo} callback).
  *
  * @spec docs/L1-ui#data-fetching
  * @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
@@ -28,7 +29,6 @@ import {
 } from '../domainVocabulary'
 import { deriveKeywordState, mailKeys, type MailSelection } from '../mailState'
 import { runtimeMutations } from '../runtime/mutations'
-import { runtimeSessionClient } from '../runtime/sessionClient'
 
 /** Message reference augmented with optional keyword fields for state derivation. */
 type ReadToggleTarget = MailSelection &
@@ -121,22 +121,15 @@ function uniqueUserTags(tags: string[]): string[] {
   return unique
 }
 
-/** Reverse the most recent action through the runtime's undo stack. */
-function undoLastRuntimeMutation(sourceId: string) {
-  void runtimeSessionClient
-    .runMutation({ name: 'mutation.undo', args: {}, sourceId })
-    .catch(() => {})
-}
-
 /**
  * Provides email action methods backed by runtime named mutations. Keyword
  * changes (`toggleRead`, `markRead`, `toggleFlag`, `setUserTags`) run silently;
  * moves (`archive`, `trash`, `moveToInbox`) toast with an Undo that calls the
- * runtime undo; `deletePermanently` is irreversible (no Undo).
+ * supplied {@link undo} callback; `deletePermanently` is irreversible (no Undo).
  *
  * @spec docs/L1-ui#data-fetching
  */
-export function useEmailActions() {
+export function useEmailActions({ undo }: { undo: () => void }) {
   const queryClient = useQueryClient()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const pendingRef = useRef(0)
@@ -169,7 +162,7 @@ export function useEmailActions() {
               ? {
                   action: {
                     label: 'Undo',
-                    onClick: () => undoLastRuntimeMutation(input.undoSourceId!),
+                    onClick: () => undo(),
                   },
                   duration: 5000,
                 }
@@ -183,7 +176,7 @@ export function useEmailActions() {
         })
         .finally(() => setPending(-1))
     },
-    [setPending],
+    [setPending, undo],
   )
 
   const moveToRole = useCallback(

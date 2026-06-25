@@ -69,6 +69,20 @@ class FakeHandle implements ReplicaHandle {
           )
         } else if (op.assertion.kind === 'replaceMailboxes') {
           mailboxIds = [...op.assertion.mailboxIds]
+        } else if (op.assertion.kind === 'applyDiff') {
+          const diff = op.assertion.diff
+          keywords = keywords.filter(
+            (k) => !diff.keywords.removed.includes(k),
+          )
+          keywords.push(
+            ...diff.keywords.added.filter((k) => !keywords.includes(k)),
+          )
+          mailboxIds = mailboxIds.filter(
+            (m) => !diff.mailboxes.removed.includes(m),
+          )
+          mailboxIds.push(
+            ...diff.mailboxes.added.filter((m) => !mailboxIds.includes(m)),
+          )
         } else {
           destroyed = true
         }
@@ -419,6 +433,33 @@ describe('replicaAdapter', () => {
     })
 
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+  })
+
+  it('folds a message.applyDiff assertion optimistically and forwards it through the outbox', async () => {
+    const { adapter, outbox, frames, harness } = build()
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+
+    const diff = {
+      keywords: { added: ['$flagged'], removed: [] },
+      mailboxes: { added: [], removed: [] },
+    }
+    const receipt = await adapter.runRuntimeMutation({
+      sessionId: 'sess',
+      name: 'message.applyDiff',
+      args: {
+        sourceId: 's',
+        messageId: 'm1',
+        diff,
+      },
+      clientMutationId: 'c1',
+    })
+
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect(harness.mutations.map((m) => m.clientMutationId)).toEqual(['c1'])
+    expect(receipt.clientMutationId).toBe('c1')
+    const records = await outbox.all()
+    expect(records).toHaveLength(1)
+    expect(records[0]?.runtimeMutationId).toBe('r-1')
   })
 
   it('forwards unrelated frames unchanged (parity)', async () => {
