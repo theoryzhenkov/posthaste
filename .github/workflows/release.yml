@@ -33,6 +33,7 @@ jobs:
     outputs:
       POSTHASTE_RELEASE_CHANNEL: ${{ steps.resolve.outputs.POSTHASTE_RELEASE_CHANNEL }}
       POSTHASTE_BUNDLE_VERSION: ${{ steps.resolve.outputs.POSTHASTE_BUNDLE_VERSION }}
+      POSTHASTE_PRERELEASE: ${{ steps.resolve.outputs.POSTHASTE_PRERELEASE }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,7 +204,7 @@ jobs:
             patchelf \
             wget
 
-      # Reflect the release tag in the installed app version. Dogfood/beta/rc
+      # Reflect the release tag in the installed app version. Nightly/rc
       # tags are rewritten to a valid 3-integer macOS CFBundleShortVersionString;
       # plain stable tags pass through unchanged. The helper is shared with the
       # updater manifest generator so the two never diverge.
@@ -424,6 +425,7 @@ jobs:
       id-token: write
     env:
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+      POSTHASTE_PRERELEASE: ${{ needs.resolve-channel.outputs.POSTHASTE_PRERELEASE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -469,7 +471,7 @@ jobs:
         shell: bash
         run: |
           cat > release-assets/MACOS-INSTALL.txt <<'RELEASE_EOF'
-          macOS dogfood builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
+          macOS nightly builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
           Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
           RELEASE_EOF
 
@@ -493,7 +495,7 @@ jobs:
           mv "$checksums" SHA256SUMS
 
       # Supply-chain steps are best-effort: a Sigstore/Rekor outage (e.g. the
-      # "tlog entry 404" failure) must not block publishing dogfood installers.
+      # "tlog entry 404" failure) must not block publishing nightly installers.
       # The GPG detached signatures + SHA256SUMS below still provide integrity.
       - name: Attest release artifacts
         uses: actions/attest@v4
@@ -558,7 +560,8 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          make_latest: ${{ env.POSTHASTE_IS_STABLE == 'true' }}
+          make_latest: ${{ env.POSTHASTE_IS_STABLE == 'true' && env.POSTHASTE_PRERELEASE == 'false' }}
+          prerelease: ${{ env.POSTHASTE_PRERELEASE == 'true' }}
           fail_on_unmatched_files: true
           files: release-assets/*
 

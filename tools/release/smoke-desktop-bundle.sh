@@ -34,7 +34,7 @@ linux_smoke() {
   cleanup_extract() { rm -rf "$extract_dir"; }
   trap cleanup_extract EXIT
 
-  (cd "$extract_dir" && "$appimage" --appimage-extract >/dev/null) || \
+  (cd "$extract_dir" && "$(realpath "$appimage")" --appimage-extract >/dev/null) || \
     fail "AppImage extraction failed"
 
   local bin
