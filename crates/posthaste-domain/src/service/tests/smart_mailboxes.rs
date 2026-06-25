@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn list_smart_mailboxes_propagates_store_count_errors() {
-    // Counts now fold lazily over the message read, so a failing message read
-    // must still surface (not be swallowed) from the count computation.
+    // Counts come from the store's indexed count query (S4), so a failing count
+    // read must still surface (not be swallowed) from list_smart_mailboxes.
     let store = Arc::new(TestStore {
-        messages_error: Some("messages failed".to_string()),
+        smart_mailbox_counts_error: Some("counts failed".to_string()),
         ..Default::default()
     });
     let config = Arc::new(TestConfig {

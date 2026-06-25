@@ -1,19 +1,9 @@
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use mail_parser::{Address, MessageParser};
 use posthaste_link_core::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
 
 use super::*;
-
-/// Overlay-induced change to a single mailbox's `(unread, total)` counts.
-///
-/// @spec docs/L1-outbox#overlay-fold
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct MailboxCountDelta {
-    pub(crate) unread: i64,
-    pub(crate) total: i64,
-}
 
 impl MailService {
     /// List messages, optionally filtered by mailbox.
@@ -22,11 +12,11 @@ impl MailService {
         account_id: &AccountId,
         mailbox_id: Option<&MailboxId>,
     ) -> Result<Vec<MessageSummary>, ServiceError> {
-        let summaries = self
-            .message_lister
-            .list_messages(account_id, None)
-            .map_err(ServiceError::from)?;
-        self.fold_message_overlay(account_id, summaries, mailbox_id)
+        // Indexed SQL over canonical (optimism written through, S2); the mailbox
+        // filter runs in SQL, no read-time overlay fold.
+        self.message_lister
+            .list_messages(account_id, mailbox_id)
+            .map_err(ServiceError::from)
     }
 
     /// Paginated message list with seek-based cursors.
@@ -41,32 +31,11 @@ impl MailService {
         sort_field: MessageSortField,
         sort_direction: SortDirection,
     ) -> Result<MessagePage, ServiceError> {
-        let mut items = self.list_messages(account_id, mailbox_id)?;
-        sort_message_summaries(&mut items, sort_field, sort_direction);
-        let start = cursor
-            .and_then(|cursor| {
-                items.iter().position(|item| {
-                    item.source_id == cursor.source_id && item.id == cursor.message_id
-                })
-            })
-            .map_or(0, |index| index + 1);
-        let page_items = items
-            .iter()
-            .skip(start)
-            .take(limit)
-            .cloned()
-            .collect::<Vec<_>>();
-        let next_cursor = if start + page_items.len() < items.len() {
-            page_items
-                .last()
-                .map(|item| message_cursor(item, sort_field))
-        } else {
-            None
-        };
-        Ok(MessagePage {
-            items: page_items,
-            next_cursor,
-        })
+        // Indexed SQL seek pagination over canonical (optimism written through,
+        // S2) — was list_messages + in-memory sort + skip/take.
+        self.message_lister
+            .list_message_page(account_id, mailbox_id, limit, cursor, sort_field, sort_direction)
+            .map_err(ServiceError::from)
     }
 
     /// Paginated conversation list with seek-based cursors.
@@ -112,27 +81,9 @@ impl MailService {
             .conversation_reader
             .get_conversation(conversation_id)?
             .not_found("conversation", conversation_id.as_str())?;
-        let Some(account_id) = view
-            .messages
-            .first()
-            .map(|message| message.source_id.clone())
-        else {
-            return Ok(view);
-        };
-        let operations = self.overlay_operations(&account_id)?;
-        if operations.is_empty() {
-            return Ok(view);
-        }
-        let mut folded = Vec::with_capacity(view.messages.len());
-        for message in view.messages {
-            if let Some(message) = apply_operations_to_summary(message, &operations)? {
-                folded.push(message);
-            }
-        }
-        Ok(ConversationView {
-            messages: folded,
-            ..view
-        })
+        // Canonical holds optimistic state (written through, S2), so the
+        // conversation read reflects pending assertions with no overlay fold.
+        Ok(view)
     }
 
     /// Fetch all messages in a thread, or 404.
@@ -155,13 +106,10 @@ impl MailService {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<Option<MessageDetail>, ServiceError> {
-        let Some(detail) = self
-            .message_detail_reader
-            .get_message_detail_without_body(account_id, message_id)?
-        else {
-            return Ok(None);
-        };
-        self.apply_message_overlay(account_id, detail)
+        // Canonical holds optimism (written through, S2); no overlay fold.
+        self.message_detail_reader
+            .get_message_detail_without_body(account_id, message_id)
+            .map_err(Into::into)
     }
 
     /// Fetch message detail, lazily fetching body from the gateway if needed.
@@ -176,8 +124,6 @@ impl MailService {
         let detail = self
             .message_detail_reader
             .get_message_detail(account_id, message_id)?
-            .and_then(|detail| self.apply_message_overlay(account_id, detail).transpose())
-            .transpose()?
             .not_found("message", message_id.as_str())?;
 
         let body_loaded = detail.body_html.is_some() || detail.body_text.is_some();
@@ -297,105 +243,6 @@ impl MailService {
             .map_err(Into::into)
     }
 
-    /// Fold pending message-state assertions over synced summaries and then
-    /// apply the requested mailbox filter to the folded view.
-    ///
-    /// @spec docs/L1-outbox#overlay-fold
-    pub(crate) fn fold_message_overlay(
-        &self,
-        account_id: &AccountId,
-        summaries: Vec<MessageSummary>,
-        mailbox_id: Option<&MailboxId>,
-    ) -> Result<Vec<MessageSummary>, ServiceError> {
-        let operations = self.overlay_operations(account_id)?;
-        let mut folded = Vec::new();
-        for summary in summaries {
-            let Some(summary) = apply_operations_to_summary(summary, &operations)? else {
-                continue;
-            };
-            if mailbox_id.is_none_or(|mailbox_id| summary.mailbox_ids.contains(mailbox_id)) {
-                folded.push(summary);
-            }
-        }
-        Ok(folded)
-    }
-
-    /// Fold pending message-state assertions over a detail view.
-    ///
-    /// @spec docs/L1-outbox#overlay-fold
-    pub(crate) fn apply_message_overlay(
-        &self,
-        account_id: &AccountId,
-        mut detail: MessageDetail,
-    ) -> Result<Option<MessageDetail>, ServiceError> {
-        let operations = self.overlay_operations(account_id)?;
-        let Some(summary) = apply_operations_to_summary(detail.summary, &operations)? else {
-            return Ok(None);
-        };
-        detail.summary = summary;
-        Ok(Some(detail))
-    }
-
-    /// Fold pending message-state assertions over a bare summary — the body-free
-    /// counterpart of [`Self::apply_message_overlay`], for metadata-only callers.
-    ///
-    /// @spec docs/L1-outbox#overlay-fold
-    pub(crate) fn apply_summary_overlay(
-        &self,
-        account_id: &AccountId,
-        summary: MessageSummary,
-    ) -> Result<Option<MessageSummary>, ServiceError> {
-        let operations = self.overlay_operations(account_id)?;
-        apply_operations_to_summary(summary, &operations)
-    }
-
-    /// Per-mailbox count adjustments implied by pending message assertions.
-    ///
-    /// Returns the delta to apply to each mailbox's stored `(unread, total)`
-    /// counts so sidebar counts reflect the read-time overlay. Bounded by the
-    /// number of messages with pending assertions, and empty when there is no
-    /// pending work.
-    ///
-    /// @spec docs/L1-outbox#overlay-fold
-    pub(crate) fn mailbox_count_overlay(
-        &self,
-        account_id: &AccountId,
-    ) -> Result<BTreeMap<MailboxId, MailboxCountDelta>, ServiceError> {
-        let operations = self.overlay_operations(account_id)?;
-        if operations.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        let affected: BTreeSet<&str> = operations.iter().map(|op| op.entity.id.as_str()).collect();
-        let mut deltas: BTreeMap<MailboxId, MailboxCountDelta> = BTreeMap::new();
-        let base_summaries = self
-            .message_lister
-            .list_messages(account_id, None)
-            .map_err(ServiceError::from)?;
-        for base in base_summaries
-            .into_iter()
-            .filter(|summary| affected.contains(summary.id.as_str()))
-        {
-            for mailbox_id in &base.mailbox_ids {
-                let delta = deltas.entry(mailbox_id.clone()).or_default();
-                delta.total -= 1;
-                if !base.is_read {
-                    delta.unread -= 1;
-                }
-            }
-            if let Some(folded) = apply_operations_to_summary(base, &operations)? {
-                for mailbox_id in &folded.mailbox_ids {
-                    let delta = deltas.entry(mailbox_id.clone()).or_default();
-                    delta.total += 1;
-                    if !folded.is_read {
-                        delta.unread += 1;
-                    }
-                }
-            }
-        }
-        deltas.retain(|_, delta| delta.unread != 0 || delta.total != 0);
-        Ok(deltas)
-    }
-
     pub(crate) fn overlay_operations(
         &self,
         account_id: &AccountId,
@@ -498,31 +345,6 @@ pub(crate) fn message_assertions(
     Ok(assertions)
 }
 
-fn apply_operations_to_summary(
-    mut summary: MessageSummary,
-    operations: &[Operation],
-) -> Result<Option<MessageSummary>, ServiceError> {
-    let assertions = message_assertions(operations, summary.id.as_str())?;
-    let base = MessageFoldState {
-        keywords: std::mem::take(&mut summary.keywords),
-        mailbox_ids: summary
-            .mailbox_ids
-            .iter()
-            .map(|mailbox_id| mailbox_id.0.clone())
-            .collect(),
-    };
-    match replay_message(base, &assertions) {
-        MessageOutcome::Removed => Ok(None),
-        MessageOutcome::Present(state) => {
-            summary.keywords = state.keywords;
-            summary.mailbox_ids = state.mailbox_ids.into_iter().map(MailboxId).collect();
-            summary.is_read = summary.keywords.iter().any(|keyword| keyword == "$seen");
-            summary.is_flagged = summary.keywords.iter().any(|keyword| keyword == "$flagged");
-            Ok(Some(summary))
-        }
-    }
-}
-
 /// Settle write-back: fold the still-unsettled assertions over a provider
 /// readback record (the new base) and yield the canonical row to persist, or
 /// `None` when the message folds to removed. Uses the same `replay_message` the
@@ -550,73 +372,6 @@ pub(crate) fn project_record(
             record.mailbox_ids = state.mailbox_ids.into_iter().map(MailboxId).collect();
             Ok(Some(record))
         }
-    }
-}
-
-pub(crate) fn sort_message_summaries(
-    summaries: &mut [MessageSummary],
-    sort_field: MessageSortField,
-    sort_direction: SortDirection,
-) {
-    summaries.sort_by(|left, right| {
-        let ordering = compare_message_summary(left, right, sort_field);
-        let ordering = match sort_direction {
-            SortDirection::Asc => ordering,
-            SortDirection::Desc => ordering.reverse(),
-        };
-        ordering
-            .then_with(|| left.source_id.as_str().cmp(right.source_id.as_str()))
-            .then_with(|| left.id.as_str().cmp(right.id.as_str()))
-    });
-}
-
-fn compare_message_summary(
-    left: &MessageSummary,
-    right: &MessageSummary,
-    sort_field: MessageSortField,
-) -> Ordering {
-    match sort_field {
-        MessageSortField::Date => left.received_at.cmp(&right.received_at),
-        MessageSortField::From => {
-            sort_string(left.from_name.as_deref().or(left.from_email.as_deref())).cmp(&sort_string(
-                right.from_name.as_deref().or(right.from_email.as_deref()),
-            ))
-        }
-        MessageSortField::Subject => {
-            sort_string(left.subject.as_deref()).cmp(&sort_string(right.subject.as_deref()))
-        }
-        MessageSortField::Source => sort_string(Some(left.source_name.as_str()))
-            .cmp(&sort_string(Some(right.source_name.as_str()))),
-        MessageSortField::Flagged => left.is_flagged.cmp(&right.is_flagged),
-        MessageSortField::Attachment => left.has_attachment.cmp(&right.has_attachment),
-    }
-}
-
-fn sort_string(value: Option<&str>) -> String {
-    value.unwrap_or_default().to_lowercase()
-}
-
-pub(crate) fn message_cursor(
-    summary: &MessageSummary,
-    sort_field: MessageSortField,
-) -> MessageCursor {
-    let sort_value = match sort_field {
-        MessageSortField::Date => summary.received_at.clone(),
-        MessageSortField::From => sort_string(
-            summary
-                .from_name
-                .as_deref()
-                .or(summary.from_email.as_deref()),
-        ),
-        MessageSortField::Subject => sort_string(summary.subject.as_deref()),
-        MessageSortField::Source => sort_string(Some(summary.source_name.as_str())),
-        MessageSortField::Flagged => i32::from(summary.is_flagged).to_string(),
-        MessageSortField::Attachment => i32::from(summary.has_attachment).to_string(),
-    };
-    MessageCursor {
-        sort_value,
-        source_id: summary.source_id.clone(),
-        message_id: summary.id.clone(),
     }
 }
 
