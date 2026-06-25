@@ -246,3 +246,74 @@ fn parsed_message_query_executes_richer_filters() -> Result<(), StoreError> {
     assert!(!page.items[0].is_read);
     Ok(())
 }
+
+#[test]
+fn command_writes_are_reflected_in_indexed_reads_and_counts() -> Result<(), StoreError> {
+    // S2/S4: a local command write updates canonical, so the indexed reads and
+    // the trigger-maintained mailbox counts reflect the optimistic state
+    // directly — no read-time overlay fold. This is the property the runtime
+    // recompute depends on (write-through -> indexed read).
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+    seed_messages(
+        &store,
+        &account,
+        vec![sample_message("message-1", "inbox", Some("mime-1"))],
+        "state",
+    )?;
+
+    // A keyword write is reflected in the indexed read.
+    store.set_keywords(
+        &account,
+        &MessageId::from("message-1"),
+        None,
+        &SetKeywordsCommand {
+            add: vec!["$flagged".to_string()],
+            remove: Vec::new(),
+        },
+    )?;
+    let inbox = store.list_messages(&account, Some(&MailboxId::from("inbox")))?;
+    assert_eq!(inbox.len(), 1);
+    assert!(
+        inbox[0].is_flagged,
+        "the keyword write is reflected in the indexed read",
+    );
+
+    // A mailbox move is reflected in the indexed reads AND the trigger-maintained
+    // mailbox counts.
+    store.replace_mailboxes(
+        &account,
+        &MessageId::from("message-1"),
+        None,
+        &ReplaceMailboxesCommand {
+            mailbox_ids: vec![MailboxId::from("archive")],
+        },
+    )?;
+    assert!(
+        store
+            .list_messages(&account, Some(&MailboxId::from("inbox")))?
+            .is_empty(),
+        "the move is reflected: gone from inbox",
+    );
+    assert_eq!(
+        store
+            .list_messages(&account, Some(&MailboxId::from("archive")))?
+            .len(),
+        1,
+        "the move is reflected: present in archive",
+    );
+
+    let mailboxes = store.list_mailboxes(&account)?;
+    let total = |id: &str| {
+        mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == MailboxId::from(id))
+            .map_or(-1, |mailbox| mailbox.total_emails)
+    };
+    assert_eq!(total("inbox"), 0, "inbox count decremented by the move (trigger)");
+    assert_eq!(total("archive"), 1, "archive count incremented by the move (trigger)");
+
+    Ok(())
+}
