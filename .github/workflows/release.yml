@@ -19,6 +19,29 @@ env:
   SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  resolve-channel:
+    name: Resolve release channel
+    runs-on: ubuntu-latest
+    outputs:
+      POSTHASTE_RELEASE_CHANNEL: ${{ steps.resolve.outputs.POSTHASTE_RELEASE_CHANNEL }}
+      POSTHASTE_INCLUDE_DEVTOOLS: ${{ steps.resolve.outputs.POSTHASTE_INCLUDE_DEVTOOLS }}
+      POSTHASTE_ENFORCE_MACOS_SIGNING: ${{ steps.resolve.outputs.POSTHASTE_ENFORCE_MACOS_SIGNING }}
+      POSTHASTE_RUN_ARTIFACT_SMOKE: ${{ steps.resolve.outputs.POSTHASTE_RUN_ARTIFACT_SMOKE }}
+      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ steps.resolve.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
+      POSTHASTE_IS_STABLE: ${{ steps.resolve.outputs.POSTHASTE_IS_STABLE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Resolve channel from release tag
+        id: resolve
+        shell: bash
+        run: |
+          bash tools/release/resolve-channel.sh "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+
   build-serve:
     name: Build serve ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
@@ -94,7 +117,14 @@ jobs:
 
   build-desktop:
     name: Build desktop ${{ matrix.platform }}
+    needs: resolve-channel
     runs-on: ${{ matrix.os }}
+    env:
+      POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+      POSTHASTE_INCLUDE_DEVTOOLS: ${{ needs.resolve-channel.outputs.POSTHASTE_INCLUDE_DEVTOOLS }}
+      POSTHASTE_ENFORCE_MACOS_SIGNING: ${{ needs.resolve-channel.outputs.POSTHASTE_ENFORCE_MACOS_SIGNING }}
+      POSTHASTE_RUN_ARTIFACT_SMOKE: ${{ needs.resolve-channel.outputs.POSTHASTE_RUN_ARTIFACT_SMOKE }}
+      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ needs.resolve-channel.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
     strategy:
       fail-fast: false
       matrix:
@@ -158,21 +188,16 @@ jobs:
             patchelf \
             wget
 
-      # Reflect the dogfood counter in the installed app version instead of the
-      # frozen 0.1.0. `v0.1.0-dogfood.N` -> bundle version `0.1.N` (a valid
-      # 3-integer macOS CFBundleShortVersionString); a plain `vX.Y.Z` tag is used
-      # as-is. Patches the checked-out config so every build below picks it up.
+      # Reflect the release tag in the installed app version. Dogfood/beta/rc
+      # tags are rewritten to a valid 3-integer macOS CFBundleShortVersionString;
+      # plain stable tags pass through unchanged. The helper is shared with the
+      # updater manifest generator so the two never diverge.
       - name: Set desktop bundle version from tag
         shell: bash
         run: |
-          tag="${RELEASE_TAG#v}"
-          if [[ "$tag" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+-dogfood\.([0-9]+)$ ]]; then
-            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-          else
-            version="$tag"
-          fi
+          version="$(bash tools/release/bundle-version-from-tag.sh "$RELEASE_TAG")"
           echo "Desktop bundle version: $version"
-          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" "$version"
+          node -e "const fs=require('fs');const f='apps/desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f,'utf8'));c.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')" "$version"
 
       - name: Import Apple Developer certificate
         if: runner.os == 'macOS'
@@ -188,7 +213,12 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          if [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ]; then
+          if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ]; then
+            if [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ]; then
+              echo "Stable macOS release builds must use Apple Developer ID signing." >&2
+              exit 1
+            fi
+          elif [ "${POSTHASTE_MACOS_SIGNING:-}" != "developer-id" ] && [ "${POSTHASTE_MACOS_SIGNING:-}" != "adhoc" ]; then
             echo "macOS release builds must be signed with an Apple Developer ID." >&2
             echo "Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets, or set POSTHASTE_MACOS_SIGNING=adhoc explicitly for an unsigned internal build." >&2
             exit 1
@@ -210,9 +240,9 @@ jobs:
           chmod 600 "$key_path"
           echo "POSTHASTE_APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      # Single build (devtools compiled in, gated at runtime); no separate
-      # "DevTools" bundle. Build one installer format per OS to keep the release
-      # critical path short.
+      # channel-aware updater endpoint so a built artifact can only ever follow
+      # one channel. The default checked-in tauri.conf.json is left on the old
+      # dogfood URL for unsupervised local builds.
       - name: Build desktop bundles
         if: runner.os != 'macOS'
         shell: bash
@@ -222,6 +252,11 @@ jobs:
           VITE_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
           bun --cwd=apps/web run build
+          devtools_flag=""
+          if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
+            devtools_flag="--features devtools"
+          fi
+          endpoint="https://github.com/theoryzhenkov/posthaste/releases/download/${POSTHASTE_RELEASE_CHANNEL}/${POSTHASTE_UPDATER_MANIFEST_FILENAME}"
           # Emit signed updater artifacts (.sig + macOS .app.tar.gz) only when the
           # updater signing key is configured, so releases still build without it.
           config='{"build":{"beforeBuildCommand":null}'
@@ -230,11 +265,11 @@ jobs:
           else
             echo "TAURI_SIGNING_PRIVATE_KEY not set; building without updater artifacts." >&2
           fi
-          config="${config}}"
+          config="${config},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
           # No `--no-sign`: it would also skip *updater* signing. Linux/Windows
           # have no code-signing certs configured, so code signing is a no-op
           # here regardless, while updater signatures (.sig) are now produced.
-          bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "$config"
+          bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "$config"
 
       - name: Build macOS desktop bundles
         if: runner.os == 'macOS'
@@ -251,12 +286,14 @@ jobs:
         run: |
           configure_notarization() {
             unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            notarization_enabled=false
 
             if [ -n "${POSTHASTE_APPLE_API_KEY:-}" ] || [ -n "${POSTHASTE_APPLE_API_ISSUER:-}" ] || [ -n "${POSTHASTE_APPLE_API_KEY_PATH:-}" ]; then
               if [ -n "${POSTHASTE_APPLE_API_KEY:-}" ] && [ -n "${POSTHASTE_APPLE_API_ISSUER:-}" ] && [ -n "${POSTHASTE_APPLE_API_KEY_PATH:-}" ]; then
                 export APPLE_API_KEY="$POSTHASTE_APPLE_API_KEY"
                 export APPLE_API_ISSUER="$POSTHASTE_APPLE_API_ISSUER"
                 export APPLE_API_KEY_PATH="$POSTHASTE_APPLE_API_KEY_PATH"
+                notarization_enabled=true
                 echo "macOS notarization enabled with App Store Connect API key."
               else
                 echo "Incomplete App Store Connect API key secrets; building signed but not notarized."
@@ -274,6 +311,7 @@ jobs:
                 export APPLE_ID="$POSTHASTE_APPLE_ID"
                 export APPLE_PASSWORD="$POSTHASTE_APPLE_PASSWORD"
                 export APPLE_TEAM_ID="$team_id"
+                notarization_enabled=true
                 echo "macOS notarization enabled with Apple ID credentials."
               else
                 echo "Incomplete Apple ID notarization secrets; building signed but not notarized."
@@ -285,6 +323,15 @@ jobs:
 
           bun --cwd=apps/web run build
           configure_notarization
+          if [ "${POSTHASTE_ENFORCE_MACOS_SIGNING:-}" = "true" ] && [ "$notarization_enabled" != "true" ]; then
+            echo "Stable macOS release builds require notarization credentials." >&2
+            exit 1
+          fi
+          devtools_flag=""
+          if [ "${POSTHASTE_INCLUDE_DEVTOOLS:-false}" = "true" ]; then
+            devtools_flag="--features devtools"
+          fi
+          endpoint="https://github.com/theoryzhenkov/posthaste/releases/download/${POSTHASTE_RELEASE_CHANNEL}/${POSTHASTE_UPDATER_MANIFEST_FILENAME}"
           # Emit signed updater artifacts only when the updater signing key is
           # configured, so releases still build without it.
           updater=""
@@ -295,10 +342,10 @@ jobs:
           fi
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
-            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}}}"
+            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
           else
             echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
-            bun run tauri build --ci --features devtools --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}}}"
+            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},\"plugins\":{\"updater\":{\"endpoints\":[\"$endpoint\"]}}}"
           fi
 
       - name: Print sccache stats
@@ -336,22 +383,35 @@ jobs:
           )
           test -n "$(find "$out" -type f -print -quit)"
 
+      - name: Smoke desktop bundle
+        if: env.POSTHASTE_RUN_ARTIFACT_SMOKE == 'true'
+        shell: bash
+        run: |
+          bash tools/release/smoke-desktop-bundle.sh \
+            "${POSTHASTE_RELEASE_CHANNEL}" \
+            "${{ matrix.platform }}" \
+            "target/distribute/desktop-${{ matrix.platform }}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: posthaste-desktop-${{ matrix.platform }}
           if-no-files-found: error
           path: target/distribute/desktop-${{ matrix.platform }}/*
-
   publish:
     name: Publish GitHub Release
     needs:
       - build-serve
       - build-desktop
+      - resolve-channel
     runs-on: ubuntu-latest
     permissions:
       contents: write
       attestations: write
       id-token: write
+    env:
+      POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
+      POSTHASTE_UPDATER_MANIFEST_FILENAME: ${{ needs.resolve-channel.outputs.POSTHASTE_UPDATER_MANIFEST_FILENAME }}
+      POSTHASTE_IS_STABLE: ${{ needs.resolve-channel.outputs.POSTHASTE_IS_STABLE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -390,18 +450,18 @@ jobs:
       - name: Add macOS launch note
         shell: bash
         run: |
-          cat > release-assets/MACOS-INSTALL.txt <<'EOF'
+          cat > release-assets/MACOS-INSTALL.txt <<'RELEASE_EOF'
           macOS dogfood builds are Apple Developer signed when the release signing secrets are configured. If notarization credentials are not configured, macOS may still require the first launch to be approved manually.
           Drag Posthaste.app to Applications. If macOS blocks the first launch, Control-click or right-click Posthaste.app, choose Open, then confirm Open. Later launches should work with a normal double-click.
-          EOF
+          RELEASE_EOF
 
       - name: Generate updater manifest
         shell: bash
         run: |
           if find release-assets -maxdepth 1 -name '*.sig' -print -quit | grep -q .; then
-            bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG"
+            bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG" "$POSTHASTE_UPDATER_MANIFEST_FILENAME"
           else
-            echo "No updater signatures present; skipping latest.json (updater signing key not configured)."
+            echo "No updater signatures present; skipping $POSTHASTE_UPDATER_MANIFEST_FILENAME (updater signing key not configured)."
           fi
 
       - name: Generate checksums
@@ -480,6 +540,13 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          make_latest: true
+          make_latest: ${{ env.POSTHASTE_IS_STABLE == 'true' }}
           fail_on_unmatched_files: true
           files: release-assets/*
+
+      - name: Update channel rolling tag
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash tools/release/update-rolling-tag.sh "$POSTHASTE_RELEASE_CHANNEL" "$RELEASE_TAG"

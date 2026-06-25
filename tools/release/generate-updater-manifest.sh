@@ -1,31 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Generate the Tauri updater manifest (`latest.json`) from the release assets.
+# Generate the Tauri updater manifest for a release.
 #
 # The Tauri updater plugin fetches this manifest from the GitHub Release and,
 # for the running platform, downloads the referenced bundle and verifies it
 # against the embedded public key using the `.sig` produced at build time.
 #
 # Usage:
-#   generate-updater-manifest.sh <assets-dir> <release-tag> [repo-slug]
+#   generate-updater-manifest.sh <assets-dir> <release-tag> [manifest-name] [repo-slug]
 #
 # Reads the updater bundle + `.sig` for each platform from <assets-dir> and
-# writes <assets-dir>/latest.json. Platforms without a present bundle are
-# skipped, so a partial matrix still produces a valid (smaller) manifest.
+# writes <assets-dir>/<manifest-name>. Defaults to latest.json. Platforms without
+# a present bundle are skipped, so a partial matrix still produces a valid
+# (smaller) manifest.
 
-assets_dir="${1:?usage: generate-updater-manifest.sh <assets-dir> <release-tag> [repo-slug]}"
+assets_dir="${1:?usage: generate-updater-manifest.sh <assets-dir> <release-tag> [manifest-name] [repo-slug]}"
 release_tag="${2:?missing release tag}"
-repo_slug="${3:-theoryzhenkov/posthaste}"
+manifest_name="${3:-latest.json}"
+repo_slug="${4:-theoryzhenkov/posthaste}"
 
-# Derive the bundle version the same way the desktop build does: a
-# `vX.Y.Z-dogfood.N` tag maps to `X.Y.N`; a plain `vX.Y.Z` tag is used as-is.
-tag="${release_tag#v}"
-if [[ "$tag" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+-dogfood\.([0-9]+)$ ]]; then
-  version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-else
-  version="$tag"
-fi
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+version="$("$script_dir/bundle-version-from-tag.sh" "$release_tag")"
 
 download_base="https://github.com/${repo_slug}/releases/download/${release_tag}"
 
@@ -67,12 +63,13 @@ if [ "$(jq 'length' <<<"$platforms_json")" -eq 0 ]; then
 fi
 
 pub_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+output_path="$assets_dir/$manifest_name"
 jq -n \
   --arg version "$version" \
   --arg pub_date "$pub_date" \
   --argjson platforms "$platforms_json" \
   '{version: $version, notes: ("Posthaste " + $version), pub_date: $pub_date, platforms: $platforms}' \
-  >"$assets_dir/latest.json"
+  >"$output_path"
 
-echo "wrote $assets_dir/latest.json for version $version" >&2
-cat "$assets_dir/latest.json" >&2
+echo "wrote $output_path for version $version" >&2
+cat "$output_path" >&2
