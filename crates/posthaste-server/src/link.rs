@@ -2,7 +2,7 @@
 //!
 //! The symmetric inner twin of the client↔runtime API. Where that surface lets
 //! a remote client drive the runtime, this one lets a **remote runtime** drive
-//! the **backend** ([replication L4 §4](../replication/L4.md)): the up-channel is
+//! the **backend** ([replication backend-link L2 §3](../replication/backend-link/L2.md)): the up-channel is
 //! a `POST` of a named mutation, the down-channel an SSE stream of base-assertion
 //! frames. A split-backend host mounts this over the backend's in-process
 //! `BackendLink` transport (`AuthorityRuntimeBuild::backend_link`); a runtime
@@ -12,7 +12,7 @@
 //! ([`posthaste_link_contract`]) — one definition, both ends — so client and
 //! server cannot drift (assertion `one-link-transport`).
 //!
-//! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+//! @spec docs/replication/backend-link/L2#3-the-link-wire-link_router
 
 use std::convert::Infallible;
 use std::sync::Arc;

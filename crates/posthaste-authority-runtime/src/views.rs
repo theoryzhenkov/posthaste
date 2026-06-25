@@ -67,7 +67,7 @@ pub(crate) struct ViewRegistry {
     event_sender: broadcast::Sender<DomainEvent>,
     /// The runtime's outbox toward the backend, folded over mail-list recomputes
     /// so served views are optimistic over forwarded-but-unconfirmed mutations
-    /// ([replication L4 §4.3](../replication/L4.md)).
+    /// ([replication backend-link L2 §5](../replication/backend-link/L2.md)).
     outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
     /// The mail-list base read through the far node (W4a: passthrough cache over
     /// the in-process backend, behavior-preserving).

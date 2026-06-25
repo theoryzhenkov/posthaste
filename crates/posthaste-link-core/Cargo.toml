@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 # The shared predictor for coherent links (docs/replication/L1 §4.3,
-# docs/replication/L2 §3). It is the single definition of every named mutation's
+# docs/replication/client-link/L2 §1). It is the single definition of every named mutation's
 # local effect, run unchanged by the bundled authority runtime and by the WASM
 # client-layer replica. It must stay portable: serde only, no I/O, no native
 # time/filesystem/database, so it compiles to wasm32-unknown-unknown.

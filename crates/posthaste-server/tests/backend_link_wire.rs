@@ -8,7 +8,7 @@
 //! transport (no store), so the test stays fast and self-contained; W1/W2 cover
 //! the in-process transport applying real mutations.
 //!
-//! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+//! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
 use std::sync::Arc;
 

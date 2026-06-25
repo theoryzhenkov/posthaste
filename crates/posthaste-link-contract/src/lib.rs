@@ -5,7 +5,7 @@
 //! **up**, authoritative base assertions + per-mutation confirmation streamed
 //! **down**. This crate is the single, transport-neutral definition of those two
 //! channels — *not* the full [`RuntimeCore`] surface, only its replication
-//! subset ([replication L4 §3-§4](../replication/L4.md)).
+//! subset ([replication backend-link L1](../replication/backend-link/L1.md)).
 //!
 //! Both seams use it. The client↔runtime link already speaks this vocabulary on
 //! the wire (it `POST`s [`MutationRequest`] → [`MutationReceipt`] and streams
@@ -15,13 +15,13 @@
 //!
 //! [`BackendApi`] is the Rust abstraction over one link's two channels; it is
 //! selected by configuration (in-process co-located by default, remote when
-//! split — [replication L4 §5](../replication/L4.md)). The transport is what
+//! split — [replication backend-link L2 §6](../replication/backend-link/L2.md)). The transport is what
 //! varies across deployments; the contract above it does not. This is the seam
 //! the `one-link-transport` assertion guards: one shared contract + one Rust
 //! transport abstraction, never a second bespoke mechanism.
 //!
-//! @spec docs/replication/L4#3-the-link-contract-backendlink
-//! @spec docs/replication/L4#4-the-transport-abstraction-one-seam-for-both-links
+//! @spec docs/replication/backend-link/L1#3-the-backendapi-contract
+//! @spec docs/replication/backend-link/L2#2-backendapi-implementations-localbackend-remotebackend
 
 use std::sync::Arc;
 
@@ -50,7 +50,7 @@ use posthaste_runtime_contract::{
 /// Wire path for the link up-channel: a remote near node `POST`s a
 /// [`MutationRequest`] (JSON) here and receives a [`MutationReceipt`]. Shared by
 /// the remote transport client and the far-node HTTP surface so the two cannot
-/// drift ([replication L4 §4](../replication/L4.md)).
+/// drift ([replication backend-link L2 §2](../replication/backend-link/L2.md)).
 pub const LINK_FORWARD_MUTATION_PATH: &str = "/v1/link/mutations";
 
 /// Wire path for the link down-channel: a remote near node opens an SSE stream
@@ -94,7 +94,7 @@ pub enum BaseUpdate {
 }
 
 /// An authoritative before/after state assertion over one message
-/// ([replication L4 §3](../replication/L4.md)). Ordered within a frame; the near
+/// ([replication backend-link L1 §3](../replication/backend-link/L1.md)). Ordered within a frame; the near
 /// node applies them to its base cache in order, then recomputes its derived
 /// views (never invalidates).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,7 +108,7 @@ pub struct BaseAssertion {
     pub update: BaseUpdate,
 }
 
-/// One frame on the link's down-channel ([replication L4 §3](../replication/L4.md)).
+/// One frame on the link's down-channel ([replication backend-link L1 §3](../replication/backend-link/L1.md)).
 ///
 /// The "confirmation watermark" (how far the far node has confirmed the near
 /// node's forwarded mutations) is realized **per mutation** as
@@ -186,7 +186,7 @@ impl From<WireSettlementOutcome> for SettlementOutcome {
 }
 
 /// What slice of the far node's base the near node subscribes to
-/// ([replication L4 §3](../replication/L4.md)). The co-located runtime requests
+/// ([replication backend-link L1 §3](../replication/backend-link/L1.md)). The co-located runtime requests
 /// [`Complete`](LinkCoverage::Complete) coverage (it serves the whole working
 /// set); a split runtime may request a [`WorkingSet`](LinkCoverage::WorkingSet)
 /// so it can distinguish "absent because unchanged" from "absent because not
@@ -214,7 +214,7 @@ pub type DownStream = BoxStream<'static, DownFrame>;
 /// that varies across deployments — in-process and co-located by default
 /// (W1, behavior-preserving), remote when the far node lives elsewhere
 /// (W3) — and is selected by configuration, never at build time
-/// ([replication L4 §5](../replication/L4.md), assertion `transport-selected-by-config`).
+/// ([replication backend-link L2 §6](../replication/backend-link/L2.md), assertion `transport-selected-by-config`).
 ///
 /// The same trait carries **both** links (assertion `one-link-transport`): the
 /// client↔runtime link is conformant by construction (the contract is the wire
@@ -225,7 +225,7 @@ pub trait BackendApi: Send + Sync {
     /// Up-channel. Forward a (possibly client-originated) named mutation toward
     /// the far node with a stable mutation id; the receipt carries the far
     /// node's `RuntimeMutationId` for the confirmation join. Idempotent on the
-    /// mutation id ([replication L4 §3](../replication/L4.md)).
+    /// mutation id ([replication backend-link L1 §3](../replication/backend-link/L1.md)).
     async fn forward_mutation(
         &self,
         mutation: MutationRequest,
@@ -237,7 +237,7 @@ pub trait BackendApi: Send + Sync {
     async fn subscribe(&self, coverage: LinkCoverage) -> Result<DownStream, RuntimeError>;
 
     /// Read channel: compute a page of a mail-list query at the far node (the
-    /// query engine is the authority's, [`DESIGN-L4-read-replication`](../../eph/DESIGN-L4-read-replication.md)).
+    /// query engine is the authority's, [backend-link L3](../replication/backend-link/L3.md)).
     /// A near node reads through here on a cache miss. The default errors: a
     /// transport that does not carry the read channel (e.g. a write-only test
     /// stub) is simply not a read source.
@@ -664,7 +664,7 @@ fn write_channel_unsupported() -> RuntimeError {
     )
 }
 
-/// The runtime↔backend link ([replication L4 §3](../replication/L4.md)): the
+/// The runtime↔backend link ([replication backend-link L1 §3](../replication/backend-link/L1.md)): the
 /// runtime's typed handle to the backend, carried by a swappable
 /// [`BackendApi`]. The runtime reaches the backend **only** through these two
 /// channels — never by reading the backend store across the link (assertion
@@ -681,7 +681,7 @@ pub struct BackendLink {
 
 impl BackendLink {
     /// Build a backend link over a transport. The transport is config-selected
-    /// upstream ([replication L4 §5](../replication/L4.md)); this type does not
+    /// upstream ([replication backend-link L2 §6](../replication/backend-link/L2.md)); this type does not
     /// know or care which one it holds.
     pub fn new(transport: Arc<dyn BackendApi>) -> Self {
         Self { transport }
@@ -970,7 +970,7 @@ impl BackendLink {
 }
 
 /// The canonical runtime↔backend link op table — one source of truth for the
-/// remote wire ([replication L4 §4](../replication/L4.md)). Each row is
+/// remote wire ([replication backend-link L2 §2](../replication/backend-link/L2.md)). Each row is
 /// `method => "path" => RequestStruct { field: Type, .. } => ReturnType`.
 ///
 /// This is an *x-macro*: invoke it with an emitter macro and it expands to the

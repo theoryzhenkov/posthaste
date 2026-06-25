@@ -37,7 +37,7 @@ function rowKeyOf(item: MessagePage['items'][number]): string {
 }
 
 /**
- * Reconcile an incremental mail-list delta (replication L6) against the held
+ * Reconcile an incremental mail-list delta (replication client-link) against the held
  * single-page window: when `order` is present, drop rows whose key is absent and
  * reorder to it; then apply `upserts` by `rowKey`. Produces exactly the rows a
  * whole `viewReplace` would, from a fraction of the payload.
@@ -168,7 +168,7 @@ export function useRuntimeMailListView({
                 case 'viewDelta':
                   // Row-local change: reconcile the delta in place. Structural
                   // changes (window/coverage) still arrive as viewReplace, so
-                  // `hasMore` is unchanged here (replication L6).
+                  // `hasMore` is unchanged here (replication client-link).
                   if (frame.viewId !== openedViewId) {
                     return
                   }

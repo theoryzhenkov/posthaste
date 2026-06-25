@@ -37,7 +37,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
     // @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#server-startup-authority-builder
     // Runtime↔backend transport: a remote backend when `[link] backend_url` is
     // configured (this process is then a near node over the link), else the
-    // in-process default ([replication L5](../replication/L5.md)).
+    // in-process default ([replication L1 §10](../replication/L1.md)).
     let backend_transport = match &runtime.link_backend_url {
         Some(base_url) => BackendTransportConfig::Remote {
             base_url: base_url.clone(),

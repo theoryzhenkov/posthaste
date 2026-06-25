@@ -3,8 +3,8 @@ name = "posthaste-link-wasm"
 version = "0.1.0"
 edition = "2021"
 
-# The wasm-bindgen boundary for the client-layer replica (docs/replication/L2
-# §8, docs/replication/L3): it exposes the portable replica view layer to JS so
+# The wasm-bindgen boundary for the client-layer replica (docs/replication/client-link/L2
+# §6, docs/replication/client-link/L3): it exposes the portable replica view layer to JS so
 # the web `replicaAdapter` can drive it. Values cross the boundary as JSON
 # strings (no serde-wasm-bindgen dependency). Built only for wasm32; excluded
 # from the native CI workspace build.

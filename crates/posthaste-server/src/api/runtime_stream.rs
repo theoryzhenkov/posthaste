@@ -9,7 +9,7 @@ use posthaste_runtime_contract::{
 pub struct RuntimeSessionQuery {
     pub source_id: Option<String>,
     /// The session can apply incremental mail-list deltas
-    /// ([replication L6](../../../docs/replication/L6.md)); when `true` the
+    /// ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
     /// runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
     #[serde(default)]
     pub view_delta: Option<bool>,
