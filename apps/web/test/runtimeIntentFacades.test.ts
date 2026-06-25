@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 
-import type { AccountOverview, DomainEvent } from '../src/api/types'
+import type { AccountOverview } from '../src/api/types'
 import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
@@ -10,7 +10,6 @@ import { runtimeMutations } from '../src/runtime/mutations'
 import { runtimeResources } from '../src/runtime/resources'
 import { runtimeStream } from '../src/runtime/runtimeStream'
 import { resetRuntimeSessionClientForTesting } from '../src/runtime/sessionClient'
-import { runtimeSubscriptions } from '../src/runtime/subscriptions'
 import { runtimeViews } from '../src/runtime/views'
 
 const account: AccountOverview = {
@@ -45,16 +44,6 @@ const account: AccountOverview = {
   },
 }
 
-const event: DomainEvent = {
-  seq: 1,
-  accountId: 'primary',
-  topic: 'message.updated',
-  occurredAt: '2026-04-28T12:00:00Z',
-  mailboxId: null,
-  messageId: 'm1',
-  payload: {},
-}
-
 afterEach(() => {
   resetRuntimeSessionClientForTesting()
   resetRuntimeAdapterForTesting()
@@ -64,7 +53,6 @@ describe('runtime intent facades', () => {
   it('route views, mutations, resources, and subscriptions through the active adapter', async () => {
     const fake = createFakeRuntimeAdapter()
     const resourceBlob = new Blob(['resource'])
-    const receivedEvents: DomainEvent[] = []
     const receivedRuntimeFrames: Array<{ type: string; sessionSeq: number }> =
       []
     fake.queueAccounts([account])
@@ -88,17 +76,11 @@ describe('runtime intent facades', () => {
       await runtimeResources.blob({ kind: 'account-logo', imageId: 'logo-1' }),
     ).toBe(resourceBlob)
     const session = await runtimeStream.openSession({ sourceId: 'primary' })
-    const unsubscribe = runtimeSubscriptions.events(
-      { afterSeq: 7 },
-      { onEvent: (payload) => receivedEvents.push(payload) },
-    )
     const unsubscribeRuntime = runtimeStream.subscribe(
       { sessionId: session.sessionId, afterSeq: 1, sourceId: 'primary' },
       { onFrame: (payload) => receivedRuntimeFrames.push(payload) },
     )
-    fake.emitDomainEvent(event)
     fake.emitRuntimeFrame({ type: 'heartbeat', sessionSeq: 2 })
-    unsubscribe()
     unsubscribeRuntime()
 
     expect(fake.accountCalls).toBe(1)
@@ -130,7 +112,6 @@ describe('runtime intent facades', () => {
     expect(fake.resourceCalls).toEqual([
       { descriptor: { kind: 'account-logo', imageId: 'logo-1' } },
     ])
-    expect(fake.eventSubscriptionCalls).toEqual([{ request: { afterSeq: 7 } }])
     expect(fake.runtimeSessionCalls).toEqual([
       // The mail-list facade opens its session through the session client, which
       // opts into deltas; the raw openSession below does not.
@@ -140,7 +121,6 @@ describe('runtime intent facades', () => {
     expect(fake.runtimeFrameSubscriptionCalls).toEqual([
       { request: { sessionId: 'session-1', afterSeq: 1, sourceId: 'primary' } },
     ])
-    expect(receivedEvents).toEqual([event])
     expect(receivedRuntimeFrames).toEqual([
       { type: 'heartbeat', sessionSeq: 2 },
     ])

@@ -6,7 +6,6 @@ import {
 import {
   authHeaders,
   buildAccountLogoUrl,
-  buildEventsUrl,
   buildMessageAttachmentUrl,
   buildMessageBodyUrl,
   buildRuntimeSessionStreamUrl,
@@ -61,11 +60,10 @@ import {
   verifyAccount,
 } from '../api/client'
 
-import type { DomainEvent, KnownMailboxRole, Mailbox } from '../api/types'
+import type { KnownMailboxRole, Mailbox } from '../api/types'
 
 import type {
   RuntimeAdapter,
-  RuntimeEventHandlers,
   RuntimeFrame,
   RuntimeFrameHandlers,
   RuntimeMailListViewState,
@@ -166,10 +164,7 @@ function resourceUrl(resource: RuntimeResourceDescriptor): string {
 }
 
 function handleMalformedFrame(
-  handlers:
-    | RuntimeEventHandlers
-    | RuntimeFrameHandlers
-    | RuntimeViewFrameHandlers,
+  handlers: RuntimeFrameHandlers | RuntimeViewFrameHandlers,
   raw: string,
   error: unknown,
 ): void {
@@ -345,52 +340,6 @@ export const httpRuntimeAdapter: RuntimeAdapter = {
         },
       },
     ).catch((error) => {
-      if (controller.signal.aborted || error instanceof FatalStreamError) {
-        return
-      }
-      handlers.onClosed?.(error)
-    })
-    return () => controller.abort()
-  },
-  subscribeEvents(request, handlers) {
-    const controller = new AbortController()
-    void fetchEventSource(buildEventsUrl({ afterSeq: request.afterSeq }), {
-      headers: authHeaders(),
-      signal: controller.signal,
-      openWhenHidden: true,
-      async onopen(response) {
-        const contentType = response.headers.get('content-type') ?? ''
-        if (response.ok && contentType.startsWith(EventStreamContentType)) {
-          return
-        }
-        if (response.status >= 400 && response.status < 500) {
-          throw new FatalStreamError(
-            `event stream rejected with ${response.status}`,
-          )
-        }
-        throw new Error(`event stream returned ${response.status}`)
-      },
-      onmessage(event) {
-        if (!event.data) {
-          return
-        }
-        let payload: DomainEvent
-        try {
-          payload = JSON.parse(event.data) as DomainEvent
-        } catch (error) {
-          handleMalformedFrame(handlers, event.data, error)
-          return
-        }
-        handlers.onEvent(payload)
-      },
-      onerror(error) {
-        if (error instanceof FatalStreamError) {
-          handlers.onPermanentError?.(error)
-          throw error
-        }
-        handlers.onTransientError?.(error)
-      },
-    }).catch((error) => {
       if (controller.signal.aborted || error instanceof FatalStreamError) {
         return
       }

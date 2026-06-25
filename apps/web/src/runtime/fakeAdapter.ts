@@ -1,5 +1,4 @@
 import type {
-  RuntimeEventHandlers,
   RuntimeFrameHandlers,
   RuntimeMutationReceipt,
   RuntimeRunMutationRequest,
@@ -45,7 +44,6 @@ export function createFakeRuntimeAdapter(
 ): FakeRuntimeAdapter {
   const calls = createFakeCallRecords()
   const queues = createFakeQueues()
-  const eventHandlers = new Set<RuntimeEventHandlers>()
   const runtimeFrameHandlers = new Set<RuntimeFrameHandlers>()
   const viewHandlers = new Set<RuntimeViewFrameHandlers>()
   let accountCalls = 0
@@ -59,9 +57,6 @@ export function createFakeRuntimeAdapter(
     get smartMailboxCalls() {
       return smartMailboxCalls
     },
-    emitDomainEvent(event) {
-      for (const handlers of eventHandlers) handlers.onEvent(event)
-    },
     emitRuntimeFrame(frame) {
       for (const handlers of runtimeFrameHandlers) handlers.onFrame(frame)
     },
@@ -72,16 +67,10 @@ export function createFakeRuntimeAdapter(
     reset() {
       accountCalls = 0
       smartMailboxCalls = 0
-      eventHandlers.clear()
       runtimeFrameHandlers.clear()
       viewHandlers.clear()
       resetFakeCallRecords(calls)
       resetFakeQueues(queues)
-    },
-    subscribeEvents(request, handlers) {
-      calls.eventSubscriptionCalls.push({ request })
-      eventHandlers.add(handlers)
-      return () => eventHandlers.delete(handlers)
     },
     openRuntimeSession(request) {
       calls.runtimeSessionCalls.push({ ...request })

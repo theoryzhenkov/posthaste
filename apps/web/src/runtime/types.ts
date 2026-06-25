@@ -7,7 +7,6 @@ import type {
   ConversationPage,
   ConversationView,
   CreateAccountInput,
-  DomainEvent,
   CreateSmartMailboxInput,
   DraftContent,
   Mailbox,
@@ -321,10 +320,6 @@ export interface RuntimeResourceFetchOptions {
   signal?: AbortSignal
 }
 
-export interface RuntimeEventSubscriptionRequest {
-  afterSeq?: number | null
-}
-
 export interface RuntimeTriggerSyncRequest {
   sourceId: string
   mode?: SyncMode
@@ -372,22 +367,10 @@ export interface RuntimeMoveMessageToMailboxRoleRequest {
   role: KnownMailboxRole
 }
 
-export interface RuntimeEventHandlers {
-  onEvent(event: DomainEvent): void
-  onMalformedFrame?(input: { raw: string; error: unknown }): void
-  onPermanentError?(error: unknown): void
-  onTransientError?(error: unknown): void
-  onClosed?(error: unknown): void
-}
-
 export type RuntimeUnsubscribe = () => void
 
 /** Renderer-facing runtime adapter facade. */
 export interface RuntimeAdapter {
-  subscribeEvents(
-    request: RuntimeEventSubscriptionRequest,
-    handlers: RuntimeEventHandlers,
-  ): RuntimeUnsubscribe
   openRuntimeSession(
     request: RuntimeOpenSessionRequest,
   ): Promise<RuntimeSession>

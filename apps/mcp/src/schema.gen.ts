@@ -236,26 +236,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Stream events
-         * @description Opens a Server-Sent Events stream of domain events. When afterSeq is provided, replays matching backlog events before switching to the live stream.
-         */
-        get: operations["stream_events"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -1647,6 +1627,33 @@ export interface components {
             security: components["schemas"]["TransportSecurity"];
         };
         /**
+         * @description An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):
+         *     the rows that changed since the last snapshot, instead of the whole view. The
+         *     client reconciles it against its held rows — drop rows absent from `order`,
+         *     reorder to `order`, then apply `upserts` by `row_key`. Emitted only to a
+         *     session that declared [`view_delta`](RuntimeCallerCapabilities::view_delta),
+         *     and only when the change is row-local (structural changes still send a whole
+         *     `ViewReplace`).
+         */
+        MailListDelta: {
+            /**
+             * @description The new full row order (row keys), when it changed (add/remove/reorder);
+             *     `None` when unchanged. Rows whose key is absent from a present `order` are
+             *     removed.
+             */
+            order?: string[] | null;
+            /** @description Rows that are new or whose content changed, keyed by `row_key`. */
+            upserts: components["schemas"]["MailListRowState"][];
+        };
+        MailListRowState: {
+            orderKey: string;
+            pendingMarkers?: components["schemas"]["RuntimeMutationId"][];
+            projection?: Record<string, never>;
+            resourceRef?: string | null;
+            rowKey: string;
+            sortKey?: Record<string, never>;
+        };
+        /**
          * @description Opaque server-assigned identifier for a mailbox (folder or label).
          *
          *     @spec docs/L1-jmap#core-types
@@ -2080,6 +2087,13 @@ export interface components {
             snapshot: components["schemas"]["ViewSnapshot"];
             /** @enum {string} */
             type: "viewReplace";
+            viewId: components["schemas"]["ViewId"];
+        } | {
+            delta: components["schemas"]["MailListDelta"];
+            revision: components["schemas"]["ViewRevision"];
+            sessionSeq: components["schemas"]["RuntimeSessionSeq"];
+            /** @enum {string} */
+            type: "viewDelta";
             viewId: components["schemas"]["ViewId"];
         } | {
             error: components["schemas"]["RuntimeAdapterError"];
@@ -3047,40 +3061,6 @@ export interface operations {
             };
         };
     };
-    stream_events: {
-        parameters: {
-            query?: {
-                accountId?: string | null;
-                topic?: string | null;
-                mailboxId?: string | null;
-                afterSeq?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Server-sent event stream of domain events */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": unknown;
-                };
-            };
-            /** @description Invalid filter */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiErrorBody"];
-                };
-            };
-        };
-    };
     health: {
         parameters: {
             query?: never;
@@ -3249,6 +3229,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -3289,6 +3275,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3341,6 +3333,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3466,6 +3464,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3531,6 +3535,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {
@@ -3585,6 +3595,12 @@ export interface operations {
         parameters: {
             query?: {
                 sourceId?: string | null;
+                /**
+                 * @description The session can apply incremental mail-list deltas
+                 *     ([replication client-link L1](../../../docs/replication/client-link/L1.md)); when `true` the
+                 *     runtime sends `ViewDelta` frames instead of whole `ViewReplace`s.
+                 */
+                viewDelta?: boolean | null;
             };
             header?: never;
             path: {

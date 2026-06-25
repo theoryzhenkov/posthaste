@@ -72,7 +72,6 @@ describe('useDaemonEvents runtime adapter subscription', () => {
           { request: { sessionId: 'session-1', afterSeq: null } },
         ]),
       )
-      expect(runtimeAdapter.eventSubscriptionCalls).toEqual([])
       runtimeAdapter.emitRuntimeFrame({
         type: 'notification',
         sessionSeq: 1,
