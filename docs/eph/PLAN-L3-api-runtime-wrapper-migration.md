@@ -1,13 +1,14 @@
 ---
 scope: L3
 summary: "Temporary API runtime-wrapper migration controls for moving /v1 from AppState-owned services to the authority runtime handle"
-modified: 2026-06-20
-reviewed: 2026-06-20
+modified: 2026-06-24
+reviewed: 2026-06-24
 lifecycle: ephemeral
 type: PLAN
 depends:
   - path: docs/eph/PLAN-L2-bundled-app-test-plan
-  - path: docs/runtime/L2
+  - path: docs/runtime/internals/L1
+  - path: docs/runtime/internals/L3
   - path: docs/backend/L2
 ---
 
@@ -61,7 +62,18 @@ Delete the wrapper and this ephemeral plan when all are true:
 7. API tests build router state around the runtime handle; harness-owned service/store/supervisor handles are isolated from route state when needed for fixture seeding.
 8. a guard check prevents reintroducing direct route-module service/store construction.
 
-## 6. Migration tag
+## 6. Loopback migration bridge
+
+While the runtime handle and renderer adapter are extracted, a protected loopback
+HTTP bridge may carry renderer mail access. If used, the direct HTTP dependency
+stays inside the client runtime adapter module; renderer components still target
+view subscriptions and named mutations, not ad hoc API fetches. The bridge is
+transitional from the renderer's point of view and disappears once the renderer
+adapter speaks the runtime contract over IPC/in-process transport. Its standing
+security rules (when any loopback bridge is present) are durable and specified in
+[runtime internals L3 §6](../runtime/internals/L3.md), `loopback-local-auth`.
+
+## 7. Migration tag
 
 Temporary code must use this searchable tag:
 
@@ -71,7 +83,7 @@ MIGRATION(api-runtime-wrapper)
 
 Each tag should link to this file or to an assertion below.
 
-## 7. Assertions
+## 8. Assertions
 
 | ID | Sev. | Assertion |
 | --- | --- | --- |

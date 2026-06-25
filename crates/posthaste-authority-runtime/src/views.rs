@@ -25,7 +25,7 @@ use tokio::task::AbortHandle;
 /// pump need, so adding a family is a new variant rather than new registry
 /// machinery.
 ///
-/// @spec docs/runtime/L2#view-descriptors
+/// @spec docs/runtime/adapter/L1#view-descriptors
 #[derive(Clone)]
 enum ViewKind {
     MailList(MailQueryRequest),
@@ -37,7 +37,7 @@ enum ViewKind {
         conversation_id: String,
     },
     /// Folded account overview(s): `None` serves the full account list, `Some`
-    /// serves one account. @spec docs/runtime/L2#account-status-views
+    /// serves one account. @spec docs/runtime/adapter/L2#account-status-views
     AccountStatus {
         account_id: Option<String>,
     },
@@ -142,7 +142,7 @@ impl ViewRegistry {
     /// subscriber (and the caller) sees the extended page. Only the windowed
     /// `mailList` family supports this; single-object views reject it.
     ///
-    /// @spec docs/runtime/L2#view-operation-flow
+    /// @spec docs/runtime/adapter/L2#view-operation-flow
     pub(crate) async fn extend_view(
         self: &Arc<Self>,
         view_id: &ViewId,

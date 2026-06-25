@@ -62,7 +62,7 @@ struct StoredMutation {
 /// A named mutation (name + args). Used both as the forward command recorded on
 /// the undo stack and as the inverse that reverses it.
 ///
-/// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+/// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
 #[derive(Clone)]
 pub(crate) struct MutationCommand {
     pub(crate) name: String,
@@ -73,7 +73,7 @@ pub(crate) struct MutationCommand {
 /// command that was applied (replayed on redo); `inverse` reverses it (run on
 /// undo). Non-invertible mutations (destroy) are never recorded.
 ///
-/// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+/// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
 #[derive(Clone)]
 pub(crate) struct HistoryEntry {
     pub(crate) forward: MutationCommand,
@@ -273,7 +273,7 @@ impl SessionRegistry {
     /// `ViewReplace` through the view forwarder (which refreshes
     /// `latest_snapshots`); the grown snapshot is also returned for the request.
     ///
-    /// @spec docs/runtime/L2#view-operation-flow
+    /// @spec docs/runtime/adapter/L2#view-operation-flow
     pub(crate) async fn extend_view(
         self: &Arc<Self>,
         caller: RuntimeCaller,
@@ -396,7 +396,7 @@ impl SessionRegistry {
     /// run its inverse. On success the caller calls [`push_redo`]; on failure it
     /// restores it with [`restore_undo`].
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     pub(crate) fn pop_undo(
         &self,
         session_id: &RuntimeSessionId,
@@ -411,7 +411,7 @@ impl SessionRegistry {
     /// Take the most recent undone step off the redo stack so the caller can
     /// replay its forward command.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     pub(crate) fn pop_redo(
         &self,
         session_id: &RuntimeSessionId,
@@ -456,7 +456,7 @@ impl SessionRegistry {
     /// Broadcast the session's current undo/redo availability so the renderer can
     /// drive undo/redo button state. Called whenever the stacks change.
     ///
-    /// @spec docs/runtime/L2#mutation-pipeline-and-catalog
+    /// @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
     pub(crate) fn emit_history_frame(
         &self,
         session_id: &RuntimeSessionId,
