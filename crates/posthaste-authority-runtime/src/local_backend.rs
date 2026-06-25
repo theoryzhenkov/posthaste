@@ -149,7 +149,7 @@ impl BackendApi for LocalBackend {
         account_id: AccountId,
         message_id: MessageId,
     ) -> Result<Option<MessageDetail>, RuntimeError> {
-        self.backend.message_detail(&account_id, &message_id).await
+        self.backend.message_detail(&account_id, &message_id)
     }
 
     async fn conversation(
@@ -203,10 +203,7 @@ impl BackendApi for LocalBackend {
         self.backend.get_smart_mailbox(smart_mailbox_id)
     }
 
-    async fn list_tags(
-        &self,
-        scope: AccountScopeRequest,
-    ) -> Result<Vec<TagSummary>, RuntimeError> {
+    async fn list_tags(&self, scope: AccountScopeRequest) -> Result<Vec<TagSummary>, RuntimeError> {
         self.backend.list_tags(scope)
     }
 
@@ -262,7 +259,9 @@ impl BackendApi for LocalBackend {
         message_id: MessageId,
         command: SetKeywordsCommand,
     ) -> Result<CommandAck, RuntimeError> {
-        self.backend.set_keywords(account_id, message_id, command).await
+        self.backend
+            .set_keywords(account_id, message_id, command)
+            .await
     }
 
     async fn add_to_mailbox(
@@ -271,7 +270,9 @@ impl BackendApi for LocalBackend {
         message_id: MessageId,
         command: AddToMailboxCommand,
     ) -> Result<CommandAck, RuntimeError> {
-        self.backend.add_to_mailbox(account_id, message_id, command).await
+        self.backend
+            .add_to_mailbox(account_id, message_id, command)
+            .await
     }
 
     async fn remove_from_mailbox(
@@ -310,7 +311,9 @@ impl BackendApi for LocalBackend {
         mailbox_id: MailboxId,
         role: Option<String>,
     ) -> Result<Vec<MailboxSummary>, RuntimeError> {
-        self.backend.set_mailbox_role(account_id, mailbox_id, role).await
+        self.backend
+            .set_mailbox_role(account_id, mailbox_id, role)
+            .await
     }
 
     async fn send_message(
@@ -523,5 +526,4 @@ mod tests {
         event.topic = "sync.completed".into();
         assert!(message_event_to_assertion(&event, Some(fold(&[], &[]))).is_none());
     }
-
 }

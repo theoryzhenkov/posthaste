@@ -8,9 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use posthaste_config::TomlConfigRepository;
-use posthaste_domain::{
-    ConfigRepository, DomainEvent, MailService, MailStore, SecretStore,
-};
+use posthaste_domain::{ConfigRepository, DomainEvent, MailService, MailStore, SecretStore};
 use posthaste_link_contract::{BackendApi, BackendLink};
 use posthaste_runtime_contract::{RuntimeLifecycle, RuntimeStatus, RuntimeStoreStatus};
 use posthaste_store::DatabaseStore;
@@ -148,7 +146,6 @@ pub async fn build_backend_node(
 /// backend (no store, service, or supervisor). The `posthaste-runtime` role (the
 /// daemon configured with a remote backend) builds this — reads + writes cross
 /// the link, and the down-channel bridge keeps the cache and views live.
-
 pub(crate) struct BackendBuild {
     secret_store: Arc<dyn SecretStore>,
     event_sender: broadcast::Sender<DomainEvent>,
@@ -266,11 +263,6 @@ pub(crate) async fn build_backend(
     })
 }
 
-/// Build the runtime near node over a backend. The bundled/daemon composition
-/// passes the in-process [`BackendBuild`]; the link is selected from config
-/// (in-process over that backend, or remote). Must run within a Tokio runtime
-/// (it may spawn the cache-coherence task for a split runtime).
-
 /// Compose a runtime near node over the in-process backend
 /// ([replication backend-link L2 §7](../replication/backend-link/L2.md)). The link
 /// is config-selected (in-process over the backend, or remote); the read cache
@@ -298,9 +290,16 @@ pub(crate) fn build_runtime(
         ..
     } = config;
 
-    let backend_link =
-        select_backend_link(&backend_transport, backend_transport_override, backend.clone());
-    let reads = Arc::new(build_read_cache(&backend_transport, &backend, &backend_link));
+    let backend_link = select_backend_link(
+        &backend_transport,
+        backend_transport_override,
+        backend.clone(),
+    );
+    let reads = Arc::new(build_read_cache(
+        &backend_transport,
+        &backend,
+        &backend_link,
+    ));
     // A split runtime drives its cache + views from the backend down-channel; an
     // in-process runtime shares the backend's bus, so no bridge is needed.
     let drive_down_channel = matches!(backend_transport, BackendTransportConfig::Remote { .. });
@@ -365,7 +364,6 @@ fn select_backend_link(
     }
 }
 
-
 /// A runtime handle built from pre-existing api parts, plus the backend's
 /// account-mutation service for the OAuth holdout.
 ///
@@ -412,7 +410,14 @@ pub fn from_api_bridge_with_providers_for_migration(
     status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
 ) -> AuthorityRuntimeHandle {
-    migration_runtime(api_bridge, account_count, status_provider, live_accounts, None).0
+    migration_runtime(
+        api_bridge,
+        account_count,
+        status_provider,
+        live_accounts,
+        None,
+    )
+    .0
 }
 
 pub fn from_api_bridge_with_account_supervisor_for_migration(
@@ -497,7 +502,7 @@ fn migration_runtime(
     let composed = assemble_runtime(RuntimeAssembly {
         backend_link,
         reads,
-        event_sender: api_bridge.event_sender.clone(),
+        event_sender: api_bridge.event_sender,
         startup_status: runtime_status,
         drive_down_channel: false,
     });

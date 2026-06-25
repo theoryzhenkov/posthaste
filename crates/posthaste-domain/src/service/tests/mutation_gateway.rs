@@ -70,12 +70,12 @@ impl MutationGateway {
     }
 
     fn apply(&self, expected_state: Option<&str>) -> Result<MutationOutcome, GatewayError> {
-        if let Some((readback, reason)) = self
+        let reject_next = self
             .reject_next
             .lock()
             .expect("reject_next lock poisoned")
-            .take()
-        {
+            .take();
+        if let Some((readback, reason)) = reject_next {
             return Err(GatewayError::MutationRejected {
                 readback: Box::new(readback),
                 reason,
@@ -166,12 +166,12 @@ impl MailGateway for MutationGateway {
         expected_state: Option<&str>,
         _command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
-        if let Some(result) = self
+        let set_keywords_result = self
             .set_keywords_results
             .lock()
             .expect("set keywords results poisoned")
-            .pop()
-        {
+            .pop();
+        if let Some(result) = set_keywords_result {
             return result;
         }
         self.apply(expected_state)

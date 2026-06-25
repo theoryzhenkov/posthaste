@@ -62,8 +62,8 @@ pub fn import_bootstrap(
     Ok(())
 }
 
-/// Parse a boolean env-var flag, accepting common truthy/falsy spellings.
-/// Returns `None` for unrecognized values so the config/default fallback wins.
+// Parse a boolean env-var flag, accepting common truthy/falsy spellings.
+// Returns `None` for unrecognized values so the config/default fallback wins.
 
 // -- Bootstrap TOML types (for import only) --
 
@@ -120,4 +120,3 @@ struct BootstrapAccountTransportConfig {
     imap: Option<posthaste_domain::ImapTransportSettings>,
     smtp: Option<posthaste_domain::SmtpTransportSettings>,
 }
-
