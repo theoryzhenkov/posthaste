@@ -4318,6 +4318,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "posthaste-domain",
+ "posthaste-link-core",
  "serde",
  "serde_json",
  "utoipa",

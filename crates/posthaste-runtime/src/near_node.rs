@@ -26,7 +26,7 @@ use posthaste_runtime_contract::{MailListViewState, MutationRequest};
 use serde_json::Value;
 
 use crate::mutation_args::{
-    keyword_toggle, MessageMoveToMailboxArgs, MessageReplaceMailboxesArgs,
+    keyword_toggle, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageReplaceMailboxesArgs,
     MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs, MessageSetReadStateArgs,
     MessageSetUserTagsArgs, MessageTargetArgs,
 };
@@ -138,6 +138,13 @@ pub(crate) fn named_message_assertion(
         "message.destroy" => {
             let args: MessageTargetArgs = parse(request)?;
             Some((args.message_id, MessageAssertion::Destroy))
+        }
+        "message.applyDiff" => {
+            let args: MessageApplyDiffArgs = parse(request)?;
+            Some((
+                args.message_id,
+                MessageAssertion::ApplyDiff { diff: args.diff },
+            ))
         }
         _ => None,
     }
@@ -283,7 +290,10 @@ mod tests {
 
     #[test]
     fn pending_flag_shows_optimistically_keeping_other_fields() {
-        let mut view = state(vec![row("m1", &[], &["inbox"]), row("m2", &["$seen"], &["inbox"])]);
+        let mut view = state(vec![
+            row("m1", &[], &["inbox"]),
+            row("m2", &["$seen"], &["inbox"]),
+        ]);
         apply_outbox_overlay(
             &mut view,
             &[pending(
@@ -359,5 +369,24 @@ mod tests {
             json!({ "sourceId": "acct", "messageId": "m1" }),
         ))
         .is_none());
+        // applyDiff folds as an ApplyDiff assertion carrying the request's diff
+        // (the inverse for an undo, the forward for a redo).
+        let (id, assertion) = named_message_assertion(&request(
+            "message.applyDiff",
+            json!({
+                "sourceId": "acct",
+                "messageId": "m1",
+                "diff": {
+                    "keywords": { "added": [], "removed": ["$flagged"] },
+                    "mailboxes": { "added": [], "removed": [] }
+                }
+            }),
+        ))
+        .unwrap();
+        assert_eq!(id, "m1");
+        let MessageAssertion::ApplyDiff { diff } = assertion else {
+            panic!("expected ApplyDiff");
+        };
+        assert_eq!(diff.keywords.removed, vec!["$flagged".to_string()]);
     }
 }

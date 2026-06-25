@@ -23,6 +23,6 @@ pub use convergence::{
     SettlementResult,
 };
 pub use message::{
-    apply_message_assertion, coalesce_message_assertions, replay_message, MessageAssertion,
-    MessageFoldState, MessageOutcome,
+    apply_message_assertion, coalesce_message_assertions, replay_message, KeywordDelta,
+    MessageAssertion, MessageChangeDiff, MessageFoldState, MessageOutcome,
 };
