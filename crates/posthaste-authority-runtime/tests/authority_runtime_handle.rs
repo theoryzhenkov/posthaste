@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
-    build_authority_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
-    AuthorityRuntimeHandle,
+    build_authority_runtime, from_api_bridge_for_migration, AuthorityRuntimeBuildConfig,
+    AuthorityRuntimeBuildError,
 };
 use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
@@ -433,7 +433,7 @@ async fn active_migration_handle_without_mutations_reports_missing_mutation_serv
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
-    let handle = AuthorityRuntimeHandle::from_api_bridge_for_migration(
+    let handle = from_api_bridge_for_migration(
         build.api_bridge.clone(),
         build.runtime_status.account_count,
     );
@@ -2142,7 +2142,7 @@ async fn oauth_token_persistence_writes_secret_and_patches_account_through_runti
         .secret_ref
         .expect("created account should have a secret");
     build
-        .handle
+        .account_mutations
         .persist_oauth_token_set(
             created.id.clone(),
             OAuthTokenSet {

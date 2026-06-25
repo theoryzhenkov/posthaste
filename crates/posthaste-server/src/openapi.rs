@@ -1,276 +1,38 @@
-//! OpenAPI document for the Posthaste REST surface.
+//! Bundled-server OpenAPI document.
 //!
-//! The Rust handlers are the single source of truth: each handler is annotated
-//! with `#[utoipa::path]` and each wire type derives `ToSchema`. [`ApiDoc`]
-//! aggregates them into one document, served at `GET /v1/openapi.json` and
-//! emitted to the committed `openapi.json` contract artifact.
-//!
-//! @spec docs/L1-api#openapi-contract
+//! The bundled/backend server serves the near `/v1` platform PLUS the OAuth-flow
+//! routes (which need the provider machinery in the far crate). [`document`]
+//! merges the near document with those routes, and is the source for the
+//! committed `openapi.json` contract + the runtime `/v1/openapi.json` the bundled
+//! server serves. A lean near node serves `posthaste_api::openapi::document()`
+//! (no OAuth) instead.
 
-use axum::Json;
 use utoipa::OpenApi;
 
-/// Aggregated OpenAPI document for the `/v1` REST surface.
-///
-/// As handlers are annotated during P1, register each one under `paths(...)`
-/// and each wire type under `components(schemas(...))`.
+// The contract-doc serving helpers are deployment-neutral — reuse the near ones.
+pub use posthaste_api::openapi::{asyncapi_json, openapi_router};
+
+/// The OAuth-flow routes the bundled server layers on top of the near platform.
 #[derive(OpenApi)]
 #[openapi(
-    info(
-        title = "Posthaste API",
-        version = "0.1.0",
-        license(name = "MIT", identifier = "MIT"),
-        description = "Local-first JMAP mail client backend. The `/v1` surface is the \
-                       documented, versioned contract for first-party clients, custom \
-                       clients, and agents."
-    ),
     paths(
-        crate::api::health,
-        crate::api::read_calls::read,
-        crate::api::accounts::crud::list_accounts,
-        crate::api::accounts::crud::get_account,
-        crate::api::accounts::crud::create_account,
-        crate::api::accounts::crud::patch_account,
-        crate::api::accounts::crud::verify_account,
-        crate::api::auth_tokens::create_auth_token,
-        crate::api::accounts::oauth::start_provider_oauth,
-        crate::api::accounts::oauth::start_account_oauth,
-        crate::api::accounts::oauth::complete_account_oauth,
-        crate::api::accounts::lifecycle::enable_account,
-        crate::api::accounts::lifecycle::disable_account,
-        crate::api::accounts::logos::upload_account_logo,
-        crate::api::accounts::logos::get_account_logo,
-        crate::api::accounts::crud::delete_account,
-        crate::api::accounts::lifecycle::reload_config,
-        crate::api::mailboxes::list_mailboxes,
-        crate::api::mailboxes::patch_mailbox,
-        crate::api::messages::listing::list_source_messages,
-        crate::api::messages::listing::search_messages,
-        crate::api::messages::listing::list_conversations,
-        crate::api::messages::detail::get_conversation,
-        crate::api::messages::detail::get_message,
-        crate::api::messages::detail::get_message_attachment,
-        crate::api::messages::detail::get_message_body,
-        crate::api::messages::compose::get_identity,
-        crate::api::messages::compose::list_sender_addresses,
-        crate::api::messages::compose::get_reply_context,
-        crate::api::messages::compose::get_draft_content,
-        crate::api::messages::compose::send_message,
-        crate::api::messages::compose::save_draft,
-        crate::api::messages::compose::delete_draft,
-        crate::api::messages::compose::list_pending_operations,
-        crate::api::messages::compose::discard_operation,
-        crate::api::messages::compose::retry_operation,
-        crate::api::sync_events::trigger_sync,
-        crate::api::sync_events::stream_events,
-        crate::api::views::open_view,
-        crate::api::views::stream_view,
-        crate::api::runtime_stream::open_runtime_session,
-        crate::api::runtime_stream::close_runtime_session,
-        crate::api::runtime_stream::stream_runtime_session,
-        crate::api::runtime_stream::open_runtime_session_view,
-        crate::api::runtime_stream::close_runtime_session_view,
-        crate::api::runtime_stream::extend_runtime_session_view,
-        crate::api::runtime_stream::run_runtime_session_mutation,
-        crate::api::message_commands::set_keywords,
-        crate::api::message_commands::add_to_mailbox,
-        crate::api::message_commands::remove_from_mailbox,
-        crate::api::message_commands::replace_mailboxes,
-        crate::api::message_commands::destroy_message,
-        crate::api::smart_mailboxes::crud::list_smart_mailboxes,
-        crate::api::smart_mailboxes::crud::create_smart_mailbox,
-        crate::api::smart_mailboxes::crud::get_smart_mailbox,
-        crate::api::smart_mailboxes::crud::patch_smart_mailbox,
-        crate::api::smart_mailboxes::crud::delete_smart_mailbox,
-        crate::api::smart_mailboxes::crud::reset_default_smart_mailboxes,
-        crate::api::smart_mailboxes::listings::list_smart_mailbox_messages,
-        crate::api::smart_mailboxes::listings::list_smart_mailbox_conversations,
-        crate::api::settings::get_settings,
-        crate::api::settings::patch_settings,
-        crate::api::settings::preview_automation_rule,
+        crate::oauth_routes::handlers::start_account_oauth,
+        crate::oauth_routes::handlers::start_provider_oauth,
+        crate::oauth_routes::handlers::complete_account_oauth,
     ),
     components(schemas(
-        // Server-local wire types.
-        crate::api::HealthResponse,
-        crate::api::ReadRequest,
-        crate::api::ReadCall,
-        crate::api::ReadOperation,
-        crate::api::ReadCallArgs,
-        crate::api::AccountIdSelector,
-        crate::api::ReadResponse,
-        crate::api::ReadResult,
-        crate::api::AccountListReadResult,
-        crate::api::MailboxListReadResult,
-        crate::api::SmartMailboxListReadResult,
-        crate::api::TagListReadResult,
-        crate::api::ApiErrorBody,
-        crate::api::ApiErrorCode,
-        crate::api::OkResponse,
-        crate::api::VerificationResponse,
-        crate::api::TriggerSyncRequest,
-        crate::api::TriggerSyncResponse,
-        crate::api::views::OpenViewRequest,
-        crate::api::views::OpenViewResponse,
-        crate::api::runtime_stream::OpenRuntimeSessionViewRequest,
-        crate::api::runtime_stream::OpenRuntimeSessionViewResponse,
-        crate::api::runtime_stream::ExtendRuntimeSessionViewRequest,
-        crate::api::ConversationPageResponse,
-        crate::api::MessagePageResponse,
-        crate::api::AutomationRulePreviewResponse,
-        crate::api::StartOAuthResponse,
-        crate::api::CreateAccountRequest,
-        crate::api::CreateAuthTokenRequest,
-        crate::api::CreateAuthTokenResponse,
-        crate::authz::Action,
-        crate::api::PatchAccountRequest,
-        crate::api::StartOAuthRequest,
-        crate::api::StartProviderOAuthRequest,
-        crate::api::PatchMailboxRequest,
-        crate::api::PatchSettingsRequest,
-        crate::api::PreviewAutomationRuleRequest,
-        crate::api::CreateSmartMailboxRequest,
-        crate::api::PatchSmartMailboxRequest,
-        crate::api::AccountTransportRequest,
-        crate::api::SecretWriteRequest,
-        crate::api::SecretWriteMode,
-        // Domain wire types and their transitive closure.
-        posthaste_domain::AccountId,
-        posthaste_domain::MailboxId,
-        posthaste_domain::MessageId,
-        posthaste_domain::ThreadId,
-        posthaste_domain::BlobId,
-        posthaste_domain::ConversationId,
-        posthaste_domain::SmartMailboxId,
-        posthaste_domain::AccountOverview,
-        posthaste_domain::AccountDriver,
-        posthaste_domain::AccountAppearance,
-        posthaste_domain::AccountConnectionOverview,
-        posthaste_domain::AccountRuntimeOverview,
-        posthaste_domain::AccountStatus,
-        posthaste_domain::PushStatus,
-        posthaste_domain::SyncProgress,
-        posthaste_domain::SyncProgressStage,
-        posthaste_domain::SyncTrigger,
-        posthaste_domain::ProviderHint,
-        posthaste_domain::ProviderKind,
-        posthaste_domain::ProviderAuthKind,
-        posthaste_domain::TransportSecurity,
-        posthaste_domain::ImapTransportSettings,
-        posthaste_domain::SmtpTransportSettings,
-        posthaste_domain::SecretKind,
-        posthaste_domain::SecretStatus,
-        posthaste_domain::AppSettings,
-        posthaste_domain::CachePolicy,
-        posthaste_domain::AutomationRule,
-        posthaste_domain::AutomationTrigger,
-        posthaste_domain::AutomationAction,
-        posthaste_domain::MailboxSummary,
-        posthaste_domain::MessageSummary,
-        posthaste_domain::MessageDetail,
-        posthaste_domain::MessageAttachment,
-        posthaste_domain::MessageSortField,
-        posthaste_domain::RawMessageRef,
-        posthaste_domain::Recipient,
-        posthaste_domain::ConversationSummary,
-        posthaste_domain::ConversationView,
-        posthaste_domain::ConversationSortField,
-        posthaste_domain::SortDirection,
-        posthaste_domain::SourceMessageRef,
-        posthaste_domain::TagSummary,
-        posthaste_domain::SmartMailbox,
-        posthaste_domain::SmartMailboxSummary,
-        posthaste_domain::SmartMailboxKind,
-        posthaste_domain::SmartMailboxRule,
-        posthaste_domain::SmartMailboxRuleNode,
-        posthaste_domain::SmartMailboxGroup,
-        posthaste_domain::SmartMailboxGroupOperator,
-        posthaste_domain::SmartMailboxCondition,
-        posthaste_domain::SmartMailboxField,
-        posthaste_domain::SmartMailboxOperator,
-        posthaste_domain::SmartMailboxValue,
-        posthaste_domain::Identity,
-        posthaste_domain::CachedSenderAddress,
-        posthaste_domain::ReplyContext,
-        posthaste_domain::CommandResult,
-        posthaste_domain::CommandAck,
-        posthaste_domain::SetKeywordsCommand,
-        posthaste_domain::AddToMailboxCommand,
-        posthaste_domain::RemoveFromMailboxCommand,
-        posthaste_domain::ReplaceMailboxesCommand,
-        posthaste_domain::SendMessageAttachment,
-        posthaste_domain::SendMessageRequest,
-        crate::api::messages::SaveDraftRequest,
-        crate::api::messages::DeleteDraftRequest,
-        posthaste_domain::Operation,
-        posthaste_domain::OperationEntity,
-        posthaste_domain::OperationEntityKind,
-        posthaste_domain::OperationKind,
-        posthaste_domain::OperationState,
-        posthaste_domain::OperationId,
-        posthaste_domain::SyncMode,
-        posthaste_domain::DomainEvent,
-        posthaste_runtime_contract::RuntimeSession,
-        posthaste_runtime_contract::RuntimeSessionId,
-        posthaste_runtime_contract::RuntimeSessionSeq,
-        posthaste_runtime_contract::RuntimeFrame,
-        posthaste_runtime_contract::ClientMutationId,
-        posthaste_runtime_contract::RuntimeMutationId,
-        posthaste_runtime_contract::MutationRequest,
-        posthaste_runtime_contract::MutationReceipt,
-        posthaste_runtime_contract::MutationSettlementState,
-        posthaste_runtime_contract::RuntimeMutationSettlement,
-        posthaste_runtime_contract::ViewId,
-        posthaste_runtime_contract::ViewRevision,
-        posthaste_runtime_contract::ViewSnapshot,
-        posthaste_runtime_contract::ViewDescriptor,
-        posthaste_runtime_contract::ViewLifecycle,
-        posthaste_runtime_contract::RuntimeCoverage,
-        posthaste_runtime_contract::RuntimeCoverageKind,
-        posthaste_runtime_contract::ReadWatermark,
-        posthaste_runtime_contract::RuntimeAdapterError,
-        posthaste_runtime_contract::RuntimeErrorCode,
+        posthaste_api::api::StartOAuthRequest,
+        posthaste_api::api::StartProviderOAuthRequest,
+        posthaste_api::api::StartOAuthResponse,
     )),
-    tags(
-        (name = "system", description = "Health and service status"),
-        (name = "read", description = "Typed batch read calls"),
-        (name = "accounts", description = "Account configuration and lifecycle"),
-        (name = "oauth", description = "Provider OAuth authorization flows"),
-        (name = "mailboxes", description = "Mailboxes and navigation sidebar"),
-        (name = "messages", description = "Messages, attachments, compose, and commands"),
-        (name = "conversations", description = "Conversation list and detail views"),
-        (name = "smart-mailboxes", description = "Saved-query smart mailboxes"),
-        (name = "settings", description = "Application settings and automation rules"),
-        (name = "sync", description = "Sync triggers and configuration reload"),
-        (name = "events", description = "Server-sent domain event stream"),
-        (name = "views", description = "Runtime-owned view snapshots and streams"),
-        (name = "runtime", description = "Session-scoped runtime frame stream"),
-        (name = "auth", description = "Capability-token minting")
-    )
+    tags((name = "oauth", description = "Provider OAuth authorization flows")),
 )]
-pub struct ApiDoc;
+struct OAuthApiDoc;
 
-/// Generate the OpenAPI document. Single entry point for both the served route
-/// and the committed-artifact contract test.
+/// The full bundled-server OpenAPI document: the near `/v1` platform plus the
+/// OAuth-flow routes. This is the committed `openapi.json` contract artifact.
 pub fn document() -> utoipa::openapi::OpenApi {
-    ApiDoc::openapi()
-}
-
-/// `GET /v1/openapi.json` — serve the generated OpenAPI document.
-pub async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
-    Json(document())
-}
-
-/// The committed AsyncAPI event contract, embedded at build time. This is the
-/// event-driven analogue of `openapi.json`, describing the `/v1/events` SSE
-/// stream and the full set of event topics.
-///
-/// @spec docs/L1-api#sse-event-stream
-const ASYNCAPI_JSON: &str = include_str!("../../../asyncapi.json");
-
-/// `GET /v1/asyncapi.json` — serve the committed AsyncAPI event contract.
-pub async fn asyncapi_json() -> impl axum::response::IntoResponse {
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        ASYNCAPI_JSON,
-    )
+    let mut doc = posthaste_api::openapi::document();
+    doc.merge(OAuthApiDoc::openapi());
+    doc
 }

@@ -556,7 +556,7 @@ async fn account_crud_and_lifecycle_routes_match_runtime_projection() {
 // spec: docs/backend/L3#account-logo-metadata-runtime-backed
 #[test]
 fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
     let source = ["accounts/logos.rs", "accounts/crud.rs"]
         .into_iter()
         .map(|relative| {
@@ -582,7 +582,7 @@ fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
 // spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#wrapper-fitness-tests
 #[test]
 fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src");
     let source = fs::read_to_string(server_dir.join("app_state.rs"))
         .expect("app state source should be readable");
     for forbidden in [
@@ -604,7 +604,7 @@ fn app_state_does_not_expose_legacy_runtime_parts_to_routes() {
 // spec: docs/backend/L3#message-mutations-runtime-backed
 #[test]
 fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
-    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
+    let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
     for relative in [
         "message_commands.rs",
         "messages/compose.rs",
@@ -640,7 +640,7 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
 fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
     let server_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime_build =
-        fs::read_to_string(server_dir.join("../posthaste-authority-runtime/src/build.rs"))
+        fs::read_to_string(server_dir.join("../posthaste-runtime/src/build.rs"))
             .expect("authority runtime build source should be readable");
     let core_start = runtime_build
         .find("struct AuthorityRuntimeCore")
@@ -687,7 +687,7 @@ fn runtime_contract_exposes_single_mail_query_entry_point() {
 
 #[test]
 fn api_route_modules_do_not_construct_new_mail_runtime_graphs() {
-    let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/api");
+    let api_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../posthaste-api/src/api");
     let mut violations = Vec::new();
     collect_forbidden_runtime_graph_constructors(&api_dir, &mut violations);
 
