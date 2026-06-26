@@ -729,6 +729,20 @@ pub enum MutationSettlementState {
     Conflict,
 }
 
+impl MutationSettlementState {
+    /// A terminal state will not transition again and can be safely evicted from
+    /// the session's live mutation cache once the client has had a chance to
+    /// observe the settlement.
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            MutationSettlementState::Confirmed
+                | MutationSettlementState::Failed
+                | MutationSettlementState::Conflict
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
