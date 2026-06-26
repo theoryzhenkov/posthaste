@@ -4407,9 +4407,14 @@ dependencies = [
 name = "posthaste-testkit"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "posthaste-authority-runtime",
  "posthaste-config",
  "posthaste-domain",
+ "posthaste-runtime-contract",
  "posthaste-store",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

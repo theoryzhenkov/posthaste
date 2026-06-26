@@ -1,5 +1,7 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
     AccountDriver, AccountId, AccountSettings, AccountTransportSettings, RFC3339_EPOCH,
@@ -23,6 +25,7 @@ use crate::paths::temp_root;
 pub struct Harness {
     pub service: posthaste_domain::MailService,
     pub store: Arc<DatabaseStore>,
+    root: PathBuf,
 }
 
 impl Harness {
@@ -44,7 +47,29 @@ impl Harness {
         Self {
             service: posthaste_domain::MailService::new(store.clone(), config),
             store,
+            root,
         }
+    }
+
+    /// Stand up an in-process authority runtime against this harness's config
+    /// root, with its own state/cache roots under the harness temp dir.
+    ///
+    /// The harness's `MailService`/`store` are dropped (their connection closed
+    /// first) so the runtime opens a fresh store; the runtime owns the store
+    /// exposed by [`RuntimeHarness::store`]. Async — the caller owns the tokio
+    /// runtime (`#[tokio::test]`).
+    pub async fn with_runtime(self) -> crate::runtime::RuntimeHarness {
+        let config = RuntimeBuildConfig::new(
+            self.root.join("config"),
+            self.root.join("runtime-state"),
+            self.root.join("runtime-cache"),
+        )
+        .with_secret_store(Arc::new(crate::runtime::TestSecretStore::default()));
+        drop(self);
+        let build = build_authority_runtime(config)
+            .await
+            .expect("authority runtime should build");
+        crate::runtime::RuntimeHarness::new(build)
     }
 
     /// Saves a source account with the given driver and transport settings.
