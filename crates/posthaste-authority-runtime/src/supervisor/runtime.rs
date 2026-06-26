@@ -112,15 +112,16 @@ pub(crate) async fn process_sync_trigger_with_state(
 ) {
     let mut next = Some((trigger, mode, reply));
     while let Some((trigger, mode, reply)) = next {
-        sync_state.increment_sync_cycle_count();
-        sync_state.start_sync();
+        sync_state.begin_cycle().await;
         let _ = process_sync_trigger(
             shared, account, generation, trigger, mode, connection, reply,
         )
         .await;
-        sync_state.finish_sync();
+        // Finish + take-pending is atomic with the trigger source's
+        // coalesce-or-claim, so a trigger coalesced while this cycle ran is
+        // always drained here rather than stranded.
         next = sync_state
-            .take_pending()
+            .finish_cycle_take_pending()
             .await
             .map(|trigger| (trigger, SyncMode::Incremental, None));
     }
