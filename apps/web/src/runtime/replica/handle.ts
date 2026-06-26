@@ -1,6 +1,6 @@
 /**
  * The narrow JS surface of the WASM replica boundary
- * (`MailListReplicaHandle`), declared independently of the generated module so
+ * (`RuntimeMailListReplica`), declared independently of the generated module so
  * the host glue and its tests depend on this interface rather than on the
  * artifact. Production resolves it from the generated bundle via
  * {@link loadReplicaHandleFactory}; tests substitute an in-memory fake.
@@ -50,9 +50,11 @@ export interface DiffStep {
   diff: MessageChangeDiff
 }
 
-export interface ReplicaHandle {
-  /** Adopt a served base: a JSON array of `{messageId, projection}`. */
-  ingestJson(rowsJson: string): void
+export interface RuntimeReplicaHandle {
+  /** Adopt a served `MailListViewState` rows array as the confirmed base. */
+  ingestViewJson(rowsJson: string): void
+  /** Apply a runtime `MailListDelta` to the confirmed base. */
+  applyDeltaJson(deltaJson: string): void
   /** Accept an optimistic mutation: `{mutationId, messageId, assertion}`. */
   acceptJson(acceptJson: string): void
   /**
@@ -62,14 +64,14 @@ export interface ReplicaHandle {
   settle(mutationId: string, outcome: SettlementVerdict): boolean
   hasPending(): boolean
   /**
-   * The optimistic rows as a JSON array of projections, in served order. Pass
-   * the view's concrete mailbox to drop archived-out rows; omit it to defer
+   * The optimistic rows as a JSON array of full `MailListRowState`. Pass the
+   * view's concrete mailbox to drop archived-out rows; omit it to defer
    * membership to the runtime's next served base.
    */
-  projectJson(mailboxId?: string | null): string
+  projectViewJson(mailboxId?: string | null): string
 }
 
-export type ReplicaHandleFactory = () => ReplicaHandle
+export type ReplicaHandleFactory = () => RuntimeReplicaHandle
 
 let cachedFactory: Promise<ReplicaHandleFactory> | undefined
 
@@ -84,7 +86,7 @@ export function loadReplicaHandleFactory(): Promise<ReplicaHandleFactory> {
   cachedFactory ??= (async () => {
     const module = await import('../wasm/posthaste_link_wasm.js')
     await module.default()
-    return () => new module.MailListReplicaHandle() as ReplicaHandle
+    return () => new module.RuntimeMailListReplica() as RuntimeReplicaHandle
   })()
   return cachedFactory
 }
