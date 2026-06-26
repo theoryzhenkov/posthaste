@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import type { OkResponse } from '../src/api/types'
 import type {
   ReplicaAssertion,
-  ReplicaHandle,
+  RuntimeReplicaHandle,
 } from '../src/runtime/replica/handle'
 import { createReplicaAdapter } from '../src/runtime/replica/replicaAdapter'
 import { MemoryOutboxStore } from '../src/runtime/replica/outboxStore'
@@ -11,6 +11,7 @@ import type {
   RuntimeAdapter,
   RuntimeFrame,
   RuntimeFrameHandlers,
+  RuntimeMailListDelta,
   RuntimeMailListViewState,
   RuntimeMutationReceipt,
   RuntimeRunMutationRequest,
@@ -26,15 +27,28 @@ interface BaseRow {
   projection: { id: string; keywords: string[]; mailboxIds: string[] }
 }
 
-class FakeHandle implements ReplicaHandle {
-  private base: BaseRow[] = []
+class FakeHandle implements RuntimeReplicaHandle {
+  private rows: RuntimeMailListRowState[] = []
   private readonly pending = new Map<
     string,
     { messageId: string; assertion: ReplicaAssertion }
   >()
 
-  ingestJson(rowsJson: string): void {
-    this.base = JSON.parse(rowsJson) as BaseRow[]
+  ingestViewJson(rowsJson: string): void {
+    this.rows = JSON.parse(rowsJson) as RuntimeMailListRowState[]
+  }
+
+  applyDeltaJson(deltaJson: string): void {
+    const delta = JSON.parse(deltaJson) as RuntimeMailListDelta
+    const upsertByKey = new Map(delta.upserts.map((row) => [row.rowKey, row]))
+    if (delta.order) {
+      const heldByKey = new Map(this.rows.map((row) => [row.rowKey, row]))
+      this.rows = delta.order
+        .map((key) => upsertByKey.get(key) ?? heldByKey.get(key))
+        .filter((row): row is RuntimeMailListRowState => row != null)
+    } else {
+      this.rows = this.rows.map((row) => upsertByKey.get(row.rowKey) ?? row)
+    }
   }
 
   acceptJson(acceptJson: string): void {
@@ -55,13 +69,18 @@ class FakeHandle implements ReplicaHandle {
     return this.pending.size > 0
   }
 
-  projectJson(mailboxId?: string | null): string {
-    const rows = this.base.flatMap((row) => {
-      let keywords = [...row.projection.keywords]
-      let mailboxIds = [...row.projection.mailboxIds]
+  projectViewJson(mailboxId?: string | null): string {
+    const projected = this.rows.flatMap((row) => {
+      const projection = row.projection as {
+        id: string
+        keywords: string[]
+        mailboxIds: string[]
+      }
+      let keywords = [...projection.keywords]
+      let mailboxIds = [...projection.mailboxIds]
       let destroyed = false
       for (const op of this.pending.values()) {
-        if (op.messageId !== row.messageId) continue
+        if (op.messageId !== projection.id) continue
         if (op.assertion.kind === 'setKeywords') {
           keywords = keywords.filter((k) => !op.assertion.remove.includes(k))
           keywords.push(
@@ -87,9 +106,14 @@ class FakeHandle implements ReplicaHandle {
       }
       if (destroyed) return []
       if (mailboxId != null && !mailboxIds.includes(mailboxId)) return []
-      return [{ id: row.projection.id, keywords, mailboxIds }]
+      return [
+        {
+          ...row,
+          projection: { ...projection, keywords, mailboxIds },
+        },
+      ]
     })
-    return JSON.stringify(rows)
+    return JSON.stringify(projected)
   }
 }
 
