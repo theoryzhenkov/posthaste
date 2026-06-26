@@ -150,8 +150,8 @@ fn row_message_id(row: &posthaste_runtime_contract::MailListRowState) -> String 
 mod tests {
     use super::*;
     use posthaste_runtime_contract::{
-        MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
-        RuntimeCoverage, RuntimeCoverageKind,
+        CoverageRange, MailListAnchorState, MailListContinuation, MailListProjectionKind,
+        MailListRowState, RuntimeCoverage,
     };
     use serde_json::json;
 
@@ -188,8 +188,7 @@ mod tests {
             },
             read_watermark: None,
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: Value::Null,
+                ranges: vec![CoverageRange { from: None, to: None }],
             },
             known_total_count: None,
             pending_mutations: Vec::new(),

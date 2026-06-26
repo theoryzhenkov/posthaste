@@ -892,7 +892,7 @@ fn ensure_caller_matches_session(
 mod delta_tests {
     use super::*;
     use posthaste_runtime_contract::{
-        RuntimeCoverage, RuntimeCoverageKind, ViewLifecycle, ViewRevision,
+        CoverageRange, RuntimeCoverage, ViewLifecycle, ViewRevision,
     };
     use serde_json::json;
 
@@ -918,8 +918,7 @@ mod delta_tests {
             lifecycle: ViewLifecycle::Ready,
             read_watermark: None,
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: Value::Null,
+                ranges: vec![CoverageRange { from: None, to: None }],
             },
             data: json!({
                 "scope": {},
@@ -932,7 +931,7 @@ mod delta_tests {
                     "hasBefore": false, "hasAfter": has_after
                 },
                 "readWatermark": null,
-                "coverage": { "kind": "complete", "details": {} },
+                "coverage": { "ranges": [{ "from": null, "to": null }] },
                 "knownTotalCount": null,
                 "pendingMutations": [],
                 "anchor": { "kind": "notRequested" }
