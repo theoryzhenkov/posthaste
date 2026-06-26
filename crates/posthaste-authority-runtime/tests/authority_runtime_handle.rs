@@ -7,10 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
-    build_authority_runtime, from_api_bridge_for_migration, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeBuildError,
+    build_authority_runtime, from_api_bridge_for_migration, RuntimeBuildConfig, RuntimeBuildError,
 };
-use posthaste_engine::MockJmapGateway;
 use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
@@ -18,6 +16,7 @@ use posthaste_domain::{
     SyncBatch, SyncCursor, SyncObject, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
     EVENT_TOPIC_MESSAGE_UPDATED,
 };
+use posthaste_engine::MockJmapGateway;
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
     MailPresentationRequest, MailQueryRequest, MutationRequest, MutationSettlementState,
@@ -318,12 +317,9 @@ fn imap_smtp_account_mutation(
 #[tokio::test]
 async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -361,12 +357,9 @@ async fn build_from_empty_roots_reports_ready_status_without_http_or_tauri() {
 #[tokio::test]
 async fn stopped_runtime_rejects_reads_but_keeps_status_readable() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -396,12 +389,9 @@ async fn stopped_runtime_rejects_reads_but_keeps_status_readable() {
 #[tokio::test]
 async fn stopped_runtime_rejects_mutations_before_mutation_service_lookup() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -425,12 +415,9 @@ async fn stopped_runtime_rejects_mutations_before_mutation_service_lookup() {
 #[tokio::test]
 async fn active_migration_handle_without_mutations_reports_missing_mutation_service() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -460,12 +447,9 @@ async fn active_migration_handle_without_mutations_reports_missing_mutation_serv
 #[tokio::test]
 async fn authority_builder_handle_supports_account_mutations() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -498,12 +482,9 @@ async fn authority_builder_handle_supports_account_mutations() {
 #[tokio::test]
 async fn mail_list_view_replaces_snapshot_after_keyword_event() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -598,12 +579,9 @@ async fn mail_list_view_replaces_snapshot_after_keyword_event() {
 #[tokio::test]
 async fn runtime_session_ids_are_not_predictable_counters() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -634,12 +612,9 @@ async fn runtime_session_ids_are_not_predictable_counters() {
 #[tokio::test]
 async fn runtime_session_stream_carries_keyword_view_replace_frames() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -749,12 +724,9 @@ async fn runtime_session_stream_carries_keyword_view_replace_frames() {
 #[tokio::test]
 async fn runtime_mutation_streams_settlement_frames() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -872,12 +844,9 @@ async fn runtime_mutation_streams_settlement_frames() {
 #[tokio::test]
 async fn message_mutation_settlement_payload_excludes_the_message_body() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -940,12 +909,9 @@ async fn message_detail_view_replaces_snapshot_after_keyword_event() {
     // a replacement when its own message changes — the read surface the renderer
     // subscribes to instead of patching a local cache.
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1021,12 +987,9 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
     // The conversation view family serves the overlay-folded conversation and
     // recomputes when a message changes.
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1131,12 +1094,9 @@ async fn runtime_set_read_state_mutation_routes_through_the_catalog() {
     // A catalog mutation beyond setKeywords routes to its handle action and
     // settles confirmed (read/flag/move/destroy all share this path).
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1202,12 +1162,9 @@ async fn runtime_session_view_extends_its_window_in_place() {
     // A windowed mailList view grows in place: extend re-queries the larger
     // window, keeps the same view id, and broadcasts a ViewReplace.
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1329,12 +1286,9 @@ async fn runtime_account_status_view_serves_and_recomputes() {
     // The accountStatus view serves the folded account list and recomputes +
     // broadcasts a ViewReplace when the account set changes.
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1463,12 +1417,9 @@ async fn runtime_undo_redo_navigates_the_session_history_stack() {
     // Undo reverses the most recent reversible mutation; redo replays it; a
     // fresh mutation clears the redo stack — desktop-style, runtime-owned.
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1652,12 +1603,9 @@ async fn runtime_undo_redo_navigates_the_session_history_stack() {
 #[tokio::test]
 async fn mail_list_view_enforces_caller_account_scope() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1706,12 +1654,9 @@ async fn mail_list_view_enforces_caller_account_scope() {
 #[tokio::test]
 async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1789,12 +1734,9 @@ async fn mail_list_view_fans_out_keyword_replaces_to_all_subscribers() {
 #[tokio::test]
 async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1871,12 +1813,9 @@ async fn mail_list_view_keeps_open_view_fresh_without_active_subscribers() {
 #[tokio::test]
 async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -1945,12 +1884,9 @@ async fn mail_list_view_replaces_snapshot_when_keyword_event_changes_membership(
 #[tokio::test]
 async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -2019,12 +1955,9 @@ async fn mail_list_view_ignores_keyword_events_for_messages_outside_window() {
 async fn create_account_duplicate_id_conflicts_without_overwriting_config_or_secret() {
     let root = temp_root();
     let secret_store = Arc::new(TestSecretStore::default());
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(secret_store.clone());
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(secret_store.clone());
 
     let build = build_authority_runtime(config)
         .await
@@ -2076,12 +2009,9 @@ async fn create_account_duplicate_id_conflicts_without_overwriting_config_or_sec
 async fn delete_account_removes_secret_config_and_publishes_event_through_runtime() {
     let root = temp_root();
     let secret_store = Arc::new(TestSecretStore::default());
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(secret_store.clone());
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(secret_store.clone());
 
     let build = build_authority_runtime(config)
         .await
@@ -2168,12 +2098,9 @@ async fn delete_account_removes_secret_config_and_publishes_event_through_runtim
 async fn oauth_token_persistence_writes_secret_and_patches_account_through_runtime() {
     let root = temp_root();
     let secret_store = Arc::new(TestSecretStore::default());
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(secret_store.clone());
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(secret_store.clone());
 
     let build = build_authority_runtime(config)
         .await
@@ -2262,12 +2189,9 @@ async fn oauth_token_persistence_writes_secret_and_patches_account_through_runti
 #[tokio::test]
 async fn event_subscription_replays_backlog_then_filters_live_events() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -2354,12 +2278,9 @@ async fn event_subscription_replays_backlog_then_filters_live_events() {
 #[tokio::test]
 async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
 
     let build = build_authority_runtime(config)
         .await
@@ -2434,23 +2355,17 @@ async fn runtime_session_stream_carries_scoped_domain_event_notifications() {
 #[tokio::test]
 async fn zero_event_channel_capacity_returns_typed_build_error() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()))
-    .with_event_channel_capacity(0);
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()))
+            .with_event_channel_capacity(0);
 
     let error = match build_authority_runtime(config).await {
         Ok(_) => panic!("zero-capacity event channel should be rejected before build side effects"),
         Err(error) => error,
     };
 
-    assert!(matches!(
-        error,
-        AuthorityRuntimeBuildError::InvalidConfig(_)
-    ));
+    assert!(matches!(error, RuntimeBuildError::InvalidConfig(_)));
 }
 
 /// A backend link transport whose up-channel blocks until released — a test seam
@@ -2523,21 +2438,18 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
     let release_for_transport = release.clone();
 
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()))
-    // Decorate the real in-process transport: gate the up-channel, delegate the
-    // rest (so account-creation setup reaches the live backend).
-    .with_backend_transport_override(move |inner| {
-        Arc::new(DeferredTransport {
-            inner,
-            entered: entered_for_transport,
-            release: release_for_transport,
-        })
-    });
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()))
+            // Decorate the real in-process transport: gate the up-channel, delegate the
+            // rest (so account-creation setup reaches the live backend).
+            .with_backend_transport_override(move |inner| {
+                Arc::new(DeferredTransport {
+                    inner,
+                    entered: entered_for_transport,
+                    release: release_for_transport,
+                })
+            });
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -2626,12 +2538,9 @@ async fn runtime_serves_optimistic_rows_from_its_outbox_while_a_forward_is_in_fl
 #[tokio::test]
 async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
     let root = temp_root();
-    let config = AuthorityRuntimeBuildConfig::new(
-        root.join("config"),
-        root.join("state"),
-        root.join("cache"),
-    )
-    .with_secret_store(Arc::new(TestSecretStore::default()));
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
     let build = build_authority_runtime(config)
         .await
         .expect("authority runtime should build");
@@ -2651,10 +2560,7 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
         .sync_account(&account.id)
         .await
         .expect("mock account runtime should sync");
-    let baseline = build
-        .account_supervisor
-        .sync_cycle_count(&account.id)
-        .await;
+    let baseline = build.account_supervisor.sync_cycle_count(&account.id).await;
     assert!(
         baseline >= 1,
         "startup or explicit sync should execute at least one cycle"

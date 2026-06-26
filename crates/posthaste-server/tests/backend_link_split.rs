@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_authority_runtime::{
-    build_authority_runtime, build_backend_node, build_remote_runtime, AuthorityRuntimeBuildConfig,
-    BackendTransportConfig, RemoteBackend,
+    build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
+    RemoteBackend, RuntimeBuildConfig,
 };
 use posthaste_domain::{
     AccountDriver, MailboxId, MailboxRecord, MessageId, MessageRecord, MessageSortField, SecretRef,
@@ -99,8 +99,8 @@ fn account_mutation(id: &str) -> CreateAccountMutation {
     }
 }
 
-fn build_config(root: PathBuf) -> AuthorityRuntimeBuildConfig {
-    AuthorityRuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+fn build_config(root: PathBuf) -> RuntimeBuildConfig {
+    RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
         .with_secret_store(Arc::new(TestSecretStore::default()))
 }
 

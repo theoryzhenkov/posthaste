@@ -36,7 +36,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{middleware, Router};
-use posthaste_runtime::{AuthorityRuntimeHandle, RuntimeShutdownHandle};
+use posthaste_runtime::{RuntimeHandle, RuntimeShutdownHandle};
 use tower_http::services::ServeDir;
 use tracing_appender::non_blocking::WorkerGuard;
 

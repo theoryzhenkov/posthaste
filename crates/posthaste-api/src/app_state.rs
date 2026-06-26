@@ -4,7 +4,7 @@ pub struct AppState {
     /// Target runtime boundary for `/v1` mail behavior.
     ///
     /// @spec docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
-    pub runtime: AuthorityRuntimeHandle,
+    pub runtime: RuntimeHandle,
     pub account_logo_root: PathBuf,
     /// Per-process bearer token enforced by the auth middleware when
     /// `require_auth` is on. The serialized **full-scope macaroon** (V2 base64

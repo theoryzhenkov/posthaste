@@ -51,8 +51,8 @@ use std::time::Duration;
 #[cfg(debug_assertions)]
 use dotenvy::dotenv;
 use posthaste_authority_runtime::{
-    build_authority_runtime, build_backend_node, build_remote_runtime, AuthorityRuntimeBuildConfig,
-    BackendTransportConfig,
+    build_authority_runtime, build_backend_node, build_remote_runtime, BackendTransportConfig,
+    RuntimeBuildConfig,
 };
 use posthaste_config::TomlConfigRepository;
 use posthaste_observability::{events, ph_info};

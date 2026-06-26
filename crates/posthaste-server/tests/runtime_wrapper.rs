@@ -574,7 +574,7 @@ fn account_asset_routes_keep_metadata_and_delete_linkage_behind_runtime() {
     ] {
         assert!(
             !source.contains(forbidden),
-            "account asset routes should use AuthorityRuntimeHandle instead of {forbidden}"
+            "account asset routes should use RuntimeHandle instead of {forbidden}"
         );
     }
 }
@@ -629,7 +629,7 @@ fn migrated_runtime_routes_do_not_call_legacy_state_directly() {
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{} should use AuthorityRuntimeHandle instead of {forbidden}",
+                "{} should use RuntimeHandle instead of {forbidden}",
                 path.display()
             );
         }
@@ -642,7 +642,7 @@ fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
     let runtime_build = fs::read_to_string(server_dir.join("../posthaste-runtime/src/build.rs"))
         .expect("authority runtime build source should be readable");
     let core_start = runtime_build
-        .find("struct AuthorityRuntimeCore")
+        .find("struct RuntimeCoreState")
         .expect("authority runtime core struct should exist");
     let core_end = runtime_build[core_start..]
         .find("/// Cloneable authority runtime handle")
@@ -652,7 +652,7 @@ fn authority_runtime_core_does_not_use_api_bridge_as_dependency_bag() {
 
     assert!(
         !core_struct.contains("api_bridge"),
-        "AuthorityRuntimeCore should own explicit runtime dependencies, not api_bridge"
+        "RuntimeCoreState should own explicit runtime dependencies, not api_bridge"
     );
     assert!(
         !runtime_build.contains("self.core.api_bridge"),

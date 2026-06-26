@@ -8,14 +8,14 @@ use posthaste_domain::{
 };
 use serde::Deserialize;
 
-use crate::AuthorityRuntimeBuildError;
+use crate::RuntimeBuildError;
 
 /// Initialize an empty config repository from a bootstrap file, or from default
 /// config and smart mailboxes when no bootstrap is supplied.
 pub(crate) fn initialize_config(
     config_repo: &TomlConfigRepository,
     bootstrap_path: Option<&Path>,
-) -> Result<(), AuthorityRuntimeBuildError> {
+) -> Result<(), RuntimeBuildError> {
     if !config_repo.is_empty() {
         return Ok(());
     }
@@ -31,15 +31,14 @@ pub(crate) fn initialize_config(
 fn import_bootstrap(
     bootstrap_path: &Path,
     config_repo: &TomlConfigRepository,
-) -> Result<(), AuthorityRuntimeBuildError> {
-    let contents = fs::read_to_string(bootstrap_path).map_err(|err| {
-        AuthorityRuntimeBuildError::BootstrapRead {
+) -> Result<(), RuntimeBuildError> {
+    let contents =
+        fs::read_to_string(bootstrap_path).map_err(|err| RuntimeBuildError::BootstrapRead {
             path: bootstrap_path.to_path_buf(),
             source: err,
-        }
-    })?;
+        })?;
     let bootstrap: BootstrapConfig =
-        toml::from_str(&contents).map_err(|err| AuthorityRuntimeBuildError::BootstrapParse {
+        toml::from_str(&contents).map_err(|err| RuntimeBuildError::BootstrapParse {
             path: bootstrap_path.to_path_buf(),
             message: err.to_string(),
         })?;
@@ -71,12 +70,12 @@ fn import_bootstrap(
 
 fn bootstrap_sources(
     accounts: &[BootstrapAccountConfig],
-) -> Result<Vec<AccountSettings>, AuthorityRuntimeBuildError> {
+) -> Result<Vec<AccountSettings>, RuntimeBuildError> {
     accounts
         .iter()
         .map(|account| {
             validate_safe_config_id(&account.id)?;
-            let now = domain_now_iso8601().map_err(AuthorityRuntimeBuildError::Clock)?;
+            let now = domain_now_iso8601().map_err(RuntimeBuildError::Clock)?;
             Ok(AccountSettings {
                 id: account.id.clone().into(),
                 name: account.name.clone(),

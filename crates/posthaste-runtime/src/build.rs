@@ -49,7 +49,7 @@ const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 ///
 /// spec: docs/runtime/internals/L2#runtime-builder-transport-free
 /// spec: docs/runtime/internals/L1#runtime-owned-roots
-pub struct AuthorityRuntimeBuildConfig {
+pub struct RuntimeBuildConfig {
     pub config_root: PathBuf,
     pub state_root: PathBuf,
     pub cache_root: PathBuf,
@@ -71,7 +71,7 @@ pub struct AuthorityRuntimeBuildConfig {
 }
 
 /// A decorator over the config-selected link transport (see
-/// [`AuthorityRuntimeBuildConfig::backend_transport_override`]): receives the
+/// [`RuntimeBuildConfig::backend_transport_override`]): receives the
 /// real [`BackendApi`] and returns a wrapping one. Composes, so it need not
 /// re-implement the whole surface — only the methods it intercepts.
 pub type BackendTransportDecorator =
@@ -95,7 +95,7 @@ pub enum BackendTransportConfig {
     },
 }
 
-impl AuthorityRuntimeBuildConfig {
+impl RuntimeBuildConfig {
     pub fn new(
         config_root: impl Into<PathBuf>,
         state_root: impl Into<PathBuf>,
@@ -161,7 +161,7 @@ impl AuthorityRuntimeBuildConfig {
 ///
 /// spec: docs/runtime/internals/L1#runtime-handle-transport-neutral
 pub struct RemoteRuntimeBuild {
-    pub handle: AuthorityRuntimeHandle,
+    pub handle: RuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
     pub runtime_status: RuntimeStatus,
     /// The runtime's own secret store, for its `/v1` client auth.
@@ -173,14 +173,14 @@ pub struct RemoteRuntimeBuild {
 /// fall back to). Must run within a Tokio runtime: it spawns the down-channel
 /// bridge that keeps the read cache + views live from the backend's assertions.
 pub fn build_remote_runtime(
-    config: AuthorityRuntimeBuildConfig,
-) -> Result<RemoteRuntimeBuild, AuthorityRuntimeBuildError> {
+    config: RuntimeBuildConfig,
+) -> Result<RemoteRuntimeBuild, RuntimeBuildError> {
     if config.event_channel_capacity == 0 {
-        return Err(AuthorityRuntimeBuildError::InvalidConfig(
+        return Err(RuntimeBuildError::InvalidConfig(
             "event_channel_capacity must be greater than zero".to_string(),
         ));
     }
-    let AuthorityRuntimeBuildConfig {
+    let RuntimeBuildConfig {
         secret_store,
         event_channel_capacity,
         backend_transport,
@@ -191,7 +191,7 @@ pub fn build_remote_runtime(
     let (base_url, token) = match backend_transport {
         BackendTransportConfig::Remote { base_url, token } => (base_url, token),
         BackendTransportConfig::InProcess => {
-            return Err(AuthorityRuntimeBuildError::InvalidConfig(
+            return Err(RuntimeBuildError::InvalidConfig(
                 "a remote runtime requires a remote backend transport".to_string(),
             ));
         }
@@ -261,7 +261,7 @@ pub struct RuntimeAssembly {
 
 /// The handle + shutdown produced by [`assemble_runtime`].
 pub struct ComposedRuntime {
-    pub handle: AuthorityRuntimeHandle,
+    pub handle: RuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
 }
 
@@ -294,7 +294,7 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
         reads.clone(),
     ));
     let sessions = Arc::new(SessionRegistry::new(views.clone(), event_sender.clone()));
-    let core = Arc::new(AuthorityRuntimeCore {
+    let core = Arc::new(RuntimeCoreState {
         backend_link,
         outbox,
         reads,
@@ -306,14 +306,14 @@ pub fn assemble_runtime(assembly: RuntimeAssembly) -> ComposedRuntime {
     });
 
     ComposedRuntime {
-        handle: AuthorityRuntimeHandle { core },
+        handle: RuntimeHandle { core },
         shutdown: RuntimeShutdownHandle { stopped },
     }
 }
 
 /// The shared runtime core behind the cloneable handle: the backend link, the
 /// outbox, the read cache, the event bus, and the view/session registries.
-struct AuthorityRuntimeCore {
+struct RuntimeCoreState {
     // Neither the service/store nor the backend far node is held here: every
     // backend operation now routes through the link — `backend_link` for the
     // mutation up-channel and the typed write commands, `reads` for the read
@@ -343,11 +343,11 @@ struct AuthorityRuntimeCore {
 /// spec: docs/runtime/internals/L1#runtime-handle-transport-neutral
 /// spec: docs/backend/L2#handle-methods-transport-free
 #[derive(Clone)]
-pub struct AuthorityRuntimeHandle {
-    core: Arc<AuthorityRuntimeCore>,
+pub struct RuntimeHandle {
+    core: Arc<RuntimeCoreState>,
 }
 
-impl AuthorityRuntimeHandle {
+impl RuntimeHandle {
     /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
     /// test/API parts until all router state is produced by the authority
     /// runtime builder.
@@ -728,7 +728,7 @@ fn runtime_lifecycle_label(lifecycle: &RuntimeLifecycle) -> &'static str {
 }
 
 #[async_trait]
-impl RuntimeCore for AuthorityRuntimeHandle {
+impl RuntimeCore for RuntimeHandle {
     async fn runtime_status(&self, _caller: RuntimeCaller) -> Result<RuntimeStatus, RuntimeError> {
         let mut status = self.current_status();
         // The live account count is backend state; read it through the link
@@ -1341,14 +1341,14 @@ impl RuntimeShutdownHandle {
     // Async by contract: shutdown is part of the runtime's async lifecycle
     // (start/await, shutdown/await) and will await task joins as it grows.
     #[allow(clippy::unused_async)]
-    pub async fn shutdown(self) -> Result<(), AuthorityRuntimeShutdownError> {
+    pub async fn shutdown(self) -> Result<(), RuntimeShutdownError> {
         self.stopped.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
 #[derive(Debug, Error)]
-pub enum AuthorityRuntimeBuildError {
+pub enum RuntimeBuildError {
     #[error("config error: {0}")]
     Config(#[from] ConfigError),
     #[error("store error: {0}")]
@@ -1368,7 +1368,7 @@ pub enum AuthorityRuntimeBuildError {
 }
 
 #[derive(Debug, Error)]
-pub enum AuthorityRuntimeShutdownError {
+pub enum RuntimeShutdownError {
     #[error("runtime shutdown failed: {0}")]
     Failed(String),
 }

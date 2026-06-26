@@ -22,7 +22,7 @@ The industry pattern is branch by abstraction / strangler-fig migration: introdu
 
 ## 2. Approved temporary exception
 
-`posthaste-server::AppState` contains the `AuthorityRuntimeHandle` target runtime boundary plus HTTP-adapter-owned state. Legacy direct fields such as `MailService`, `MailStore`, `SecretStore`, `AccountSupervisor`, and `event_sender` must not be exposed through route state.
+`posthaste-server::AppState` contains the `RuntimeHandle` target runtime boundary plus HTTP-adapter-owned state. Legacy direct fields such as `MailService`, `MailStore`, `SecretStore`, `AccountSupervisor`, and `event_sender` must not be exposed through route state.
 
 `AuthorityRuntimeBuild::api_bridge` may temporarily expose those handles for compatibility test harnesses and migration constructors while direct seeding paths are retired. Runtime-core method implementations must use explicit runtime-owned dependencies rather than calling through `api_bridge`.
 
@@ -37,7 +37,7 @@ During the migration, legacy direct access is allowed only in these places:
 3. integration-test harnesses that seed store state or exercise existing endpoint behavior; and
 4. the temporary API bridge constructors used to build migration handles in tests.
 
-New mail-state behavior must be added behind `RuntimeCore` or `AuthorityRuntimeHandle` first, then adapted to HTTP. Do not add new independent service/store graphs to route modules.
+New mail-state behavior must be added behind `RuntimeCore` or `RuntimeHandle` first, then adapted to HTTP. Do not add new independent service/store graphs to route modules.
 
 ## 4. Fitness functions
 
@@ -87,7 +87,7 @@ Each tag should link to this file or to an assertion below.
 
 | ID | Sev. | Assertion |
 | --- | --- | --- |
-| appstate-has-runtime-handle | MUST | `posthaste-server::AppState` carries an `AuthorityRuntimeHandle` during the wrapper migration. |
+| appstate-has-runtime-handle | MUST | `posthaste-server::AppState` carries an `RuntimeHandle` during the wrapper migration. |
 | legacy-fields-temporary | MUST | Direct service/store/supervisor handles are temporary migration-constructor or test-harness internals, not `AppState` route fields or runtime-core method dependencies. |
 | server-startup-authority-builder | MUST | Server startup uses `posthaste-authority-runtime` to assemble config, store, service, secret store, and event channel before API adapter state is built. |
 | no-new-route-service-graphs | MUST | New mail-state route behavior is not implemented by constructing a separate `MailService`, `DatabaseStore`, provider gateway, or supervisor graph in route modules. |

@@ -15,9 +15,9 @@ use posthaste_store::DatabaseStore;
 use tokio::sync::broadcast;
 
 use posthaste_runtime::{
-    assemble_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
-    AuthorityRuntimeHandle, BackendTransportConfig, BackendTransportDecorator, ReadCache,
-    RemoteBackend, RuntimeAssembly, RuntimeShutdownHandle, SystemSecretStore,
+    assemble_runtime, BackendTransportConfig, BackendTransportDecorator, ReadCache, RemoteBackend,
+    RuntimeAssembly, RuntimeBuildConfig, RuntimeBuildError, RuntimeHandle, RuntimeShutdownHandle,
+    SystemSecretStore,
 };
 
 use crate::account_reads::{AccountReadService, DefaultAccountRuntimeOverviewProvider};
@@ -34,7 +34,7 @@ use crate::{
 
 /// Result of building the authority runtime in-process (backend + near node).
 pub struct AuthorityRuntimeBuild {
-    pub handle: AuthorityRuntimeHandle,
+    pub handle: RuntimeHandle,
     pub shutdown: RuntimeShutdownHandle,
     pub runtime_status: RuntimeStatus,
     pub account_supervisor: Arc<AccountSupervisor>,
@@ -95,8 +95,8 @@ impl AuthorityRuntimeApiMigrationBridge {
 /// spec: docs/eph/PLAN-L2-bundled-app-test-plan#authority-runtime-handle-test-first
 /// spec: docs/runtime/internals/L2#runtime-builder-transport-free
 pub async fn build_authority_runtime(
-    config: AuthorityRuntimeBuildConfig,
-) -> Result<AuthorityRuntimeBuild, AuthorityRuntimeBuildError> {
+    config: RuntimeBuildConfig,
+) -> Result<AuthorityRuntimeBuild, RuntimeBuildError> {
     let backend = build_backend(&config).await?;
     Ok(build_runtime(backend, config))
 }
@@ -130,8 +130,8 @@ impl BackendNode {
 /// this returns (the supervisor has started its accounts); serve
 /// [`BackendNode::transport`] over the link to expose it to a remote runtime.
 pub async fn build_backend_node(
-    config: AuthorityRuntimeBuildConfig,
-) -> Result<BackendNode, AuthorityRuntimeBuildError> {
+    config: RuntimeBuildConfig,
+) -> Result<BackendNode, RuntimeBuildError> {
     let backend = build_backend(&config).await?;
     let transport: Arc<dyn BackendApi> = Arc::new(LocalBackend::new(backend.backend.clone()));
     Ok(BackendNode {
@@ -159,19 +159,19 @@ pub(crate) struct BackendBuild {
 /// Build the backend far node alone (no runtime). Used directly by a
 /// backend-only deployment and as the first half of the bundled build.
 pub(crate) async fn build_backend(
-    config: &AuthorityRuntimeBuildConfig,
-) -> Result<BackendBuild, AuthorityRuntimeBuildError> {
+    config: &RuntimeBuildConfig,
+) -> Result<BackendBuild, RuntimeBuildError> {
     if config.event_channel_capacity == 0 {
-        return Err(AuthorityRuntimeBuildError::InvalidConfig(
+        return Err(RuntimeBuildError::InvalidConfig(
             "event_channel_capacity must be greater than zero".to_string(),
         ));
     }
 
-    fs::create_dir_all(&config.state_root).map_err(|source| AuthorityRuntimeBuildError::Io {
+    fs::create_dir_all(&config.state_root).map_err(|source| RuntimeBuildError::Io {
         path: config.state_root.clone(),
         source,
     })?;
-    fs::create_dir_all(&config.cache_root).map_err(|source| AuthorityRuntimeBuildError::Io {
+    fs::create_dir_all(&config.cache_root).map_err(|source| RuntimeBuildError::Io {
         path: config.cache_root.clone(),
         source,
     })?;
@@ -270,7 +270,7 @@ pub(crate) async fn build_backend(
 /// for the OAuth holdout. Must run within a Tokio runtime.
 pub(crate) fn build_runtime(
     backend: BackendBuild,
-    config: AuthorityRuntimeBuildConfig,
+    config: RuntimeBuildConfig,
 ) -> AuthorityRuntimeBuild {
     let BackendBuild {
         secret_store,
@@ -284,7 +284,7 @@ pub(crate) fn build_runtime(
     // Take the transport selection out of the config (the override decorator is
     // `FnOnce`, so it is moved, not cloned); the rest of the config was consumed
     // by `build_backend`.
-    let AuthorityRuntimeBuildConfig {
+    let RuntimeBuildConfig {
         backend_transport,
         backend_transport_override,
         ..
@@ -369,7 +369,7 @@ fn select_backend_link(
 ///
 /// spec: docs/eph/PLAN-L3-api-runtime-wrapper-migration#appstate-has-runtime-handle
 pub struct MigrationRuntime {
-    pub handle: AuthorityRuntimeHandle,
+    pub handle: RuntimeHandle,
     pub account_mutations: Arc<AccountMutationService>,
 }
 
@@ -378,7 +378,7 @@ pub struct MigrationRuntime {
 pub fn from_api_bridge_for_migration(
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     account_count: usize,
-) -> AuthorityRuntimeHandle {
+) -> RuntimeHandle {
     migration_runtime(
         api_bridge,
         account_count,
@@ -393,7 +393,7 @@ pub fn from_api_bridge_with_status_provider_for_migration(
     api_bridge: AuthorityRuntimeApiMigrationBridge,
     account_count: usize,
     status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
-) -> AuthorityRuntimeHandle {
+) -> RuntimeHandle {
     migration_runtime(
         api_bridge,
         account_count,
@@ -409,7 +409,7 @@ pub fn from_api_bridge_with_providers_for_migration(
     account_count: usize,
     status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
-) -> AuthorityRuntimeHandle {
+) -> RuntimeHandle {
     migration_runtime(
         api_bridge,
         account_count,
@@ -445,7 +445,7 @@ fn migration_runtime(
     status_provider: Arc<dyn AccountRuntimeOverviewProvider>,
     live_accounts: Arc<dyn LiveAccountRuntimeProvider>,
     account_supervisor: Option<Arc<AccountSupervisor>>,
-) -> (AuthorityRuntimeHandle, Option<Arc<AccountMutationService>>) {
+) -> (RuntimeHandle, Option<Arc<AccountMutationService>>) {
     let account_reads = Arc::new(AccountReadService::new(
         api_bridge.service.clone(),
         status_provider,
