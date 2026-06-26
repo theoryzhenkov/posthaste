@@ -97,9 +97,28 @@ store notifications → cache).
   deltas batched with the message event (G3); store ingests into
   `mailbox[id].count`; sidebar reads from the store. **This kills the count/row
   divergence** (both are one store, one stream, one atomic batch).
+
+  **LANDED (2026-06-26):** both `message.updated` emit paths (sync
+  `apply_message_record_tx` and the command path `set_keywords`/
+  `replace_mailboxes`/`destroy`) attach a `countDeltas` array — the affected
+  mailboxes' (`current ∪ previous`) current `unread`/`total`, read in-tx at the
+  emit site via `mailbox_counts_json_tx` (trigger-maintained, consistent
+  point-read, `D3`). The store's `StoreUpdate::Message { count_deltas }`
+  consumes them. The destroy path carries the previous mailboxes' counts. Test:
+  countDeltas match served `list_mailboxes` counts across a mailbox move.
 - **2c — Firehose carries rows (runtime + store).** Enrich `message.updated`
   with `receivedAt` + the renderable projection (G2); the store materializes a
   promoted never-held message from the event; paging still fetches.
+
+  **LANDED (2026-06-26):** both emit paths attach a `projection` field — the
+  canonical `MessageSummary`, built in-tx via `query_message_summary_tx`
+  (reusing the detail query's `SELECT` + `source_projection` join for
+  `source_name`). Byte-identical to a served row (one derivation), so the store
+  materializes a promoted never-held message without a promotion round-trip.
+  Additive — legacy flat fields (`keywords`/`mailboxIds`/`assertion`) retained
+  for `applyDomainEvent` until 2e. Destroy emits `deleted:true` (no projection).
+  Tests: command-path projection byte-equals the served summary; sync-path
+  event carries the projection.
 - **2d — Gap-detection (G4).** The notification stream detects a missed
   `sessionSeq`/`Lagged` and forces a resync (re-snapshot open views + refetch
   counts) — never a silent drop. Reuses the session collapse path.
