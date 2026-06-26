@@ -6,9 +6,9 @@
 //! lean near node (no `backend` feature, no in-process `Backend`) still needs
 //! them. They were factored out of `backend.rs` for exactly this reason.
 
+use crate::{MutationRequest, RuntimeError, RuntimeErrorCode, RuntimeSessionSeq};
 use posthaste_domain::SetKeywordsCommand;
 use posthaste_link_core::MessageChangeDiff;
-use posthaste_runtime_contract::{MutationRequest, RuntimeError, RuntimeSessionSeq};
 use serde::Deserialize;
 
 /// Build a single-keyword add/remove command from a desired presence. Shared by
@@ -28,7 +28,7 @@ pub fn keyword_toggle(keyword: &str, present: bool) -> SetKeywordsCommand {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSetKeywordsMutationArgs {
     pub source_id: String,
@@ -36,7 +36,7 @@ pub struct MessageSetKeywordsMutationArgs {
     pub command: SetKeywordsCommand,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSetReadStateArgs {
     pub source_id: String,
@@ -44,7 +44,7 @@ pub struct MessageSetReadStateArgs {
     pub read: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSetFlaggedStateArgs {
     pub source_id: String,
@@ -52,7 +52,7 @@ pub struct MessageSetFlaggedStateArgs {
     pub flagged: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageSetUserTagsArgs {
     pub source_id: String,
@@ -63,7 +63,7 @@ pub struct MessageSetUserTagsArgs {
     pub remove: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageMoveToMailboxArgs {
     pub source_id: String,
@@ -71,7 +71,7 @@ pub struct MessageMoveToMailboxArgs {
     pub mailbox_id: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageMoveToRoleArgs {
     pub source_id: String,
@@ -79,7 +79,7 @@ pub struct MessageMoveToRoleArgs {
     pub role: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageReplaceMailboxesArgs {
     pub source_id: String,
@@ -88,7 +88,7 @@ pub struct MessageReplaceMailboxesArgs {
 }
 
 /// A message mutation that targets one message by id (archive/trash/destroy).
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageTargetArgs {
     pub source_id: String,
@@ -101,7 +101,7 @@ pub struct MessageTargetArgs {
 /// an ordinary optimistic mutation through the outbox + replay guard; the
 /// `undoOf`/`redoOf` seq hints are history-bookkeeping metadata the runtime uses
 /// to navigate its own seq-ordered diff history (they do not gate execution).
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageApplyDiffArgs {
     pub source_id: String,
@@ -119,7 +119,7 @@ where
 {
     serde_json::from_value(request.args.clone()).map_err(|error| {
         RuntimeError::with_details(
-            posthaste_runtime_contract::RuntimeErrorCode::InvalidMutation,
+            RuntimeErrorCode::InvalidMutation,
             format!("invalid args for mutation '{}'", request.name),
             serde_json::json!({ "error": error.to_string() }),
         )

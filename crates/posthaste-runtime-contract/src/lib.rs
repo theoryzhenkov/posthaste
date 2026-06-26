@@ -7,6 +7,7 @@
 //! spec: docs/eph/PLAN-L2-bundled-app-test-plan#contract-no-transport-types
 
 mod mail_query;
+pub mod mutation_args;
 
 pub use mail_query::*;
 

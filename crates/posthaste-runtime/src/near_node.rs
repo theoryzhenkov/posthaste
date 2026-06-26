@@ -20,16 +20,11 @@
 
 use std::sync::Mutex;
 
+use posthaste_link_contract::message_mutation::MessageMutation;
 use posthaste_link_core::{MessageAssertion, MutationId, PendingMessageMutation};
 use posthaste_link_replica::{MailListReplica, MailListRow};
 use posthaste_runtime_contract::{MailListViewState, MutationRequest};
 use serde_json::Value;
-
-use crate::mutation_args::{
-    keyword_toggle, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageReplaceMailboxesArgs,
-    MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs, MessageSetReadStateArgs,
-    MessageSetUserTagsArgs, MessageTargetArgs,
-};
 
 /// The runtime's outbox toward the backend: forwarded-but-unconfirmed message
 /// mutations, ordered, idempotent on mutation id.
@@ -71,87 +66,17 @@ impl RuntimeBackendOutbox {
 /// from the request alone — role moves (archive/trash/moveToRole) need the
 /// account's role→mailbox resolution, so they are not folded optimistically yet
 /// and simply forward.
+///
+/// Delegates to [`posthaste_link_contract::message_mutation::MessageMutation`] so
+/// the name→assertion mapping stays in one place.
 pub(crate) fn named_message_assertion(
     request: &MutationRequest,
 ) -> Option<(String, MessageAssertion)> {
-    match request.name.as_str() {
-        "message.setKeywords" => {
-            let args: MessageSetKeywordsMutationArgs = parse(request)?;
-            Some((
-                args.message_id,
-                MessageAssertion::SetKeywords {
-                    add: args.command.add,
-                    remove: args.command.remove,
-                },
-            ))
-        }
-        "message.setReadState" => {
-            let args: MessageSetReadStateArgs = parse(request)?;
-            let command = keyword_toggle("$seen", args.read);
-            Some((
-                args.message_id,
-                MessageAssertion::SetKeywords {
-                    add: command.add,
-                    remove: command.remove,
-                },
-            ))
-        }
-        "message.setFlaggedState" => {
-            let args: MessageSetFlaggedStateArgs = parse(request)?;
-            let command = keyword_toggle("$flagged", args.flagged);
-            Some((
-                args.message_id,
-                MessageAssertion::SetKeywords {
-                    add: command.add,
-                    remove: command.remove,
-                },
-            ))
-        }
-        "message.setUserTags" => {
-            let args: MessageSetUserTagsArgs = parse(request)?;
-            Some((
-                args.message_id,
-                MessageAssertion::SetKeywords {
-                    add: args.add,
-                    remove: args.remove,
-                },
-            ))
-        }
-        "message.moveToMailbox" => {
-            let args: MessageMoveToMailboxArgs = parse(request)?;
-            Some((
-                args.message_id,
-                MessageAssertion::ReplaceMailboxes {
-                    mailbox_ids: vec![args.mailbox_id],
-                },
-            ))
-        }
-        "message.replaceMailboxes" => {
-            let args: MessageReplaceMailboxesArgs = parse(request)?;
-            Some((
-                args.message_id,
-                MessageAssertion::ReplaceMailboxes {
-                    mailbox_ids: args.mailbox_ids,
-                },
-            ))
-        }
-        "message.destroy" => {
-            let args: MessageTargetArgs = parse(request)?;
-            Some((args.message_id, MessageAssertion::Destroy))
-        }
-        "message.applyDiff" => {
-            let args: MessageApplyDiffArgs = parse(request)?;
-            Some((
-                args.message_id,
-                MessageAssertion::ApplyDiff { diff: args.diff },
-            ))
-        }
-        _ => None,
-    }
-}
-
-fn parse<T: for<'de> serde::Deserialize<'de>>(request: &MutationRequest) -> Option<T> {
-    serde_json::from_value(request.args.clone()).ok()
+    let mutation = MessageMutation::from_request(request).ok()?;
+    let message_id = mutation.message_id().to_string();
+    mutation
+        .to_assertion()
+        .map(|assertion| (message_id, assertion))
 }
 
 /// Fold the runtime→backend outbox over a recomputed mail-list view, in place,
