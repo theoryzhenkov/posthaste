@@ -54,15 +54,36 @@ pub(crate) const RELEASE_CHANNEL: &str = match option_env!("POSTHASTE_RELEASE_CH
     None => "dev",
 };
 
+/// The full sentinel string. CI sets `POSTHASTE_RELEASE_CHANNEL_SENTINEL` to it;
+/// local builds default to the dev sentinel. `concat!` cannot take a const, so
+/// the full string is supplied by the build environment rather than built here.
+const RELEASE_CHANNEL_SENTINEL_STR: &str =
+    match option_env!("POSTHASTE_RELEASE_CHANNEL_SENTINEL") {
+        Some(sentinel) => sentinel,
+        None => "posthaste-release-channel=dev",
+    };
+
 /// Sentinel baked into the binary so the release smoke step can prove which
 /// channel a binary was built on by grepping for `posthaste-release-channel=`.
-/// The CI sets `POSTHASTE_RELEASE_CHANNEL_SENTINEL` to the full sentinel; local
-/// builds default to the dev sentinel. `concat!` cannot take a const, so the
-/// full string is supplied by the build environment rather than built here.
+///
+/// Stored as an inline, zero-padded byte array rather than a `&str`: `#[used]`
+/// only retains the static's own storage, and for a `&str` that storage is just
+/// a fat pointer — the backing string constant lives in a separate mergeable
+/// `.rodata` section that the linker can detach under `--gc-sections` (observed
+/// with mold in CI, leaving the smoke grep with no sentinel at all). Holding the
+/// bytes inline makes them the static's own storage, so they survive linker GC
+/// and stripping. The grep stops at the first NUL, so the padding is invisible.
 #[used]
-static RELEASE_CHANNEL_SENTINEL: &str = match option_env!("POSTHASTE_RELEASE_CHANNEL_SENTINEL") {
-    Some(sentinel) => sentinel,
-    None => "posthaste-release-channel=dev",
+static RELEASE_CHANNEL_SENTINEL: [u8; 64] = {
+    let src = RELEASE_CHANNEL_SENTINEL_STR.as_bytes();
+    assert!(src.len() <= 64, "release channel sentinel exceeds 64 bytes");
+    let mut out = [0u8; 64];
+    let mut i = 0;
+    while i < src.len() {
+        out[i] = src[i];
+        i += 1;
+    }
+    out
 };
 
 /// Return the compile-time release channel to the renderer so the desktop binary
@@ -129,14 +150,15 @@ pub fn run() {
     ]);
 
     let builder = builder.setup(|app| {
-        // Log the baked release channel so the sentinel is reachable (survives
-        // linker GC) and so the channel is observable in diagnostics.
+        // Log the baked release channel so it is observable in diagnostics. The
+        // sentinel byte array is retained by `#[used]`; touch it by reference so
+        // we do not copy the array.
         ph_info!(
             events::DESKTOP_RELEASE_CHANNEL,
             channel = RELEASE_CHANNEL,
             "desktop release channel"
         );
-        let _ = RELEASE_CHANNEL_SENTINEL;
+        let _ = &RELEASE_CHANNEL_SENTINEL;
 
         #[cfg(feature = "embedded-server")]
         let backend = {

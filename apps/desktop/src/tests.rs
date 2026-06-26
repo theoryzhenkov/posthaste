@@ -627,14 +627,27 @@ fn release_channel_sentinel_matches_baked_channel() {
     // The sentinel is what the release smoke step greps for; it must carry the
     // same channel as RELEASE_CHANNEL so an artifact cannot be mislabeled.
     assert!(
-        RELEASE_CHANNEL_SENTINEL.starts_with("posthaste-release-channel="),
-        "sentinel should be prefixed, got: {RELEASE_CHANNEL_SENTINEL}"
+        RELEASE_CHANNEL_SENTINEL_STR.starts_with("posthaste-release-channel="),
+        "sentinel should be prefixed, got: {RELEASE_CHANNEL_SENTINEL_STR}"
     );
-    let sentinel_channel = RELEASE_CHANNEL_SENTINEL
+    let sentinel_channel = RELEASE_CHANNEL_SENTINEL_STR
         .strip_prefix("posthaste-release-channel=")
         .unwrap();
     assert_eq!(
         sentinel_channel, RELEASE_CHANNEL,
         "sentinel channel should match RELEASE_CHANNEL"
+    );
+
+    // The baked byte array (what actually lands in the binary) must begin with
+    // the same bytes, NUL-padded — this is what the smoke grep matches.
+    let src = RELEASE_CHANNEL_SENTINEL_STR.as_bytes();
+    assert_eq!(
+        &RELEASE_CHANNEL_SENTINEL[..src.len()],
+        src,
+        "baked sentinel bytes should match the sentinel string"
+    );
+    assert!(
+        RELEASE_CHANNEL_SENTINEL[src.len()..].iter().all(|&b| b == 0),
+        "sentinel padding should be NUL"
     );
 }
