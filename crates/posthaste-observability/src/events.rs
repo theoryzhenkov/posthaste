@@ -186,6 +186,10 @@ pub const SUPERVISOR_SYNC_TRIGGER_IGNORED: LogEvent =
     LogEvent::new("supervisor.sync.trigger_ignored");
 pub const SUPERVISOR_SYNC_TRIGGER_COALESCED: LogEvent =
     LogEvent::new("supervisor.sync.trigger_coalesced");
+pub const SUPERVISOR_OAUTH_REFRESH_FAILED: LogEvent =
+    LogEvent::new("supervisor.oauth.refresh_failed");
+pub const SUPERVISOR_OAUTH_TOKEN_REFRESHED: LogEvent =
+    LogEvent::new("supervisor.oauth.token_refreshed");
 
 pub const DOMAIN_AUTOMATION_POST_SYNC_FAILED: LogEvent =
     LogEvent::new("domain.automation.post_sync_failed");

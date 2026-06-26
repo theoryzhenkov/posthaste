@@ -2,15 +2,15 @@ use super::*;
 
 pub(crate) async fn send_message_via_smtp(
     gateway: &LiveImapSmtpGateway,
+    imap_config: &ImapConnectionConfig,
+    smtp_config: &SmtpConnectionConfig,
     request: &SendMessageRequest,
 ) -> Result<(), GatewayError> {
-    let submitted = submit_smtp_message(&gateway.smtp_config, request)
+    let submitted = submit_smtp_message(smtp_config, request)
         .await
         .map_err(imap_error_to_gateway)?;
 
-    if smtp_sent_copy_strategy(&gateway.smtp_config.provider)
-        == SmtpSentCopyStrategy::AppendToSentMailbox
-    {
+    if smtp_sent_copy_strategy(&smtp_config.provider) == SmtpSentCopyStrategy::AppendToSentMailbox {
         if let Some(sent_mailbox) = gateway
             .discovery
             .mailboxes
@@ -18,8 +18,7 @@ pub(crate) async fn send_message_via_smtp(
             .find(|mailbox| mailbox.selectable && mailbox.role == Some("sent"))
         {
             if let Err(error) =
-                append_smtp_sent_copy(&gateway.config, &sent_mailbox.name, &submitted.raw_message)
-                    .await
+                append_smtp_sent_copy(imap_config, &sent_mailbox.name, &submitted.raw_message).await
             {
                 ph_warn!(
                     events::IMAP_SMTP_SENT_APPEND_FAILED,

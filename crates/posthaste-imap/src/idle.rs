@@ -1,8 +1,9 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_stream::stream;
 use posthaste_domain::{
-    now_iso8601, AccountId, PushEventStream, PushNotification, PushStreamEvent,
+    now_iso8601, AccountId, PushEventStream, PushNotification, PushStreamEvent, SecretResolver,
 };
 use posthaste_observability::{events, ph_debug, ph_warn};
 
@@ -24,10 +25,11 @@ pub fn imap_idle_event_stream(
     account_id: AccountId,
     config: ImapConnectionConfig,
     mailbox_name: String,
+    secret_resolver: Arc<dyn SecretResolver>,
 ) -> PushEventStream {
     Box::pin(stream! {
         loop {
-            match connect_idle_client(&config, &mailbox_name).await {
+            match connect_idle_client(&config, &mailbox_name, secret_resolver.as_ref()).await {
                 Ok(mut client) => {
                     yield PushStreamEvent::Connected {
                         transport: "imap-idle",
@@ -98,8 +100,15 @@ pub fn imap_idle_event_stream(
 async fn connect_idle_client(
     config: &ImapConnectionConfig,
     mailbox_name: &str,
+    secret_resolver: &dyn SecretResolver,
 ) -> Result<imap_client::client::tokio::Client, ImapAdapterError> {
-    let mut client = connect_authenticated_client(config).await?;
+    let secret = secret_resolver
+        .resolve_secret()
+        .await
+        .map_err(|error| ImapAdapterError::Auth(error.to_string()))?;
+    let mut resolved_config = config.clone();
+    resolved_config.secret = secret;
+    let mut client = connect_authenticated_client(&resolved_config).await?;
     client.refresh_capabilities().await?;
     examine_selected_mailbox(&mut client, mailbox_name).await?;
     Ok(client)

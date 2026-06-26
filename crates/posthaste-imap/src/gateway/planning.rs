@@ -5,13 +5,21 @@ impl LiveImapSmtpGateway {
         config: ImapConnectionConfig,
         smtp_config: SmtpConnectionConfig,
         store: Option<Arc<dyn MailStore>>,
+        secret_resolver: Arc<dyn SecretResolver>,
     ) -> Result<Self, ImapAdapterError> {
-        let discovery = discover_imap_account(&config).await?;
+        let secret = secret_resolver
+            .resolve_secret()
+            .await
+            .map_err(|error| ImapAdapterError::Auth(error.to_string()))?;
+        let mut resolved_config = config.clone();
+        resolved_config.secret = secret;
+        let discovery = discover_imap_account(&resolved_config).await?;
         Ok(Self {
             config,
             smtp_config,
             discovery,
             store,
+            secret_resolver,
         })
     }
 

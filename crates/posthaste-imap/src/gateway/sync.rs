@@ -10,8 +10,9 @@ pub(crate) async fn sync_imap_account(
         &progress,
         ImapSyncProgressUpdate::new(SyncProgressStage::Discovering, "Checking IMAP capabilities"),
     );
-    let discovery = gateway.discovery.clone();
-    let mut client = connect_authenticated_client(&gateway.config)
+    let mut discovery = gateway.discovery.clone();
+    let imap_config = gateway.resolve_imap_config().await?;
+    let mut client = connect_authenticated_client(&imap_config)
         .await
         .map_err(imap_error_to_gateway)?;
     client
@@ -19,13 +20,18 @@ pub(crate) async fn sync_imap_account(
         .await
         .map_err(ImapAdapterError::from)
         .map_err(imap_error_to_gateway)?;
-    let fetch_modseq = normalize_imap_capabilities(
+
+    // Use the capabilities advertised on this connection for planning, not the
+    // cached discovery snapshot. CONDSTORE/QRESYNC may only appear post-auth, or
+    // the server's advertisement may change between discovery and sync.
+    discovery.capabilities = normalize_imap_capabilities(
         client
             .state
             .capabilities_iter()
             .map(std::string::ToString::to_string),
-    )
-    .supports_condstore();
+    );
+
+    let fetch_modseq = discovery.capabilities.supports_condstore();
     let fetch_gmail_metadata = discovery.capabilities.supports_gmail_extensions();
     let selectable_mailbox_count = discovery
         .mailboxes

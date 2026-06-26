@@ -27,6 +27,48 @@ pub(crate) async fn ensure_connection(
     Ok(())
 }
 
+/// Secret resolver for IMAP/SMTP accounts.
+///
+/// Password and app-password accounts use a static resolver: the secret is read
+/// once from the secret store and returned unchanged for every connection.
+/// OAuth accounts dynamically refresh the short-lived access token through the
+/// provider's token endpoint before each connection, updating the persisted
+/// token set when a new refresh token is issued.
+struct AccountSecretResolver {
+    shared: Arc<SupervisorShared>,
+    account: AccountSettings,
+}
+
+impl AccountSecretResolver {
+    fn new(shared: Arc<SupervisorShared>, account: AccountSettings) -> Self {
+        Self { shared, account }
+    }
+}
+
+impl std::fmt::Debug for AccountSecretResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountSecretResolver")
+            .field("account_id", &self.account.id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait::async_trait]
+impl SecretResolver for AccountSecretResolver {
+    async fn resolve_secret(&self) -> Result<String, GatewayError> {
+        let secret_ref = self.account.transport.secret_ref.as_ref().ok_or_else(|| {
+            GatewayError::Rejected("missing account secret reference".to_string())
+        })?;
+        let secret = resolve_account_secret(&self.account, &self.shared, secret_ref)
+            .await
+            .map_err(|error| match error {
+                ServiceError::Gateway(gateway_error) => gateway_error,
+                other => GatewayError::Rejected(other.to_string()),
+            })?;
+        Ok(secret)
+    }
+}
+
 /// Build a gateway connection for an account, resolving its secret and
 /// opening a resilient push stream (WS preferred, SSE fallback).
 ///
@@ -41,6 +83,7 @@ pub(crate) async fn build_connection(
             gateway: Arc::new(MockJmapGateway::default()),
             push_events: None,
             remote_observation: RemoteObservationPolicy::disabled(),
+            secret_resolver: Arc::new(StaticSecretResolver::new("")),
         }),
         AccountDriver::Jmap => {
             let url = account
@@ -54,9 +97,10 @@ pub(crate) async fn build_connection(
                 .as_deref()
                 .map(str::trim)
                 .filter(|username| !username.is_empty());
-            let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
-                GatewayError::Rejected("missing JMAP secret reference".to_string())
-            })?;
+            let secret_resolver: Arc<dyn SecretResolver> = Arc::new(AccountSecretResolver::new(
+                Arc::clone(shared),
+                account.clone(),
+            ));
             ph_info!(
                 events::SUPERVISOR_GATEWAY_CONNECTING,
                 account_id = %account.id,
@@ -65,7 +109,7 @@ pub(crate) async fn build_connection(
                 has_username = username.is_some(),
                 "connecting account gateway"
             );
-            let secret = resolve_account_secret(account, shared, secret_ref).await?;
+            let secret = secret_resolver.resolve_secret().await?;
             let client = connect_jmap_client(url, username, &secret).await?;
             let gateway: SharedGateway = Arc::new(LiveJmapGateway::from_client(client));
 
@@ -104,13 +148,15 @@ pub(crate) async fn build_connection(
                     .provider_profile()
                     .jmap()
                     .remote_observation(),
+                secret_resolver,
             })
         }
         AccountDriver::ImapSmtp => {
-            let secret_ref = account.transport.secret_ref.as_ref().ok_or_else(|| {
-                GatewayError::Rejected("missing IMAP/SMTP secret reference".to_string())
-            })?;
-            let secret = resolve_account_secret(account, shared, secret_ref).await?;
+            let secret_resolver: Arc<dyn SecretResolver> = Arc::new(AccountSecretResolver::new(
+                Arc::clone(shared),
+                account.clone(),
+            ));
+            let secret = secret_resolver.resolve_secret().await?;
             let imap_config =
                 ImapConnectionConfig::from_account_transport(&account.transport, secret.clone())
                     .map_err(imap_adapter_error)?;
@@ -133,6 +179,7 @@ pub(crate) async fn build_connection(
                 imap_config.clone(),
                 smtp_config,
                 Some(shared.store.clone()),
+                Arc::clone(&secret_resolver),
             )
             .await
             .map_err(imap_adapter_error)?;
@@ -177,6 +224,7 @@ pub(crate) async fn build_connection(
                         account.id.clone(),
                         imap_config,
                         mailbox_name,
+                        Arc::clone(&secret_resolver),
                     ))
                 } else {
                     ph_warn!(
@@ -208,6 +256,7 @@ pub(crate) async fn build_connection(
                 gateway: Arc::new(gateway),
                 push_events,
                 remote_observation,
+                secret_resolver,
             })
         }
     }
@@ -266,6 +315,7 @@ pub(crate) fn imap_adapter_error(error: ImapAdapterError) -> ServiceError {
         | ImapAdapterError::MissingAttachment { .. }
         | ImapAdapterError::InvalidSmtpAddress { .. }
         | ImapAdapterError::BuildSmtpMessage(_) => GatewayError::Rejected(error.to_string()).into(),
+        ImapAdapterError::Auth(_) => GatewayError::Auth.into(),
         ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
             GatewayError::Network(message).into()
         }

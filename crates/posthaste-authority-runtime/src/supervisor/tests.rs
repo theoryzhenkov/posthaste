@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_config::TomlConfigRepository;
 use posthaste_domain::{
-    AccountTransportSettings, EventFilter, ProviderHint, PushNotification, SecretRef,
-    SecretStoreError, RFC3339_EPOCH,
+    AccountTransportSettings, EventFilter, ProviderAuthKind, ProviderHint, PushNotification,
+    SecretRef, SecretStoreError, RFC3339_EPOCH,
 };
 use posthaste_store::DatabaseStore;
 
@@ -108,6 +108,7 @@ fn runtime_connection_state_tracks_connected_gateway() {
         gateway: gateway.clone(),
         push_events: None,
         remote_observation: RemoteObservationPolicy::disabled(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
     });
 
     assert!(state.is_connected());
@@ -360,6 +361,7 @@ async fn checkpoint_only_push_notification_triggers_sync() {
             .provider_profile()
             .jmap()
             .remote_observation(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
     });
     let notification = PushNotification {
         account_id: account.id.clone(),
@@ -406,6 +408,7 @@ async fn gmail_imap_idle_hint_without_changed_ids_triggers_full_observation_sync
             .provider_profile()
             .imap()
             .remote_observation(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
     });
     let notification = PushNotification {
         account_id: account.id.clone(),
@@ -457,6 +460,7 @@ async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
             .provider_profile()
             .jmap()
             .remote_observation(),
+        secret_resolver: Arc::new(StaticSecretResolver::new("")),
     });
     let notification = PushNotification {
         account_id: account.id.clone(),
@@ -484,4 +488,23 @@ async fn jmap_empty_push_notification_without_checkpoint_is_ignored() {
         .list_messages(&account.id, None)
         .expect("messages should list")
         .is_empty());
+}
+
+#[tokio::test]
+async fn oauth_refresh_state_is_enabled_for_oauth_account() {
+    let mut account = test_account("oauth");
+    account.transport.auth = ProviderAuthKind::OAuth2;
+    let mut state = OAuthRefreshState::new(&account);
+
+    assert!(state.enabled());
+    assert!(state.interval().is_some());
+}
+
+#[test]
+fn oauth_refresh_state_is_disabled_for_non_oauth_account() {
+    let account = test_account("basic");
+    let mut state = OAuthRefreshState::new(&account);
+
+    assert!(!state.enabled());
+    assert!(state.interval().is_none());
 }

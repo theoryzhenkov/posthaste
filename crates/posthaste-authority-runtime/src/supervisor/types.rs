@@ -8,6 +8,7 @@ pub(crate) const CACHE_INTERACTIVE_PRESSURE: f64 = 1.0;
 pub(crate) const CACHE_STALE_RESCORE_AFTER: Duration = Duration::from_secs(6 * 60 * 60);
 pub(crate) const CACHE_WORKER_INITIAL_DELAY: Duration = Duration::from_secs(5);
 pub(crate) const CACHE_WORKER_INTERVAL: Duration = Duration::from_secs(2);
+pub(crate) const OAUTH_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Manages per-account async runtimes: connection lifecycle, sync triggers,
 /// push stream consumption, and runtime status tracking.
@@ -177,6 +178,10 @@ pub(crate) struct AccountConnection {
     pub(crate) gateway: SharedGateway,
     pub(crate) push_events: Option<PushEventStream>,
     pub(crate) remote_observation: RemoteObservationPolicy,
+    /// Secret resolver used to refresh OAuth tokens before they expire. Present
+    /// for all live connections so the runtime can proactively rebuild JMAP
+    /// gateways whose client bakes auth in at construction.
+    pub(crate) secret_resolver: Arc<dyn SecretResolver>,
 }
 
 /// Local runtime connection state. Keeps gateway and push stream lifetimes coupled.
@@ -213,12 +218,66 @@ impl AccountRuntimeConnectionState {
         }
     }
 
+    pub(crate) fn secret_resolver(&self) -> Option<Arc<dyn SecretResolver>> {
+        match self {
+            Self::Connected(connection) => Some(Arc::clone(&connection.secret_resolver)),
+            Self::Disconnected => None,
+        }
+    }
+
     pub(crate) fn set_connected(&mut self, connection: AccountConnection) {
         *self = Self::Connected(connection);
     }
 
     pub(crate) fn disconnect(&mut self) {
         *self = Self::Disconnected;
+    }
+}
+
+/// Tracks the last resolved OAuth access token for an account runtime so the
+/// loop can detect when the secret store has a fresher token than the gateway.
+///
+/// JMAP gateways hold a jmap_client::Client whose bearer token is fixed at
+/// construction. When `resolve_secret()` returns a new token, the runtime tears
+/// the connection down so the next operation rebuilds with the fresh token.
+pub(crate) struct OAuthRefreshState {
+    enabled: bool,
+    last_secret: Option<String>,
+    interval: Option<tokio::time::Interval>,
+}
+
+impl OAuthRefreshState {
+    pub(crate) fn new(account: &AccountSettings) -> Self {
+        let enabled = account.transport.auth == ProviderAuthKind::OAuth2;
+        Self {
+            enabled,
+            last_secret: None,
+            interval: None,
+        }
+    }
+
+    pub(crate) fn interval(&mut self) -> Option<tokio::time::Interval> {
+        if !self.enabled {
+            return None;
+        }
+        if self.interval.is_none() {
+            let mut interval = tokio::time::interval(OAUTH_TOKEN_REFRESH_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            self.interval = Some(interval);
+        }
+        self.interval.take()
+    }
+
+    pub(crate) fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub(crate) fn last_secret(&self) -> Option<&str> {
+        self.last_secret.as_deref()
+    }
+
+    pub(crate) fn set_last_secret(&mut self, secret: String) {
+        self.last_secret = Some(secret);
     }
 }
 
