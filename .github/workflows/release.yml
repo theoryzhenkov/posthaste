@@ -140,7 +140,12 @@ jobs:
           - os: ubuntu-latest
             platform: linux-x86_64
             bundle_targets: appimage
-          - os: macos-latest
+          # Pinned to macos-14 (arm64): the DMG step (bundle_dmg.sh) hits the
+          # hdiutil "Resource busy" flake far less on macos-14 than on newer
+          # runner images. Same architecture as macos-latest, so the artifact
+          # stays aarch64 and binaries remain forward-compatible. Bump when
+          # GitHub retires macos-14, and keep in sync with warm-release-cache.yml.
+          - os: macos-14
             platform: macos
             # Emit the standalone .app alongside the .dmg: the .dmg is the
             # distributed artifact, but the "Verify macOS desktop app signature"

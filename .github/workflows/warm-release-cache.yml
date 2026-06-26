@@ -95,7 +95,10 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-x86_64
-          - os: macos-latest
+          # Pinned to macos-14 to match release.yml's build-desktop job: the
+          # rust-cache key is tied to the runner image, so the warmed cache only
+          # hits if both jobs run on the same macOS version.
+          - os: macos-14
             platform: macos
           - os: windows-latest
             platform: windows-x86_64
