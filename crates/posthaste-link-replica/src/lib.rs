@@ -17,5 +17,10 @@
 //! @spec docs/replication/client-link/L2#2-the-replica-node-posthaste-link-replica
 
 mod mail_list;
+pub mod entity_store;
 
+pub use entity_store::{
+    CountDelta, DirtyKey, EntityStore, MailboxEntity, MessageEntity, SortDirection, StoreUpdate,
+    ViewEntity, ViewPredicate, ViewRow,
+};
 pub use mail_list::{MailListReplica, MailListRow};
