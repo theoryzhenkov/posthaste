@@ -25,7 +25,7 @@ pub use crate::store::{DatabaseStore, RepairReport, REPAIR_MARKER_FILE};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 use hex::encode as hex_encode;

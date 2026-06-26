@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use posthaste_domain::{
@@ -189,3 +190,30 @@ mod repair;
 mod smart_mailboxes;
 mod source_visibility;
 mod tags_and_locations;
+
+#[test]
+fn write_transaction_recovers_from_poisoned_mutex() {
+    let root = temp_root();
+    let store = Arc::new(DatabaseStore::open(root.join("mail.sqlite"), root.join("data")).unwrap());
+
+    // Poison the write-connection mutex by panicking inside a transaction.
+    let poisoner = Arc::clone(&store);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        poisoner
+            .write_transaction(|_tx| -> Result<(), StoreError> {
+                panic!("intentional test panic while holding write lock");
+            })
+            .ok();
+    }));
+    assert!(result.is_err(), "panic inside operation should propagate");
+
+    // The next write transaction must succeed: the mutex should have been
+    // recovered rather than left poisoned forever.
+    store
+        .write_transaction(|tx: &rusqlite::Transaction<'_>| {
+            tx.query_row("SELECT 1", [], |_| Ok(()))
+                .map_err(|err| StoreError::Failure(err.to_string()))?;
+            Ok(())
+        })
+        .expect("store should recover from a poisoned write mutex");
+}
