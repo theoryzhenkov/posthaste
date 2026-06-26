@@ -171,4 +171,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - name: Verify endpoint inventory is up to date
+        run: |
+          python3 tools/docs/gen_endpoints.py
+          git diff --exit-code docs/api/endpoints.md
       - run: uv run mkdocs build --strict
