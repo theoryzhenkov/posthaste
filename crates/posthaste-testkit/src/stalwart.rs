@@ -6,20 +6,31 @@ use posthaste_domain::{
     SecretRef, SmtpTransportSettings, TransportSecurity,
 };
 
-use crate::util::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
+use crate::paths::{free_loopback_port, stalwart_bin, temp_root, workspace_root};
 
-pub(super) struct StalwartFixture {
+/// A disposable real Stalwart mail server bound to loopback ports.
+///
+/// Spawns the `stalwart` binary (overridable via `POSTHASTE_STALWART_BIN`)
+/// against `tools/dev/stalwart/config.toml`, seeds a `dev@example.org`
+/// mailbox via `tools/dev/stalwart/seed.sh`, and tears both down on drop.
+///
+/// Tests that use this must gate themselves on
+/// `POSTHASTE_STALWART_INTEGRATION=1` (the codebase convention) and skip
+/// otherwise — the fixture panics if the binary cannot start, since a missing
+/// Stalwart is an environment failure, not a test failure.
+pub struct StalwartFixture {
     child: Child,
     root: PathBuf,
-    pub(super) http_url: String,
-    pub(super) imap_port: u16,
-    pub(super) smtp_port: u16,
-    pub(super) password: String,
+    pub http_url: String,
+    pub imap_port: u16,
+    pub smtp_port: u16,
+    pub password: String,
 }
 
 impl StalwartFixture {
-    pub(super) fn start() -> Self {
-        let root = temp_root("posthaste-stalwart-server");
+    /// Starts Stalwart on free loopback ports and seeds the dev mailbox.
+    pub fn start() -> Self {
+        let root = temp_root("posthaste-testkit-stalwart");
         let data = root.join("data");
         let logs = root.join("logs");
         let state = root.join("state");
@@ -84,7 +95,8 @@ impl StalwartFixture {
         }
     }
 
-    pub(super) fn jmap_transport(&self) -> AccountTransportSettings {
+    /// JMAP transport settings pointing at this fixture's HTTP URL.
+    pub fn jmap_transport(&self) -> AccountTransportSettings {
         AccountTransportSettings {
             provider: ProviderHint::Generic,
             auth: ProviderAuthKind::Password,
@@ -99,7 +111,8 @@ impl StalwartFixture {
         }
     }
 
-    pub(super) fn imap_transport(&self) -> AccountTransportSettings {
+    /// IMAP+SMTP transport settings pointing at this fixture's loopback ports.
+    pub fn imap_transport(&self) -> AccountTransportSettings {
         AccountTransportSettings {
             provider: ProviderHint::Generic,
             auth: ProviderAuthKind::Password,
@@ -122,7 +135,8 @@ impl StalwartFixture {
         }
     }
 
-    pub(super) fn email(&self) -> String {
+    /// The seeded dev mailbox address.
+    pub fn email(&self) -> String {
         "dev@example.org".to_string()
     }
 }

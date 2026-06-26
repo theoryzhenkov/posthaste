@@ -20,6 +20,7 @@ default-members = [
   "crates/posthaste-runtimed",
   "crates/posthaste-server",
   "crates/posthaste-store",
+  "crates/posthaste-testkit",
 ]
 exclude = ["crates/target", "vendor/imap-codec", "vendor/imap-types"]
 resolver = "2"

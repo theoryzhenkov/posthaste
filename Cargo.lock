@@ -4366,6 +4366,7 @@ dependencies = [
  "posthaste-observability",
  "posthaste-runtime-contract",
  "posthaste-store",
+ "posthaste-testkit",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4400,6 +4401,15 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "posthaste-testkit"
+version = "0.1.0"
+dependencies = [
+ "posthaste-config",
+ "posthaste-domain",
+ "posthaste-store",
 ]
 
 [[package]]

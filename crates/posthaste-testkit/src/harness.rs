@@ -6,16 +6,29 @@ use posthaste_domain::{
 };
 use posthaste_store::DatabaseStore;
 
-use crate::util::temp_root;
+use crate::paths::temp_root;
 
-pub(super) struct Harness {
-    pub(super) service: posthaste_domain::MailService,
-    pub(super) store: Arc<DatabaseStore>,
+/// Disposable integration harness: a config repository, a SQLite store, and a
+/// `MailService` bound to them, all rooted under a fresh temp directory.
+///
+/// The store and service are exposed so tests can drive mutations, flush, sync,
+/// and read projections directly. The temp root is cleaned up by the OS; tests
+/// should not rely on it surviving the process.
+///
+/// Future extension (planned, see `docs/testing/L1.md`): a `.with_runtime()`
+/// builder that also stands up a `RuntimeCore` against the same store/config so
+/// view-settlement assertions can observe the runtime recompute path. The
+/// `store`/`service` fields are the seam for that — they already give slice 2
+/// everything it needs without changing this constructor.
+pub struct Harness {
+    pub service: posthaste_domain::MailService,
+    pub store: Arc<DatabaseStore>,
 }
 
 impl Harness {
-    pub(super) fn new() -> Self {
-        let root = temp_root("posthaste-stalwart-provider-parity");
+    /// Opens a fresh disposable config + store + service.
+    pub fn new() -> Self {
+        let root = temp_root("posthaste-testkit-harness");
         let config_root = root.join("config");
         let state_root = root.join("state");
         let config_repo =
@@ -34,7 +47,8 @@ impl Harness {
         }
     }
 
-    pub(super) fn save_account(
+    /// Saves a source account with the given driver and transport settings.
+    pub fn save_account(
         &self,
         id: &str,
         name: &str,
@@ -55,5 +69,11 @@ impl Harness {
                 updated_at: RFC3339_EPOCH.to_string(),
             })
             .expect("account should save");
+    }
+}
+
+impl Default for Harness {
+    fn default() -> Self {
+        Self::new()
     }
 }

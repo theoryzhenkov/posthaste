@@ -93,6 +93,9 @@ nav:
       - State contract (L1): client/L1.md
       - Mail runtime (L2): client/L2.md
       - Adapter patterns (L3): client/L3.md
+  - Testing:
+      - Domain (L0): testing/L0.md
+      - Contracts (L1): testing/L1.md
   - Stale specs:
       - L0:
           - Accounts: stale/L0-accounts.md

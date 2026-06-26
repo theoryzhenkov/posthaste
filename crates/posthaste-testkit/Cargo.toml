@@ -1,0 +1,17 @@
+[package]
+name = "posthaste-testkit"
+version = "0.1.0"
+edition = "2021"
+description = "Shared test support: disposable integration harness, a managed real-Stalwart fixture, and path/port helpers. Dev-only; consumed via [dev-dependencies]."
+
+[lib]
+name = "posthaste_testkit"
+path = "src/lib.rs"
+
+[dependencies]
+posthaste-config = { path = "../posthaste-config" }
+posthaste-domain = { path = "../posthaste-domain" }
+posthaste-store = { path = "../posthaste-store" }
+
+[lints]
+workspace = true
