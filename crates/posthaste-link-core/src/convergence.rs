@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use crate::message::{replay_message, MessageAssertion, MessageFoldState, MessageOutcome};
+use crate::message::{replay_message, MessageAssertion, MessageFoldState};
 
 /// A near-node-minted stable identifier for a mutation
 /// ([replication L1 §4.1](../replication/L1.md)). It is preserved as the mutation
@@ -16,20 +18,44 @@ impl MutationId {
     }
 }
 
-/// One accepted-but-unconfirmed message mutation in the outbox: the near node's
-/// optimistic intent, a desired-state assertion over a single message.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PendingMessageMutation {
-    pub id: MutationId,
-    pub message_id: String,
-    pub assertion: MessageAssertion,
+/// Result of folding effects over an entity: its new state, or removed. Removal
+/// is terminal — later effects over a removed entity are no-ops. Generic over the
+/// state so one convergence engine serves every foldable entity kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome<S> {
+    Present(S),
+    Removed,
 }
 
-/// An authoritative update to one message's confirmed base: a new asserted state
+/// The fold a foldable entity kind provides: how an ordered list of effects
+/// transforms a confirmed base state. One implementation per entity kind
+/// (message today; a future mailbox fold reuses the same engine), so optimism is
+/// a general property of [`Replica`], not message-specific.
+pub trait Convergence {
+    type Key: Ord + Clone + Debug;
+    type State: Clone + Debug;
+    type Effect: Clone + Debug;
+
+    /// Fold an ordered list of effects over a confirmed base state — the
+    /// predictor's `replay(base, pending)` ([replication L1 §5.3](../replication/L1.md)).
+    fn fold(base: Self::State, effects: &[Self::Effect]) -> Outcome<Self::State>;
+}
+
+/// One accepted-but-unconfirmed mutation in the outbox: the near node's optimistic
+/// intent, a desired-state effect over one entity (keyed by `key`). Generic field
+/// names (`key`/`effect`) so one shape serves every foldable kind.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingMutation<C: Convergence> {
+    pub id: MutationId,
+    pub key: C::Key,
+    pub effect: C::Effect,
+}
+
+/// An authoritative update to one entity's confirmed base: a new asserted state
 /// or a removal ([replication L1 §5.1](../replication/L1.md)).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MessageBaseUpdate {
-    Present(MessageFoldState),
+pub enum BaseUpdate<S> {
+    Present(S),
     Removed,
 }
 
@@ -57,57 +83,69 @@ pub struct SettlementResult {
     pub reverted: bool,
 }
 
-/// The message-scope convergence engine of a client-layer link node: a confirmed
-/// base of canonical message states plus an ordered outbox of pending mutations.
-/// Its visible state is `replay(base, pending)` per message
+/// The convergence engine of a link node: a confirmed base of canonical states
+/// plus an ordered outbox of pending mutations, over one foldable entity kind.
+/// Its visible state is `replay(base, pending)` per entity
 /// ([replication L1 §5.3](../replication/L1.md)) — optimism is always a pure fold
 /// over the confirmed base, never stored as truth.
 ///
-/// This is the pure heart of the replica node (W1). It owns no I/O: persistence,
-/// transport, and view recomputation are the node's responsibility; this type
+/// Generic over a [`Convergence`] so message and any future mailbox fold share
+/// one engine across both seams (`predictor-single-crate`). This type owns no
+/// I/O: persistence, transport, and view recomputation are the node's job; it
 /// only holds the base + outbox and runs the rebase loop.
 ///
 /// @spec docs/replication/client-link/L2#1-the-shared-predictor-crate-posthaste-link-core
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct MessageReplica {
-    base: BTreeMap<String, MessageFoldState>,
-    pending: Vec<PendingMessageMutation>,
+#[derive(Clone, Debug)]
+pub struct Replica<C: Convergence> {
+    base: BTreeMap<C::Key, C::State>,
+    pending: Vec<PendingMutation<C>>,
+    _convergence: PhantomData<C>,
 }
 
-impl MessageReplica {
+impl<C: Convergence> Default for Replica<C> {
+    fn default() -> Self {
+        Self {
+            base: BTreeMap::new(),
+            pending: Vec::new(),
+            _convergence: PhantomData,
+        }
+    }
+}
+
+impl<C: Convergence> Replica<C> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Replace the confirmed base for one message (an applied authoritative
+    /// Replace the confirmed base for one entity (an applied authoritative
     /// assertion).
-    pub fn set_base(&mut self, message_id: impl Into<String>, state: MessageFoldState) {
-        self.base.insert(message_id.into(), state);
+    pub fn set_base(&mut self, key: C::Key, state: C::State) {
+        self.base.insert(key, state);
     }
 
     /// Swap the **entire** confirmed base for a freshly served one, keeping the
     /// pending outbox intact. Use this when adopting a served view snapshot:
-    /// messages absent from the new base leave the base (the served base is
+    /// entities absent from the new base leave the base (the served base is
     /// authoritative for the working set), but unconfirmed optimistic mutations
     /// must survive to re-fold over it (`view-is-pure-fold`; they retire only on
     /// settlement, §5.5). Replacing the base without clearing pending is the
     /// base-replace half of the rebase loop ([replication L1 §5.3](../replication/L1.md)).
     pub fn replace_base<I>(&mut self, base: I)
     where
-        I: IntoIterator<Item = (String, MessageFoldState)>,
+        I: IntoIterator<Item = (C::Key, C::State)>,
     {
         self.base = base.into_iter().collect();
     }
 
-    /// Drop a message from the confirmed base (authoritative removal).
-    pub fn remove_base(&mut self, message_id: &str) {
-        self.base.remove(message_id);
+    /// Drop an entity from the confirmed base (authoritative removal).
+    pub fn remove_base(&mut self, key: &C::Key) {
+        self.base.remove(key);
     }
 
     /// Accept an optimistic mutation: append it to the outbox. Idempotent on
     /// mutation id — re-accepting an already-held id is a no-op
     /// ([replication L1 §4.2](../replication/L1.md)).
-    pub fn accept(&mut self, mutation: PendingMessageMutation) {
+    pub fn accept(&mut self, mutation: PendingMutation<C>) {
         if self.pending.iter().any(|held| held.id == mutation.id) {
             return;
         }
@@ -126,15 +164,15 @@ impl MessageReplica {
     /// ([replication L1 §5.3](../replication/L1.md)).
     pub fn apply_base_update<I>(&mut self, updates: I)
     where
-        I: IntoIterator<Item = (String, MessageBaseUpdate)>,
+        I: IntoIterator<Item = (C::Key, BaseUpdate<C::State>)>,
     {
-        for (message_id, update) in updates {
+        for (key, update) in updates {
             match update {
-                MessageBaseUpdate::Present(state) => {
-                    self.base.insert(message_id, state);
+                BaseUpdate::Present(state) => {
+                    self.base.insert(key, state);
                 }
-                MessageBaseUpdate::Removed => {
-                    self.base.remove(&message_id);
+                BaseUpdate::Removed => {
+                    self.base.remove(&key);
                 }
             }
         }
@@ -158,32 +196,35 @@ impl MessageReplica {
         }
     }
 
-    /// The optimistic state of one message: `replay(base, its pending)`. `None`
-    /// when the message is not in the confirmed base (not held / not covered).
-    pub fn project(&self, message_id: &str) -> Option<MessageOutcome> {
-        let base = self.base.get(message_id)?.clone();
-        let assertions: Vec<MessageAssertion> = self
+    /// The optimistic state of one entity: `replay(base, its pending)`. `None`
+    /// when the entity is not in the confirmed base (not held / not covered).
+    pub fn project(&self, key: &C::Key) -> Option<Outcome<C::State>> {
+        let base = self.base.get(key)?.clone();
+        let effects: Vec<C::Effect> = self
             .pending
             .iter()
-            .filter(|held| held.message_id == message_id)
-            .map(|held| held.assertion.clone())
+            .filter(|held| &held.key == key)
+            .map(|held| held.effect.clone())
             .collect();
-        Some(replay_message(base, &assertions))
+        Some(C::fold(base, &effects))
     }
 
-    /// The optimistic state of every held message, with removed messages elided
-    /// — the projected working set.
-    pub fn project_all(&self) -> BTreeMap<String, MessageFoldState> {
+    /// The optimistic state of every held entity, with removed entities elided —
+    /// the projected working set.
+    pub fn project_all(&self) -> BTreeMap<C::Key, C::State>
+    where
+        C::State: PartialEq,
+    {
         let mut projected = BTreeMap::new();
-        for message_id in self.base.keys() {
-            if let Some(MessageOutcome::Present(state)) = self.project(message_id) {
-                projected.insert(message_id.clone(), state);
+        for key in self.base.keys() {
+            if let Some(Outcome::Present(state)) = self.project(key) {
+                projected.insert(key.clone(), state);
             }
         }
         projected
     }
 
-    pub fn pending(&self) -> &[PendingMessageMutation] {
+    pub fn pending(&self) -> &[PendingMutation<C>] {
         &self.pending
     }
 
@@ -192,9 +233,36 @@ impl MessageReplica {
     }
 }
 
+// --- The message fold: the one foldable entity kind today -------------------
+
+/// `Convergence` for message state: the fold is `replay_message` over
+/// `MessageFoldState` and `MessageAssertion`. A future mailbox fold adds another
+/// impl and reuses [`Replica`] unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageConvergence;
+
+impl Convergence for MessageConvergence {
+    type Key = String;
+    type State = MessageFoldState;
+    type Effect = MessageAssertion;
+
+    fn fold(base: MessageFoldState, effects: &[MessageAssertion]) -> Outcome<MessageFoldState> {
+        replay_message(base, effects)
+    }
+}
+
+/// The message convergence engine — [`Replica<MessageConvergence>`].
+pub type MessageReplica = Replica<MessageConvergence>;
+/// A pending message mutation — [`PendingMutation<MessageConvergence>`]. Fields
+/// are the generic `key` (message id) / `effect` (assertion).
+pub type PendingMessageMutation = PendingMutation<MessageConvergence>;
+/// A message base update — [`BaseUpdate<MessageFoldState>`].
+pub type MessageBaseUpdate = BaseUpdate<MessageFoldState>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::MessageOutcome;
 
     fn state(keywords: &[&str], mailboxes: &[&str]) -> MessageFoldState {
         MessageFoldState {
@@ -206,8 +274,8 @@ mod tests {
     fn flag(id: &str, message_id: &str) -> PendingMessageMutation {
         PendingMessageMutation {
             id: MutationId(id.into()),
-            message_id: message_id.into(),
-            assertion: MessageAssertion::SetKeywords {
+            key: message_id.into(),
+            effect: MessageAssertion::SetKeywords {
                 add: vec!["$flagged".into()],
                 remove: vec![],
             },
@@ -215,7 +283,7 @@ mod tests {
     }
 
     fn present(replica: &MessageReplica, message_id: &str) -> MessageFoldState {
-        match replica.project(message_id) {
+        match replica.project(&message_id.to_string()) {
             Some(MessageOutcome::Present(state)) => state,
             other => panic!("expected present, got {other:?}"),
         }
@@ -224,7 +292,7 @@ mod tests {
     #[test]
     fn optimism_shows_before_confirmation() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         assert_eq!(
             present(&replica, "m1").keywords,
@@ -236,10 +304,8 @@ mod tests {
     #[test]
     fn confirmation_retires_pending_and_base_carries_the_effect() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        // Authority applies op1 and serves the post-state as the new base, then
-        // settles op1 confirmed (state-before-event: the base already reflects it).
         replica.apply_base_update([(
             "m1".to_string(),
             MessageBaseUpdate::Present(state(&["$flagged"], &["inbox"])),
@@ -255,10 +321,8 @@ mod tests {
 
     #[test]
     fn base_update_and_still_pending_overlap_is_a_no_op() {
-        // The base already reflects op1 but its settlement has not arrived yet:
-        // the projection is unchanged (idempotent fold), so no flicker.
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.apply_base_update([(
             "m1".to_string(),
@@ -274,7 +338,7 @@ mod tests {
     #[test]
     fn unconfirmed_pending_survives_an_unrelated_base_update() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.apply_base_update([(
             "m2".to_string(),
@@ -290,11 +354,10 @@ mod tests {
     #[test]
     fn settle_retires_only_the_named_mutation_out_of_order() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.accept(flag("op2", "m1"));
         replica.accept(flag("op3", "m1"));
-        // Confirm the middle mutation; the others stay pending (out-of-order safe).
         replica.settle(&MutationId("op2".into()), SettlementOutcome::Confirmed);
         let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, vec!["op1", "op3"]);
@@ -303,7 +366,7 @@ mod tests {
     #[test]
     fn failed_settlement_reverts_to_authoritative_state() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         assert_eq!(
             present(&replica, "m1").keywords,
@@ -324,32 +387,32 @@ mod tests {
     #[test]
     fn destroy_then_authoritative_removal() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(PendingMessageMutation {
             id: MutationId("op1".into()),
-            message_id: "m1".into(),
-            assertion: MessageAssertion::Destroy,
+            key: "m1".into(),
+            effect: MessageAssertion::Destroy,
         });
-        assert_eq!(replica.project("m1"), Some(MessageOutcome::Removed));
+        assert_eq!(
+            replica.project(&"m1".to_string()),
+            Some(MessageOutcome::Removed)
+        );
         assert!(replica.project_all().is_empty());
-        // Authority applies the destroy (removes the row) and settles it.
         replica.apply_base_update([("m1".to_string(), MessageBaseUpdate::Removed)]);
         replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
-        assert_eq!(replica.project("m1"), None);
+        assert_eq!(replica.project(&"m1".to_string()), None);
         assert!(!replica.has_pending());
     }
 
     #[test]
     fn replace_base_swaps_states_but_keeps_pending() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        // A fresh served base that does not reflect op1, and adds m2.
         replica.replace_base([
             ("m1".to_string(), state(&[], &["inbox"])),
             ("m2".to_string(), state(&[], &["inbox"])),
         ]);
-        // Pending survived and re-folds over the new base.
         assert!(replica.has_pending());
         assert_eq!(
             present(&replica, "m1").keywords,
@@ -361,7 +424,7 @@ mod tests {
     #[test]
     fn accept_is_idempotent_on_mutation_id() {
         let mut replica = MessageReplica::new();
-        replica.set_base("m1", state(&[], &["inbox"]));
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
         replica.accept(flag("op1", "m1"));
         assert_eq!(replica.pending().len(), 1);
