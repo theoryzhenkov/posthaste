@@ -40,6 +40,65 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   const pendingRef = useRef<Array<'undo' | 'redo'>>([])
   const busyRef = useRef(false)
 
+  const runApplyDiff = useCallback(async (step: DiffStep, inverse: boolean) => {
+    undoLogger.debug(
+      {
+        event: LOG_EVENTS.historyApplyDiffDispatched,
+        stepSeq: step.seq,
+        inverse,
+        sourceId: step.sourceId,
+        messageId: step.messageId,
+      },
+      'dispatching applyDiff for history step',
+    )
+    const diff = inverse ? await invertMessageChangeDiff(step.diff) : step.diff
+    void runtimeSessionClient
+      .runMutation({
+        name: 'message.applyDiff',
+        args: {
+          sourceId: step.sourceId,
+          messageId: step.messageId,
+          diff,
+          [inverse ? 'undoOf' : 'redoOf']: step.seq,
+        },
+      })
+      .catch(() => {
+        // Transient failures are non-fatal; availability is corrected by the
+        // next mutationHistory frame.
+      })
+  }, [])
+
+  // Named function expression so the recursive call is not flagged as a
+  // use-before-declare by the immutability ESLint rule; the const is assigned
+  // at render time, well before the callback is ever invoked.
+  const processQueue = useCallback(
+    function processQueue(): void {
+      if (busyRef.current || pendingRef.current.length === 0) {
+        return
+      }
+      const kind = pendingRef.current.shift()
+      if (!kind) {
+        return
+      }
+      const step = kind === 'undo' ? undoTopRef.current : redoTopRef.current
+      if (!step) {
+        undoLogger.debug(
+          {
+            event: LOG_EVENTS.historyNavigationDropped,
+            kind,
+            reason: 'no step available',
+          },
+          'dropping queued history navigation',
+        )
+        processQueue()
+        return
+      }
+      busyRef.current = true
+      runApplyDiff(step, kind === 'undo')
+    },
+    [runApplyDiff],
+  )
+
   useEffect(() => {
     const unsubscribe = runtimeSessionClient.subscribe(
       {
@@ -70,60 +129,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
       { afterSeq: 0 },
     )
     return unsubscribe
-  }, [])
-
-  const runApplyDiff = useCallback(async (step: DiffStep, inverse: boolean) => {
-    undoLogger.debug(
-      {
-        event: LOG_EVENTS.historyApplyDiffDispatched,
-        stepSeq: step.seq,
-        inverse,
-        sourceId: step.sourceId,
-        messageId: step.messageId,
-      },
-      'dispatching applyDiff for history step',
-    )
-    const diff = inverse ? await invertMessageChangeDiff(step.diff) : step.diff
-    void runtimeSessionClient
-      .runMutation({
-        name: 'message.applyDiff',
-        args: {
-          sourceId: step.sourceId,
-          messageId: step.messageId,
-          diff,
-          [inverse ? 'undoOf' : 'redoOf']: step.seq,
-        },
-      })
-      .catch(() => {
-        // Transient failures are non-fatal; availability is corrected by the
-        // next mutationHistory frame.
-      })
-  }, [])
-
-  const processQueue = useCallback(() => {
-    if (busyRef.current || pendingRef.current.length === 0) {
-      return
-    }
-    const kind = pendingRef.current.shift()
-    if (!kind) {
-      return
-    }
-    const step = kind === 'undo' ? undoTopRef.current : redoTopRef.current
-    if (!step) {
-      undoLogger.debug(
-        {
-          event: LOG_EVENTS.historyNavigationDropped,
-          kind,
-          reason: 'no step available',
-        },
-        'dropping queued history navigation',
-      )
-      processQueue()
-      return
-    }
-    busyRef.current = true
-    runApplyDiff(step, kind === 'undo')
-  }, [runApplyDiff])
+  }, [processQueue])
 
   const undo = useCallback(() => {
     undoLogger.debug(

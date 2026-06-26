@@ -43,10 +43,8 @@ pub(crate) async fn run_account_runtime(
         &shared,
         &account,
         generation,
-        SyncTrigger::Startup,
-        SyncMode::Incremental,
+        SyncTriggerRequest::new(SyncTrigger::Startup, SyncMode::Incremental),
         &mut connection,
-        None,
     )
     .await;
     let mut interval = sync_poll_interval(shared.poll_interval);
@@ -114,6 +112,37 @@ pub(crate) async fn run_account_runtime(
     }
 }
 
+/// A single sync request bundled to avoid a multi-argument explosion in
+/// [`process_sync_trigger_with_state`].
+#[derive(Debug)]
+pub(crate) struct SyncTriggerRequest {
+    pub(crate) trigger: SyncTrigger,
+    pub(crate) mode: SyncMode,
+    pub(crate) reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
+}
+
+impl SyncTriggerRequest {
+    pub(crate) fn new(trigger: SyncTrigger, mode: SyncMode) -> Self {
+        Self {
+            trigger,
+            mode,
+            reply: None,
+        }
+    }
+
+    pub(crate) fn with_reply(
+        trigger: SyncTrigger,
+        mode: SyncMode,
+        reply: oneshot::Sender<Result<usize, ServiceError>>,
+    ) -> Self {
+        Self {
+            trigger,
+            mode,
+            reply: Some(reply),
+        }
+    }
+}
+
 /// Run a single sync cycle, keeping [`SyncTriggerState`] informed so that
 /// fire-and-forget triggers can be coalesced. After the requested cycle
 /// finishes, any trigger that was coalesced into `pending` while it was running
@@ -123,16 +152,20 @@ pub(crate) async fn process_sync_trigger_with_state(
     shared: &Arc<SupervisorShared>,
     account: &AccountSettings,
     generation: RuntimeGeneration,
-    trigger: SyncTrigger,
-    mode: SyncMode,
+    request: SyncTriggerRequest,
     connection: &mut AccountRuntimeConnectionState,
-    reply: Option<oneshot::Sender<Result<usize, ServiceError>>>,
 ) {
-    let mut next = Some((trigger, mode, reply));
-    while let Some((trigger, mode, reply)) = next {
+    let mut next = Some(request);
+    while let Some(request) = next {
         sync_state.begin_cycle().await;
         let _ = process_sync_trigger(
-            shared, account, generation, trigger, mode, connection, reply,
+            shared,
+            account,
+            generation,
+            request.trigger,
+            request.mode,
+            connection,
+            request.reply,
         )
         .await;
         // Finish + take-pending is atomic with the trigger source's
@@ -141,7 +174,7 @@ pub(crate) async fn process_sync_trigger_with_state(
         next = sync_state
             .finish_cycle_take_pending()
             .await
-            .map(|trigger| (trigger, SyncMode::Incremental, None));
+            .map(|trigger| SyncTriggerRequest::new(trigger, SyncMode::Incremental));
     }
 }
 
@@ -157,10 +190,8 @@ pub(crate) async fn handle_poll_tick(
         shared,
         account,
         generation,
-        SyncTrigger::Poll,
-        SyncMode::Incremental,
+        SyncTriggerRequest::new(SyncTrigger::Poll, SyncMode::Incremental),
         connection,
-        None,
     )
     .await;
 }
@@ -210,10 +241,8 @@ pub(crate) async fn handle_runtime_command(
                 shared,
                 account,
                 generation,
-                trigger,
-                mode,
+                SyncTriggerRequest::with_reply(trigger, mode, reply),
                 connection,
-                Some(reply),
             )
             .await;
             true
@@ -224,10 +253,8 @@ pub(crate) async fn handle_runtime_command(
                 shared,
                 account,
                 generation,
-                trigger,
-                SyncMode::Incremental,
+                SyncTriggerRequest::new(trigger, SyncMode::Incremental),
                 connection,
-                None,
             )
             .await;
             true
@@ -279,10 +306,8 @@ pub(crate) async fn handle_push_event(
                 shared,
                 account,
                 generation,
-                SyncTrigger::Push,
-                SyncMode::Incremental,
+                SyncTriggerRequest::new(SyncTrigger::Push, SyncMode::Incremental),
                 connection,
-                None,
             )
             .await;
             true
