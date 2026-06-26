@@ -5667,6 +5667,15 @@
             "items": {
               "$ref": "#/components/schemas/Recipient"
             }
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Per-message authority-state version (IMAP per-message `max(modseq)`);\n`None` for providers without a per-message version (JMAP, mock/local).\nThe client replica uses it as a staleness guard on base ingest: a base\nwhose `version` is strictly older than the held one is rejected, so a\nlate provider re-serve can't clobber a confirmed optimistic mutation\n(flicker Bug 1b). Absent ⇒ unguarded.\n@spec docs/eph/DESIGN-L2-message-authority-version",
+            "minimum": 0
           }
         }
       },

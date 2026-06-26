@@ -51,6 +51,15 @@ pub struct MessageSummary {
     pub is_flagged: bool,
     pub mailbox_ids: Vec<MailboxId>,
     pub keywords: Vec<String>,
+    /// Per-message authority-state version (IMAP per-message `max(modseq)`);
+    /// `None` for providers without a per-message version (JMAP, mock/local).
+    /// The client replica uses it as a staleness guard on base ingest: a base
+    /// whose `version` is strictly older than the held one is rejected, so a
+    /// late provider re-serve can't clobber a confirmed optimistic mutation
+    /// (flicker Bug 1b). Absent ⇒ unguarded.
+    /// @spec docs/eph/DESIGN-L2-message-authority-version
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
 }
 
 /// Column by which message lists can be sorted.

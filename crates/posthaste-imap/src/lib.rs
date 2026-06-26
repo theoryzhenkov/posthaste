@@ -54,8 +54,8 @@ pub use mutation::{
 };
 pub use smtp::{
     append_smtp_sent_copy, build_smtp_message, render_smtp_markdown, send_smtp_message,
-    smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message, SmtpConnectionConfig,
-    SmtpSentCopyStrategy, SubmittedSmtpMessage,
+    send_smtp_messages, smtp_mailbox_for_recipient, smtp_sent_copy_strategy, submit_smtp_message,
+    SmtpConnectionConfig, SmtpSentCopyStrategy, SubmittedSmtpMessage,
 };
 pub use sync::{
     imap_condstore_delta_sync_batch, imap_delta_sync_batch, imap_full_sync_batch,

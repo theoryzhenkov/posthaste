@@ -11,7 +11,7 @@ use posthaste_testkit::{Harness, StalwartFixture};
 use crate::helpers::*;
 
 #[tokio::test]
-// spec: docs/L0-providers#live-provider-parity
+// spec: docs/testing/L1#real-provider-parity
 async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
     if std::env::var("POSTHASTE_STALWART_INTEGRATION").as_deref() != Ok("1") {
         eprintln!("skipping Stalwart integration; set POSTHASTE_STALWART_INTEGRATION=1");
