@@ -139,3 +139,5 @@ export const syncLogger = typedLogger('sync')
 export const uiLogger = typedLogger('ui')
 export const apiLogger = typedLogger('api')
 export const undoLogger = typedLogger('undo')
+
+export { LOG_EVENTS } from './logEvents'

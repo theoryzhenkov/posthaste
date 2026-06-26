@@ -2,7 +2,7 @@ import {
   injectedRuntimeMode,
   type InjectedRuntimeMode,
 } from '../connection/injected'
-import { syncLogger } from '../logger'
+import { LOG_EVENTS, syncLogger } from '../logger'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import { loadReplicaHandleFactory } from './replica/handle'
@@ -148,7 +148,11 @@ export function installReplicaAdapter(): Promise<void> {
     })
     replicaActive = true
     syncLogger.info(
-      { replica: true, adapterMode: injectedRuntimeMode() ?? 'loopback' },
+      {
+        event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
+        replica: true,
+        adapterMode: injectedRuntimeMode() ?? 'loopback',
+      },
       'replica adapter installed and active',
     )
   })()
@@ -156,7 +160,11 @@ export function installReplicaAdapter(): Promise<void> {
 }
 
 syncLogger.info(
-  { replicaEnabled: replicaAdapterEnabled(), adapterMode: injectedRuntimeMode() ?? 'loopback' },
+  {
+    event: LOG_EVENTS.runtimeAdapterInitialized,
+    replicaEnabled: replicaAdapterEnabled(),
+    adapterMode: injectedRuntimeMode() ?? 'loopback',
+  },
   'runtime adapter initialized',
 )
 

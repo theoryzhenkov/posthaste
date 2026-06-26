@@ -9,7 +9,7 @@ import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
 } from '@/runtime/types'
-import { uiLogger } from '@/logger'
+import { LOG_EVENTS, uiLogger } from '@/logger'
 import type { OperationContext } from '@/observability'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SidebarSelection } from '../Sidebar'
@@ -162,6 +162,7 @@ export function useRuntimeMailListView({
                   }
                   uiLogger.debug(
                     {
+                      event: LOG_EVENTS.viewSnapshotApplied,
                       viewId: frame.viewId,
                       type: frame.type,
                       sessionSeq: frame.sessionSeq,
@@ -188,6 +189,7 @@ export function useRuntimeMailListView({
                   }
                   uiLogger.debug(
                     {
+                      event: LOG_EVENTS.viewDeltaApplied,
                       viewId: frame.viewId,
                       type: frame.type,
                       sessionSeq: frame.sessionSeq,

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-import { undoLogger } from '@/logger'
+import { LOG_EVENTS, undoLogger } from '@/logger'
 import { isEditableKeyboardTarget } from '@/components/keyboard/inputTargets'
 import type { MailSelection } from '@/mailState'
 import type { SurfaceDescriptor } from '@/surfaces'
@@ -112,6 +112,7 @@ export function useGlobalMailShortcuts({
         event.preventDefault()
         undoLogger.debug(
           {
+            event: LOG_EVENTS.uiShortcutKeyPressed,
             key: event.key,
             shiftKey: event.shiftKey,
             repeat: event.repeat,
