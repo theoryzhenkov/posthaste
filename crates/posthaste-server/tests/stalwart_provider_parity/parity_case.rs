@@ -6,8 +6,8 @@ use posthaste_domain::*;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
 
-use crate::fixture::StalwartFixture;
-use crate::harness::Harness;
+use posthaste_testkit::{Harness, StalwartFixture};
+
 use crate::helpers::*;
 
 #[tokio::test]
