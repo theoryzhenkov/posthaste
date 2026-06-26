@@ -33,19 +33,21 @@ lifted from `stalwart_provider_parity`. `stalwart_provider_parity` and
 `stalwart_identity_transport` migrated to consume it. No behavior change;
 parity tests behave as before.
 
-### P2 — Runtime-in-harness + view-settlement recorder
+### P2 — Runtime-in-harness + view-settlement recorder (done 2026-06-26)
 
-Add `Harness::with_runtime()` standing up a `RuntimeCore` against the existing
-store/config. Add a `ViewSettlement` recorder that captures the ordered
-view-diff stream emitted by the runtime and asserts:
+`Harness::with_runtime()` builds an in-process authority runtime against the
+harness config root; `ViewSettlement` captures the ordered `RuntimeFrame` stream
+a mutation settles through and asserts confirmed / recompute-present /
+only-touched-view / session-seq-monotonic. First regression:
+`keyword_toggle_settles_and_recomputes_the_touched_view`.
 
-- every expected view settled (no missed recompute);
-- no view recomputed more broadly than the mutation warrants (no over-broad
-  invalidation);
-- deterministic ordering for golden comparison.
-
-First regression test: drive a mutation through the runtime and assert the
-settlement golden. This is where the view-update bug class gets caught.
+Finding (characterized, not a bug): a `run_mutation` keyword toggle on a live
+mock account recomputes the touched view *twice* — optimistic (rev 2, from the
+mutation's local event) then sync-confirmed (rev 3, after the supervisor syncs)
+— with a ~16-notification fan-out between them. This is expected local-first
+two-phase behavior, so the first test asserts `at_least_once`, not
+`exactly_once` (the latter is reserved for no-follow-up-sync scenarios). The
+notification fan-out breadth is worth a future profiling look.
 
 ### P3 — Declarative fixtures + StalwartFixture injection
 
