@@ -23,11 +23,11 @@ pub struct PendingOAuthFlow {
     pub nonce: String,
 }
 
-const OAUTH_COMPLETION_STATE_TTL_SECONDS: i64 = 10 * 60;
+pub(crate) const OAUTH_COMPLETION_STATE_TTL_SECONDS: i64 = 10 * 60;
 
 #[derive(Debug)]
 enum StoredOAuthFlow {
-    Pending(Box<PendingOAuthFlow>),
+    Pending(Box<PendingOAuthFlow>, OffsetDateTime),
     Completing(OffsetDateTime),
     Completed(OffsetDateTime),
 }
@@ -46,18 +46,31 @@ pub struct OAuthFlowStore {
 
 impl OAuthFlowStore {
     pub async fn insert(&self, state: String, flow: PendingOAuthFlow) {
+        self.flows.lock().await.insert(
+            state,
+            StoredOAuthFlow::Pending(Box::new(flow), OffsetDateTime::now_utc()),
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn insert_at(
+        &self,
+        state: String,
+        flow: PendingOAuthFlow,
+        started_at: OffsetDateTime,
+    ) {
         self.flows
             .lock()
             .await
-            .insert(state, StoredOAuthFlow::Pending(Box::new(flow)));
+            .insert(state, StoredOAuthFlow::Pending(Box::new(flow), started_at));
     }
 
     pub async fn begin_completion(&self, state: &str) -> OAuthFlowCompletion {
         let now = OffsetDateTime::now_utc();
         let mut flows = self.flows.lock().await;
-        prune_terminal_oauth_states(&mut flows, now);
+        prune_oauth_states(&mut flows, now);
         match flows.remove(state) {
-            Some(StoredOAuthFlow::Pending(flow)) => {
+            Some(StoredOAuthFlow::Pending(flow, _started_at)) => {
                 flows.insert(state.to_string(), StoredOAuthFlow::Completing(now));
                 OAuthFlowCompletion::Pending(flow)
             }
@@ -81,9 +94,11 @@ impl OAuthFlowStore {
     }
 }
 
-fn prune_terminal_oauth_states(flows: &mut HashMap<String, StoredOAuthFlow>, now: OffsetDateTime) {
+fn prune_oauth_states(flows: &mut HashMap<String, StoredOAuthFlow>, now: OffsetDateTime) {
     flows.retain(|_, flow| match flow {
-        StoredOAuthFlow::Pending(_) => true,
+        StoredOAuthFlow::Pending(_, started_at) => {
+            now - *started_at < Duration::seconds(OAUTH_COMPLETION_STATE_TTL_SECONDS)
+        }
         StoredOAuthFlow::Completing(started_at) | StoredOAuthFlow::Completed(started_at) => {
             now - *started_at < Duration::seconds(OAUTH_COMPLETION_STATE_TTL_SECONDS)
         }
