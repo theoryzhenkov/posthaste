@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -44,6 +44,9 @@ struct StoredSession {
     latest_snapshots: HashMap<ViewId, ViewSnapshot>,
     latest_mutations: HashMap<RuntimeMutationId, StoredMutation>,
     mutations_by_client_id: HashMap<ClientMutationId, RuntimeMutationId>,
+    /// Terminal mutation IDs in settlement order, used to evict the oldest
+    /// settled mutations once the live catch-up window reaches its cap.
+    settled_mutation_ids: VecDeque<RuntimeMutationId>,
     /// Reversible mutations the session has applied, oldest first. Each step is
     /// an invertible change-diff; undo applies `inverse(diff)`, redo applies
     /// `diff`, both as ordinary `message.applyDiff` mutations.
@@ -57,6 +60,11 @@ struct StoredSession {
 /// Upper bound on each session's undo and redo history (matches the renderer's
 /// former client-side bound).
 const MAX_HISTORY: usize = 50;
+
+/// Upper bound on the number of terminal mutations retained in a session for
+/// catch-up retransmission. Older mutations are evicted so reconnect cost stays
+/// bounded rather than growing with session age.
+const MAX_LATEST_MUTATIONS: usize = 100;
 
 #[derive(Clone)]
 struct StoredMutation {
@@ -104,6 +112,23 @@ impl StoredMutation {
     }
 }
 
+impl StoredSession {
+    /// Evict the oldest terminal mutations once the live catch-up window is
+    /// full, keeping the `latest_mutations` and `mutations_by_client_id` maps
+    /// bounded. Pending mutations are never evicted.
+    fn prune_settled_mutations(&mut self) {
+        while self.settled_mutation_ids.len() > MAX_LATEST_MUTATIONS {
+            let Some(oldest_id) = self.settled_mutation_ids.pop_front() else {
+                break;
+            };
+            if let Some(oldest) = self.latest_mutations.remove(&oldest_id) {
+                self.mutations_by_client_id
+                    .remove(&oldest.client_mutation_id);
+            }
+        }
+    }
+}
+
 impl SessionRegistry {
     pub(crate) fn new(
         views: Arc<ViewRegistry>,
@@ -135,6 +160,7 @@ impl SessionRegistry {
                 latest_snapshots: HashMap::new(),
                 latest_mutations: HashMap::new(),
                 mutations_by_client_id: HashMap::new(),
+                settled_mutation_ids: VecDeque::new(),
                 undo_history: Vec::new(),
                 redo_history: Vec::new(),
                 event_task: None,
@@ -497,6 +523,7 @@ impl SessionRegistry {
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
+        let is_terminal = state.is_terminal();
         let (receipt, frame) = {
             let mutation = session
                 .latest_mutations
@@ -505,11 +532,14 @@ impl SessionRegistry {
             mutation.state = state;
             mutation.error = error;
             mutation.output = output;
-            let receipt = mutation.receipt();
             let mutation = mutation.clone();
             let frame = mutation.frame(next_seq(session));
-            (receipt, frame)
+            (mutation.receipt(), frame)
         };
+        if is_terminal {
+            session.settled_mutation_ids.push_back(mutation_id.clone());
+            session.prune_settled_mutations();
+        }
         let sender = session.frames.clone();
         drop(sessions);
         let _ = sender.send(frame);
@@ -947,6 +977,169 @@ mod delta_tests {
         assert!(
             mail_list_delta(&old, &new).is_none(),
             "a non-row-local change must re-serve the whole view"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mutation_eviction_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn stored_mutation(id: u64, client_id: u64, state: MutationSettlementState) -> StoredMutation {
+        StoredMutation {
+            mutation_id: RuntimeMutationId::new(format!("mutation-{id}")),
+            client_mutation_id: ClientMutationId::new(format!("client-{client_id}")),
+            name: "message.setFlaggedState".to_string(),
+            args: json!({ "flagged": true }),
+            state,
+            error: None,
+            output: Value::Null,
+        }
+    }
+
+    fn empty_session() -> StoredSession {
+        let (frames, _) = broadcast::channel(1);
+        StoredSession {
+            account_scope: None,
+            delta_capable: false,
+            last_seq: 0,
+            frames,
+            open_views: HashSet::new(),
+            latest_snapshots: HashMap::new(),
+            latest_mutations: HashMap::new(),
+            mutations_by_client_id: HashMap::new(),
+            settled_mutation_ids: VecDeque::new(),
+            undo_history: Vec::new(),
+            redo_history: Vec::new(),
+            event_task: None,
+        }
+    }
+
+    #[test]
+    fn prune_evicts_oldest_terminal_mutations_once_window_is_full() {
+        let mut session = empty_session();
+        let cap = MAX_LATEST_MUTATIONS;
+
+        for id in 1..=cap + 5 {
+            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Confirmed);
+            session
+                .latest_mutations
+                .insert(m.mutation_id.clone(), m.clone());
+            session
+                .mutations_by_client_id
+                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
+            session
+                .settled_mutation_ids
+                .push_back(m.mutation_id.clone());
+            session.prune_settled_mutations();
+            assert!(
+                session.latest_mutations.len() <= cap,
+                "latest_mutations never exceeds the cap after pruning"
+            );
+        }
+
+        assert_eq!(
+            session.latest_mutations.len(),
+            cap,
+            "the most recent terminal mutations are retained"
+        );
+        assert_eq!(
+            session.settled_mutation_ids.len(),
+            cap,
+            "settled_mutation_ids tracks only the live window"
+        );
+
+        for id in 1..=5 {
+            let evicted_id = RuntimeMutationId::new(format!("mutation-{id}"));
+            let evicted_client = ClientMutationId::new(format!("client-{id}"));
+            assert!(
+                !session.latest_mutations.contains_key(&evicted_id),
+                "oldest terminal mutation {id} was evicted"
+            );
+            assert!(
+                !session.mutations_by_client_id.contains_key(&evicted_client),
+                "client id of evicted mutation {id} was also removed"
+            );
+        }
+
+        for id in 6..=cap + 5 {
+            let retained_id = RuntimeMutationId::new(format!("mutation-{id}"));
+            assert!(
+                session.latest_mutations.contains_key(&retained_id),
+                "recent terminal mutation {id} is still retained"
+            );
+        }
+    }
+
+    #[test]
+    fn prune_never_evicts_pending_mutations() {
+        let mut session = empty_session();
+        let cap = MAX_LATEST_MUTATIONS;
+
+        // Seed many pending mutations beyond the cap.
+        for id in 1..=cap + 10 {
+            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Accepted);
+            session
+                .latest_mutations
+                .insert(m.mutation_id.clone(), m.clone());
+            session
+                .mutations_by_client_id
+                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
+        }
+
+        session.prune_settled_mutations();
+
+        assert_eq!(
+            session.latest_mutations.len(),
+            cap + 10,
+            "pending mutations are left intact when there are no terminal mutations"
+        );
+
+        // Settle only the oldest pending mutation; it should become eligible for
+        // eviction only after enough newer mutations are also settled.
+        let first_id = RuntimeMutationId::new("mutation-1");
+        let first_client = ClientMutationId::new("client-1");
+        session.settled_mutation_ids.push_back(first_id.clone());
+        session.prune_settled_mutations();
+
+        assert!(
+            session.latest_mutations.contains_key(&first_id),
+            "single settled mutation is not evicted while the window is not full"
+        );
+        assert!(
+            session.mutations_by_client_id.contains_key(&first_client),
+            "client id is not removed until the mutation leaves the window"
+        );
+    }
+
+    #[test]
+    fn collapse_session_frames_emits_at_most_the_live_mutation_window() {
+        let mut session = empty_session();
+        let cap = MAX_LATEST_MUTATIONS;
+
+        for id in 1..=cap + 50 {
+            let m = stored_mutation(id as u64, id as u64, MutationSettlementState::Confirmed);
+            session
+                .latest_mutations
+                .insert(m.mutation_id.clone(), m.clone());
+            session
+                .mutations_by_client_id
+                .insert(m.client_mutation_id.clone(), m.mutation_id.clone());
+            session
+                .settled_mutation_ids
+                .push_back(m.mutation_id.clone());
+            session.prune_settled_mutations();
+        }
+
+        let frames = collapse_session_frames(&mut session);
+        let mutation_frames = frames
+            .iter()
+            .filter(|f| matches!(f, RuntimeFrame::MutationSettlement { .. }))
+            .count();
+        assert_eq!(
+            mutation_frames, cap,
+            "reconnect re-emits at most MAX_LATEST_MUTATIONS settlement frames"
         );
     }
 }
