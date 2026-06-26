@@ -2,6 +2,7 @@ import {
   injectedRuntimeMode,
   type InjectedRuntimeMode,
 } from '../connection/injected'
+import { syncLogger } from '../logger'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import { loadReplicaHandleFactory } from './replica/handle'
@@ -102,6 +103,13 @@ export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntimeAdapter
 }
 
+let replicaActive = false
+
+/** Whether the client-layer WASM replica adapter is currently active. */
+export function isReplicaAdapterActive(): boolean {
+  return replicaActive
+}
+
 /** Test-only: override the active adapter without starting a backend. */
 export function setRuntimeAdapterForTesting(
   adapter: RuntimeAdapter,
@@ -138,9 +146,19 @@ export function installReplicaAdapter(): Promise<void> {
       makeHandle,
       outbox: defaultOutboxStore(),
     })
+    replicaActive = true
+    syncLogger.info(
+      { replica: true, adapterMode: injectedRuntimeMode() ?? 'loopback' },
+      'replica adapter installed and active',
+    )
   })()
   return replicaInstall
 }
+
+syncLogger.info(
+  { replicaEnabled: replicaAdapterEnabled(), adapterMode: injectedRuntimeMode() ?? 'loopback' },
+  'runtime adapter initialized',
+)
 
 if (replicaAdapterEnabled()) {
   void installReplicaAdapter()

@@ -1,3 +1,5 @@
+import { syncLogger } from '../logger'
+
 import { runtimeStream } from './runtimeStream'
 import type {
   RuntimeFrameHandlers,
@@ -108,6 +110,20 @@ function ensureStream(afterSeq?: number | null): void {
         },
         {
           onFrame(frame) {
+            syncLogger.debug(
+              {
+                sessionId: session.sessionId,
+                type: frame.type,
+                sessionSeq: frame.sessionSeq,
+                ...(frame.type === 'viewReplace' || frame.type === 'viewSnapshot'
+                  ? { viewId: frame.viewId, revision: frame.revision }
+                  : {}),
+                ...(frame.type === 'mutationHistory'
+                  ? { canUndo: frame.canUndo, canRedo: frame.canRedo }
+                  : {}),
+              },
+              'runtime frame dispatched',
+            )
             for (const handlers of frameHandlers) {
               handlers.onFrame(frame)
             }
@@ -228,12 +244,22 @@ export const runtimeSessionClient = {
     request: RuntimeSessionMutationRequest,
   ): Promise<RuntimeMutationReceipt> {
     const session = await ensureSession(request.sourceId)
+    const clientMutationId =
+      request.clientMutationId ?? randomRuntimeId('client_mutation')
+    syncLogger.debug(
+      {
+        sessionId: session.sessionId,
+        name: request.name,
+        clientMutationId,
+        sourceId: activeTransportSourceId(),
+      },
+      'runtime mutation sent',
+    )
     return runtimeStream.runMutation({
       sessionId: session.sessionId,
       name: request.name,
       args: request.args,
-      clientMutationId:
-        request.clientMutationId ?? randomRuntimeId('client_mutation'),
+      clientMutationId,
       context: request.context,
       sourceId: activeTransportSourceId(),
     })

@@ -20,7 +20,7 @@ mod sync;
 mod ws_connection;
 
 pub use live::{connect_jmap_client, LiveJmapGateway};
-pub use mock::MockJmapGateway;
+pub use mock::{MockJmapGateway, SyncGateGuard};
 pub use push_sse::SsePushTransport;
 pub use push_ws::WsPushTransport;
 pub use ws_connection::SharedWsConnection;
