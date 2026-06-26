@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
-use tokio::sync::Notify;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, from_api_bridge_for_migration, RuntimeBuildConfig, RuntimeBuildError,
@@ -25,6 +24,7 @@ use posthaste_runtime_contract::{
     RuntimeLifecycle, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor,
     ViewFrame, ViewRevision,
 };
+use tokio::sync::Notify;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -2775,10 +2775,16 @@ async fn rapid_undo_stays_consistent_when_provider_sync_coalesces() {
     loop {
         match tokio::time::timeout(idle_timeout, subscription.live.next()).await {
             Ok(Some(frame)) => match frame {
-                RuntimeFrame::ViewSnapshot { view_id: fid, snapshot, .. }
-                | RuntimeFrame::ViewReplace { view_id: fid, snapshot, .. }
-                    if fid == view_id =>
-                {
+                RuntimeFrame::ViewSnapshot {
+                    view_id: fid,
+                    snapshot,
+                    ..
+                }
+                | RuntimeFrame::ViewReplace {
+                    view_id: fid,
+                    snapshot,
+                    ..
+                } if fid == view_id => {
                     snapshots.push(mail_list_state(&snapshot));
                     idle_attempts = 0;
                 }
