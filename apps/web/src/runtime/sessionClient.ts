@@ -1,4 +1,4 @@
-import { syncLogger } from '../logger'
+import { LOG_EVENTS, syncLogger } from '../logger'
 
 import { runtimeStream } from './runtimeStream'
 import type {
@@ -112,6 +112,7 @@ function ensureStream(afterSeq?: number | null): void {
           onFrame(frame) {
             syncLogger.debug(
               {
+                event: LOG_EVENTS.runtimeFrameDispatched,
                 sessionId: session.sessionId,
                 type: frame.type,
                 sessionSeq: frame.sessionSeq,
@@ -248,6 +249,7 @@ export const runtimeSessionClient = {
       request.clientMutationId ?? randomRuntimeId('client_mutation')
     syncLogger.debug(
       {
+        event: LOG_EVENTS.runtimeMutationSent,
         sessionId: session.sessionId,
         name: request.name,
         clientMutationId,
