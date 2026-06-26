@@ -45,46 +45,35 @@ const CLOSE_WINDOW_MENU_ID: &str = "close-window";
 const CLOSE_WINDOW_REQUESTED_EVENT: &str = "posthaste://close-window-requested";
 const MAIN_WINDOW_LABEL: &str = "main";
 
-/// Compile-time release channel ("nightly" | "stable" | "dev"). Set via the
-/// `POSTHASTE_RELEASE_CHANNEL` env var at build time; defaults to "dev" for
-/// local builds. Drives in-product channel display and the updater-endpoint
-/// binding (see docs/eph/DESIGN-L2-release-channels.md).
-pub(crate) const RELEASE_CHANNEL: &str = match option_env!("POSTHASTE_RELEASE_CHANNEL") {
-    Some(channel) => channel,
-    None => "dev",
-};
-
-/// The full sentinel string. CI sets `POSTHASTE_RELEASE_CHANNEL_SENTINEL` to it;
-/// local builds default to the dev sentinel. `concat!` cannot take a const, so
-/// the full string is supplied by the build environment rather than built here.
-const RELEASE_CHANNEL_SENTINEL_STR: &str =
-    match option_env!("POSTHASTE_RELEASE_CHANNEL_SENTINEL") {
-        Some(sentinel) => sentinel,
-        None => "posthaste-release-channel=dev",
-    };
-
-/// Sentinel baked into the binary so the release smoke step can prove which
-/// channel a binary was built on by grepping for `posthaste-release-channel=`.
+/// Compile-time release channel ("nightly" | "stable" | "dev"). Resolved by
+/// `build.rs` from the `POSTHASTE_RELEASE_CHANNEL` env var and re-exported as
+/// `POSTHASTE_RELEASE_CHANNEL_RESOLVED`; defaults to "dev" for local builds.
+/// Going through the build script (rather than `option_env!`) makes the channel
+/// a first-class cargo build input with proper fingerprinting, so a stale
+/// `target/`/sccache object can never carry the wrong channel.
 ///
-/// Stored as an inline, zero-padded byte array rather than a `&str`: `#[used]`
-/// only retains the static's own storage, and for a `&str` that storage is just
-/// a fat pointer — the backing string constant lives in a separate mergeable
-/// `.rodata` section that the linker can detach under `--gc-sections` (observed
-/// with mold in CI, leaving the smoke grep with no sentinel at all). Holding the
-/// bytes inline makes them the static's own storage, so they survive linker GC
-/// and stripping. The grep stops at the first NUL, so the padding is invisible.
-#[used]
-static RELEASE_CHANNEL_SENTINEL: [u8; 64] = {
-    let src = RELEASE_CHANNEL_SENTINEL_STR.as_bytes();
-    assert!(src.len() <= 64, "release channel sentinel exceeds 64 bytes");
-    let mut out = [0u8; 64];
-    let mut i = 0;
-    while i < src.len() {
-        out[i] = src[i];
-        i += 1;
+/// Drives in-product channel display, the updater-endpoint binding, and the
+/// `--print-release-channel` self-report the release smoke checks (see
+/// docs/eph/DESIGN-L2-release-channels.md).
+pub const RELEASE_CHANNEL: &str = env!("POSTHASTE_RELEASE_CHANNEL_RESOLVED");
+
+/// Flag that makes the binary print its compiled-in [`RELEASE_CHANNEL`] and
+/// exit, before any GUI initialization. The release smoke step runs this and
+/// compares the output to the expected channel — a direct, toolchain-independent
+/// proof that an artifact was built for the right channel.
+pub const PRINT_RELEASE_CHANNEL_FLAG: &str = "--print-release-channel";
+
+/// If invoked with [`PRINT_RELEASE_CHANNEL_FLAG`], print the channel and return
+/// `true` so the caller can exit before starting Tauri. Kept out of `run()` so
+/// it works headless (no event loop, no display).
+pub fn handle_print_release_channel() -> bool {
+    if std::env::args().skip(1).any(|arg| arg == PRINT_RELEASE_CHANNEL_FLAG) {
+        println!("{RELEASE_CHANNEL}");
+        true
+    } else {
+        false
     }
-    out
-};
+}
 
 /// Return the compile-time release channel to the renderer so the desktop binary
 /// and the web bundle cannot silently disagree.
@@ -150,15 +139,12 @@ pub fn run() {
     ]);
 
     let builder = builder.setup(|app| {
-        // Log the baked release channel so it is observable in diagnostics. The
-        // sentinel byte array is retained by `#[used]`; touch it by reference so
-        // we do not copy the array.
+        // Log the baked release channel so it is observable in diagnostics.
         ph_info!(
             events::DESKTOP_RELEASE_CHANNEL,
             channel = RELEASE_CHANNEL,
             "desktop release channel"
         );
-        let _ = &RELEASE_CHANNEL_SENTINEL;
 
         #[cfg(feature = "embedded-server")]
         let backend = {

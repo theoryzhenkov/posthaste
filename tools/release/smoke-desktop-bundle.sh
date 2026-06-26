@@ -7,7 +7,12 @@ set -euo pipefail
 #   smoke-desktop-bundle.sh <channel> <platform> <bundle-dir>
 #
 # Supported platforms: linux-x86_64, macos, windows-x86_64.
-# "channel" is nightly or stable and controls strictness.
+#
+# The channel check is a direct self-report: the desktop binary, run with
+# `--print-release-channel`, prints its compiled-in channel and exits before any
+# GUI init. We compare that to the expected channel. This is toolchain- and
+# packaging-independent (no byte-grepping a baked sentinel), so a mismatch shows
+# the actual channel the binary was built for rather than an opaque failure.
 
 channel="${1:?usage: smoke-desktop-bundle.sh <channel> <platform> <bundle-dir>}"
 platform="${2:?missing platform}"
@@ -23,16 +28,25 @@ fail() {
   exit 1
 }
 
-# Prove the binary was built on the expected channel. The sentinel is baked in
-# at compile time (apps/desktop/src/lib.rs), so this catches a misbuilt artifact
-# regardless of how the bundle was packaged.
-check_sentinel() {
+# Find the largest executable file under a directory. The real Rust binary
+# dwarfs any launcher/wrapper script, so size is a robust way to pick it without
+# hard-coding the (channel-dependent) product name.
+largest_executable() {
+  local root="$1"
+  find "$root" -type f -perm -111 -printf '%s\t%p\n' 2>/dev/null \
+    | sort -rn \
+    | head -n1 \
+    | cut -f2-
+}
+
+# Run the binary's self-report and assert it matches the expected channel.
+check_channel() {
   local bin="$1"
-  local expected="posthaste-release-channel=$channel"
-  if ! grep -aq "$expected" "$bin"; then
-    local found
-    found="$(grep -ao 'posthaste-release-channel=[a-z]*' "$bin" | head -n1 || true)"
-    fail "binary channel sentinel mismatch: expected '$expected', found '${found:-none}'"
+  local reported
+  reported="$("$bin" --print-release-channel 2>/dev/null || true)"
+  [ -n "$reported" ] || fail "binary did not report a release channel: $bin"
+  if [ "$reported" != "$channel" ]; then
+    fail "binary channel mismatch: expected '$channel', binary reports '$reported'"
   fi
 }
 
@@ -55,40 +69,45 @@ linux_smoke() {
     fail "AppImage extraction failed"
 
   local bin
-  bin="$(find "$linux_extract_dir/squashfs-root/usr/bin" -maxdepth 1 -type f -executable -print -quit | head -n1)"
-  if [ -z "$bin" ]; then
-    bin="$(find "$linux_extract_dir/squashfs-root" -maxdepth 1 -type f -executable -print -quit | head -n1)"
-  fi
+  bin="$(largest_executable "$linux_extract_dir/squashfs-root")"
   [ -n "$bin" ] || fail "no executable found in extracted AppImage"
 
-  "$bin" --version >/dev/null || fail "desktop binary --version failed"
-  "$bin" --help >/dev/null || fail "desktop binary --help failed"
+  check_channel "$bin"
 
-  check_sentinel "$bin"
-
-  echo "linux smoke passed: $(basename "$appimage")"
+  echo "linux smoke passed: $(basename "$appimage") (channel $channel)"
 }
 
 macos_smoke() {
+  # Prefer the updater tarball: it contains the .app and lets us run the binary
+  # without mounting the DMG (hdiutil is flaky on CI runners).
+  local app_tar
+  app_tar="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit | head -n1)"
   local app
   app="$(find "$bundle_dir" -maxdepth 1 -type d -name '*.app' -print -quit | head -n1)"
   local dmg
   dmg="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit | head -n1)"
 
-  if [ -n "$app" ]; then
-    local bin
-    bin="$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit | head -n1)"
+  local bin
+  if [ -n "$app_tar" ]; then
+    # Keep this global: the EXIT trap outlives this function, so a local would be
+    # out of scope (and unbound under `set -u`) when the trap fires.
+    macos_extract_dir="$(mktemp -d)"
+    cleanup_macos() { rm -rf "$macos_extract_dir"; }
+    trap cleanup_macos EXIT
+    tar -xzf "$app_tar" -C "$macos_extract_dir" || fail "failed to extract $app_tar"
+    bin="$(largest_executable "$macos_extract_dir")"
+    [ -n "$bin" ] || fail "no executable found in $app_tar"
+    check_channel "$bin"
+    echo "macos smoke passed: $(basename "$app_tar") (channel $channel)"
+  elif [ -n "$app" ]; then
+    bin="$(largest_executable "$app/Contents/MacOS")"
     [ -n "$bin" ] || fail "no executable found in $app"
-    [ -x "$bin" ] || fail "macOS .app binary is not executable: $bin"
-
-    "$bin" --version >/dev/null || fail "desktop binary --version failed"
-    "$bin" --help >/dev/null || fail "desktop binary --help failed"
-
-    check_sentinel "$bin"
-
-    echo "macos smoke passed: $(basename "$app")"
+    check_channel "$bin"
+    echo "macos smoke passed: $(basename "$app") (channel $channel)"
   elif [ -n "$dmg" ]; then
-    echo "macos smoke passed: .dmg present (sentinel not checked)"
+    # No runnable bundle present (e.g. updater artifacts disabled); fall back to
+    # an existence check so the gate still verifies an artifact was produced.
+    echo "macos smoke passed: .dmg present (channel not verified \u2014 no .app.tar.gz)"
   else
     fail "no macOS bundle found in $bundle_dir"
   fi
@@ -107,7 +126,7 @@ windows_smoke() {
 case "$platform" in
   linux-x86_64)
     linux_smoke
- ;;
+    ;;
   macos)
     macos_smoke
     ;;

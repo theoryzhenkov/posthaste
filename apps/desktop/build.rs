@@ -3,13 +3,14 @@ fn main() {
     println!("cargo:rerun-if-changed=capabilities/default.json");
     println!("cargo:rerun-if-changed=capabilities/e2e-playwright.json");
 
-    // `apps/desktop/src/lib.rs` bakes the release channel and its sentinel
-    // string into the binary via `option_env!`. Cargo does not watch arbitrary
-    // env vars by default, so a stale `target/` cache can silently reuse an
-    // object file built for another channel. Declare the dependency so the
-    // crate is recompiled whenever the channel/sentinel changes.
+    // Resolve the release channel here and re-export it as a build-script env so
+    // `lib.rs` reads it via `env!`. Going through the build script (rather than
+    // `option_env!` directly) makes the channel a first-class cargo build input:
+    // `rerun-if-env-changed` forces a rebuild when the channel changes, so a
+    // stale `target/`/sccache object can never silently carry the wrong channel.
     println!("cargo:rerun-if-env-changed=POSTHASTE_RELEASE_CHANNEL");
-    println!("cargo:rerun-if-env-changed=POSTHASTE_RELEASE_CHANNEL_SENTINEL");
+    let channel = std::env::var("POSTHASTE_RELEASE_CHANNEL").unwrap_or_else(|_| "dev".to_string());
+    println!("cargo:rustc-env=POSTHASTE_RELEASE_CHANNEL_RESOLVED={channel}");
 
     let capabilities_path_pattern = if std::env::var_os("CARGO_FEATURE_E2E_TESTING").is_some() {
         "capabilities/*.json"

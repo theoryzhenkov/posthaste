@@ -1,8 +1,8 @@
 ---
 scope: L2
 summary: "Release channels as a first-class product concept: channel is declared (tag-inferred for push, explicit for manual dispatch), baked into the binary, and drives a single policy table covering distinct per-channel identity, updater manifest, devtools, macOS signing, and smoke gates."
-modified: 2026-06-25
-reviewed: 2026-06-25
+modified: 2026-06-26
+reviewed: 2026-06-26
 lifecycle: ephemeral
 type: DESIGN
 depends:
@@ -154,13 +154,21 @@ documented fallback; it is not pre-built.
 
 Compile-time baking (the binary carries it):
 
-- Rust: `const RELEASE_CHANNEL: &str = option_env!("POSTHASTE_RELEASE_CHANNEL").unwrap_or("dev");`
-- A `#[used]` sentinel string `posthaste-release-channel=<channel>` is embedded so
-  the smoke step can prove which channel a binary was built on.
+- `apps/desktop/build.rs` reads `POSTHASTE_RELEASE_CHANNEL` (default `dev`) and
+  re-exports it via `cargo:rustc-env=POSTHASTE_RELEASE_CHANNEL_RESOLVED`, paired
+  with `cargo:rerun-if-env-changed`. `lib.rs` reads it with `env!`, so the
+  channel is a first-class cargo build input — a stale `target/`/sccache object
+  can never silently carry the wrong channel. (The earlier `option_env!` +
+  `#[used]` grep-sentinel approach was abandoned: linker `--gc-sections` could
+  detach the sentinel's backing constant, making the smoke grep fail opaquely.)
+- The binary **self-reports** its channel: run with `--print-release-channel` it
+  prints `RELEASE_CHANNEL` and exits before any GUI init. The smoke step runs
+  this and compares the output to the expected channel — a direct, toolchain- and
+  packaging-independent proof, and a mismatch shows the actual channel.
 - Renderer: `VITE_RELEASE_CHANNEL` is set at web-build time and read via
   `import.meta.env.VITE_RELEASE_CHANNEL`.
-- A Tauri command exposes the Rust constant to the renderer so the two cannot
-  silently disagree.
+- A Tauri command (`release_channel`) exposes the Rust constant to the renderer
+  so the two cannot silently disagree.
 
 The updater endpoint is also set at build time via `--config`, so both the
 channel identity and the endpoint are compile-time-bound to the same channel.
@@ -172,9 +180,9 @@ channel identity and the endpoint are compile-time-bound to the same channel.
 2. **`build-desktop`** materializes the per-channel policy once via
    `channel-policy.sh` and overrides identity, product name, and updater endpoint
    via `--config`.
-3. **Smoke step** extracts the AppImage, runs `--version`/`--help`, and greps
-   the binary for the `posthaste-release-channel=<channel>` sentinel — a real
-   assertion that the binary was built on the expected channel.
+3. **Smoke step** unpacks the artifact (AppImage extraction on Linux, the
+   `.app.tar.gz` on macOS) and runs the binary's `--print-release-channel`,
+   asserting the reported channel equals the expected one.
 4. **`generate-updater-manifest.sh`** takes the manifest filename from the
    policy (`latest.json` / `latest-stable.json`).
 5. **Publish** uses the `prerelease` flag so rc/nightlies are marked GitHub
@@ -186,8 +194,8 @@ channel identity and the endpoint are compile-time-bound to the same channel.
 | ID                        | Sev.   | Assertion                                                                                  |
 | ------------------------- | ------ | ------------------------------------------------------------------------------------------ |
 | channel-declared          | MUST   | Every release resolves to a channel: inferred from tag on push, or explicit input on dispatch; unknown tags fail CI. |
-| channel-baked             | MUST   | Every desktop binary embeds its channel as a compile-time constant and sentinel.          |
-| channel-sentinel-smoke    | MUST   | The smoke step proves the binary's baked channel matches the release channel.             |
+| channel-baked             | MUST   | Every desktop binary embeds its channel as a compile-time constant resolved by build.rs from `POSTHASTE_RELEASE_CHANNEL`. |
+| channel-self-report-smoke | MUST   | The smoke step runs the binary's `--print-release-channel` and proves the reported channel matches the release channel. |
 | channel-policy-single     | MUST   | All per-channel policy is read from one committed policy table by channel, not threaded as booleans. |
 | distinct-identity         | MUST   | Nightly and stable use distinct bundle identifiers and product names.                     |
 | nightly-devtools           | MUST   | Nightly desktop builds compile with the `devtools` feature.                                |
@@ -211,4 +219,5 @@ channel identity and the endpoint are compile-time-bound to the same channel.
 - Rolling tag: `tools/release/update-rolling-tag.sh`
 - Bundle smoke: `tools/release/smoke-desktop-bundle.sh`
 - Tauri config: `apps/desktop/tauri.conf.json`
-- Channel baking: `apps/desktop/src/lib.rs`, `apps/web/src/runtime/releaseChannel.ts`
+- Channel baking: `apps/desktop/build.rs`, `apps/desktop/src/lib.rs`, `apps/web/src/runtime/releaseChannel.ts`
+- Channel self-report: `apps/desktop/src/main.rs` (`--print-release-channel`)
