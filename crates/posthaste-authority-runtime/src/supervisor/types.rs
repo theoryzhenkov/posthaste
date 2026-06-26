@@ -60,54 +60,83 @@ impl RuntimeGeneration {
 /// local-first operations, so coalescing preserves correctness while avoiding
 /// serial sync storms.
 pub(crate) struct SyncTriggerState {
-    /// True while the account runtime task is inside a sync cycle.
-    is_syncing: AtomicBool,
-    /// A coalesced follow-up trigger that arrived while a sync was in progress.
-    /// Only the most recent trigger is kept; `SyncTrigger::Manual` is the
-    /// expected value for mutation-driven flushes.
-    pending: Mutex<Option<SyncTrigger>>,
+    /// The `syncing` flag and coalesced `pending` trigger guarded together so
+    /// the trigger source and the runtime drain loop make one atomic decision.
+    /// Splitting these across an `AtomicBool` + separate `Mutex` allowed a
+    /// lost-wakeup race: a trigger observed `syncing == true`, then the drain
+    /// loop cleared `syncing` and took an (empty) pending before the trigger
+    /// stored its own — stranding it so its sync never ran and open views went
+    /// stale until the next poll.
+    inner: Mutex<SyncCoalesceState>,
     /// Number of sync cycles executed by this account runtime. Used as an
     /// observability/test seam to verify that bursts of mutations do not
     /// produce one provider sync per mutation.
     sync_cycle_count: AtomicUsize,
 }
 
+#[derive(Default)]
+struct SyncCoalesceState {
+    /// True while the account runtime task is inside a sync cycle.
+    syncing: bool,
+    /// A coalesced follow-up trigger that arrived while a sync was in progress.
+    /// Only the most recent trigger is kept; `SyncTrigger::Manual` is the
+    /// expected value for mutation-driven flushes.
+    pending: Option<SyncTrigger>,
+}
+
 impl SyncTriggerState {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
-            is_syncing: AtomicBool::new(false),
-            pending: Mutex::new(None),
+            inner: Mutex::new(SyncCoalesceState::default()),
             sync_cycle_count: AtomicUsize::new(0),
         })
     }
 
-    pub(crate) fn is_syncing(&self) -> bool {
-        self.is_syncing.load(Ordering::SeqCst)
+    /// Trigger-source entry point (the supervisor manager). If a sync is already
+    /// running, coalesce this trigger into the pending follow-up and return
+    /// `true` (the caller must not enqueue a new cycle). Otherwise return `false`
+    /// (the caller enqueues a cycle, which calls [`begin_cycle`] on entry).
+    ///
+    /// The check and the store happen under one lock, so a trigger can never be
+    /// stranded between the drain loop clearing `syncing` and taking `pending`.
+    pub(crate) async fn coalesce_if_syncing(&self, trigger: SyncTrigger) -> bool {
+        let mut inner = self.inner.lock().await;
+        if inner.syncing {
+            inner.pending = Some(trigger);
+            true
+        } else {
+            false
+        }
     }
 
-    pub(crate) fn start_sync(&self) {
-        self.is_syncing.store(true, Ordering::SeqCst);
-    }
-
-    pub(crate) fn finish_sync(&self) {
-        self.is_syncing.store(false, Ordering::SeqCst);
-    }
-
-    pub(crate) async fn set_pending(&self, trigger: SyncTrigger) {
-        let mut pending = self.pending.lock().await;
-        *pending = Some(trigger);
-    }
-
-    pub(crate) async fn take_pending(&self) -> Option<SyncTrigger> {
-        self.pending.lock().await.take()
-    }
-
-    pub(crate) fn increment_sync_cycle_count(&self) {
+    /// Mark the runtime as entering a sync cycle and bump the cycle counter.
+    pub(crate) async fn begin_cycle(&self) {
+        self.inner.lock().await.syncing = true;
         self.sync_cycle_count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Finish the current cycle. If a trigger was coalesced while it ran, take it
+    /// (keeping `syncing` set so the caller runs a follow-up cycle); otherwise
+    /// clear `syncing` and return `None`. The take-or-clear is atomic with
+    /// [`coalesce_if_syncing`], which is what closes the lost-wakeup race.
+    pub(crate) async fn finish_cycle_take_pending(&self) -> Option<SyncTrigger> {
+        let mut inner = self.inner.lock().await;
+        match inner.pending.take() {
+            Some(trigger) => Some(trigger),
+            None => {
+                inner.syncing = false;
+                None
+            }
+        }
     }
 
     pub(crate) fn sync_cycle_count(&self) -> usize {
         self.sync_cycle_count.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn is_syncing(&self) -> bool {
+        self.inner.lock().await.syncing
     }
 }
 
@@ -200,43 +229,63 @@ mod tests {
     #[tokio::test]
     async fn sync_trigger_state_starts_idle() {
         let state = SyncTriggerState::new();
-        assert!(!state.is_syncing());
-        assert!(state.take_pending().await.is_none());
+        assert!(!state.is_syncing().await);
+        // Idle: a trigger is not coalesced; the caller enqueues a cycle.
+        assert!(!state.coalesce_if_syncing(SyncTrigger::Manual).await);
     }
 
     #[tokio::test]
-    async fn sync_trigger_state_tracks_pending_across_sync_cycle() {
+    async fn sync_trigger_state_drains_a_coalesced_trigger_on_finish() {
         let state = SyncTriggerState::new();
 
         // Runtime begins a sync.
-        state.start_sync();
-        assert!(state.is_syncing());
+        state.begin_cycle().await;
+        assert!(state.is_syncing().await);
 
         // A mutation arrives while the sync is running and is coalesced.
-        state.set_pending(SyncTrigger::Manual).await;
-        assert!(state.is_syncing());
+        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        assert!(state.is_syncing().await);
 
-        // Runtime finishes the first sync and immediately observes the pending
-        // follow-up trigger.
-        state.finish_sync();
-        let pending = state.take_pending().await;
+        // Finishing the cycle takes the coalesced follow-up (and keeps syncing
+        // set so the caller runs it) — the trigger is never stranded.
+        let pending = state.finish_cycle_take_pending().await;
         assert_eq!(pending, Some(SyncTrigger::Manual));
 
-        // After the follow-up is taken, the state is idle and empty again.
-        assert!(!state.is_syncing());
-        assert!(state.take_pending().await.is_none());
+        // Finishing again with nothing pending clears syncing and returns None.
+        let pending = state.finish_cycle_take_pending().await;
+        assert_eq!(pending, None);
+        assert!(!state.is_syncing().await);
     }
 
     #[tokio::test]
     async fn sync_trigger_state_keeps_most_recent_pending_trigger() {
         let state = SyncTriggerState::new();
-        state.start_sync();
+        state.begin_cycle().await;
 
-        state.set_pending(SyncTrigger::Manual).await;
-        state.set_pending(SyncTrigger::Push).await;
-        state.set_pending(SyncTrigger::Manual).await;
+        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
+        assert!(state.coalesce_if_syncing(SyncTrigger::Push).await);
+        assert!(state.coalesce_if_syncing(SyncTrigger::Manual).await);
 
-        let pending = state.take_pending().await;
+        let pending = state.finish_cycle_take_pending().await;
         assert_eq!(pending, Some(SyncTrigger::Manual));
+    }
+
+    #[tokio::test]
+    async fn sync_trigger_state_finishing_idle_window_does_not_strand_a_later_trigger() {
+        // Regression for the lost-wakeup race: a cycle finishes with nothing
+        // pending (clearing syncing), and only afterwards a trigger arrives.
+        // Because the trigger now observes `syncing == false` under the same
+        // lock the drain used, it is NOT coalesced — the caller enqueues a fresh
+        // cycle instead of stranding it in `pending`.
+        let state = SyncTriggerState::new();
+        state.begin_cycle().await;
+
+        // Drain finds nothing pending and clears syncing.
+        assert_eq!(state.finish_cycle_take_pending().await, None);
+        assert!(!state.is_syncing().await);
+
+        // A trigger that arrives now is not swallowed into pending; the caller is
+        // told to enqueue a cycle (returns false).
+        assert!(!state.coalesce_if_syncing(SyncTrigger::Manual).await);
     }
 }

@@ -13,8 +13,8 @@ use posthaste_domain::{
     AccountDriver, AccountId, EventFilter, ImapTransportSettings, MailboxId, MailboxRecord,
     MessageId, MessageRecord, MessageSortField, ProviderAuthKind, ProviderHint, SecretRef,
     SecretStore, SecretStoreError, SetKeywordsCommand, SmtpTransportSettings, SortDirection,
-    SyncBatch, SyncCursor, SyncObject, ThreadId, TransportSecurity, EVENT_TOPIC_ACCOUNT_DELETED,
-    EVENT_TOPIC_MESSAGE_UPDATED,
+    SyncBatch, SyncCursor, SyncObject, SyncTrigger, ThreadId, TransportSecurity,
+    EVENT_TOPIC_ACCOUNT_DELETED, EVENT_TOPIC_MESSAGE_UPDATED,
 };
 use posthaste_engine::MockJmapGateway;
 use posthaste_runtime_contract::{
@@ -2830,5 +2830,205 @@ async fn rapid_undo_stays_consistent_when_provider_sync_coalesces() {
     assert!(
         is_flagged(snapshots.last().unwrap()),
         "final frame should settle flagged, got {snapshots:?}"
+    );
+}
+
+#[tokio::test]
+async fn runtime_mutation_in_one_session_updates_view_in_another_session() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+    let mut mutation = mock_account_mutation("cross-session-mutation-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("mock account runtime should sync");
+    seed_single_message_batch(&build, &account.id, "xm-001", "mb-inbox");
+
+    let session_a = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session A should open");
+    let snapshot_a = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session_a.session_id.clone(),
+            mail_list_descriptor("in:cross-session-mutation-account/mb-inbox"),
+        )
+        .await
+        .expect("session A view should open");
+    let mut subscription_a = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session_a.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("session A stream should subscribe");
+    assert_eq!(subscription_a.catch_up.len(), 1);
+
+    let session_b = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session B should open");
+
+    let receipt = build
+        .handle
+        .run_mutation(
+            RuntimeCaller::test(),
+            MutationRequest {
+                session_id: Some(session_b.session_id.clone()),
+                name: "message.setKeywords".to_string(),
+                args: serde_json::json!({
+                    "sourceId": account.id.as_str(),
+                    "messageId": "xm-001",
+                    "command": {"add": ["$flagged"], "remove": []}
+                }),
+                client_mutation_id: ClientMutationId::new("client-b"),
+                context: None,
+            },
+        )
+        .await
+        .expect("session B mutation should run");
+
+    assert_eq!(receipt.name, "message.setKeywords");
+    assert_eq!(receipt.state, MutationSettlementState::Confirmed);
+
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = subscription_a
+                .live
+                .next()
+                .await
+                .expect("session A stream should remain open");
+            if matches!(frame, RuntimeFrame::ViewReplace { .. }) {
+                break frame;
+            }
+        }
+    })
+    .await
+    .expect("session A should receive a view update after session B mutation");
+    let RuntimeFrame::ViewReplace {
+        view_id: fid,
+        snapshot,
+        ..
+    } = frame
+    else {
+        panic!("expected ViewReplace");
+    };
+    assert_eq!(fid, snapshot_a.view_id);
+    let state = mail_list_state(&snapshot);
+    let row = state
+        .rows
+        .iter()
+        .find(|row| row.projection["id"] == "xm-001")
+        .expect("updated row should be visible");
+    assert_eq!(row.projection["isFlagged"], true);
+}
+
+/// A sync trigger that arrives while a provider sync is in flight must still run
+/// a follow-up cycle once that sync finishes — it is coalesced, never dropped.
+///
+/// Regression for the lost-wakeup race in `SyncTriggerState`: when the coalesced
+/// trigger was stranded, the follow-up sync never ran, so changes that sync
+/// would have observed (e.g. another client's mailbox change pulled on the next
+/// cycle) stayed invisible until the next poll — surfacing to the user as "views
+/// don't regenerate until I switch views and back".
+///
+/// spec: docs/L1-sync#sync-loop
+#[tokio::test]
+async fn coalesced_sync_trigger_still_runs_a_follow_up_cycle() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+
+    let mut mutation = mock_account_mutation("coalesce-followup-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+
+    // Baseline sync (ungated) establishes the connection and seeds state.
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("baseline sync should run");
+
+    // Gate every subsequent provider pull at entry so the test controls when a
+    // cycle is in flight.
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let _gate = MockJmapGateway::gate_sync_at_entry(&account.id, entered.clone(), release.clone());
+
+    let baseline = build.account_supervisor.sync_cycle_count(&account.id).await;
+
+    // Trigger A: enqueues a cycle. It enters the (gated) pull and blocks.
+    build
+        .account_supervisor
+        .trigger_account_sync(&account.id, SyncTrigger::Manual)
+        .await
+        .expect("first trigger should enqueue");
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("cycle A should enter the provider pull");
+
+    // Trigger B arrives while A is still in flight. It must coalesce into A's
+    // pending follow-up (not enqueue a redundant cycle, and not be dropped).
+    build
+        .account_supervisor
+        .trigger_account_sync(&account.id, SyncTrigger::Push)
+        .await
+        .expect("second trigger should coalesce");
+
+    // Release A. On finishing it must drain the coalesced trigger and run a
+    // second cycle, which enters the gated pull again.
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("the coalesced trigger should run a follow-up cycle (not be stranded)");
+
+    // Let the follow-up cycle finish.
+    release.notify_one();
+
+    // Wait for the cycle count to settle and assert exactly the two cycles ran:
+    // A plus the single coalesced follow-up.
+    let final_count = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let count = build.account_supervisor.sync_cycle_count(&account.id).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if build.account_supervisor.sync_cycle_count(&account.id).await == count {
+                return count;
+            }
+        }
+    })
+    .await
+    .expect("sync cycles should settle");
+
+    assert_eq!(
+        final_count - baseline,
+        2,
+        "trigger A plus one coalesced follow-up should run exactly two cycles"
     );
 }
