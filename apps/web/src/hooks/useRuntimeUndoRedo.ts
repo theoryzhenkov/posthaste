@@ -9,7 +9,7 @@
  *
  * @spec docs/runtime/mutations/L1#mutation-pipeline-and-catalog
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { undoLogger } from '@/logger'
 import type { DiffStep } from '@/runtime/replica/handle'
@@ -27,6 +27,19 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   const [undoTop, setUndoTop] = useState<DiffStep | null>(null)
   const [redoTop, setRedoTop] = useState<DiffStep | null>(null)
 
+  // Refs hold the latest tops so queue processing can read them without
+  // waiting for a React re-render. They are updated synchronously in the
+  // frame handler before the queue is drained.
+  const undoTopRef = useRef<DiffStep | null>(null)
+  const redoTopRef = useRef<DiffStep | null>(null)
+
+  // Serialize undo/redo requests: a new request is dispatched only after the
+  // runtime has acknowledged the previous one via a mutationHistory frame. This
+  // prevents rapid keypresses from reading a stale undoTop/redoTop and applying
+  // the same diff step twice.
+  const pendingRef = useRef<Array<'undo' | 'redo'>>([])
+  const busyRef = useRef(false)
+
   useEffect(() => {
     const unsubscribe = runtimeSessionClient.subscribe(
       {
@@ -42,8 +55,14 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
               },
               'mutationHistory frame updated undo/redo tops',
             )
+            undoTopRef.current = frame.undoTop ?? null
+            redoTopRef.current = frame.redoTop ?? null
             setUndoTop(frame.undoTop ?? null)
             setRedoTop(frame.redoTop ?? null)
+            if (busyRef.current) {
+              busyRef.current = false
+              processQueue()
+            }
           }
         },
       },
@@ -53,6 +72,15 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   }, [])
 
   const runApplyDiff = useCallback((step: DiffStep, inverse: boolean) => {
+    undoLogger.debug(
+      {
+        stepSeq: step.seq,
+        inverse,
+        sourceId: step.sourceId,
+        messageId: step.messageId,
+      },
+      'dispatching applyDiff for history step',
+    )
     void runtimeSessionClient
       .runMutation({
         name: 'message.applyDiff',
@@ -69,25 +97,54 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
       })
   }, [])
 
+  const processQueue = useCallback(() => {
+    if (busyRef.current || pendingRef.current.length === 0) {
+      return
+    }
+    const kind = pendingRef.current.shift()
+    if (!kind) {
+      return
+    }
+    const step = kind === 'undo' ? undoTopRef.current : redoTopRef.current
+    if (!step) {
+      undoLogger.debug(
+        { kind, reason: 'no step available' },
+        'dropping queued history navigation',
+      )
+      processQueue()
+      return
+    }
+    busyRef.current = true
+    runApplyDiff(step, kind === 'undo')
+  }, [runApplyDiff])
+
   const undo = useCallback(() => {
-    const step = undoTop
     undoLogger.debug(
-      { currentUndoTopSeq: step?.seq, canUndo: step !== null },
+      {
+        currentUndoTopSeq: undoTopRef.current?.seq,
+        canUndo: undoTopRef.current !== null,
+        queueLength: pendingRef.current.length,
+        busy: busyRef.current,
+      },
       'undo requested',
     )
-    if (!step) return
-    runApplyDiff(step, true)
-  }, [undoTop, runApplyDiff])
+    pendingRef.current.push('undo')
+    processQueue()
+  }, [processQueue])
 
   const redo = useCallback(() => {
-    const step = redoTop
     undoLogger.debug(
-      { currentRedoTopSeq: step?.seq, canRedo: step !== null },
+      {
+        currentRedoTopSeq: redoTopRef.current?.seq,
+        canRedo: redoTopRef.current !== null,
+        queueLength: pendingRef.current.length,
+        busy: busyRef.current,
+      },
       'redo requested',
     )
-    if (!step) return
-    runApplyDiff(step, false)
-  }, [redoTop, runApplyDiff])
+    pendingRef.current.push('redo')
+    processQueue()
+  }, [processQueue])
 
   return {
     canRedo: redoTop !== null,
