@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { undoLogger } from '@/logger'
+import { LOG_EVENTS, undoLogger } from '@/logger'
 import type { DiffStep } from '@/runtime/replica/handle'
 import { invertMessageChangeDiff } from '@/runtime/replica/handle'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
@@ -47,6 +47,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
           if (frame.type === 'mutationHistory') {
             undoLogger.debug(
               {
+                event: LOG_EVENTS.runtimeFrameDispatched,
                 sessionSeq: frame.sessionSeq,
                 canUndo: frame.canUndo,
                 canRedo: frame.canRedo,
@@ -74,6 +75,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   const runApplyDiff = useCallback((step: DiffStep, inverse: boolean) => {
     undoLogger.debug(
       {
+        event: LOG_EVENTS.historyApplyDiffDispatched,
         stepSeq: step.seq,
         inverse,
         sourceId: step.sourceId,
@@ -108,7 +110,11 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
     const step = kind === 'undo' ? undoTopRef.current : redoTopRef.current
     if (!step) {
       undoLogger.debug(
-        { kind, reason: 'no step available' },
+        {
+          event: LOG_EVENTS.historyNavigationDropped,
+          kind,
+          reason: 'no step available',
+        },
         'dropping queued history navigation',
       )
       processQueue()
@@ -121,6 +127,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   const undo = useCallback(() => {
     undoLogger.debug(
       {
+        event: LOG_EVENTS.historyUndoRequested,
         currentUndoTopSeq: undoTopRef.current?.seq,
         canUndo: undoTopRef.current !== null,
         queueLength: pendingRef.current.length,
@@ -135,6 +142,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
   const redo = useCallback(() => {
     undoLogger.debug(
       {
+        event: LOG_EVENTS.historyRedoRequested,
         currentRedoTopSeq: redoTopRef.current?.seq,
         canRedo: redoTopRef.current !== null,
         queueLength: pendingRef.current.length,
