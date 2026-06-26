@@ -106,7 +106,6 @@ impl MockJmapGateway {
         let mut gates = SYNC_GATES.lock().expect("sync gates mutex poisoned");
         gates.clear();
     }
-
 }
 
 /// Account-scoped sync gates for deterministic coalescing tests. A single
@@ -132,7 +131,6 @@ impl Drop for SyncGateGuard {
         gates.remove(&self.account_id);
     }
 }
-
 
 /// Build a mock mutation outcome from the current revision.
 #[async_trait]
