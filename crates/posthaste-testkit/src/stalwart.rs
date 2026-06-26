@@ -139,6 +139,48 @@ impl StalwartFixture {
     pub fn email(&self) -> String {
         "dev@example.org".to_string()
     }
+
+    /// SMTP-deliver `count` messages to the dev mailbox as a self-send (Stalwart
+    /// restricts the `dev` user to its own sender address), authenticating as
+    /// `dev`, over a single pooled SMTP connection. This is the "message sent"
+    /// injection point for live-convergence scenarios: the app's own sync path
+    /// (push, with a short poll fallback) observes them.
+    pub async fn inject(&self, count: usize) {
+        use posthaste_domain::{Recipient, SendMessageRequest};
+        use posthaste_imap::{send_smtp_messages, SmtpConnectionConfig};
+
+        let config = SmtpConnectionConfig {
+            host: "127.0.0.1".to_string(),
+            port: self.smtp_port,
+            security: TransportSecurity::Plain,
+            sender_name: Some("Injector".to_string()),
+            sender_email: self.email(),
+            username: "dev".to_string(),
+            secret: self.password.clone(),
+            auth: ProviderAuthKind::Password,
+            provider: ProviderHint::Generic,
+        };
+        let requests: Vec<SendMessageRequest> = (0..count)
+            .map(|i| SendMessageRequest {
+                from: Some(Recipient {
+                    name: Some("Injector".to_string()),
+                    email: self.email(),
+                }),
+                to: vec![Recipient {
+                    name: Some("Dev".to_string()),
+                    email: self.email(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: format!("Injected message {i}"),
+                body: format!("Injected body {i}"),
+                ..Default::default()
+            })
+            .collect();
+        send_smtp_messages(&config, &requests)
+            .await
+            .unwrap_or_else(|error| panic!("inject batch should deliver: {error:?}"));
+    }
 }
 
 impl Drop for StalwartFixture {

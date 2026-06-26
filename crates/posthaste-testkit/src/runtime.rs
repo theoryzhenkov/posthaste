@@ -7,6 +7,7 @@
 //! over-broad view recomputes.
 
 use std::collections::{BTreeSet, HashMap};
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,15 +16,18 @@ use tokio::sync::broadcast;
 
 use posthaste_authority_runtime::{AuthorityRuntimeBuild, RuntimeHandle};
 use posthaste_domain::{
-    AccountDriver, AccountId, DomainEvent, MailStore, MailboxId, MailboxRecord, MessageId,
-    MessageRecord, SecretStore, SecretStoreError, SecretRef, SyncBatch, SyncCursor, SyncObject,
-    ThreadId,
+    AccountDriver, AccountId, DomainEvent, MailStore, MailboxId, MailboxRecord, MessageRecord,
+    ProviderAuthKind, ProviderHint, SecretRef, SecretStore, SecretStoreError, SyncBatch,
+    SyncCursor, SyncObject,
 };
 use posthaste_runtime_contract::{
-    AccountTransportMutation, CreateAccountMutation, MutationReceipt, MutationRequest,
-    MutationSettlementState, RuntimeCaller, RuntimeCore, RuntimeFrame, RuntimeFrameSubscription,
-    RuntimeMutationId, RuntimeSessionSeq, SecretWriteMutation, ViewDescriptor, ViewId,
+    AccountTransportMutation, ClientMutationId, CreateAccountMutation, MutationNotification,
+    MutationReceipt, MutationRequest, RuntimeCaller, RuntimeCore, RuntimeFrame,
+    RuntimeFrameSubscription, RuntimeSessionId, RuntimeSessionSeq, SecretWriteMode,
+    SecretWriteMutation, ViewDescriptor, ViewId, ViewSnapshot,
 };
+
+use crate::fixture::{Fixture, FixtureAccount, FixtureDriver, FixtureError, FixtureMessage};
 
 /// Drain deadline for a mutation to settle + its view to recompute.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -60,6 +64,17 @@ impl RuntimeHarness {
         self.build.api_bridge.event_sender.clone()
     }
 
+    /// Drive one synchronous sync cycle for an account and await its result.
+    /// Used to re-sync after mutating an external fixture (e.g. delivering a
+    /// QRESYNC delta to a [`GmailImapFixture`](crate::GmailImapFixture)).
+    pub async fn sync_account(&self, account_id: &AccountId) -> usize {
+        self.build
+            .account_supervisor
+            .sync_account(account_id)
+            .await
+            .expect("account should sync")
+    }
+
     /// Create a mock-driver account, enable it, and sync it so its runtime is
     /// live. Returns the account id.
     pub async fn create_mock_account(&self, id: &str) -> AccountId {
@@ -88,10 +103,83 @@ impl RuntimeHarness {
         account.id
     }
 
+    /// Create a JMAP account pointed at a [`StalwartFixture`], enabled, with its
+    /// password written to the secret store, and run an initial sync (which
+    /// establishes push + fetches seeded mail). The app's real sync path then
+    /// observes later [`StalwartFixture::inject`] deliveries.
+    pub async fn create_jmap_account(
+        &self,
+        id: &str,
+        stalwart: &crate::StalwartFixture,
+    ) -> AccountId {
+        let mutation = CreateAccountMutation {
+            id: Some(id.to_string()),
+            name: id.to_string(),
+            driver: Some(AccountDriver::Jmap),
+            enabled: Some(true),
+            full_name: Some("Dev Account".to_string()),
+            email_patterns: vec![stalwart.email()],
+            appearance: None,
+            transport: AccountTransportMutation {
+                provider: Some(ProviderHint::Generic),
+                auth: Some(ProviderAuthKind::Password),
+                base_url: Some(stalwart.http_url.clone()),
+                username: Some("dev".to_string()),
+                imap: None,
+                smtp: None,
+            },
+            secret: SecretWriteMutation {
+                mode: SecretWriteMode::Replace,
+                password: Some(stalwart.password.clone()),
+            },
+        };
+        let account = self
+            .build
+            .handle
+            .create_account(RuntimeCaller::test(), mutation)
+            .await
+            .expect("jmap account should create");
+        self.build
+            .account_supervisor
+            .sync_account(&account.id)
+            .await
+            .expect("jmap account should sync");
+        account.id
+    }
+
     /// Seed `(message_id, mailbox_id)` pairs into an account via a direct store
-    /// batch (bypasses sync — for unit/integration setup).
+    /// batch (bypasses sync — for unit/integration setup). Convenience wrapper
+    /// around [`seed_messages_typed`](Self::seed_messages_typed) for specs with
+    /// no field overrides.
     pub fn seed_messages(&self, account_id: &AccountId, messages: &[(&str, &str)]) {
-        let mailbox_ids: BTreeSet<&str> = messages.iter().map(|(_, mb)| *mb).collect();
+        let typed: Vec<FixtureMessage> = messages
+            .iter()
+            .map(|(id, mailbox)| FixtureMessage {
+                id: (*id).to_string(),
+                mailbox: (*mailbox).to_string(),
+                subject: None,
+                from_name: None,
+                from_email: None,
+                preview: None,
+                received_at: None,
+                size: None,
+                keywords: None,
+                thread_id: None,
+                rfc_message_id: None,
+            })
+            .collect();
+        self.seed_messages_typed(account_id, typed);
+    }
+
+    /// Seed typed fixture messages into an account via a direct store batch
+    /// (bypasses sync). Each message's declared fields override the
+    /// [`default_message`](crate::fixture::default_message) baseline.
+    pub fn seed_messages_typed(&self, account_id: &AccountId, messages: Vec<FixtureMessage>) {
+        let mailbox_ids: BTreeSet<&str> = messages.iter().map(|m| m.mailbox.as_str()).collect();
+        // The mailbox INSERT in apply_sync_batch persists only
+        // (account_id, id, name, role); unread_emails/total_emails are
+        // SQL-trigger-maintained from message rows and read directly by
+        // list_mailboxes, so the values set here are informational only.
         let mailboxes: Vec<MailboxRecord> = mailbox_ids
             .iter()
             .map(|mb| MailboxRecord {
@@ -99,10 +187,13 @@ impl RuntimeHarness {
                 name: mb.to_string(),
                 role: Some((*mb).to_string()),
                 unread_emails: 0,
-                total_emails: messages.iter().filter(|(_, m)| m == mb).count() as i64,
+                total_emails: messages.iter().filter(|m| m.mailbox == *mb).count() as i64,
             })
             .collect();
-        let msgs: Vec<MessageRecord> = messages.iter().map(|(m, mb)| seeded_message(m, mb)).collect();
+        let msgs: Vec<MessageRecord> = messages
+            .into_iter()
+            .map(FixtureMessage::into_record)
+            .collect();
         let batch = SyncBatch {
             mailboxes,
             messages: msgs,
@@ -126,10 +217,54 @@ impl RuntimeHarness {
             .expect("seed batch should apply");
     }
 
+    /// Load a declarative TOML [`Fixture`](crate::fixture::Fixture) from a
+    /// string, creating each account and seeding its messages. Returns the
+    /// created account ids in declaration order. Only `driver = "mock"` is
+    /// supported; JMAP / provider-state fixtures land with the live read-path.
+    pub async fn load_fixture_toml(&self, toml: &str) -> Result<Vec<AccountId>, FixtureError> {
+        let fixture = Fixture::parse(toml)?;
+        let mut accounts = Vec::with_capacity(fixture.accounts.len());
+        for account in fixture.accounts {
+            let id = self.load_fixture_account(account).await?;
+            accounts.push(id);
+        }
+        Ok(accounts)
+    }
+
+    /// Load a declarative TOML fixture from a file. See
+    /// [`load_fixture_toml`](Self::load_fixture_toml).
+    pub async fn load_fixture(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Vec<AccountId>, FixtureError> {
+        let contents = std::fs::read_to_string(path)?;
+        self.load_fixture_toml(&contents).await
+    }
+
+    async fn load_fixture_account(
+        &self,
+        account: FixtureAccount,
+    ) -> Result<AccountId, FixtureError> {
+        match account.driver {
+            FixtureDriver::Mock => {
+                let id = self.create_mock_account(&account.id).await;
+                if !account.messages.is_empty() {
+                    self.seed_messages_typed(&id, account.messages);
+                }
+                Ok(id)
+            }
+            FixtureDriver::Jmap => Err(FixtureError::UnsupportedDriver { driver: "jmap" }),
+        }
+    }
+
     /// Open a session + view, subscribe to the runtime frame stream, run a
     /// mutation, and drain the ordered frames through settlement and the view's
     /// recompute. `mutation.session_id` is set to the opened session.
-    pub async fn settle(&self, mut mutation: MutationRequest, view: ViewDescriptor) -> ViewSettlement {
+    pub async fn settle(
+        &self,
+        mut mutation: MutationRequest,
+        view: ViewDescriptor,
+    ) -> ViewSettlement {
         let caller = RuntimeCaller::test();
         let session = self
             .build
@@ -164,10 +299,7 @@ impl RuntimeHarness {
             .run_mutation(caller.clone(), mutation)
             .await
             .expect("mutation should run");
-        let mutation_id = receipt
-            .runtime_mutation_id
-            .clone()
-            .expect("runtime mutation id should be assigned");
+        let client_mutation_id = receipt.client_mutation_id.clone();
 
         let mut frames: Vec<RuntimeFrame> = std::mem::take(&mut subscription.catch_up);
         let mut saw_confirmed = false;
@@ -180,7 +312,7 @@ impl RuntimeHarness {
             }
             match tokio::time::timeout(remaining, subscription.live.next()).await {
                 Ok(Some(frame)) => {
-                    if is_terminal_settlement(&frame, &mutation_id) {
+                    if is_mutation_notification(&frame, &client_mutation_id) {
                         saw_confirmed = true;
                     }
                     if is_view_recompute(&frame, &view_id) {
@@ -193,53 +325,244 @@ impl RuntimeHarness {
                     }
                 }
                 Ok(None) => break, // stream closed
-                Err(_) => break,    // timeout
+                Err(_) => break,   // timeout
             }
         }
 
         ViewSettlement {
-            mutation_id,
+            client_mutation_id,
             view_id,
             receipt,
             frames,
         }
     }
+
+    /// Open a session + view and subscribe to its frame stream, returning a
+    /// [`ViewWatch`] that stays subscribed across an external action (e.g.
+    /// [`StalwartFixture::inject`]) and drains until a snapshot satisfies a
+    /// predicate. The sync-driven counterpart to mutation-centric [`settle`].
+    pub async fn watch_view(&self, view: ViewDescriptor) -> ViewWatch<'_> {
+        let caller = RuntimeCaller::test();
+        let session = self
+            .build
+            .handle
+            .open_session(caller.clone())
+            .await
+            .expect("session should open");
+        let snapshot = self
+            .build
+            .handle
+            .open_session_view(caller.clone(), session.session_id.clone(), view)
+            .await
+            .expect("session view should open");
+        let mut subscription = self
+            .build
+            .handle
+            .subscribe_runtime_frames(caller, session.session_id, Some(RuntimeSessionSeq::new(0)))
+            .await
+            .expect("runtime stream should subscribe");
+        let frames = std::mem::take(&mut subscription.catch_up);
+        let view_id = snapshot.view_id.clone();
+        ViewWatch {
+            view_id,
+            subscription,
+            frames,
+            last_snapshot: Some(snapshot),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Open a session + view + frame subscription and return a [`FrameCapture`]
+    /// that records the *raw* ordered `RuntimeFrame` stream across arbitrary
+    /// actions (a mutation interleaved with a provider sync). Unlike
+    /// [`settle`](Self::settle) (mutation-scoped) or [`watch_view`](Self::watch_view)
+    /// (predicate-scoped), the caller runs the scenario on the returned
+    /// `session_id` and then [`drain`](FrameCapture::drain)s everything emitted —
+    /// the input to the [`ReplicaProbe`](crate::ReplicaProbe) flicker check.
+    pub async fn open_capture(&self, view: ViewDescriptor) -> FrameCapture {
+        let caller = RuntimeCaller::test();
+        let session = self
+            .build
+            .handle
+            .open_session(caller.clone())
+            .await
+            .expect("session should open");
+        let snapshot = self
+            .build
+            .handle
+            .open_session_view(caller.clone(), session.session_id.clone(), view)
+            .await
+            .expect("session view should open");
+        let subscription = self
+            .build
+            .handle
+            .subscribe_runtime_frames(
+                caller,
+                session.session_id.clone(),
+                Some(RuntimeSessionSeq::new(0)),
+            )
+            .await
+            .expect("runtime stream should subscribe");
+        FrameCapture {
+            session_id: session.session_id,
+            view_id: snapshot.view_id.clone(),
+            initial: snapshot,
+            subscription,
+        }
+    }
+}
+
+/// A raw frame-stream capture over one session/view, for replay through the
+/// [`ReplicaProbe`](crate::ReplicaProbe). Run the scenario on `session_id`
+/// (set it on the mutation request so its frames route here), then
+/// [`drain`](Self::drain).
+pub struct FrameCapture {
+    pub session_id: RuntimeSessionId,
+    pub view_id: ViewId,
+    pub initial: ViewSnapshot,
+    subscription: RuntimeFrameSubscription,
+}
+
+impl FrameCapture {
+    /// Collect every buffered + live frame that arrives within `window` from now
+    /// (a fixed wall-clock budget, not a quiet gap — the mock driver polls
+    /// indefinitely, so a quiet window never elapses). Returns arrival order.
+    pub async fn drain(&mut self, window: Duration) -> Vec<RuntimeFrame> {
+        let mut frames = std::mem::take(&mut self.subscription.catch_up);
+        let deadline = Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, self.subscription.live.next()).await {
+                Ok(Some(frame)) => frames.push(frame),
+                _ => break,
+            }
+        }
+        frames
+    }
+}
+
+/// A live subscription to one view's frame stream, kept open across an external
+/// action (e.g. message injection) so a sync-driven recompute can be observed.
+pub struct ViewWatch<'a> {
+    view_id: ViewId,
+    subscription: RuntimeFrameSubscription,
+    frames: Vec<RuntimeFrame>,
+    last_snapshot: Option<ViewSnapshot>,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> ViewWatch<'a> {
+    /// Drain until a snapshot for the watched view satisfies `predicate`, or
+    /// `timeout` elapses. Returns whether the predicate was satisfied.
+    pub async fn wait_until<F>(&mut self, predicate: F, timeout: Duration) -> bool
+    where
+        F: Fn(&ViewSnapshot) -> bool,
+    {
+        if let Some(snapshot) = &self.last_snapshot {
+            if predicate(snapshot) {
+                return true;
+            }
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match tokio::time::timeout(remaining, self.subscription.live.next()).await {
+                Ok(Some(frame)) => {
+                    let mut satisfied = false;
+                    match &frame {
+                        RuntimeFrame::ViewSnapshot {
+                            view_id, snapshot, ..
+                        }
+                        | RuntimeFrame::ViewReplace {
+                            view_id, snapshot, ..
+                        } if view_id == &self.view_id => {
+                            self.last_snapshot = Some(snapshot.clone());
+                            if predicate(snapshot) {
+                                satisfied = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.frames.push(frame);
+                    if satisfied {
+                        return true;
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    /// The most recent snapshot observed for the watched view.
+    pub fn snapshot(&self) -> &ViewSnapshot {
+        self.last_snapshot
+            .as_ref()
+            .expect("at least the initial snapshot should be present")
+    }
+
+    /// Assert no `ViewError` frame was observed.
+    pub fn assert_no_view_errors(&self) {
+        let errors: Vec<&RuntimeFrame> = self
+            .frames
+            .iter()
+            .filter(|frame| matches!(frame, RuntimeFrame::ViewError { .. }))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "observed {} view error frame(s)",
+            errors.len()
+        );
+    }
+
+    /// Assert `session_seq` is strictly increasing across the captured frames.
+    pub fn assert_seq_monotonic(&self) {
+        assert_frames_seq_monotonic(&self.frames);
+    }
 }
 
 /// The captured frame sequence for one mutation, from subscription open through
-/// terminal settlement (+ a grace window for redundant recomputes).
+/// its terminal `MutationNotification` (+ a grace window for redundant
+/// recomputes).
 pub struct ViewSettlement {
-    pub mutation_id: RuntimeMutationId,
+    pub client_mutation_id: ClientMutationId,
     pub view_id: ViewId,
     pub receipt: MutationReceipt,
     pub frames: Vec<RuntimeFrame>,
 }
 
 impl ViewSettlement {
-    /// The terminal `MutationSettlement` frame for this mutation, if observed.
-    pub fn settlement(&self) -> Option<&posthaste_runtime_contract::RuntimeMutationSettlement> {
+    /// The terminal `MutationNotification` verdict for this mutation, if observed
+    /// (`Confirmed` or `Rejected`). Replaces the former `MutationSettlement`
+    /// frame — the runtime no longer emits non-terminal acks.
+    pub fn settlement(&self) -> Option<&MutationNotification> {
         self.frames.iter().find_map(|frame| match frame {
-            RuntimeFrame::MutationSettlement {
-                mutation_id,
-                state,
+            RuntimeFrame::MutationNotification {
+                client_mutation_id,
+                notification,
                 ..
-            } if mutation_id == &self.mutation_id && state.status.is_terminal() => Some(state),
+            } if client_mutation_id == &self.client_mutation_id => Some(notification),
             _ => None,
         })
     }
 
-    /// Assert the mutation settled `Confirmed` (fails if no terminal settlement
+    /// Assert the mutation settled `Confirmed` (fails if no terminal verdict
     /// arrived — the missed-settlement case).
     pub fn assert_confirmed(&self) {
-        let settlement = self.settlement().unwrap_or_else(|| {
+        let notification = self.settlement().unwrap_or_else(|| {
             panic!(
-                "no terminal settlement frame observed for mutation {:?}",
-                self.mutation_id
+                "no terminal mutation notification observed for {:?}",
+                self.client_mutation_id
             )
         });
         assert_eq!(
-            settlement.status,
-            MutationSettlementState::Confirmed,
+            notification,
+            &MutationNotification::Confirmed,
             "mutation did not settle Confirmed"
         );
     }
@@ -306,28 +629,31 @@ impl ViewSettlement {
 
     /// Assert `session_seq` is strictly increasing across the captured frames.
     pub fn assert_seq_monotonic(&self) {
-        let mut last: Option<u64> = None;
-        for frame in &self.frames {
-            let seq = frame.session_seq().get();
-            if let Some(prev) = last {
-                assert!(
-                    seq > prev,
-                    "session_seq went backward or stalled: {prev} -> {seq}"
-                );
-            }
-            last = Some(seq);
-        }
+        assert_frames_seq_monotonic(&self.frames);
     }
 }
 
-fn is_terminal_settlement(frame: &RuntimeFrame, mutation_id: &RuntimeMutationId) -> bool {
+fn assert_frames_seq_monotonic(frames: &[RuntimeFrame]) {
+    let mut last: Option<u64> = None;
+    for frame in frames {
+        let seq = frame.session_seq().get();
+        if let Some(prev) = last {
+            assert!(
+                seq > prev,
+                "session_seq went backward or stalled: {prev} -> {seq}"
+            );
+        }
+        last = Some(seq);
+    }
+}
+
+fn is_mutation_notification(frame: &RuntimeFrame, client_mutation_id: &ClientMutationId) -> bool {
     matches!(
         frame,
-        RuntimeFrame::MutationSettlement {
-            mutation_id: mid,
-            state,
+        RuntimeFrame::MutationNotification {
+            client_mutation_id: cmid,
             ..
-        } if mid == mutation_id && state.status.is_terminal()
+        } if cmid == client_mutation_id
     )
 }
 
@@ -357,23 +683,6 @@ async fn drain_grace(
             Ok(Some(frame)) => frames.push(frame),
             _ => break,
         }
-    }
-}
-
-fn seeded_message(message_id: &str, mailbox_id: &str) -> MessageRecord {
-    MessageRecord {
-        id: MessageId::from(message_id),
-        source_thread_id: ThreadId::from(format!("thread-{message_id}")),
-        subject: Some(format!("Subject {message_id}")),
-        from_name: Some("Alice".to_string()),
-        from_email: Some("alice@example.com".to_string()),
-        preview: Some("Preview".to_string()),
-        received_at: "2026-03-31T10:00:00Z".to_string(),
-        size: 42,
-        mailbox_ids: vec![MailboxId::from(mailbox_id)],
-        keywords: vec!["$seen".to_string()],
-        rfc_message_id: Some(format!("<{message_id}@example.test>")),
-        ..Default::default()
     }
 }
 

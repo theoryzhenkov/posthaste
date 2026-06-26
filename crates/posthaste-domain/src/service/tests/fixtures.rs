@@ -58,6 +58,7 @@ pub(super) fn sample_message_summary(id: &str, keywords: Vec<String>) -> Message
         is_flagged: false,
         mailbox_ids: vec![MailboxId::from("inbox")],
         keywords,
+        version: None,
     }
 }
 

@@ -42,6 +42,7 @@ pub(crate) fn query_message_detail_tx(
                     is_flagged: row.get::<_, i64>(13)? != 0,
                     mailbox_ids: Vec::new(),
                     keywords: Vec::new(),
+                    version: None,
                 },
             ))
         })
@@ -54,6 +55,7 @@ pub(crate) fn query_message_detail_tx(
 
     summary.mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     summary.keywords = fetch_keywords_tx(tx, account_id, message_id)?;
+    summary.version = fetch_message_version_tx(tx, account_id, message_id)?;
 
     let body = tx
         .query_row(
@@ -137,6 +139,7 @@ pub(crate) fn query_message_summary_tx(
                 is_flagged: row.get::<_, i64>(13)? != 0,
                 mailbox_ids: Vec::new(),
                 keywords: Vec::new(),
+                version: None,
             })
         })
         .optional()
@@ -146,5 +149,6 @@ pub(crate) fn query_message_summary_tx(
     };
     summary.mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
     summary.keywords = fetch_keywords_tx(tx, account_id, message_id)?;
+    summary.version = fetch_message_version_tx(tx, account_id, message_id)?;
     Ok(Some(summary))
 }

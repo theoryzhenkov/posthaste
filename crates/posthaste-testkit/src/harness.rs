@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use posthaste_authority_runtime::{build_authority_runtime, RuntimeBuildConfig};
 use posthaste_config::TomlConfigRepository;
@@ -17,11 +18,11 @@ use crate::paths::temp_root;
 /// and read projections directly. The temp root is cleaned up by the OS; tests
 /// should not rely on it surviving the process.
 ///
-/// Future extension (planned, see `docs/testing/L1.md`): a `.with_runtime()`
-/// builder that also stands up a `RuntimeCore` against the same store/config so
-/// view-settlement assertions can observe the runtime recompute path. The
-/// `store`/`service` fields are the seam for that — they already give slice 2
-/// everything it needs without changing this constructor.
+/// `with_runtime()` consumes this harness and stands up an in-process
+/// `RuntimeCore` against the same config root (see `docs/testing/L1.md`),
+/// exposing the runtime handle, store, and event bus so view-settlement
+/// assertions can observe the recompute path. The `store`/`service` fields are
+/// the seam for direct driving without the runtime.
 pub struct Harness {
     pub service: posthaste_domain::MailService,
     pub store: Arc<DatabaseStore>,
@@ -64,7 +65,8 @@ impl Harness {
             self.root.join("runtime-state"),
             self.root.join("runtime-cache"),
         )
-        .with_secret_store(Arc::new(crate::runtime::TestSecretStore::default()));
+        .with_secret_store(Arc::new(crate::runtime::TestSecretStore::default()))
+        .with_poll_interval(Duration::from_millis(500));
         drop(self);
         let build = build_authority_runtime(config)
             .await

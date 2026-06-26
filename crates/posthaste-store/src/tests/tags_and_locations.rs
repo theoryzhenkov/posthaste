@@ -51,6 +51,76 @@ fn list_tags_returns_user_keywords_with_counts() -> Result<(), StoreError> {
 }
 
 #[test]
+fn message_summary_carries_max_modseq_as_version() -> Result<(), StoreError> {
+    use posthaste_domain::MessageDetailStore;
+
+    let root = temp_root();
+    let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
+    let account = AccountId::from("primary");
+    setup_source(&store, &account, "Primary")?;
+
+    // An IMAP message present in two mailboxes at different modseqs: the summary
+    // version is the max (the message's latest authority state). modseq is
+    // stored as TEXT, so this also covers the numeric (not lexical) ordering:
+    // 1000 > 999 numerically, but "1000" < "999" lexically.
+    let imap_id = MessageId::from("imap-msg");
+    store.apply_sync_batch(
+        &account,
+        &SyncBatch {
+            mailboxes: vec![posthaste_domain::MailboxRecord {
+                id: MailboxId::from("inbox"),
+                name: "Inbox".to_string(),
+                role: Some("inbox".to_string()),
+                unread_emails: 0,
+                total_emails: 0,
+            }],
+            messages: vec![
+                sample_message("imap-msg", "inbox", Some("mime-imap")),
+                sample_message("local-msg", "inbox", Some("mime-local")),
+            ],
+            imap_mailbox_states: Vec::new(),
+            imap_message_locations: vec![
+                ImapMessageLocation {
+                    message_id: imap_id.clone(),
+                    mailbox_id: MailboxId::from("imap:inbox"),
+                    uid_validity: ImapUidValidity(10),
+                    uid: ImapUid(101),
+                    modseq: Some(ImapModSeq(999)),
+                    updated_at: "2026-04-25T00:00:00Z".to_string(),
+                },
+                ImapMessageLocation {
+                    message_id: imap_id.clone(),
+                    mailbox_id: MailboxId::from("imap:all"),
+                    uid_validity: ImapUidValidity(10),
+                    uid: ImapUid(102),
+                    modseq: Some(ImapModSeq(1000)),
+                    updated_at: "2026-04-25T00:00:00Z".to_string(),
+                },
+            ],
+            deleted_imap_message_locations: Vec::new(),
+            deleted_mailbox_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+            replace_all_mailboxes: false,
+            replace_all_messages: false,
+            cursors: Vec::new(),
+        },
+    )?;
+
+    // The IMAP message: version = max(modseq) = 1000.
+    let imap_summary = store
+        .get_message_summary(&account, &imap_id)?
+        .expect("imap message summary");
+    assert_eq!(imap_summary.version, Some(1000));
+
+    // A message with no IMAP location (JMAP / mock / local): no version.
+    let local_summary = store
+        .get_message_summary(&account, &MessageId::from("local-msg"))?
+        .expect("local message summary");
+    assert_eq!(local_summary.version, None);
+    Ok(())
+}
+
+#[test]
 fn sync_batch_persists_and_deletes_imap_message_locations() -> Result<(), StoreError> {
     let root = temp_root();
     let store = DatabaseStore::open(root.join("mail.sqlite"), root.join("data"))?;
