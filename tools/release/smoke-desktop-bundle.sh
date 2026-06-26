@@ -31,12 +31,22 @@ fail() {
 # Find the largest executable file under a directory. The real Rust binary
 # dwarfs any launcher/wrapper script, so size is a robust way to pick it without
 # hard-coding the (channel-dependent) product name.
+#
+# Deliberately portable: GNU `find -printf`/`-perm -111` are not available on
+# macOS's BSD find, so we list plain files and test each with POSIX `[ -x ]` and
+# `wc -c`. Runs on both the Linux and macOS runners unchanged.
 largest_executable() {
-  local root="$1"
-  find "$root" -type f -perm -111 -printf '%s\t%p\n' 2>/dev/null \
-    | sort -rn \
-    | head -n1 \
-    | cut -f2-
+  local root="$1" best="" best_size=-1 f size
+  while IFS= read -r f; do
+    [ -x "$f" ] || continue
+    size="$(wc -c < "$f" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$size" ] || continue
+    if [ "$size" -gt "$best_size" ]; then
+      best_size="$size"
+      best="$f"
+    fi
+  done < <(find "$root" -type f)
+  printf '%s\n' "$best"
 }
 
 # Run the binary's self-report and assert it matches the expected channel.
