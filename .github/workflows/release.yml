@@ -522,10 +522,12 @@ jobs:
           RELEASE_EOF
 
       - name: Generate updater manifest
+        id: generate_manifest
         shell: bash
         run: |
           if find release-assets -maxdepth 1 -name '*.sig' -print -quit | grep -q .; then
             bash tools/release/generate-updater-manifest.sh release-assets "$RELEASE_TAG" "$POSTHASTE_UPDATER_MANIFEST"
+            echo "manifest_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "No updater signatures present; skipping $POSTHASTE_UPDATER_MANIFEST (updater signing key not configured)."
           fi
@@ -617,3 +619,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash tools/release/update-rolling-tag.sh "$POSTHASTE_RELEASE_CHANNEL" "$RELEASE_TAG"
+
+      # The Tauri updater endpoint is baked to a channel-scoped URL
+      # (`releases/download/<channel>/<manifest>`). That URL only resolves if a
+      # GitHub *release* exists for the rolling tag and carries the manifest as
+      # an asset — moving the tag alone does not attach assets. So publish the
+      # manifest to the rolling channel release (creating it if absent) so the
+      # stable URL always serves the latest manifest. Only the manifest lives
+      # here; versioned bundles stay on the versioned release and are referenced
+      # by URL from the manifest.
+      - name: Publish updater manifest to rolling channel release
+        if: steps.generate_manifest.outputs.manifest_exists == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.POSTHASTE_RELEASE_CHANNEL }}
+          name: ${{ env.POSTHASTE_PRODUCT_NAME }}
+          body: |
+            Rolling release for the `${{ env.POSTHASTE_RELEASE_CHANNEL }}` channel.
+
+            This release holds only the Tauri updater manifest (`${{ env.POSTHASTE_UPDATER_MANIFEST }}`), which points at the latest versioned bundles. It is overwritten on every release; do not download installers from here — use the versioned release tags.
+          prerelease: ${{ env.POSTHASTE_PRERELEASE == 'true' }}
+          # Never let a channel rolling release become the global "latest"
+          # pointer; that belongs to the versioned stable release.
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: release-assets/${{ env.POSTHASTE_UPDATER_MANIFEST }}
