@@ -95,3 +95,56 @@ pub(crate) fn query_message_detail_tx(
         draft_id,
     }))
 }
+
+/// Fetches a single message's summary (no body) within a transaction — the
+/// canonical projection used both to serve list rows and, attached to a
+/// `message.updated` event, to promote a never-held message at the store
+/// (`firehose-carries-rows`). The SELECT mirrors the summary portion of
+/// [`query_message_detail_tx`] so an event-promoted row is byte-identical to a
+/// served one (one derivation — no second projection path).
+pub(crate) fn query_message_summary_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<Option<MessageSummary>, StoreError> {
+    let mut statement = tx
+        .prepare_cached(
+            "SELECT m.id, m.account_id, COALESCE(a.name, m.account_id), m.thread_id, m.conversation_id, m.subject,
+                    m.from_name, m.from_email, m.to_json, m.preview, m.received_at, m.has_attachment,
+                    m.is_read, m.is_flagged
+             FROM message m
+             LEFT JOIN source_projection a
+               ON a.source_id = m.account_id
+             WHERE m.account_id = ?1 AND m.id = ?2",
+        )
+        .map_err(sql_to_store_error)?;
+    let summary = statement
+        .query_row(params![account_id.as_str(), message_id.as_str()], |row| {
+            Ok(MessageSummary {
+                id: MessageId(row.get(0)?),
+                source_id: AccountId(row.get(1)?),
+                source_name: row.get(2)?,
+                source_thread_id: ThreadId(row.get(3)?),
+                conversation_id: ConversationId(row.get(4)?),
+                subject: row.get(5)?,
+                from_name: row.get(6)?,
+                from_email: row.get(7)?,
+                to: parse_recipients_json(row.get(8)?)?,
+                preview: row.get(9)?,
+                received_at: row.get(10)?,
+                has_attachment: row.get::<_, i64>(11)? != 0,
+                is_read: row.get::<_, i64>(12)? != 0,
+                is_flagged: row.get::<_, i64>(13)? != 0,
+                mailbox_ids: Vec::new(),
+                keywords: Vec::new(),
+            })
+        })
+        .optional()
+        .map_err(sql_to_store_error)?;
+    let Some(mut summary) = summary else {
+        return Ok(None);
+    };
+    summary.mailbox_ids = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
+    summary.keywords = fetch_keywords_tx(tx, account_id, message_id)?;
+    Ok(Some(summary))
+}
