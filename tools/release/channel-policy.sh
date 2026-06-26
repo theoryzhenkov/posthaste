@@ -16,7 +16,7 @@ channel="${1:?usage: channel-policy.sh <channel>}"
 case "$channel" in
   nightly)
     identifier="com.posthaste.mail.nightly"
-    product_name="Posthaste Nightly"
+    product_name="PosthasteNightly"
     updater_manifest="latest.json"
     updater_endpoint="https://github.com/theoryzhenkov/posthaste/releases/download/nightly/latest.json"
     include_devtools="true"
