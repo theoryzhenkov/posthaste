@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import { undoLogger } from '@/logger'
 import type { DiffStep } from '@/runtime/replica/handle'
 import { invertMessageChangeDiff } from '@/runtime/replica/handle'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
@@ -31,6 +32,16 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
       {
         onFrame(frame) {
           if (frame.type === 'mutationHistory') {
+            undoLogger.debug(
+              {
+                sessionSeq: frame.sessionSeq,
+                canUndo: frame.canUndo,
+                canRedo: frame.canRedo,
+                undoTopSeq: frame.undoTop?.seq,
+                redoTopSeq: frame.redoTop?.seq,
+              },
+              'mutationHistory frame updated undo/redo tops',
+            )
             setUndoTop(frame.undoTop ?? null)
             setRedoTop(frame.redoTop ?? null)
           }
@@ -60,12 +71,20 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
 
   const undo = useCallback(() => {
     const step = undoTop
+    undoLogger.debug(
+      { currentUndoTopSeq: step?.seq, canUndo: step !== null },
+      'undo requested',
+    )
     if (!step) return
     runApplyDiff(step, true)
   }, [undoTop, runApplyDiff])
 
   const redo = useCallback(() => {
     const step = redoTop
+    undoLogger.debug(
+      { currentRedoTopSeq: step?.seq, canRedo: step !== null },
+      'redo requested',
+    )
     if (!step) return
     runApplyDiff(step, false)
   }, [redoTop, runApplyDiff])

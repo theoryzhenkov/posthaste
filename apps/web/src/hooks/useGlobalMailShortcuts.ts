@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 
+import { undoLogger } from '@/logger'
 import { isEditableKeyboardTarget } from '@/components/keyboard/inputTargets'
 import type { MailSelection } from '@/mailState'
 import type { SurfaceDescriptor } from '@/surfaces'
@@ -109,6 +110,16 @@ export function useGlobalMailShortcuts({
           return
         }
         event.preventDefault()
+        undoLogger.debug(
+          {
+            key: event.key,
+            shiftKey: event.shiftKey,
+            repeat: event.repeat,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+          },
+          'undo/redo keyboard shortcut fired',
+        )
         if (event.shiftKey) {
           onRedo()
         } else {
