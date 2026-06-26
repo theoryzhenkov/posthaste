@@ -1,6 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
+export const parseMessageMutation: (a: number, b: number) => [number, number, number, number];
 export const __wbg_maillistreplicahandle_free: (a: number, b: number) => void;
 export const maillistreplicahandle_acceptJson: (a: number, b: number, c: number) => [number, number];
 export const maillistreplicahandle_hasPending: (a: number) => number;

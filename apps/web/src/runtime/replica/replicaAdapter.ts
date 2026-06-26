@@ -27,12 +27,7 @@ import type {
   RuntimeViewSnapshot,
 } from '../types'
 import type { OkResponse } from '../../api/types'
-import type {
-  ReplicaAssertion,
-  ReplicaHandle,
-  ReplicaHandleFactory,
-  MessageChangeDiff,
-} from './handle'
+import type { ReplicaHandle, ReplicaHandleFactory } from './handle'
 import {
   applyOptimisticRows,
   membershipMailbox,
@@ -40,6 +35,7 @@ import {
   settlementVerdict,
 } from './mapping'
 import type { OutboxStore } from './outboxStore'
+import { parseMessageMutation } from './wasmUtil'
 
 export interface ReplicaAdapterDeps {
   base: RuntimeAdapter
@@ -73,51 +69,6 @@ function applyRuntimeDelta(
       .filter((row): row is RuntimeMailListRowState => row != null)
   }
   return rows.map((row) => upsertByKey.get(row.rowKey) ?? row)
-}
-
-/** A message mutation the replica can fold, or `null` to pass through unchanged. */
-function toAssertion(
-  request: RuntimeRunMutationRequest,
-): { messageId: string; assertion: ReplicaAssertion } | null {
-  const args = request.args as Record<string, unknown> | undefined
-  if (!args || typeof args.messageId !== 'string') {
-    return null
-  }
-  const messageId = args.messageId
-  switch (request.name) {
-    case 'message.setKeywords': {
-      const command = args.command as
-        | { add?: string[]; remove?: string[] }
-        | undefined
-      return {
-        messageId,
-        assertion: {
-          kind: 'setKeywords',
-          add: command?.add ?? [],
-          remove: command?.remove ?? [],
-        },
-      }
-    }
-    case 'message.replaceMailboxes':
-      return {
-        messageId,
-        assertion: {
-          kind: 'replaceMailboxes',
-          mailboxIds: (args.mailboxIds as string[] | undefined) ?? [],
-        },
-      }
-    case 'message.destroy':
-      return { messageId, assertion: { kind: 'destroy' } }
-    case 'message.applyDiff': {
-      const diff = args.diff as MessageChangeDiff | undefined
-      if (!diff) {
-        return null
-      }
-      return { messageId, assertion: { kind: 'applyDiff', diff } }
-    }
-    default:
-      return null
-  }
 }
 
 class ReplicaController {
@@ -189,7 +140,7 @@ class ReplicaController {
   }
 
   async runMutation(request: RuntimeRunMutationRequest) {
-    const translated = toAssertion(request)
+    const translated = await parseMessageMutation(request)
     if (!translated) {
       return this.deps.base.runRuntimeMutation(request)
     }
