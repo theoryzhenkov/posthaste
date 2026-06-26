@@ -9,7 +9,6 @@
 //! runtime over an in-process backend via [`assemble_runtime`].
 
 mod build;
-pub mod mutation_args;
 mod near_node;
 mod read;
 mod secret;
