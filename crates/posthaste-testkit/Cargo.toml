@@ -2,16 +2,21 @@
 name = "posthaste-testkit"
 version = "0.1.0"
 edition = "2021"
-description = "Shared test support: disposable integration harness, a managed real-Stalwart fixture, and path/port helpers. Dev-only; consumed via [dev-dependencies]."
+description = "Shared test support: disposable integration harness, runtime-in-harness, a managed real-Stalwart fixture, and a view-settlement recorder. Dev-only; consumed via [dev-dependencies]."
 
 [lib]
 name = "posthaste_testkit"
 path = "src/lib.rs"
 
 [dependencies]
+futures-util = { workspace = true }
+posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain" }
+posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
