@@ -91,18 +91,22 @@ pub(crate) fn set_keywords_tx(
     let detail = query_message_detail_tx(tx, account_id, message_id)?
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     let assertion = posthaste_domain::MessageChangeAssertion::after(detail.summary.clone());
+    let count_deltas = crate::query::mailbox_counts_json_tx(tx, account_id, mailboxes.iter())?;
+    let mut payload = json!({
+        "messageId": message_id.as_str(),
+        "changes": { "keywords": true },
+        "keywords": keywords.iter().cloned().collect::<Vec<_>>(),
+        "assertion": assertion,
+        "projection": &detail.summary,
+    });
+    payload["countDeltas"] = count_deltas;
     let event = insert_event_tx(
         tx,
         account_id,
         EVENT_TOPIC_MESSAGE_UPDATED,
         mailboxes.first(),
         Some(message_id),
-        json!({
-            "messageId": message_id.as_str(),
-            "changes": { "keywords": true },
-            "keywords": keywords.iter().cloned().collect::<Vec<_>>(),
-            "assertion": assertion,
-        }),
+        payload,
     )?;
     if let Some(cursor) = cursor {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
@@ -147,28 +151,34 @@ pub(crate) fn replace_mailboxes_tx(
         .difference(&previous_set)
         .map(MailboxId::as_str)
         .collect::<Vec<_>>();
+    let detail = query_message_detail_tx(tx, account_id, message_id)?
+        .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
+    let affected_mailboxes: BTreeSet<MailboxId> = previous_set.union(&current_set).cloned().collect();
+    let count_deltas =
+        crate::query::mailbox_counts_json_tx(tx, account_id, affected_mailboxes.iter())?;
+    let mut payload = json!({
+        "messageId": message_id.as_str(),
+        "changes": {
+            "mailboxes": true,
+            "arrived": !arrived_mailbox_ids.is_empty(),
+        },
+        "mailboxIds": command.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+        "arrivedMailboxIds": arrived_mailbox_ids,
+        "projection": &detail.summary,
+    });
+    payload["countDeltas"] = count_deltas;
     let event = insert_event_tx(
         tx,
         account_id,
         EVENT_TOPIC_MESSAGE_UPDATED,
         command.mailbox_ids.first(),
         Some(message_id),
-        json!({
-            "messageId": message_id.as_str(),
-            "changes": {
-                "mailboxes": true,
-                "arrived": !arrived_mailbox_ids.is_empty(),
-            },
-            "mailboxIds": command.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
-            "arrivedMailboxIds": arrived_mailbox_ids,
-        }),
+        payload,
     )?;
 
     if let Some(cursor) = cursor {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;
     }
-    let detail = query_message_detail_tx(tx, account_id, message_id)?
-        .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     Ok(CommandResult {
         detail: Some(detail),
         events: vec![event],
@@ -196,13 +206,17 @@ pub(crate) fn destroy_message_tx(
         .ok_or_else(|| StoreError::NotFound(format!("message:{}", message_id.as_str())))?;
     delete_message_tx(tx, account_id, message_id)?;
     refresh_thread_projection_tx(tx, account_id, &thread_id)?;
+    let count_deltas =
+        crate::query::mailbox_counts_json_tx(tx, account_id, previous_mailboxes.iter())?;
+    let mut payload = json!({ "messageId": message_id.as_str(), "deleted": true });
+    payload["countDeltas"] = count_deltas;
     let event = insert_event_tx(
         tx,
         account_id,
         EVENT_TOPIC_MESSAGE_UPDATED,
         previous_mailboxes.first(),
         Some(message_id),
-        json!({ "messageId": message_id.as_str(), "deleted": true }),
+        payload,
     )?;
     if let Some(cursor) = cursor {
         DatabaseStore::upsert_sync_cursor_tx(tx, account_id, cursor)?;

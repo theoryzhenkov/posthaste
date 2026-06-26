@@ -20,9 +20,11 @@ pub(crate) fn append_message_diff_events_tx(
     message: &posthaste_domain::MessageRecord,
     conversation_id: &ConversationId,
     before: &MessageBeforeApply,
+    projection: Option<&posthaste_domain::MessageSummary>,
+    count_deltas: Value,
     events: &mut EventRecorder<'_, '_, '_>,
 ) -> Result<(), StoreError> {
-    let diff = MessageEventDiff::new(message, conversation_id, before);
+    let diff = MessageEventDiff::new(message, conversation_id, before, projection, count_deltas);
 
     events.record(
         EVENT_TOPIC_MESSAGE_UPDATED,
@@ -38,6 +40,8 @@ struct MessageEventDiff<'a> {
     message: &'a posthaste_domain::MessageRecord,
     conversation_id: &'a ConversationId,
     before: &'a MessageBeforeApply,
+    projection: Option<&'a posthaste_domain::MessageSummary>,
+    count_deltas: Value,
     current_mailboxes: BTreeSet<MailboxId>,
     previous_mailboxes: BTreeSet<MailboxId>,
 }
@@ -47,11 +51,15 @@ impl<'a> MessageEventDiff<'a> {
         message: &'a posthaste_domain::MessageRecord,
         conversation_id: &'a ConversationId,
         before: &'a MessageBeforeApply,
+        projection: Option<&'a posthaste_domain::MessageSummary>,
+        count_deltas: Value,
     ) -> Self {
         Self {
             message,
             conversation_id,
             before,
+            projection,
+            count_deltas,
             current_mailboxes: message.mailbox_ids.iter().cloned().collect(),
             previous_mailboxes: before.mailboxes.iter().cloned().collect(),
         }
@@ -67,7 +75,7 @@ impl<'a> MessageEventDiff<'a> {
             .difference(&self.previous_mailboxes)
             .map(MailboxId::as_str)
             .collect::<Vec<_>>();
-        json!({
+        let mut payload = json!({
             "messageId": self.message.id.as_str(),
             "sourceThreadId": self.message.source_thread_id.as_str(),
             "conversationId": self.conversation_id.as_str(),
@@ -80,7 +88,21 @@ impl<'a> MessageEventDiff<'a> {
             "keywords": self.message.keywords,
             "mailboxIds": self.message.mailbox_ids.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
             "arrivedMailboxIds": arrived_mailbox_ids,
-        })
+        });
+        // The full `MessageSummary` projection — enough for the reactive store
+        // to materialize a never-held message (sort key, row key, membership,
+        // render) without a promotion round-trip (`firehose-carries-rows`).
+        // Byte-identical to a served row (one derivation). The flat
+        // keyword/mailboxIds fields above are retained for the legacy
+        // invalidation path until 2e retires it.
+        if let Some(summary) = self.projection {
+            payload["projection"] = serde_json::to_value(summary).unwrap_or(Value::Null);
+        }
+        // The affected mailboxes' current counts (read in-tx at the emit
+        // site) so the store's `mailbox[id].count` updates in the same atomic
+        // batch as the row delta (`counts-on-the-stream`, `D3`).
+        payload["countDeltas"] = self.count_deltas.clone();
+        payload
     }
 
     fn keywords_changed(&self) -> bool {
