@@ -36,10 +36,27 @@ export class MailListReplicaHandle {
     settle(mutation_id: string, outcome: string): boolean;
 }
 
+/**
+ * Swap added↔removed for both the keyword and mailbox facets — the inverse
+ * diff applied by undo. Uses `MessageChangeDiff::inverse` in Rust.
+ */
+export function invertMessageChangeDiff(diff_json: string): string;
+
+/**
+ * Parse a runtime mutation request and return `{ messageId, assertion }` as
+ * JSON when the mutation is locally foldable. Returns `null` for mutations
+ * whose effect cannot be folded from the request alone (role moves such as
+ * archive/trash/moveToRole). Mirrors the Rust near-node
+ * `MessageMutation::from_request` + `to_assertion` path.
+ */
+export function parseMessageMutation(request_json: string): string | undefined;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
+    readonly parseMessageMutation: (a: number, b: number) => [number, number, number, number];
     readonly __wbg_maillistreplicahandle_free: (a: number, b: number) => void;
     readonly maillistreplicahandle_acceptJson: (a: number, b: number, c: number) => [number, number];
     readonly maillistreplicahandle_hasPending: (a: number) => number;

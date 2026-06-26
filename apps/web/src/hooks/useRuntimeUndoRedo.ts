@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { LOG_EVENTS, undoLogger } from '@/logger'
 import type { DiffStep } from '@/runtime/replica/handle'
-import { invertMessageChangeDiff } from '@/runtime/replica/handle'
+import { invertMessageChangeDiff } from '@/runtime/replica/wasmUtil'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
 
 export interface RuntimeUndoRedo {
@@ -72,7 +72,7 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
     return unsubscribe
   }, [])
 
-  const runApplyDiff = useCallback((step: DiffStep, inverse: boolean) => {
+  const runApplyDiff = useCallback(async (step: DiffStep, inverse: boolean) => {
     undoLogger.debug(
       {
         event: LOG_EVENTS.historyApplyDiffDispatched,
@@ -83,13 +83,14 @@ export function useRuntimeUndoRedo(): RuntimeUndoRedo {
       },
       'dispatching applyDiff for history step',
     )
+    const diff = inverse ? await invertMessageChangeDiff(step.diff) : step.diff
     void runtimeSessionClient
       .runMutation({
         name: 'message.applyDiff',
         args: {
           sourceId: step.sourceId,
           messageId: step.messageId,
-          diff: inverse ? invertMessageChangeDiff(step.diff) : step.diff,
+          diff,
           [inverse ? 'undoOf' : 'redoOf']: step.seq,
         },
       })

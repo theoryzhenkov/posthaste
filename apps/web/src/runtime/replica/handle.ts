@@ -29,7 +29,8 @@ export interface KeywordDelta {
 /**
  * An invertible change-diff over a message's mutable state: keywords + mailbox
  * membership, each an add/remove pair. Mirrors `posthaste-link-core`'s
- * `MessageChangeDiff`; `invertMessageChangeDiff` swaps added↔removed for both.
+ * `MessageChangeDiff`; the canonical inverse is computed in WASM via
+ * {@link ../wasmUtil#invertMessageChangeDiff}.
  */
 export interface MessageChangeDiff {
   keywords: KeywordDelta
@@ -47,17 +48,6 @@ export interface DiffStep {
   messageId: string
   sourceId: string
   diff: MessageChangeDiff
-}
-
-/** Swap added↔removed for both facets — the diff that reverses this one. */
-export function invertMessageChangeDiff(
-  diff: MessageChangeDiff,
-): MessageChangeDiff {
-  const invert = (delta: KeywordDelta): KeywordDelta => ({
-    added: delta.removed,
-    removed: delta.added,
-  })
-  return { keywords: invert(diff.keywords), mailboxes: invert(diff.mailboxes) }
 }
 
 export interface ReplicaHandle {
