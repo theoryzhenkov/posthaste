@@ -16,6 +16,8 @@ use wasm_bindgen::prelude::*;
 use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome};
 use posthaste_link_replica::{MailListReplica, MailListRow};
 
+pub mod mutation;
+
 /// A live mail-list replica owned by JS: the served rows are its base, the
 /// outbox holds optimistic mutations, and `projectJson` returns the folded rows.
 #[wasm_bindgen]

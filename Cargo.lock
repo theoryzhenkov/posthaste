@@ -4273,10 +4273,13 @@ dependencies = [
 name = "posthaste-link-wasm"
 version = "0.1.0"
 dependencies = [
+ "posthaste-link-contract",
  "posthaste-link-core",
  "posthaste-link-replica",
+ "posthaste-runtime-contract",
  "serde",
  "serde_json",
+ "uuid",
  "wasm-bindgen",
 ]
 
