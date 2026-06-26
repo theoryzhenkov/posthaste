@@ -116,7 +116,8 @@ function ensureStream(afterSeq?: number | null): void {
                 sessionId: session.sessionId,
                 type: frame.type,
                 sessionSeq: frame.sessionSeq,
-                ...(frame.type === 'viewReplace' || frame.type === 'viewSnapshot'
+                ...(frame.type === 'viewReplace' ||
+                frame.type === 'viewSnapshot'
                   ? { viewId: frame.viewId, revision: frame.revision }
                   : {}),
                 ...(frame.type === 'mutationHistory'

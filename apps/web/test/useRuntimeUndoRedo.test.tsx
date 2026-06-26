@@ -3,7 +3,6 @@ import { renderHook, waitFor, act } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 import { useRuntimeUndoRedo } from '../src/hooks/useRuntimeUndoRedo'
-import { queryKeys } from '../src/queryKeys'
 import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
@@ -65,9 +64,7 @@ function makeUndoStep(seq: number): DiffStep {
   }
 }
 
-function makeMutationReceipt(
-  clientMutationId: string,
-): RuntimeMutationReceipt {
+function makeMutationReceipt(clientMutationId: string): RuntimeMutationReceipt {
   return {
     runtimeMutationId: 'mutation-1',
     clientMutationId,
@@ -138,8 +135,11 @@ describe('useRuntimeUndoRedo', () => {
       expect(runtimeAdapter.runtimeMutationCalls.length).toBe(1),
     )
     expect(
-      (runtimeAdapter.runtimeMutationCalls[0].request.args as { undoOf?: number })
-        .undoOf,
+      (
+        runtimeAdapter.runtimeMutationCalls[0].request.args as {
+          undoOf?: number
+        }
+      ).undoOf,
     ).toBe(42)
 
     // Runtime ack: the first undo moved step 42 to redo; the next undoable step is 41.
@@ -151,8 +151,11 @@ describe('useRuntimeUndoRedo', () => {
       expect(runtimeAdapter.runtimeMutationCalls.length).toBe(2),
     )
     expect(
-      (runtimeAdapter.runtimeMutationCalls[1].request.args as { undoOf?: number })
-        .undoOf,
+      (
+        runtimeAdapter.runtimeMutationCalls[1].request.args as {
+          undoOf?: number
+        }
+      ).undoOf,
     ).toBe(41)
   })
 })
