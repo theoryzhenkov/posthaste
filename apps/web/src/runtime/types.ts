@@ -91,7 +91,7 @@ export interface RuntimeViewSnapshot<TData = unknown> {
   revision: number
   lifecycle: 'loading' | 'ready' | 'updating' | 'error'
   readWatermark: { value: string } | null
-  coverage: { kind: 'complete' | 'partial' | 'unknown'; details?: unknown }
+  coverage: { ranges?: { from?: unknown; to?: unknown }[] }
   data: TData
   pendingMutations: string[]
   error: unknown | null
@@ -119,7 +119,7 @@ export interface RuntimeMailListViewState {
     hasAfter: boolean
   }
   readWatermark: { value: string } | null
-  coverage: { kind: 'complete' | 'partial' | 'unknown'; details?: unknown }
+  coverage: { ranges?: { from?: unknown; to?: unknown }[] }
   knownTotalCount: number | null
   pendingMutations: string[]
   anchor: unknown

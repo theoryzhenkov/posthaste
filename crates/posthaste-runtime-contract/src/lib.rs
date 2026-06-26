@@ -553,10 +553,32 @@ pub struct ReadWatermark {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeCoverage {
-    pub kind: RuntimeCoverageKind,
+    /// The sort-key ranges a consumer holds every matching row within, with no
+    /// gaps. A range is inclusive in the composite sort-key domain (`(sortField,
+    /// dir, id)`): `from = None` is unbounded above (TOP, the greatest sort key);
+    /// `to = None` is unbounded below (BOTTOM). A single range `[TOP, BOTTOM]`
+    /// denotes a complete result; `[TOP, k]` a window from the top down to `k`
+    /// with potentially more rows below. Empty for a view with no held rows and
+    /// no claim of completeness.
+    ///
+    /// Replaces the coarse `RuntimeCoverageKind { Complete, Partial, Unknown }`,
+    /// which was hardcoded `Complete` for windowed mail lists and so could not
+    /// distinguish "absent because unchanged" from "absent because not held"
+    /// ([replication client-link L2 coverage redesign](../../docs/eph/DESIGN-L2-client-link-reactive-store.md)).
     #[serde(default)]
-    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
-    pub details: Value,
+    pub ranges: Vec<CoverageRange>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct CoverageRange {
+    /// Inclusive lower bound; `None` = TOP (unbounded above).
+    #[serde(default)]
+    pub from: Option<Value>,
+    /// Inclusive upper bound; `None` = BOTTOM (unbounded below).
+    #[serde(default)]
+    pub to: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -652,15 +674,6 @@ pub enum MailListAnchorState {
     Removed {
         row_key: String,
     },
-    Unknown,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "camelCase")]
-pub enum RuntimeCoverageKind {
-    Complete,
-    Partial,
     Unknown,
 }
 
@@ -1367,8 +1380,10 @@ mod tests {
                 value: "watermark-1".to_string(),
             }),
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
+                ranges: vec![CoverageRange {
+                    from: None,
+                    to: Some(serde_json::json!(["2026-04-28T12:00:00Z", "m1"])),
+                }],
             },
             known_total_count: Some(1),
             pending_mutations: vec![RuntimeMutationId::new("mutation-1")],
@@ -1383,7 +1398,10 @@ mod tests {
         assert_eq!(serialized["continuation"]["beforeCursor"], "before-1");
         assert_eq!(serialized["continuation"]["afterCursor"], "after-1");
         assert_eq!(serialized["readWatermark"]["value"], "watermark-1");
-        assert_eq!(serialized["coverage"]["kind"], "complete");
+        assert_eq!(
+            serialized["coverage"]["ranges"][0]["to"].clone(),
+            serde_json::json!(["2026-04-28T12:00:00Z", "m1"])
+        );
         assert_eq!(serialized["pendingMutations"][0], "mutation-1");
         assert_eq!(serialized["anchor"]["kind"], "kept");
     }
@@ -1400,8 +1418,7 @@ mod tests {
             lifecycle: ViewLifecycle::Ready,
             read_watermark: None,
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({}),
+                ranges: vec![CoverageRange { from: None, to: None }],
             },
             data: serde_json::json!({ "rows": [] }),
             pending_mutations: Vec::new(),
@@ -1440,8 +1457,7 @@ mod tests {
                 value: "watermark-1".to_string(),
             }),
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
+                ranges: vec![CoverageRange { from: None, to: None }],
             },
             known_total_count: Some(0),
             pending_mutations: Vec::new(),
@@ -1461,15 +1477,14 @@ mod tests {
                 value: "watermark-1".to_string(),
             }),
             coverage: RuntimeCoverage {
-                kind: RuntimeCoverageKind::Complete,
-                details: serde_json::json!({ "authority": true }),
+                ranges: vec![CoverageRange { from: None, to: None }],
             },
             data: serde_json::to_value(state).expect("state should serialize"),
             pending_mutations: Vec::new(),
             error: None,
         };
 
-        assert_eq!(snapshot.coverage.kind, RuntimeCoverageKind::Complete);
+        assert_eq!(snapshot.coverage.ranges, vec![CoverageRange { from: None, to: None }]);
         assert_eq!(snapshot.data["continuation"]["hasAfter"], false);
         assert_eq!(snapshot.data["anchor"]["kind"], "removed");
         assert_eq!(snapshot.read_watermark.unwrap().value, "watermark-1");
