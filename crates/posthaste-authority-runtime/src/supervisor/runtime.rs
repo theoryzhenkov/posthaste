@@ -13,6 +13,8 @@ pub(crate) async fn run_account_runtime(
 ) {
     let account_id = account.id.clone();
     let mut connection = AccountRuntimeConnectionState::default();
+    let mut oauth_refresh_state = OAuthRefreshState::new(&account);
+    let mut oauth_refresh_interval = oauth_refresh_state.interval();
     let mut backfill_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + AUTOMATION_BACKFILL_INITIAL_DELAY,
         AUTOMATION_BACKFILL_INTERVAL,
@@ -73,6 +75,22 @@ pub(crate) async fn run_account_runtime(
                     CACHE_BACKGROUND_PRESSURE,
                     None,
                 ).await;
+            }
+            _ = async {
+                match oauth_refresh_interval.as_mut() {
+                    Some(interval) => interval.tick().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                handle_oauth_refresh_tick(
+                    &shared,
+                    &account,
+                    generation,
+                    &account_id,
+                    &mut connection,
+                    &mut oauth_refresh_state,
+                )
+                .await;
             }
             Some(command) = command_rx.recv() => {
                 if handle_runtime_command(
@@ -312,6 +330,55 @@ pub(crate) async fn handle_push_event(
             false
         }
     }
+}
+
+pub(crate) async fn handle_oauth_refresh_tick(
+    shared: &Arc<SupervisorShared>,
+    account: &AccountSettings,
+    generation: RuntimeGeneration,
+    account_id: &AccountId,
+    connection: &mut AccountRuntimeConnectionState,
+    state: &mut OAuthRefreshState,
+) {
+    if !state.enabled() {
+        return;
+    }
+    let Some(resolver) = connection.secret_resolver() else {
+        return;
+    };
+    let current_secret = match resolver.resolve_secret().await {
+        Ok(secret) => secret,
+        Err(error) => {
+            ph_warn!(
+                events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+                account_id = %account_id,
+                error = %error,
+                "OAuth token refresh check failed"
+            );
+            return;
+        }
+    };
+
+    if let Some(last_secret) = state.last_secret() {
+        if last_secret != current_secret {
+            ph_info!(
+                events::SUPERVISOR_OAUTH_TOKEN_REFRESHED,
+                account_id = %account_id,
+                "OAuth access token refreshed; rebuilding gateway"
+            );
+            connection.disconnect();
+            if let Err(error) = ensure_connection(shared, account, generation, connection).await {
+                ph_warn!(
+                    events::SUPERVISOR_OAUTH_REFRESH_FAILED,
+                    account_id = %account_id,
+                    error = %error,
+                    "OAuth gateway rebuild after token refresh failed"
+                );
+                return;
+            }
+        }
+    }
+    state.set_last_secret(current_secret);
 }
 
 pub(crate) fn remote_observation_policy_for_account(

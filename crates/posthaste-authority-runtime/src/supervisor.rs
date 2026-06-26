@@ -10,9 +10,10 @@ use posthaste_domain::{
     CacheMaintenanceFeedback, CacheResourceGovernor, CacheResourcePolicy, DomainEvent,
     GatewayError, Id, Identity, MailService, MailStore, ProviderAuthKind, PushEventStream,
     PushNotification, PushStatus, PushStreamEvent, RemoteIdleScope, RemoteObservationPolicy,
-    ResilientPushConfig, SecretStore, ServiceError, ServiceErrorKind, SharedGateway, SyncMode,
-    SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
-    EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED, EVENT_TOPIC_PUSH_DISCONNECTED,
+    ResilientPushConfig, SecretResolver, SecretStore, ServiceError, ServiceErrorKind,
+    SharedGateway, StaticSecretResolver, SyncMode, SyncProgress, SyncProgressReporter,
+    SyncProgressStage, SyncTrigger, EVENT_TOPIC_ACCOUNT_STATUS_CHANGED, EVENT_TOPIC_PUSH_CONNECTED,
+    EVENT_TOPIC_PUSH_DISCONNECTED,
 };
 use posthaste_engine::{connect_jmap_client, LiveJmapGateway, MockJmapGateway};
 use posthaste_imap::{

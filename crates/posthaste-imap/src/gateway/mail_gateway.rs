@@ -17,8 +17,9 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
     ) -> Result<FetchedBody, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
+        let config = self.resolve_imap_config().await?;
 
-        fetch_message_body_by_location(&self.config, &mailbox_name, &location)
+        fetch_message_body_by_location(&config, &mailbox_name, &location)
             .await
             .map_err(imap_error_to_gateway)
     }
@@ -31,7 +32,8 @@ impl MailGateway for LiveImapSmtpGateway {
         let (message_id, _attachment_index) =
             parse_imap_attachment_blob_id(blob_id).map_err(imap_error_to_gateway)?;
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, &message_id)?;
-        let raw_mime = fetch_raw_message_by_location(&self.config, &mailbox_name, &location)
+        let config = self.resolve_imap_config().await?;
+        let raw_mime = fetch_raw_message_by_location(&config, &mailbox_name, &location)
             .await
             .map_err(imap_error_to_gateway)?;
 
@@ -56,8 +58,9 @@ impl MailGateway for LiveImapSmtpGateway {
         command: &SetKeywordsCommand,
     ) -> Result<MutationOutcome, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
+        let config = self.resolve_imap_config().await?;
 
-        apply_imap_keyword_delta_by_location(&self.config, &mailbox_name, &location, command)
+        apply_imap_keyword_delta_by_location(&config, &mailbox_name, &location, command)
             .await
             .map_err(imap_error_to_gateway)
     }
@@ -69,7 +72,8 @@ impl MailGateway for LiveImapSmtpGateway {
         _expected_state: Option<&str>,
         mailbox_ids: &[MailboxId],
     ) -> Result<MutationOutcome, GatewayError> {
-        replace_message_mailboxes(self, account_id, message_id, mailbox_ids).await
+        let config = self.resolve_imap_config().await?;
+        replace_message_mailboxes(self, &config, account_id, message_id, mailbox_ids).await
     }
 
     async fn destroy_message(
@@ -78,7 +82,8 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
         _expected_state: Option<&str>,
     ) -> Result<MutationOutcome, GatewayError> {
-        destroy_message_by_imap(self, account_id, message_id).await
+        let config = self.resolve_imap_config().await?;
+        destroy_message_by_imap(self, &config, account_id, message_id).await
     }
 
     async fn set_mailbox_role(
@@ -120,8 +125,9 @@ impl MailGateway for LiveImapSmtpGateway {
         message_id: &MessageId,
     ) -> Result<ReplyContext, GatewayError> {
         let (location, mailbox_name) = self.location_and_mailbox_name(account_id, message_id)?;
+        let config = self.resolve_imap_config().await?;
 
-        fetch_imap_reply_context_by_location(&self.config, &mailbox_name, &location)
+        fetch_imap_reply_context_by_location(&config, &mailbox_name, &location)
             .await
             .map_err(imap_error_to_gateway)
     }
@@ -131,7 +137,9 @@ impl MailGateway for LiveImapSmtpGateway {
         _account_id: &AccountId,
         request: &SendMessageRequest,
     ) -> Result<(), GatewayError> {
-        send_message_via_smtp(self, request).await
+        let imap_config = self.resolve_imap_config().await?;
+        let smtp_config = self.resolve_smtp_config().await?;
+        send_message_via_smtp(self, &imap_config, &smtp_config, request).await
     }
 
     async fn save_draft(
@@ -140,7 +148,8 @@ impl MailGateway for LiveImapSmtpGateway {
         request: &SendMessageRequest,
         replace: Option<&MessageId>,
     ) -> Result<MessageId, GatewayError> {
-        save_imap_draft(self, account_id, request, replace).await
+        let config = self.resolve_imap_config().await?;
+        save_imap_draft(self, &config, account_id, request, replace).await
     }
 
     async fn delete_draft(
@@ -148,7 +157,8 @@ impl MailGateway for LiveImapSmtpGateway {
         account_id: &AccountId,
         message_id: &MessageId,
     ) -> Result<(), GatewayError> {
-        delete_imap_draft(self, account_id, message_id).await
+        let config = self.resolve_imap_config().await?;
+        delete_imap_draft(self, &config, account_id, message_id).await
     }
 
     fn push_transports(&self) -> Vec<Box<dyn PushTransport>> {

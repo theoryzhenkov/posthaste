@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
+use posthaste_domain::StaticSecretResolver;
 use posthaste_domain::*;
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::{ImapConnectionConfig, LiveImapSmtpGateway, SmtpConnectionConfig};
@@ -55,6 +57,7 @@ async fn stalwart_jmap_and_imap_sync_project_equivalent_fixture_messages() {
             provider: ProviderHint::Generic,
         },
         Some(harness.store.clone()),
+        Arc::new(StaticSecretResolver::new(stalwart.password.clone())),
     )
     .await
     .expect("IMAP gateway should connect");

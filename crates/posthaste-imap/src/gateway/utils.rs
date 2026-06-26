@@ -39,6 +39,7 @@ pub(crate) fn imap_error_to_gateway(error: ImapAdapterError) -> GatewayError {
         | ImapAdapterError::MissingAttachment { .. }
         | ImapAdapterError::InvalidSmtpAddress { .. }
         | ImapAdapterError::BuildSmtpMessage(_) => GatewayError::Rejected(error.to_string()),
+        ImapAdapterError::Auth(_) => GatewayError::Auth,
         ImapAdapterError::Client(message) | ImapAdapterError::Smtp(message) => {
             GatewayError::Network(message)
         }

@@ -14,6 +14,8 @@ pub enum ImapAdapterError {
     MissingSmtpSenderEmail,
     #[error("missing IMAP secret")]
     MissingSecret,
+    #[error("IMAP authentication error: {0}")]
+    Auth(String),
     #[error("IMAP client error: {0}")]
     Client(String),
     #[error("invalid IMAP mailbox name: {0}")]

@@ -8,8 +8,8 @@ use posthaste_domain::{
     GatewayError, Identity, ImapCapabilities, ImapMailboxSyncPlan, ImapMailboxSyncState,
     ImapMessageLocation, ImapMoveStrategy, ImapUid, ImapUidValidity, MailGateway, MailStore,
     MailboxId, MessageId, MutationOutcome, ProviderProfile, PushTransport, ReplyContext,
-    SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor, SyncProgress,
-    SyncProgressReporter, SyncProgressStage, SyncTrigger,
+    SecretResolver, SendMessageRequest, SetKeywordsCommand, StoreError, SyncBatch, SyncCursor,
+    SyncProgress, SyncProgressReporter, SyncProgressStage, SyncTrigger,
 };
 use posthaste_observability::{events, ph_debug, ph_info, ph_warn};
 
