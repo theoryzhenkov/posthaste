@@ -126,7 +126,7 @@ export function resetRuntimeAdapterForTesting(): void {
   activeRuntimeAdapter = httpRuntimeAdapter
 }
 
-/** Whether the client-layer replica is opted in (VITE_RUNTIME_REPLICA=true). */
+/** Whether the client-layer replica is enabled (controlled by VITE_RUNTIME_REPLICA). */
 export function replicaAdapterEnabled(): boolean {
   return import.meta.env?.VITE_RUNTIME_REPLICA === 'true'
 }
