@@ -36,7 +36,7 @@ pub use supervisor::AccountSupervisor;
 // The near node lives in `posthaste-runtime`; re-export its public surface so
 // hosts (the server, benches) keep a single `posthaste_authority_runtime` import.
 pub use posthaste_runtime::{
-    build_remote_runtime, AuthorityRuntimeBuildConfig, AuthorityRuntimeBuildError,
-    AuthorityRuntimeHandle, AuthorityRuntimeShutdownError, BackendTransportConfig, RemoteBackend,
-    RemoteRuntimeBuild, RuntimeShutdownHandle, SystemSecretStore,
+    build_remote_runtime, BackendTransportConfig, RemoteBackend, RemoteRuntimeBuild,
+    RuntimeBuildConfig, RuntimeBuildError, RuntimeHandle, RuntimeShutdownError,
+    RuntimeShutdownHandle, SystemSecretStore,
 };

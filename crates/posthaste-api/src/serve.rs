@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::Router;
 use posthaste_domain::SecretStore;
 use posthaste_observability::{events, ph_info};
-use posthaste_runtime::{AuthorityRuntimeHandle, RuntimeShutdownHandle};
+use posthaste_runtime::{RuntimeHandle, RuntimeShutdownHandle};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{field, info_span, Span};
@@ -23,7 +23,7 @@ use crate::{auth, observability, token, AppState, ServerConfig, ServerHandle};
 /// the Origin/Host allowlists. The OAuth fields live in the far `OAuthState`, not
 /// here — a lean near node has no provider machinery.
 pub fn build_app_state(
-    runtime: AuthorityRuntimeHandle,
+    runtime: RuntimeHandle,
     secret_store: &Arc<dyn SecretStore>,
     roots: &ResolvedRoots,
     daemon: &DaemonSettings,

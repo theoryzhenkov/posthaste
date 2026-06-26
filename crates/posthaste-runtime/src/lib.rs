@@ -18,10 +18,9 @@ mod transport;
 mod views;
 
 pub use build::{
-    assemble_runtime, build_remote_runtime, AuthorityRuntimeBuildConfig,
-    AuthorityRuntimeBuildError, AuthorityRuntimeHandle, AuthorityRuntimeShutdownError,
-    BackendTransportConfig, BackendTransportDecorator, ComposedRuntime, RemoteRuntimeBuild,
-    RuntimeAssembly, RuntimeShutdownHandle,
+    assemble_runtime, build_remote_runtime, BackendTransportConfig, BackendTransportDecorator,
+    ComposedRuntime, RemoteRuntimeBuild, RuntimeAssembly, RuntimeBuildConfig, RuntimeBuildError,
+    RuntimeHandle, RuntimeShutdownError, RuntimeShutdownHandle,
 };
 pub use read::ReadCache;
 pub use secret::SystemSecretStore;

@@ -32,7 +32,7 @@ pub async fn start_backend(server_config: ServerConfig) -> BackendServerHandle {
     let log_guard = logging::init(&roots.state_root, &runtime.log_level);
 
     let node = build_backend_node(
-        AuthorityRuntimeBuildConfig::new(
+        RuntimeBuildConfig::new(
             roots.config_root.clone(),
             roots.state_root.clone(),
             roots.state_root.join("cache"),

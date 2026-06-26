@@ -45,8 +45,8 @@ crates/posthaste-runtime-contract
   RuntimeError / adapter-safe error envelope
 
 crates/posthaste-authority-runtime
-  AuthorityRuntimeHandle implements RuntimeCore
-  AuthorityRuntimeBuildConfig
+  RuntimeHandle implements RuntimeCore
+  RuntimeBuildConfig
   AuthorityRuntimeBuild output
   RuntimeShutdownHandle
   config/secret/store/service/supervisor assembly
@@ -86,7 +86,7 @@ Do not put these in the contract:
 
 The first implementation is the authority runtime used by the bundled desktop app and by the API server. It owns config/state/cache roots, SQLite, provider gateways, account supervisor, event history, view state, mutation idempotency, resource resolution, and provider secret access.
 
-The authority runtime builder is transport-free. It opens local dependencies and returns an `AuthorityRuntimeHandle` plus shutdown ownership. It does not bind an HTTP listener and does not create Tauri windows.
+The authority runtime builder is transport-free. It opens local dependencies and returns an `RuntimeHandle` plus shutdown ownership. It does not bind an HTTP listener and does not create Tauri windows.
 
 ### 2.4 Adapters
 
@@ -126,7 +126,7 @@ Required behaviors:
 - shut down account runtimes, view subscriptions, queued work, store handles, and provider connections through the runtime shutdown handle
 - compile handle methods without Axum extractor/response types, Tauri handles, or frontend component types in their signatures
 
-The first red test should be small: build `AuthorityRuntimeHandle` from empty temp roots and read startup/runtime status. It should fail until the new runtime crate boundary exists. That creates the seam the rest of the migration can use.
+The first red test should be small: build `RuntimeHandle` from empty temp roots and read startup/runtime status. It should fail until the new runtime crate boundary exists. That creates the seam the rest of the migration can use.
 
 ### 3.2 API adapter compatibility tests
 
@@ -136,7 +136,7 @@ Suggested location: existing `crates/posthaste-server/tests/*` harness, extended
 
 Required behaviors:
 
-- `build_api_router` or its replacement receives API adapter state that wraps `RuntimeCore` or `AuthorityRuntimeHandle`
+- `build_api_router` or its replacement receives API adapter state that wraps `RuntimeCore` or `RuntimeHandle`
 - existing auth, authz, OpenAPI, AsyncAPI, and full-stack API tests keep passing
 - API reads and runtime-handle reads use the same projection constructors for overlapping state
 - message command routes call named mutation/runtime command paths or shared mutation helpers, not a duplicate service/store graph
@@ -287,7 +287,7 @@ These tests can be staged. Start with startup/readiness and one fake runtime vie
 
 ### 4.1 Establish the runtime crates and first red test
 
-Add `posthaste-runtime-contract` and `posthaste-authority-runtime`, or a temporary single runtime crate with a clearly isolated contract module. Add a test-only authority runtime builder using temp roots and a mock secret store/provider. The first passing test should build `AuthorityRuntimeHandle` without HTTP or Tauri and read runtime status.
+Add `posthaste-runtime-contract` and `posthaste-authority-runtime`, or a temporary single runtime crate with a clearly isolated contract module. Add a test-only authority runtime builder using temp roots and a mock secret store/provider. The first passing test should build `RuntimeHandle` without HTTP or Tauri and read runtime status.
 
 ### 4.2 Move assembly out of `posthaste-server`
 

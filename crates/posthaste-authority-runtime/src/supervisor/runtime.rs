@@ -115,13 +115,7 @@ pub(crate) async fn process_sync_trigger_with_state(
         sync_state.increment_sync_cycle_count();
         sync_state.start_sync();
         let _ = process_sync_trigger(
-            shared,
-            account,
-            generation,
-            trigger,
-            mode,
-            connection,
-            reply,
+            shared, account, generation, trigger, mode, connection, reply,
         )
         .await;
         sync_state.finish_sync();
