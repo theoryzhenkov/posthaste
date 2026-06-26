@@ -16,6 +16,12 @@ export interface ParsedMessageMutation {
 
 interface WasmModule {
   default(): Promise<void>
+  /**
+   * Synchronously initialize with a wasm binary. Used in Bun tests to avoid
+   * `file://` fetch restrictions; in the browser `default()` initializes from
+   * the bundled URL.
+   */
+  initSync(input: BufferSource | WebAssembly.Module): unknown
   parseMessageMutation(requestJson: string): string | undefined
   invertMessageChangeDiff(diffJson: string): string
 }
@@ -26,6 +32,17 @@ async function loadWasmModule(): Promise<WasmModule> {
   wasmModulePromise ??= (async () => {
     const module =
       (await import('../wasm/posthaste_link_wasm.js')) as unknown as WasmModule
+    if (typeof (globalThis as Record<string, unknown>).Bun !== 'undefined') {
+      // Bun test environment: avoid happy-dom's fetch by reading the wasm
+      // binary directly. Once initSync() runs, default() is a no-op.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fs = (await import('node:fs')) as any
+      const wasmPath = new URL(
+        '../wasm/posthaste_link_wasm_bg.wasm',
+        import.meta.url,
+      ).pathname
+      module.initSync({ module: fs.readFileSync(wasmPath) })
+    }
     await module.default()
     return module
   })()
