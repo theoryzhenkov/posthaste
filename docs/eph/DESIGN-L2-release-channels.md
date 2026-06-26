@@ -77,7 +77,7 @@ on the same machine without clobbering each other's data or updater state.
 | Channel  | Identifier                 | Product name        | Data root          |
 | -------- | -------------------------- | ------------------- | ------------------ |
 | stable   | `com.posthaste.mail`       | Posthaste           | (from identifier)  |
-| nightly  | `com.posthaste.mail.nightly` | Posthaste Nightly | (from identifier)  |
+| nightly  | `com.posthaste.mail.nightly` | PosthasteNightly | (from identifier)  |
 
 Tauri derives per-platform app-data roots from the bundle identifier, so
 distinct identifiers give distinct data roots for free. The checked-in
