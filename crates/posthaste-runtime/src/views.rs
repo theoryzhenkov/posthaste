@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use posthaste_domain::{
@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tokio::task::AbortHandle;
+use tracing::warn;
 
 /// The parsed, family-specific identity of a runtime view. The registry is
 /// generic over families: each carries what `build_snapshot` and the event
@@ -85,6 +86,16 @@ struct StoredView {
 }
 
 impl ViewRegistry {
+    fn lock_views(&self) -> MutexGuard<'_, HashMap<ViewId, StoredView>> {
+        match self.views.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("view registry mutex was poisoned; recovering");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     pub(crate) fn new(
         event_sender: broadcast::Sender<DomainEvent>,
         outbox: Arc<crate::near_node::RuntimeBackendOutbox>,
@@ -119,7 +130,7 @@ impl ViewRegistry {
             )
             .await?;
         let (frames, _) = broadcast::channel(16);
-        self.views.lock().map_err(lock_error)?.insert(
+        self.lock_views().insert(
             view_id.clone(),
             StoredView {
                 descriptor,
@@ -130,7 +141,7 @@ impl ViewRegistry {
             },
         );
         let event_task = self.spawn_event_pump(view_id.clone());
-        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(&view_id) {
+        if let Some(view) = self.lock_views().get_mut(&view_id) {
             view.event_task = Some(event_task);
         }
         Ok(snapshot)
@@ -167,7 +178,7 @@ impl ViewRegistry {
                 next_revision,
             )
             .await?;
-        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(view_id) {
+        if let Some(view) = self.lock_views().get_mut(view_id) {
             view.kind = kind;
             view.snapshot = snapshot.clone();
         }
@@ -294,9 +305,7 @@ impl ViewRegistry {
 
     pub(crate) fn close_view(&self, view_id: &ViewId) -> Result<(), RuntimeError> {
         let removed = self
-            .views
-            .lock()
-            .map_err(lock_error)?
+            .lock_views()
             .remove(view_id)
             .ok_or_else(|| RuntimeError::not_found("view not found"))?;
         if let Some(event_task) = removed.event_task {
@@ -309,16 +318,11 @@ impl ViewRegistry {
     }
 
     fn view_exists(&self, view_id: &ViewId) -> bool {
-        self.views
-            .lock()
-            .map(|views| views.contains_key(view_id))
-            .unwrap_or(false)
+        self.lock_views().contains_key(view_id)
     }
 
     fn current_view(&self, view_id: &ViewId) -> Result<StoredView, RuntimeError> {
-        self.views
-            .lock()
-            .map_err(lock_error)?
+        self.lock_views()
             .get(view_id)
             .cloned()
             .ok_or_else(|| RuntimeError::not_found("view not found"))
@@ -335,7 +339,7 @@ impl ViewRegistry {
                 next_revision,
             )
             .await?;
-        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(view_id) {
+        if let Some(view) = self.lock_views().get_mut(view_id) {
             view.snapshot = snapshot.clone();
         }
         Ok(snapshot)
@@ -358,7 +362,7 @@ impl ViewRegistry {
         if snapshot.data == current.snapshot.data {
             return Ok(None);
         }
-        if let Some(view) = self.views.lock().map_err(lock_error)?.get_mut(view_id) {
+        if let Some(view) = self.lock_views().get_mut(view_id) {
             view.snapshot = snapshot.clone();
         }
         Ok(Some(snapshot))
@@ -452,10 +456,6 @@ impl ViewRegistry {
             error: None,
         })
     }
-}
-
-fn lock_error<T>(_error: T) -> RuntimeError {
-    RuntimeError::new(RuntimeErrorCode::Internal, "view registry lock poisoned")
 }
 
 /// Parse a view descriptor into its family-specific [`ViewKind`].

@@ -3,6 +3,7 @@ use crate::sql_cache::CachedSql;
 use std::ops::Deref;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::warn;
 
 const MAX_IDLE_READ_CONNECTIONS: usize = 4;
 
@@ -52,10 +53,29 @@ impl Drop for ReadConnection<'_> {
         let Some(connection) = self.connection.take() else {
             return;
         };
-        if let Ok(mut pool) = self.pool.lock() {
-            if pool.len() < MAX_IDLE_READ_CONNECTIONS {
-                pool.push(connection);
-            }
+        let mut pool = lock_read_pool(self.pool);
+        if pool.len() < MAX_IDLE_READ_CONNECTIONS {
+            pool.push(connection);
+        }
+    }
+}
+
+fn lock_read_pool(pool: &Mutex<Vec<Connection>>) -> MutexGuard<'_, Vec<Connection>> {
+    match pool.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("read connection pool mutex was poisoned; recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
+fn lock_write_connection(connection: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+    match connection.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("write connection mutex was poisoned; recovering");
+            poisoned.into_inner()
         }
     }
 }
@@ -151,10 +171,7 @@ impl DatabaseStore {
     /// pool when the guard is dropped.
     pub(crate) fn read_connection(&self) -> Result<ReadConnection<'_>, StoreError> {
         let connection = {
-            let mut pool = self
-                .read_connections
-                .lock()
-                .map_err(|_| StoreError::Failure("read pool lock poisoned".to_string()))?;
+            let mut pool = lock_read_pool(&self.read_connections);
             pool.pop()
         };
         let connection = match connection {
@@ -180,10 +197,7 @@ impl DatabaseStore {
         &self,
         operation: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut connection = self
-            .write_connection
-            .lock()
-            .map_err(|_| StoreError::Failure("write lock poisoned".to_string()))?;
+        let mut connection = lock_write_connection(&self.write_connection);
         let tx = connection
             .transaction()
             .map_err(|err| StoreError::Failure(err.to_string()))?;

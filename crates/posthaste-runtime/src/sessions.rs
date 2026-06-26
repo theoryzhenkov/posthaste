@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures_util::StreamExt;
 use posthaste_domain::{DomainEvent, Id};
@@ -130,6 +130,16 @@ impl StoredSession {
 }
 
 impl SessionRegistry {
+    fn lock_sessions(&self) -> MutexGuard<'_, HashMap<RuntimeSessionId, StoredSession>> {
+        match self.sessions.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                warn!("session registry mutex was poisoned; recovering");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     pub(crate) fn new(
         views: Arc<ViewRegistry>,
         event_sender: broadcast::Sender<DomainEvent>,
@@ -149,7 +159,7 @@ impl SessionRegistry {
         let session_id = RuntimeSessionId::new(format!("session-{}", Id::generate()));
         let (frames, _) = broadcast::channel(SESSION_FRAME_CHANNEL_CAPACITY);
         debug!(session_id = %session_id.as_str(), "runtime session opened");
-        self.sessions.lock().map_err(lock_error)?.insert(
+        self.lock_sessions().insert(
             session_id.clone(),
             StoredSession {
                 account_scope: caller.account_scope,
@@ -167,12 +177,7 @@ impl SessionRegistry {
             },
         );
         let event_task = self.spawn_notification_forwarder(session_id.clone());
-        if let Some(session) = self
-            .sessions
-            .lock()
-            .map_err(lock_error)?
-            .get_mut(&session_id)
-        {
+        if let Some(session) = self.lock_sessions().get_mut(&session_id) {
             session.event_task = Some(event_task);
         }
         Ok(RuntimeSession { session_id })
@@ -185,7 +190,7 @@ impl SessionRegistry {
         after_seq: Option<RuntimeSessionSeq>,
     ) -> Result<RuntimeFrameSubscription, RuntimeError> {
         let (catch_up, mut receiver) = {
-            let mut sessions = self.sessions.lock().map_err(lock_error)?;
+            let mut sessions = self.lock_sessions();
             let session = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -253,7 +258,7 @@ impl SessionRegistry {
         session_id: RuntimeSessionId,
     ) -> Result<(), RuntimeError> {
         let (open_views, event_task) = {
-            let mut sessions = self.sessions.lock().map_err(lock_error)?;
+            let mut sessions = self.lock_sessions();
             let session = sessions
                 .get(&session_id)
                 .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -307,7 +312,7 @@ impl SessionRegistry {
     ) -> Result<ViewSnapshot, RuntimeError> {
         let session_scope = self.session_scope(&session_id, caller.account_scope.as_deref())?;
         {
-            let sessions = self.sessions.lock().map_err(lock_error)?;
+            let sessions = self.lock_sessions();
             let session = sessions
                 .get(&session_id)
                 .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -326,7 +331,7 @@ impl SessionRegistry {
         session_id: RuntimeSessionId,
         view_id: ViewId,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(&session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -352,7 +357,7 @@ impl SessionRegistry {
         let session_id = request.session_id.as_ref().ok_or_else(|| {
             RuntimeError::invalid_mutation("runtime mutation requires a session id")
         })?;
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -409,7 +414,7 @@ impl SessionRegistry {
         message_id: String,
         diff: MessageChangeDiff,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -438,7 +443,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         seq: RuntimeSessionSeq,
     ) -> Result<Option<DiffStep>, RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -452,7 +457,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         seq: RuntimeSessionSeq,
     ) -> Result<Option<DiffStep>, RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -467,7 +472,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         step: DiffStep,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -482,7 +487,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         step: DiffStep,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -500,7 +505,7 @@ impl SessionRegistry {
         &self,
         session_id: &RuntimeSessionId,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -519,7 +524,7 @@ impl SessionRegistry {
         error: Option<RuntimeAdapterError>,
         output: Value,
     ) -> Result<MutationReceipt, RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -551,7 +556,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         caller_scope: Option<&[String]>,
     ) -> Result<Option<Vec<String>>, RuntimeError> {
-        let sessions = self.sessions.lock().map_err(lock_error)?;
+        let sessions = self.lock_sessions();
         let session = sessions
             .get(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -564,7 +569,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         snapshot: ViewSnapshot,
     ) -> Result<(), RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -624,10 +629,7 @@ impl SessionRegistry {
     }
 
     fn forward_view_frame(&self, session_id: &RuntimeSessionId, frame: ViewFrame) -> bool {
-        let mut sessions = match self.sessions.lock().map_err(lock_error) {
-            Ok(sessions) => sessions,
-            Err(_) => return false,
-        };
+        let mut sessions = self.lock_sessions();
         let Some(session) = sessions.get_mut(session_id) else {
             return false;
         };
@@ -641,10 +643,7 @@ impl SessionRegistry {
     }
 
     fn forward_notification(&self, session_id: &RuntimeSessionId, event: DomainEvent) -> bool {
-        let mut sessions = match self.sessions.lock().map_err(lock_error) {
-            Ok(sessions) => sessions,
-            Err(_) => return false,
-        };
+        let mut sessions = self.lock_sessions();
         let Some(session) = sessions.get_mut(session_id) else {
             return false;
         };
@@ -671,7 +670,7 @@ impl SessionRegistry {
         session_id: &RuntimeSessionId,
         caller_scope: Option<&[String]>,
     ) -> Result<Vec<RuntimeFrame>, RuntimeError> {
-        let mut sessions = self.sessions.lock().map_err(lock_error)?;
+        let mut sessions = self.lock_sessions();
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
@@ -887,13 +886,6 @@ fn ensure_caller_matches_session(
             "caller account scope does not match runtime session",
         )),
     }
-}
-
-fn lock_error<T>(_error: T) -> RuntimeError {
-    RuntimeError::new(
-        posthaste_runtime_contract::RuntimeErrorCode::Internal,
-        "runtime session registry lock poisoned",
-    )
 }
 
 #[cfg(test)]
