@@ -127,11 +127,11 @@ jobs:
     needs: resolve-channel
     runs-on: ${{ matrix.os }}
     env:
+      # Resolved by apps/desktop/build.rs into a compile-time constant the binary
+      # self-reports via --print-release-channel (checked by the smoke step), and
+      # passed to the web bundle so the two cannot disagree.
       POSTHASTE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
       POSTHASTE_BUNDLE_VERSION: ${{ needs.resolve-channel.outputs.POSTHASTE_BUNDLE_VERSION }}
-      # Baked into the desktop binary (option_env!) and the web bundle so an
-      # artifact carries its channel; the smoke step greps the sentinel.
-      POSTHASTE_RELEASE_CHANNEL_SENTINEL: posthaste-release-channel=${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
       VITE_RELEASE_CHANNEL: ${{ needs.resolve-channel.outputs.POSTHASTE_RELEASE_CHANNEL }}
     strategy:
       fail-fast: false
