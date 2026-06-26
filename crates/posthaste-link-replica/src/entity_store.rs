@@ -1,4 +1,4 @@
-//! The reactive entity store core (merged slices 2+3, sub-slice 2a).
+//! The reactive entity store core (merged slices 2+3, sub-slices 2a + optimism).
 //!
 //! Generalizes [`crate::MailListReplica`] from a single mail-list view into a
 //! normalized, keyed entity store with register-by-use / drain-dirty reactivity:
@@ -19,13 +19,30 @@
 //! `paging-grows-range`). A **deferred** predicate is never self-evaluated; the
 //! host drives its membership via deltas.
 //!
-//! This sub-slice is authoritative-only: it does not yet fold the outbox
-//! (`posthaste-link-core`'s `MessageReplica`) — that layers on a following
-//! sub-slice over the same entity model. Coverage is held as the watermark `W`
-//! (the sort key of the last held row; `None` = reaches BOTTOM); the full
-//! multi-range `CoverageRange` shape is adopted when jump-to-date lands. The
-//! typed `SortKey` supports the `[receivedAt, id]` composite (the default and
-//! overwhelmingly common sort); views under a different sort are `Deferred`.
+//! ## Optimism
+//!
+//! The store holds a [`MessageReplica`] (the shared convergence engine,
+//! `posthaste-link-core`'s `Replica<MessageConvergence>`) over message fold
+//! state. [`accept_mutation`](EntityStore::accept_mutation) folds an optimistic
+//! assertion into the outbox; [`message`](EntityStore::message) and view
+//! placement read the *projected* state — the confirmed base with pending
+//! folded over it — so optimism is a general property of the store, never stored
+//! as truth (`view-is-pure-fold`). Confirm retires the pending op (the served
+//! base already carries the effect, so it is a visual no-op); a failed settle
+//! drops it and the projection reverts to authoritative state. Pending survives
+//! an unrelated base update (a sibling arrival re-seeds only its own base; the
+//! outbox is untouched and re-folds).
+//!
+//! Counts are **not** derived: a mailbox entity holds server-authoritative count
+//! scalars (the store is partial, so a held-window count is not the true total).
+//! Optimism for counts is a later concern (mutation-id-end-to-end); today a count
+//! delta from the authority is the only path.
+//!
+//! Coverage is held as the watermark `W` (the sort key of the last held row;
+//! `None` = reaches BOTTOM); the full multi-range `CoverageRange` shape is
+//! adopted when jump-to-date lands. The typed `SortKey` supports the
+//! `[receivedAt, id]` composite (the default and overwhelmingly common sort);
+//! views under a different sort are `Deferred`.
 //!
 //! @spec docs/eph/DESIGN-L2-client-link-reactive-store
 //! @spec docs/eph/PLAN-L2-client-link-reactive-store
@@ -35,6 +52,13 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use posthaste_link_core::{
+    MessageAssertion, MessageReplica, MutationId, Outcome, PendingMessageMutation,
+    SettlementOutcome, SettlementResult,
+};
+
+use crate::mail_list::{apply_fold_to_projection, fold_state_from_projection};
 
 /// A changed entity key, reported by [`EntityStore::drain_dirty`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -124,10 +148,15 @@ pub struct MailboxEntity {
     pub total_count: i64,
 }
 
-/// A message entity: the authoritative `MessageSummary` projection.
+/// A message entity: the authoritative `MessageSummary` projection (the base the
+/// outbox folds over). The *optimistic* projection a renderer reads is computed
+/// on [`EntityStore::message`] — never stored. Internal (not exported): the base
+/// projection must not leak past the store's `message()` accessor, which returns
+/// the folded state — exposing it would open a second, non-optimistic
+/// derivation path.
 #[derive(Clone, Debug)]
-pub struct MessageEntity {
-    pub projection: Value,
+struct MessageEntity {
+    projection: Value,
 }
 
 /// A count delta shipped with a message event (atomic per batch — `D3`).
@@ -155,11 +184,20 @@ pub enum StoreUpdate {
 }
 
 /// The reactive entity store. Pure compute: no transport, no persistence.
+///
+/// Holds a [`MessageReplica`] so message optimism is a pure fold over the
+/// confirmed base (keywords + mailbox membership); views and the message read
+/// derive from the projected state. Bases are seeded per-key on ingest; the
+/// outbox is never cleared by a base update, so unconfirmed optimism survives a
+/// re-served snapshot and retires only on settlement.
 #[derive(Default)]
 pub struct EntityStore {
     messages: HashMap<String, MessageEntity>,
     mailboxes: HashMap<String, MailboxEntity>,
     views: HashMap<String, ViewEntity>,
+    /// The message convergence engine: confirmed fold states + the optimistic
+    /// outbox. Keyed by message id (`MessageConvergence::Key = String`).
+    engine: MessageReplica,
     dirty: HashSet<DirtyKey>,
 }
 
@@ -193,7 +231,11 @@ impl EntityStore {
     }
 
     /// Replace a view's held rows and watermark (a served snapshot / page from
-    /// the authority). Used on open, extend, and resync.
+    /// the authority). Used on open, extend, and resync. Does not touch the
+    /// message base or outbox — those are seeded by message ingest and retire on
+    /// settlement, so optimism placed by a prior base survives a re-served
+    /// snapshot. (Base trimming for messages that have left every view is a
+    /// later concern; today bases accumulate per ingest.)
     pub fn set_view_rows(
         &mut self,
         view_id: &str,
@@ -232,9 +274,64 @@ impl EntityStore {
         }
     }
 
+    /// Accept an optimistic message mutation into the outbox (idempotent on
+    /// mutation id). The projected state is re-derived for the affected message
+    /// so reads and view membership reflect the fold immediately. A mutation on
+    /// a message whose base has not yet been ingested is tracked but deferred —
+    /// it folds in once the authoritative projection arrives.
+    pub fn accept_mutation(
+        &mut self,
+        mutation_id: MutationId,
+        message_id: &str,
+        assertion: MessageAssertion,
+    ) {
+        self.engine.accept(PendingMessageMutation {
+            id: mutation_id,
+            key: message_id.to_string(),
+            effect: assertion,
+        });
+        if self.messages.contains_key(message_id) {
+            self.rederive_message(message_id);
+        }
+    }
+
+    /// Settle a pending mutation by its terminal outcome (`Confirmed`/`Failed`).
+    /// `Confirmed` retires the now-redundant pending op (a visual no-op — the
+    /// served base already carries the effect); `Failed` retires it and the
+    /// projection reverts to authoritative state. Out-of-order safe: only the
+    /// named mutation is touched; idempotent on an unknown id.
+    pub fn settle(
+        &mut self,
+        mutation_id: &MutationId,
+        outcome: SettlementOutcome,
+    ) -> SettlementResult {
+        // Look up the affected message before retiring so we can re-fold just it.
+        let key = self
+            .engine
+            .pending()
+            .iter()
+            .find(|held| &held.id == mutation_id)
+            .map(|held| held.key.clone());
+        let result = self.engine.settle(mutation_id, outcome);
+        if let Some(message_id) = key {
+            if self.messages.contains_key(&message_id) {
+                self.rederive_message(&message_id);
+            }
+        }
+        result
+    }
+
+    /// Whether any optimistic mutation is still pending (drives optimistic-UI
+    /// affordances and settle-driven dirty drains).
+    pub fn has_pending(&self) -> bool {
+        self.engine.has_pending()
+    }
+
     fn apply_message(&mut self, message_id: &str, projection: &Value, deleted: bool) {
         if deleted {
             self.messages.remove(message_id);
+            self.engine.remove_base(&message_id.to_string());
+            self.remove_message_from_views(message_id);
         } else {
             self.messages.insert(
                 message_id.to_string(),
@@ -242,13 +339,33 @@ impl EntityStore {
                     projection: projection.clone(),
                 },
             );
+            self.engine.set_base(
+                message_id.to_string(),
+                fold_state_from_projection(projection),
+            );
+            self.rederive_message(message_id);
         }
         self.dirty.insert(DirtyKey::Message(message_id.to_string()));
+    }
 
-        // Place-or-ignore for every evaluable view. Deferred views are left to
-        // the host's deltas. Snapshot the views (id + sort) so we can mutate
-        // without borrowing the map under iteration.
-        let sort_key = sort_key_of(projection, message_id);
+    fn apply_count_delta(&mut self, delta: &CountDelta) {
+        let mailbox = self.mailboxes.entry(delta.mailbox_id.clone()).or_default();
+        mailbox.unread_count = delta.unread_count;
+        mailbox.total_count = delta.total_count;
+        self.dirty.insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
+    }
+
+    /// Re-evaluate a held message's placement across every evaluable view from
+    /// its projected (folded) state, and mark it dirty. Assumes the message is
+    /// held (in `messages`); callers gate on that so an un-ingested message's
+    /// authoritative rows are left untouched (its pending folds in on ingest).
+    fn rederive_message(&mut self, message_id: &str) {
+        let optimistic = self.optimistic_projection(message_id);
+        let row_opt: Option<ViewRow> = optimistic.as_ref().map(|proj| ViewRow {
+            row_key: row_key_of(proj, message_id),
+            message_id: message_id.to_string(),
+            sort_key: sort_key_of(proj, message_id),
+        });
         let views: Vec<(String, SortDirection, ViewPredicate, Option<SortKey>)> = self
             .views
             .iter()
@@ -267,15 +384,15 @@ impl EntityStore {
             }
             let view = self.views.get_mut(&view_id).expect("view present");
             let was_present = view.rows.iter().position(|r| r.message_id == message_id);
-            let place =
-                !deleted && predicate.matches(projection) && in_range(&sort_key, &watermark);
-            let row = ViewRow {
-                row_key: row_key_of(projection, message_id),
-                message_id: message_id.to_string(),
-                sort_key: sort_key.clone(),
+            let place = match (&row_opt, &optimistic) {
+                (Some(row), Some(proj)) => {
+                    predicate.matches(proj) && in_range(&row.sort_key, &watermark)
+                }
+                _ => false,
             };
             let changed = match (place, was_present) {
                 (true, Some(idx)) => {
+                    let row = row_opt.clone().expect("row present when placed");
                     if view.rows[idx] != row {
                         view.rows.remove(idx);
                         insert_sorted(&mut view.rows, row, direction);
@@ -285,7 +402,11 @@ impl EntityStore {
                     }
                 }
                 (true, None) => {
-                    insert_sorted(&mut view.rows, row, direction);
+                    insert_sorted(
+                        &mut view.rows,
+                        row_opt.clone().expect("row present when placed"),
+                        direction,
+                    );
                     true
                 }
                 (false, Some(idx)) => {
@@ -298,18 +419,41 @@ impl EntityStore {
                 self.dirty.insert(DirtyKey::View(view_id));
             }
         }
+        self.dirty.insert(DirtyKey::Message(message_id.to_string()));
     }
 
-    fn apply_count_delta(&mut self, delta: &CountDelta) {
-        let mailbox = self.mailboxes.entry(delta.mailbox_id.clone()).or_default();
-        mailbox.unread_count = delta.unread_count;
-        mailbox.total_count = delta.total_count;
-        self.dirty.insert(DirtyKey::Mailbox(delta.mailbox_id.clone()));
+    /// Drop a message's row from every evaluable view (authoritative removal).
+    fn remove_message_from_views(&mut self, message_id: &str) {
+        let view_ids: Vec<String> = self.views.keys().cloned().collect();
+        for view_id in view_ids {
+            let view = match self.views.get_mut(&view_id) {
+                Some(v) => v,
+                None => continue,
+            };
+            if !view.predicate.is_evaluable() {
+                continue;
+            }
+            if let Some(idx) = view.rows.iter().position(|r| r.message_id == message_id) {
+                view.rows.remove(idx);
+                self.dirty.insert(DirtyKey::View(view_id));
+            }
+        }
     }
 
-    /// Read a message projection (None if not held).
-    pub fn message(&self, message_id: &str) -> Option<&Value> {
-        self.messages.get(message_id).map(|m| &m.projection)
+    /// The optimistic projection for a message: the authoritative base with the
+    /// pending outbox folded over its keywords/mailboxes, or `None` if the
+    /// message is not held or has been optimistically destroyed.
+    fn optimistic_projection(&self, message_id: &str) -> Option<Value> {
+        let base = self.messages.get(message_id)?.projection.clone();
+        match self.engine.project(&message_id.to_string())? {
+            Outcome::Present(state) => Some(apply_fold_to_projection(base, &state)),
+            Outcome::Removed => None,
+        }
+    }
+
+    /// Read a message's optimistic projection (None if not held or destroyed).
+    pub fn message(&self, message_id: &str) -> Option<Value> {
+        self.optimistic_projection(message_id)
     }
 
     /// Read a mailbox's counts.
@@ -373,6 +517,7 @@ fn insert_sorted(rows: &mut Vec<ViewRow>, row: ViewRow, direction: SortDirection
 #[cfg(test)]
 mod tests {
     use super::*;
+    use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome};
     use serde_json::json;
 
     fn summary(id: &str, received_at: &str, mailboxes: &[&str]) -> Value {
@@ -417,6 +562,30 @@ mod tests {
         store.drain_dirty();
         (store, "inbox")
     }
+
+    /// Ingest m2 so it has a confirmed base to fold over (set_view_rows places
+    /// the row but does not seed the base; the projection arrives via ingest).
+    fn ingest_m2(store: &mut EntityStore, keywords: &[&str]) {
+        let mut proj = summary("m2", "2026-04-28T12:00:00Z", &["inbox"]);
+        proj["keywords"] = json!(keywords);
+        proj["isRead"] = json!(keywords.contains(&"$seen"));
+        proj["isFlagged"] = json!(keywords.contains(&"$flagged"));
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m2".into(),
+            projection: proj,
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+    }
+
+    fn flag_assertion() -> MessageAssertion {
+        MessageAssertion::SetKeywords {
+            add: vec!["$flagged".into()],
+            remove: vec![],
+        }
+    }
+
+    // --- authoritative placement (unchanged behavior) ----------------------
 
     #[test]
     fn in_range_arrival_is_placed_at_top_of_desc_view() {
@@ -565,5 +734,142 @@ mod tests {
         // The host drives a deferred view via set_view_rows; a raw mutation
         // does not place a row.
         assert!(store.view_rows("search").unwrap().is_empty());
+    }
+
+    // --- optimism -----------------------------------------------------------
+
+    #[test]
+    fn optimistic_flag_shows_in_message_and_view_before_confirm() {
+        let (mut store, view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+
+        // The message projection reflects the optimistic flag.
+        let proj = store.message("m2").unwrap();
+        assert_eq!(proj["isFlagged"], json!(true));
+        assert_eq!(proj["keywords"], json!(["$flagged"]));
+        // The view row still holds m2 (a flag does not change membership).
+        let ids: Vec<&str> =
+            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        assert_eq!(ids, vec!["m2"]);
+        assert!(store.has_pending());
+        let dirty = store.drain_dirty();
+        assert!(dirty.contains(&DirtyKey::Message("m2".into())));
+    }
+
+    #[test]
+    fn optimistic_archive_drops_row_but_keeps_message() {
+        let (mut store, view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(
+            MutationId("op1".into()),
+            "m2",
+            MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: vec!["archive".into()],
+            },
+        );
+
+        // The inbox view drops m2 (membership moved to archive)...
+        assert!(store.view_rows(view).unwrap().is_empty());
+        // ...but the message is still held (base intact; only the fold moved it).
+        let proj = store.message("m2").unwrap();
+        assert_eq!(proj["mailboxIds"], json!(["archive"]));
+        assert!(store.has_pending());
+    }
+
+    #[test]
+    fn confirm_retires_pending_and_base_carries_the_effect() {
+        let (mut store, _view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        // The authority applies the flag and re-serves the base with it.
+        ingest_m2(&mut store, &["$flagged"]);
+
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(result.retired);
+        assert!(!result.reverted);
+        assert!(!store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+    }
+
+    #[test]
+    fn failed_settle_reverts_the_optimistic_change() {
+        let (mut store, _view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Failed);
+        assert!(result.reverted);
+        assert!(!store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(false));
+    }
+
+    #[test]
+    fn pending_optimism_survives_an_unrelated_base_update() {
+        let (mut store, view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        // A sibling arrival (m0, newer) re-serves its own base WITHOUT the flag.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m0".into(),
+            projection: summary("m0", "2026-04-30T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+
+        // m2's optimism survived the rebase (its pending was not cleared).
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+        assert!(store.has_pending());
+        let ids: Vec<&str> =
+            store.view_rows(view).unwrap().iter().map(|r| r.message_id.as_str()).collect();
+        assert_eq!(ids, vec!["m0", "m2"]);
+    }
+
+    #[test]
+    fn optimistic_destroy_drops_row_and_reverts_on_failure() {
+        let (mut store, view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", MessageAssertion::Destroy);
+        // Optimistically destroyed: row gone, message reads None.
+        assert!(store.view_rows(view).unwrap().is_empty());
+        assert!(store.message("m2").is_none());
+        assert!(store.has_pending());
+
+        // A failed destroy reverts: the row returns.
+        store.settle(&MutationId("op1".into()), SettlementOutcome::Failed);
+        assert!(store.message("m2").is_some());
+        assert_eq!(store.view_rows(view).unwrap().len(), 1);
+        assert!(!store.has_pending());
+    }
+
+    #[test]
+    fn accept_on_uningested_message_is_deferred_not_dropped() {
+        // inbox_view places m2 via set_view_rows but never ingests its
+        // projection, so there is no base to fold over. The mutation is tracked
+        // (pending) and folds in once the base arrives — it does not remove the
+        // authoritative row.
+        let (mut store, view) = inbox_view();
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        assert!(store.has_pending());
+        assert_eq!(store.view_rows(view).unwrap().len(), 1, "row left untouched");
+
+        // The base arrives: optimism folds in.
+        ingest_m2(&mut store, &[]);
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
     }
 }

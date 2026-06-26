@@ -73,12 +73,26 @@ store notifications → cache).
   place-or-ignore against the `[TOP, W]` watermark (`SortKey` composite,
   `received_at`-based), atomic batch (one dirty drain per batch), count deltas as
   server-authoritative scalars, `Deferred` predicate left to the host. Exposed
-  from `link-replica` lib. **Authoritative-only** (no outbox fold yet —
-  `MessageReplica` reuse is the next sub-slice); coverage held as the single
-  watermark (multi-range `CoverageRange` adopted with jump-to-date). 8 tests
-  (place-in-range, ignore-below-watermark, membership-loss removal, deletion,
-  count-delta + dirty, atomic-batch, complete-view, deferred-not-self-maintained);
+  from `link-replica` lib. Coverage held as the single watermark (multi-range
+  `CoverageRange` adopted with jump-to-date). 8 authoritative-placement tests;
   wasm32 + clippy clean.
+
+  **Optimism LANDED (2026-06-26):** the store holds a `MessageReplica`
+  (`Replica<MessageConvergence>`, the shared convergence engine) over message
+  fold state. `accept_mutation` folds an assertion into the outbox;
+  `message`/view placement read the *projected* state (base + pending), so
+  optimism is a pure fold, never stored as truth. `settle(Confirmed)` retires the
+  pending op (a visual no-op — the served base already carries the effect);
+  `settle(Failed)` drops it and the projection reverts. Pending survives an
+  unrelated base update (per-key `set_base` on ingest; the outbox is never
+  cleared by a base update). A mutation on a not-yet-ingested message is tracked
+  but deferred (folds in on ingest; its authoritative row is left untouched).
+  The generic engine (`Replica<C: Convergence>`) makes optimism a property of
+  the store, not message-specific — a future mailbox fold reuses the engine.
+  Counts stay authority-only scalars (derived counts deferred to
+  mutation-id-end-to-end). 8 optimism tests (flag-before-confirm, archive-drops,
+  confirm-carries, failed-revert, pending-survives-rebase, destroy-revert,
+  deferred-on-uningested); 26 link-replica tests green; wasm32 + clippy clean.
 - **2b — Counts on the stream (runtime + store).** Emit `unreadCount`/`total`
   deltas batched with the message event (G3); store ingests into
   `mailbox[id].count`; sidebar reads from the store. **This kills the count/row
@@ -95,6 +109,55 @@ store notifications → cache).
 - **2f — Flip default.** Store on by default once real-browser-validated; the
   legacy REST/invalidation paths become dead code to remove (then realized
   `client-link/L2.md` §4/§5/§6 are rewritten).
+
+### Host-contract preconditions (must land with/before 2e)
+
+These came out of the optimism-fold quality review (`yoyvspnq`/`ukylrwov`).
+The fold math and the divergence guarantees are sound; the risks are all in the
+**host wiring contract** — the cutover (2e) is exactly where they fire, so they
+gate 2e/2f.
+
+- **P1 — Row implies a live base (HIGH).** `ViewRow` carries identity + position
+  only; a row's *content* is read separately via `message(id)`, which returns the
+  *optimistic* projection and `None` unless the message was separately ingested.
+  `set_view_rows` places rows but does **not** seed message bases. So a snapshot
+  that places rows for not-yet-ingested messages yields rows the host cannot
+  render. The structural guard is good (a `ViewRow` cannot carry content, forcing
+  the host through `message()`), but nothing guarantees row-placement and
+  base-ingest arrive together. **Required:** a documented host-protocol invariant
+  — every `set_view_rows` row id must have a live base, delivered atomically in
+  the same batch — plus ideally a debug assertion. The current
+  `accept_on_uningested_message` test encodes the blank-row state as acceptable;
+  revisit it as a *deferred-mutation* case, not a *renderable-row* case.
+- **P2 — Content-only mutations dirty `Message`, not `View` (MED).** A flag
+  (membership unchanged) leaves the row in place, so `rederive_message` emits
+  `DirtyKey::Message` but not `DirtyKey::View`. Correct and efficient, but a
+  host that re-renders rows only on `DirtyKey::View` shows stale flag/read state
+  forever — i.e. reintroduces the original bug class. **Required:** the host must
+  maintain a message→rows reverse fan-out and re-render rows on
+  `DirtyKey::Message`. Make it an explicit contract, not an assumption.
+- **P3 — `ReplaceMailboxes` can transiently stomp concurrent authoritative
+  state (MED, doc caveat).** It is absolute last-writer-wins, not a delta: an
+  optimistic `ReplaceMailboxes([archive])` re-folded over an authority base
+  that independently gained a label `[archive, important]` silently drops
+  `important` until settlement. Not an idempotency violation (folding twice is
+  stable) and bounded to the pending window, but the module doc's "retire is a
+  visual no-op" overclaims — it is only true for the delta assertions
+  (`SetKeywords`/`ApplyDiff`). Pre-existing in `MailListReplica`. **Required:** a
+  doc caveat; consider whether mailbox moves should be carried as deltas
+  (`ApplyDiff`) rather than absolute replaces where the client knows the
+  before-state.
+
+**Not a precondition (resolved in review):** an earlier "orphaned pending
+resurrects stale optimism" concern was retracted — the outbox re-fold that
+causes it is the *same* mechanism that correctly guards a keyword change from
+being reverted by a sync (verified: optimism survives a re-served un-settled
+base), and `message()`/`view_rows`/dirty-set stay consistent through a
+delete+re-seed (no divergence). Whether a removal invalidates an in-flight
+mutation is backend semantics (settled `Failed` → reverts correctly), not a store
+bug; voiding pending on removal was rejected (it discards valid optimism in a
+restore-from-trash). `MessageEntity.projection` was made private to close the
+base-vs-optimistic leak (done).
 
 ## 4. Decisions (to confirm before 2b/2c)
 
