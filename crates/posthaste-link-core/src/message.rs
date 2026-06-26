@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::convergence::Outcome;
+
 /// The subset of canonical message state a mutation's local effect transforms:
 /// keyword set and mailbox membership. Renderer-facing derivations (is_read,
 /// is_flagged) are computed by the caller from `keywords`; the predictor only
@@ -128,12 +130,9 @@ pub enum MessageAssertion {
 
 /// Result of folding assertions over a message: its new state, or removed
 /// (destroyed). Removal is terminal — later assertions over a removed message
-/// are no-ops.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum MessageOutcome {
-    Present(MessageFoldState),
-    Removed,
-}
+/// are no-ops. An alias for the generic [`Outcome<MessageFoldState>`] so the
+/// message fold shares the convergence engine's result type.
+pub type MessageOutcome = Outcome<MessageFoldState>;
 
 /// Apply one assertion's local effect to a message state.
 ///

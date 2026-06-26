@@ -73,8 +73,8 @@ impl MailListReplica {
         self.engine
             .accept(posthaste_link_core::PendingMessageMutation {
                 id: mutation_id,
-                message_id,
-                assertion,
+                key: message_id,
+                effect: assertion,
             });
     }
 
@@ -160,7 +160,7 @@ impl MailListReplica {
 
 /// Read the foldable canonical state (keywords + mailbox ids) out of a row's
 /// presentation projection. Absent/!array fields read as empty.
-fn fold_state_from_projection(projection: &Value) -> MessageFoldState {
+pub(crate) fn fold_state_from_projection(projection: &Value) -> MessageFoldState {
     MessageFoldState {
         keywords: string_array(projection.get("keywords")),
         mailbox_ids: string_array(projection.get("mailboxIds")),
@@ -170,7 +170,7 @@ fn fold_state_from_projection(projection: &Value) -> MessageFoldState {
 /// Write the folded canonical state back into a presentation projection,
 /// re-deriving the read/flag display flags from the keywords and preserving
 /// every other field.
-fn apply_fold_to_projection(mut projection: Value, state: &MessageFoldState) -> Value {
+pub(crate) fn apply_fold_to_projection(mut projection: Value, state: &MessageFoldState) -> Value {
     if let Value::Object(map) = &mut projection {
         map.insert(
             "keywords".to_string(),
