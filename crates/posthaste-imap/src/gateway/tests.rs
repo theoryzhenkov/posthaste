@@ -10,6 +10,7 @@ async fn fetch_identity_uses_configured_sender_identity() {
             mailboxes: Vec::new(),
         },
         store: None,
+        secret_resolver: Arc::new(posthaste_domain::StaticSecretResolver::new("secret")),
     };
 
     let identity = gateway
@@ -181,6 +182,7 @@ async fn fetch_body_reports_clear_unsupported_error() {
             mailboxes: Vec::new(),
         },
         store: None,
+        secret_resolver: Arc::new(posthaste_domain::StaticSecretResolver::new("secret")),
     };
 
     let error = gateway
@@ -269,4 +271,54 @@ fn imap_mailbox_state(highest_uid: Option<ImapUid>) -> ImapMailboxSyncState {
         highest_modseq: None,
         updated_at: "2026-04-27T00:00:00Z".to_string(),
     }
+}
+
+#[derive(Debug)]
+struct CountingResolver {
+    count: std::sync::atomic::AtomicUsize,
+    secret: String,
+}
+
+impl CountingResolver {
+    fn new(secret: impl Into<String>) -> Self {
+        Self {
+            count: std::sync::atomic::AtomicUsize::new(0),
+            secret: secret.into(),
+        }
+    }
+
+    fn call_count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl posthaste_domain::SecretResolver for CountingResolver {
+    async fn resolve_secret(&self) -> Result<String, posthaste_domain::GatewayError> {
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(self.secret.clone())
+    }
+}
+
+#[tokio::test]
+async fn gateway_resolves_fresh_secret_before_each_connection() {
+    let resolver = Arc::new(CountingResolver::new("fresh-secret"));
+    let gateway = LiveImapSmtpGateway {
+        config: test_config(),
+        smtp_config: test_smtp_config(),
+        discovery: DiscoveredImapAccount {
+            capabilities: ImapCapabilities::default(),
+            mailboxes: Vec::new(),
+        },
+        store: None,
+        secret_resolver: resolver.clone(),
+    };
+
+    let imap_config = gateway.resolve_imap_config().await.expect("resolve imap");
+    assert_eq!(imap_config.secret, "fresh-secret");
+    assert_eq!(resolver.call_count(), 1);
+
+    let smtp_config = gateway.resolve_smtp_config().await.expect("resolve smtp");
+    assert_eq!(smtp_config.secret, "fresh-secret");
+    assert_eq!(resolver.call_count(), 2);
 }

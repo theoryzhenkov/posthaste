@@ -36,6 +36,7 @@ fn drafts_mailbox(gateway: &LiveImapSmtpGateway) -> Result<&DiscoveredImapMailbo
 /// @spec docs/L1-outbox#operation-model
 pub(crate) async fn save_imap_draft(
     gateway: &LiveImapSmtpGateway,
+    config: &ImapConnectionConfig,
     account_id: &AccountId,
     request: &SendMessageRequest,
     replace: Option<&MessageId>,
@@ -44,7 +45,8 @@ pub(crate) async fn save_imap_draft(
     let drafts_name = drafts.name.clone();
     let drafts_id = drafts.id.clone();
 
-    let mut raw_message = build_smtp_message(&gateway.smtp_config, request)
+    let smtp_config = &gateway.smtp_config;
+    let mut raw_message = build_smtp_message(smtp_config, request)
         .map_err(imap_error_to_gateway)?
         .formatted();
     // Stamp the stable draft identity as a top-level header so a resumed edit
@@ -63,7 +65,7 @@ pub(crate) async fn save_imap_draft(
         raw_message = prefixed;
     }
 
-    let mut client = connect_authenticated_client(&gateway.config)
+    let mut client = connect_authenticated_client(config)
         .await
         .map_err(imap_error_to_gateway)?;
     client
@@ -89,7 +91,7 @@ pub(crate) async fn save_imap_draft(
     let new_message_id = imap_message_id(&drafts_id, uid_validity, ImapUid(uid.get()));
 
     if let Some(replace) = replace {
-        delete_imap_draft(gateway, account_id, replace).await?;
+        delete_imap_draft(gateway, config, account_id, replace).await?;
     }
 
     Ok(new_message_id)
@@ -105,6 +107,7 @@ pub(crate) async fn save_imap_draft(
 /// @spec docs/L1-outbox#operation-model
 pub(crate) async fn delete_imap_draft(
     gateway: &LiveImapSmtpGateway,
+    config: &ImapConnectionConfig,
     account_id: &AccountId,
     message_id: &MessageId,
 ) -> Result<(), GatewayError> {
@@ -115,7 +118,7 @@ pub(crate) async fn delete_imap_draft(
         if !locations.is_empty() {
             for location in &locations {
                 let mailbox_name = gateway.mailbox_name_for_id(account_id, &location.mailbox_id)?;
-                delete_draft_by_location(gateway, &mailbox_name, location).await?;
+                delete_draft_by_location(gateway, config, &mailbox_name, location).await?;
             }
             return Ok(());
         }
@@ -136,21 +139,22 @@ pub(crate) async fn delete_imap_draft(
                 "unknown IMAP mailbox for draft {message_id} deletion"
             ))
         })?;
-    delete_draft_by_location(gateway, &mailbox_name, &location).await
+    delete_draft_by_location(gateway, config, &mailbox_name, &location).await
 }
 
 /// Capability-aware deletion: UID EXPUNGE under UIDPLUS, otherwise mark `\Deleted`.
 async fn delete_draft_by_location(
     gateway: &LiveImapSmtpGateway,
+    config: &ImapConnectionConfig,
     mailbox_name: &str,
     location: &ImapMessageLocation,
 ) -> Result<(), GatewayError> {
     if gateway.discovery.capabilities.supports_uidplus() {
-        expunge_imap_message_by_location(&gateway.config, mailbox_name, location)
+        expunge_imap_message_by_location(config, mailbox_name, location)
             .await
             .map_err(imap_error_to_gateway)?;
     } else {
-        mark_imap_message_deleted_by_location(&gateway.config, mailbox_name, location)
+        mark_imap_message_deleted_by_location(config, mailbox_name, location)
             .await
             .map_err(imap_error_to_gateway)?;
     }
