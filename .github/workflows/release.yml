@@ -357,11 +357,45 @@ jobs:
           updater_config="\"plugins\":{\"updater\":{\"endpoints\":[\"$POSTHASTE_UPDATER_ENDPOINT\"]}}}"
           if [ "${POSTHASTE_MACOS_SIGNING:-adhoc}" = "developer-id" ]; then
             echo "Building macOS bundle with Apple signing identity: ${APPLE_SIGNING_IDENTITY}"
-            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},${identity_config}${updater_config}"
+            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"hardenedRuntime\":true}},${identity_config}${updater_config}"
           else
             echo "Building macOS bundle with ad-hoc signing. Configure APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD repository secrets to use Apple Developer signing."
-            bun run tauri build --ci $devtools_flag --bundles "${{ matrix.bundle_targets }}" --config "{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
+            macos_bundle_config="{\"build\":{\"beforeBuildCommand\":null},\"bundle\":{${updater}\"macOS\":{\"signingIdentity\":\"-\",\"hardenedRuntime\":false}},${identity_config}${updater_config}"
           fi
+
+          # Tauri's generated bundle_dmg.sh intermittently fails on GitHub macOS
+          # runners with hdiutil "Resource busy" while detaching the staging
+          # image (tauri-apps/tauri#14686). The app is signed, notarized, and
+          # stapled before the DMG step, and the DMG carries no separate
+          # notarization (Tauri only codesigns it), so retrying the whole build
+          # clears the flake; re-notarization only happens on an actual retry.
+          detach_stale_dmg_mounts() {
+            # A failed bundle_dmg.sh can leave the staging volume mounted, which
+            # is what makes the next hdiutil detach report "Resource busy".
+            local vol="/Volumes/${POSTHASTE_PRODUCT_NAME}"
+            if [ -d "$vol" ]; then
+              echo "Detaching stale DMG volume: $vol" >&2
+              hdiutil detach "$vol" -force 2>/dev/null || true
+            fi
+          }
+
+          attempts="${POSTHASTE_MACOS_BUILD_ATTEMPTS:-3}"
+          attempt=1
+          while true; do
+            if bun run tauri build --ci $devtools_flag \
+                --bundles "${{ matrix.bundle_targets }}" \
+                --config "$macos_bundle_config"; then
+              break
+            fi
+            if [ "$attempt" -ge "$attempts" ]; then
+              echo "macOS bundle failed after $attempt attempt(s)." >&2
+              exit 1
+            fi
+            echo "macOS bundle attempt $attempt/$attempts failed (known bundle_dmg.sh/hdiutil flake); cleaning up and retrying..." >&2
+            detach_stale_dmg_mounts
+            attempt=$((attempt + 1))
+            sleep 10
+          done
 
       - name: Print sccache stats
         if: always()
