@@ -109,8 +109,8 @@ pub(crate) fn apply_outbox_overlay(
     for mutation in pending {
         replica.accept(
             mutation.id.clone(),
-            mutation.message_id.clone(),
-            mutation.assertion.clone(),
+            mutation.key.clone(),
+            mutation.effect.clone(),
         );
     }
     if !replica.has_pending() {
@@ -199,8 +199,8 @@ mod tests {
     fn pending(id: &str, message_id: &str, assertion: MessageAssertion) -> PendingMessageMutation {
         PendingMessageMutation {
             id: MutationId(id.to_string()),
-            message_id: message_id.to_string(),
-            assertion,
+            key: message_id.to_string(),
+            effect: assertion,
         }
     }
 

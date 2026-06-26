@@ -576,8 +576,8 @@ impl RuntimeHandle {
             let id = MutationId(request.client_mutation_id.as_str().to_string());
             self.core.outbox.accept(PendingMessageMutation {
                 id: id.clone(),
-                message_id,
-                assertion,
+                key: message_id,
+                effect: assertion,
             });
             id
         });

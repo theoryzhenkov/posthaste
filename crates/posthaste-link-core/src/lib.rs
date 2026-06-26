@@ -19,7 +19,8 @@ mod convergence;
 mod message;
 
 pub use convergence::{
-    MessageBaseUpdate, MessageReplica, MutationId, PendingMessageMutation, SettlementOutcome,
+    BaseUpdate, Convergence, MessageBaseUpdate, MessageConvergence, MessageReplica, MutationId,
+    Outcome, PendingMutation, PendingMessageMutation, Replica, SettlementOutcome,
     SettlementResult,
 };
 pub use message::{
