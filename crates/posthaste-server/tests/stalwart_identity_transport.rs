@@ -6,19 +6,9 @@
 //!
 //! Gated behind `POSTHASTE_STALWART_INTEGRATION=1` like the parity suite.
 
-// The fixture/util modules are shared with the parity suite; this test only uses
-// part of their surface, so silence dead-code warnings for the unused helpers.
-#[allow(dead_code)]
-#[path = "stalwart_provider_parity/fixture.rs"]
-mod fixture;
-#[allow(dead_code)]
-#[path = "stalwart_provider_parity/util.rs"]
-mod util;
-
 use posthaste_domain::{AccountId, MailGateway, Recipient, SendMessageRequest};
 use posthaste_engine::LiveJmapGateway;
-
-use crate::fixture::StalwartFixture;
+use posthaste_testkit::StalwartFixture;
 
 /// End-to-end proof of the stable draft identity: a draft saved with a
 /// `draft_id` stamps `X-Posthaste-Draft-Id`, and a sync reads it back onto the

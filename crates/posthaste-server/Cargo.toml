@@ -64,6 +64,7 @@ async-trait = { workspace = true }
 http-body-util = "0.1"
 posthaste-link-contract = { path = "../posthaste-link-contract" }
 posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-testkit = { path = "../posthaste-testkit" }
 tokio = { workspace = true, features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
 

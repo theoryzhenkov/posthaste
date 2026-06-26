@@ -6,7 +6,7 @@ use posthaste_domain::{
 use posthaste_engine::LiveJmapGateway;
 use posthaste_imap::LiveImapSmtpGateway;
 
-use crate::harness::Harness;
+use posthaste_testkit::Harness;
 
 pub(super) async fn sync_pair(
     harness: &Harness,
