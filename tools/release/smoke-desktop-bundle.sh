@@ -23,6 +23,19 @@ fail() {
   exit 1
 }
 
+# Prove the binary was built on the expected channel. The sentinel is baked in
+# at compile time (apps/desktop/src/lib.rs), so this catches a misbuilt artifact
+# regardless of how the bundle was packaged.
+check_sentinel() {
+  local bin="$1"
+  local expected="posthaste-release-channel=$channel"
+  if ! grep -aq "$expected" "$bin"; then
+    local found
+    found="$(grep -ao 'posthaste-release-channel=[a-z]*' "$bin" | head -n1 || true)"
+    fail "binary channel sentinel mismatch: expected '$expected', found '${found:-none}'"
+  fi
+}
+
 linux_smoke() {
   local appimage
   appimage="$(find "$bundle_dir" -maxdepth 1 -type f -name '*_amd64.AppImage' -print -quit | head -n1)"
@@ -51,14 +64,7 @@ linux_smoke() {
   "$bin" --version >/dev/null || fail "desktop binary --version failed"
   "$bin" --help >/dev/null || fail "desktop binary --help failed"
 
-  # Prove the binary was built on the expected channel. The channel is baked
-  # in as a compile-time sentinel (apps/desktop/src/lib.rs), so this catches a
-  # misbuilt artifact regardless of how the bundle was packaged.
-  sentinel="posthaste-release-channel=$channel"
-  if ! grep -aq "$sentinel" "$bin"; then
-    found="$(grep -ao 'posthaste-release-channel=[a-z]*' "$bin" | head -n1 || true)"
-    fail "binary channel sentinel mismatch: expected '$sentinel', found '${found:-none}'"
-  fi
+  check_sentinel "$bin"
 
   echo "linux smoke passed: $(basename "$appimage")"
 }
@@ -70,10 +76,19 @@ macos_smoke() {
   dmg="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit | head -n1)"
 
   if [ -n "$app" ]; then
-    [ -x "$app/Contents/MacOS/"* ] || fail "macOS .app binary is not executable"
-    echo "macos smoke passed: .app structure ok"
+    local bin
+    bin="$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit | head -n1)"
+    [ -n "$bin" ] || fail "no executable found in $app"
+    [ -x "$bin" ] || fail "macOS .app binary is not executable: $bin"
+
+    "$bin" --version >/dev/null || fail "desktop binary --version failed"
+    "$bin" --help >/dev/null || fail "desktop binary --help failed"
+
+    check_sentinel "$bin"
+
+    echo "macos smoke passed: $(basename "$app")"
   elif [ -n "$dmg" ]; then
-    echo "macos smoke passed: .dmg present"
+    echo "macos smoke passed: .dmg present (sentinel not checked)"
   else
     fail "no macOS bundle found in $bundle_dir"
   fi
