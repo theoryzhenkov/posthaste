@@ -178,14 +178,23 @@ impl AccountSupervisor {
             .await
             .map_err(|_| GatewayError::Unavailable(account_id.to_string()))?;
 
-        if runtime.sync_state.is_syncing() {
+        // Coalesce-or-claim atomically: if a sync is in flight the trigger is
+        // folded into the pending follow-up (drained when that sync finishes);
+        // otherwise the reserved slot enqueues a fresh cycle. Doing the check and
+        // the pending-store under one lock (inside `coalesce_if_syncing`) closes
+        // the lost-wakeup race that previously stranded a trigger between the
+        // drain loop clearing `syncing` and taking `pending`.
+        if runtime
+            .sync_state
+            .coalesce_if_syncing(trigger.clone())
+            .await
+        {
             ph_debug!(
                 events::SUPERVISOR_SYNC_TRIGGER_COALESCED,
                 account_id = %account_id,
                 trigger = trigger.as_str(),
                 "sync trigger coalesced while runtime is already syncing"
             );
-            runtime.sync_state.set_pending(trigger).await;
             drop(permit);
             return Ok(());
         }
