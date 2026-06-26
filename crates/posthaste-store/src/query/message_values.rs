@@ -69,6 +69,31 @@ pub(crate) fn fetch_keywords_tx(
         .map_err(sql_to_store_error)
 }
 
+/// Reads a message's per-message authority-state version within a transaction:
+/// the max IMAP `modseq` across its locations (stored as TEXT, so `CAST AS
+/// INTEGER` for numeric ordering). `None` when the message has no IMAP location
+/// with a modseq (JMAP / mock / local) — those providers have no per-message
+/// version, and the client leaves such bases unguarded.
+/// @spec docs/eph/DESIGN-L2-message-authority-version
+pub(crate) fn fetch_message_version_tx(
+    tx: &Transaction<'_>,
+    account_id: &AccountId,
+    message_id: &MessageId,
+) -> Result<Option<u64>, StoreError> {
+    let version: Option<i64> = tx
+        .query_row(
+            "SELECT MAX(CAST(modseq AS INTEGER))
+             FROM imap_message_location
+             WHERE account_id = ?1 AND message_id = ?2 AND modseq IS NOT NULL",
+            params![account_id.as_str(), message_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sql_to_store_error)?
+        .flatten();
+    Ok(version.map(|value| value as u64))
+}
+
 /// Reads the current `unread_emails`/`total_emails` for a set of mailboxes
 /// within a transaction — the authoritative count point-read attached to a
 /// `message.updated` event so the reactive store's `mailbox[id].count` updates

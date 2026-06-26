@@ -20,6 +20,20 @@ pub async fn send_smtp_message(
     Ok(())
 }
 
+/// Send many messages through a single pooled SMTP transport (one connection
+/// reused across the batch), avoiding a connection storm on the server.
+pub async fn send_smtp_messages(
+    config: &SmtpConnectionConfig,
+    requests: &[SendMessageRequest],
+) -> Result<(), ImapAdapterError> {
+    let transport = smtp_transport(config)?;
+    for request in requests {
+        let message = build_smtp_message(config, request)?;
+        transport.send(message).await?;
+    }
+    Ok(())
+}
+
 /// Submit one message and return the exact RFC 5322 bytes accepted by SMTP.
 pub async fn submit_smtp_message(
     config: &SmtpConnectionConfig,

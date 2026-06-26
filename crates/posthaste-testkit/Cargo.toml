@@ -13,10 +13,17 @@ futures-util = { workspace = true }
 posthaste-authority-runtime = { path = "../posthaste-authority-runtime" }
 posthaste-config = { path = "../posthaste-config" }
 posthaste-domain = { path = "../posthaste-domain" }
+posthaste-imap = { path = "../posthaste-imap" }
+posthaste-link-core = { path = "../posthaste-link-core" }
+posthaste-link-replica = { path = "../posthaste-link-replica" }
 posthaste-runtime-contract = { path = "../posthaste-runtime-contract" }
 posthaste-store = { path = "../posthaste-store" }
+imap-codec = "2.0.0-alpha.7"
+serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
+toml = { workspace = true }
 
 [lints]
 workspace = true

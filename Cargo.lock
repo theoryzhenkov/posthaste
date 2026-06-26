@@ -4217,6 +4217,7 @@ dependencies = [
  "base64 0.22.1",
  "hex",
  "imap-client",
+ "imap-codec",
  "lettre",
  "mail-parser",
  "posthaste-domain",
@@ -4408,13 +4409,20 @@ name = "posthaste-testkit"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "imap-codec",
  "posthaste-authority-runtime",
  "posthaste-config",
  "posthaste-domain",
+ "posthaste-imap",
+ "posthaste-link-core",
+ "posthaste-link-replica",
  "posthaste-runtime-contract",
  "posthaste-store",
+ "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.2",
 ]
 
 [[package]]

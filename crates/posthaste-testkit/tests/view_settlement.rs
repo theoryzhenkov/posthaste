@@ -10,28 +10,11 @@
 //!
 // spec: docs/testing/L1#view-settlement-correctness
 
-use posthaste_domain::{MessageSortField, SortDirection};
-use posthaste_runtime_contract::{
-    ClientMutationId, MailPresentationRequest, MailQueryRequest, MutationRequest, ViewDescriptor,
-};
-use posthaste_testkit::Harness;
+#[path = "common/mod.rs"]
+mod common;
 
-fn mail_list_view(query: &str) -> ViewDescriptor {
-    let request = MailQueryRequest {
-        query: query.to_string(),
-        presentation: MailPresentationRequest::Messages {
-            limit: Some(10),
-            cursor: None,
-            sort_field: MessageSortField::Date,
-            sort_direction: SortDirection::Desc,
-        },
-        visibility: None,
-    };
-    ViewDescriptor {
-        family: "mailList".to_string(),
-        payload: serde_json::to_value(&request).expect("request should serialize"),
-    }
-}
+use posthaste_runtime_contract::{ClientMutationId, MutationRequest};
+use posthaste_testkit::Harness;
 
 fn set_keywords_mutation(account_id: &str, message_id: &str, cmid: &str) -> MutationRequest {
     MutationRequest {
@@ -56,7 +39,7 @@ async fn keyword_toggle_settles_and_recomputes_the_touched_view() {
     let settlement = harness
         .settle(
             set_keywords_mutation(account.as_str(), "m-1", "c-1"),
-            mail_list_view("in:a/inbox"),
+            common::mail_list_view("in:a/inbox"),
         )
         .await;
 
