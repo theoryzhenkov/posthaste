@@ -37,16 +37,6 @@ Account configuration and lifecycle
 | `POST` | `/v1/accounts/{account_id}/logo` | Upload account logo | `upload_account_logo` |
 | `POST` | `/v1/accounts/{account_id}/verify` | Verify account | `verify_account` |
 
-## oauth
-
-Provider OAuth authorization flows
-
-| Method | Path | Summary | Operation |
-| --- | --- | --- | --- |
-| `POST` | `/v1/accounts/{account_id}/oauth/start` | Start account OAuth flow | `start_account_oauth` |
-| `GET` | `/v1/oauth/callback` | Complete OAuth flow | `complete_account_oauth` |
-| `POST` | `/v1/oauth/start` | Start provider OAuth flow | `start_provider_oauth` |
-
 ## mailboxes
 
 Mailboxes and navigation sidebar
@@ -126,14 +116,6 @@ Sync triggers and configuration reload
 | `POST` | `/v1/config:reload` | Reload configuration | `reload_config` |
 | `POST` | `/v1/sources/{source_id}/commands/sync` | Trigger sync | `trigger_sync` |
 
-## events
-
-Server-sent domain event stream
-
-| Method | Path | Summary | Operation |
-| --- | --- | --- | --- |
-| `GET` | `/v1/events` | Stream events | `stream_events` |
-
 ## views
 
 Runtime-owned view snapshots and streams
@@ -164,3 +146,13 @@ Capability-token minting
 | Method | Path | Summary | Operation |
 | --- | --- | --- | --- |
 | `POST` | `/v1/auth/tokens` | Mint a capability token | `create_auth_token` |
+
+## oauth
+
+Provider OAuth authorization flows
+
+| Method | Path | Summary | Operation |
+| --- | --- | --- | --- |
+| `POST` | `/v1/accounts/{account_id}/oauth/start` | Start account OAuth flow | `start_account_oauth` |
+| `GET` | `/v1/oauth/callback` | Complete OAuth flow | `complete_account_oauth` |
+| `POST` | `/v1/oauth/start` | Start provider OAuth flow | `start_provider_oauth` |
