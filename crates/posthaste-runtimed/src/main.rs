@@ -14,9 +14,7 @@ use std::time::Duration;
 use posthaste_api::{
     build_api_router, build_app_state, logging, resolve_roots, serve, ServeOptions, ServerConfig,
 };
-use posthaste_runtime::{
-    build_remote_runtime, AuthorityRuntimeBuildConfig, BackendTransportConfig,
-};
+use posthaste_runtime::{build_remote_runtime, BackendTransportConfig, RuntimeBuildConfig};
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +29,7 @@ async fn main() {
         )
     });
 
-    let build_config = AuthorityRuntimeBuildConfig::new(
+    let build_config = RuntimeBuildConfig::new(
         roots.config_root.clone(),
         roots.state_root.clone(),
         roots.state_root.join("cache"),

@@ -67,7 +67,10 @@ pub const PRINT_RELEASE_CHANNEL_FLAG: &str = "--print-release-channel";
 /// `true` so the caller can exit before starting Tauri. Kept out of `run()` so
 /// it works headless (no event loop, no display).
 pub fn handle_print_release_channel() -> bool {
-    if std::env::args().skip(1).any(|arg| arg == PRINT_RELEASE_CHANNEL_FLAG) {
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == PRINT_RELEASE_CHANNEL_FLAG)
+    {
         println!("{RELEASE_CHANNEL}");
         true
     } else {

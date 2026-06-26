@@ -34,7 +34,7 @@ pub async fn start_server(server_config: ServerConfig) -> ServerHandle {
         None => BackendTransportConfig::InProcess,
     };
 
-    let build_config = AuthorityRuntimeBuildConfig::new(
+    let build_config = RuntimeBuildConfig::new(
         roots.config_root.clone(),
         roots.state_root.clone(),
         roots.state_root.join("cache"),
