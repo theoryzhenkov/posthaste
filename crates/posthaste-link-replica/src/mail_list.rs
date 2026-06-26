@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -108,6 +110,45 @@ impl MailListReplica {
             }
         }
         out
+    }
+
+    /// Apply a runtime delta to the served base. `order` is a list of row
+    /// message ids; when present, rows whose id is absent are dropped and the
+    /// remaining rows are reordered. `upserts` replaces any existing row with
+    /// the same message id. Pending mutations are preserved and re-fold over
+    /// the new base.
+    pub fn apply_delta(&mut self, order: Option<Vec<String>>, upserts: Vec<MailListRow>) {
+        let upsert_by_id: HashMap<String, MailListRow> = upserts
+            .into_iter()
+            .map(|row| (row.message_id.clone(), row))
+            .collect();
+        self.rows = match order {
+            Some(order) => order
+                .into_iter()
+                .filter_map(|id| {
+                    upsert_by_id
+                        .get(&id)
+                        .or_else(|| self.rows.iter().find(|row| row.message_id == id))
+                        .cloned()
+                })
+                .collect(),
+            None => self
+                .rows
+                .iter()
+                .map(|row| {
+                    upsert_by_id
+                        .get(&row.message_id)
+                        .cloned()
+                        .unwrap_or_else(|| row.clone())
+                })
+                .collect(),
+        };
+        self.engine.replace_base(self.rows.iter().map(|row| {
+            (
+                row.message_id.clone(),
+                fold_state_from_projection(&row.projection),
+            )
+        }));
     }
 
     /// Convenience projection that drops only destroyed rows (membership always
@@ -328,5 +369,40 @@ mod tests {
         // A later served base no longer includes m1 (scrolled/refiltered).
         replica.ingest(vec![row("m2", &[], &["inbox"], "B")]);
         assert_eq!(ids(&replica.project_all()), vec!["m2"]);
+    }
+
+    #[test]
+    fn apply_delta_with_order_reorders_and_drops_rows() {
+        let mut replica = MailListReplica::new();
+        replica.ingest(vec![
+            row("m1", &["$seen"], &["inbox"], "A"),
+            row("m2", &[], &["inbox"], "B"),
+        ]);
+        replica.apply_delta(Some(vec!["m2".into(), "m1".into()]), vec![]);
+        assert_eq!(ids(&replica.project_all()), vec!["m2", "m1"]);
+    }
+
+    #[test]
+    fn apply_delta_upsert_replaces_existing_row() {
+        let mut replica = MailListReplica::new();
+        replica.ingest(vec![row("m1", &["$seen"], &["inbox"], "A")]);
+        replica.apply_delta(
+            None,
+            vec![row("m1", &["$seen", "$flagged"], &["inbox"], "A")],
+        );
+        let rows = replica.project_all();
+        assert_eq!(rows[0]["isFlagged"], json!(true));
+    }
+
+    #[test]
+    fn apply_delta_preserves_pending_optimism() {
+        let mut replica = MailListReplica::new();
+        replica.ingest(vec![row("m1", &[], &["inbox"], "A")]);
+        let (id, message, assertion) = flag("m1");
+        replica.accept(id, message, assertion);
+        replica.apply_delta(None, vec![row("m1", &["$seen"], &["inbox"], "A")]);
+        let rows = replica.project_all();
+        assert_eq!(rows[0]["isFlagged"], json!(true));
+        assert!(replica.has_pending());
     }
 }

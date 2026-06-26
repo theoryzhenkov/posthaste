@@ -1,6 +1,14 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_runtimemaillistreplica_free: (a: number, b: number) => void;
+export const runtimemaillistreplica_acceptJson: (a: number, b: number, c: number) => [number, number];
+export const runtimemaillistreplica_applyDeltaJson: (a: number, b: number, c: number) => [number, number];
+export const runtimemaillistreplica_hasPending: (a: number) => number;
+export const runtimemaillistreplica_ingestViewJson: (a: number, b: number, c: number) => [number, number];
+export const runtimemaillistreplica_new: () => number;
+export const runtimemaillistreplica_projectViewJson: (a: number, b: number, c: number) => [number, number, number, number];
+export const runtimemaillistreplica_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
 export const parseMessageMutation: (a: number, b: number) => [number, number, number, number];
 export const __wbg_maillistreplicahandle_free: (a: number, b: number) => void;

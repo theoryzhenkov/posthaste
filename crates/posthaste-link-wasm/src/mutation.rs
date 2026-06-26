@@ -21,8 +21,12 @@ use posthaste_runtime_contract::MutationRequest;
 pub fn parse_message_mutation(request_json: &str) -> Result<Option<String>, JsError> {
     let request: MutationRequest =
         serde_json::from_str(request_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let mutation = MessageMutation::from_request(&request)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    // Unknown or non-foldable message mutations are not errors; the adapter
+    // simply passes them through to the runtime.
+    let mutation = match MessageMutation::from_request(&request) {
+        Ok(mutation) => mutation,
+        Err(_) => return Ok(None),
+    };
     let assertion = match mutation.to_assertion() {
         Some(assertion) => assertion,
         None => return Ok(None),

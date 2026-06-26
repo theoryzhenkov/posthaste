@@ -106,6 +106,125 @@ export class MailListReplicaHandle {
 if (Symbol.dispose) MailListReplicaHandle.prototype[Symbol.dispose] = MailListReplicaHandle.prototype.free;
 
 /**
+ * A mail-list replica that operates on full runtime view-state rows.
+ *
+ * The host owns transport and persistence; this boundary owns the fold.
+ */
+export class RuntimeMailListReplica {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RuntimeMailListReplicaFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_runtimemaillistreplica_free(ptr, 0);
+    }
+    /**
+     * Accept an optimistic mutation by assertion JSON, the same shape used by
+     * `MailListReplicaHandle`.
+     * @param {string} accept_json
+     */
+    acceptJson(accept_json) {
+        const ptr0 = passStringToWasm0(accept_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.runtimemaillistreplica_acceptJson(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Apply a runtime `MailListDelta` to the confirmed base.
+     *
+     * When `order` is present, rows whose `row_key` is absent are dropped and
+     * the rest are reordered; `upserts` replace rows by `row_key`. Pending
+     * mutations are preserved and re-folded.
+     * @param {string} delta_json
+     */
+    applyDeltaJson(delta_json) {
+        const ptr0 = passStringToWasm0(delta_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.runtimemaillistreplica_applyDeltaJson(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @returns {boolean}
+     */
+    hasPending() {
+        const ret = wasm.runtimemaillistreplica_hasPending(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Adopt a served `MailListViewState` rows array as the confirmed base.
+     * Replaces the base and drops any rows no longer present, but keeps
+     * pending mutations so they re-fold over the new base.
+     * @param {string} rows_json
+     */
+    ingestViewJson(rows_json) {
+        const ptr0 = passStringToWasm0(rows_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.runtimemaillistreplica_ingestViewJson(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    constructor() {
+        const ret = wasm.runtimemaillistreplica_new();
+        this.__wbg_ptr = ret >>> 0;
+        RuntimeMailListReplicaFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Return the optimistic rows as a JSON array of full `MailListRowState`.
+     * Pass the viewed concrete `mailbox_id` to drop archive-out rows.
+     * @param {string | null} [mailbox_id]
+     * @returns {string}
+     */
+    projectViewJson(mailbox_id) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            var ptr0 = isLikeNone(mailbox_id) ? 0 : passStringToWasm0(mailbox_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len0 = WASM_VECTOR_LEN;
+            const ret = wasm.runtimemaillistreplica_projectViewJson(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Settle a pending mutation. Returns `true` when the settlement reverted
+     * an optimistic change.
+     * @param {string} mutation_id
+     * @param {string} outcome
+     * @returns {boolean}
+     */
+    settle(mutation_id, outcome) {
+        const ptr0 = passStringToWasm0(mutation_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(outcome, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.runtimemaillistreplica_settle(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+}
+if (Symbol.dispose) RuntimeMailListReplica.prototype[Symbol.dispose] = RuntimeMailListReplica.prototype.free;
+
+/**
  * Swap added↔removed for both the keyword and mailbox facets — the inverse
  * diff applied by undo. Uses `MessageChangeDiff::inverse` in Rust.
  * @param {string} diff_json
@@ -185,6 +304,9 @@ function __wbg_get_imports() {
 const MailListReplicaHandleFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_maillistreplicahandle_free(ptr >>> 0, 1));
+const RuntimeMailListReplicaFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_runtimemaillistreplica_free(ptr >>> 0, 1));
 
 function getStringFromWasm0(ptr, len) {
     ptr = ptr >>> 0;

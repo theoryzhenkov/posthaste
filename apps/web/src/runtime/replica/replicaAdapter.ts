@@ -16,7 +16,6 @@ import type {
   RuntimeFrame,
   RuntimeFrameHandlers,
   RuntimeFrameSubscriptionRequest,
-  RuntimeMailListDelta,
   RuntimeMailListRowState,
   RuntimeMailListViewState,
   RuntimeOpenMessageListViewResult,
@@ -27,13 +26,8 @@ import type {
   RuntimeViewSnapshot,
 } from '../types'
 import type { OkResponse } from '../../api/types'
-import type { ReplicaHandle, ReplicaHandleFactory } from './handle'
-import {
-  applyOptimisticRows,
-  membershipMailbox,
-  replicaRowsFromViewState,
-  settlementVerdict,
-} from './mapping'
+import type { ReplicaHandleFactory, RuntimeReplicaHandle } from './handle'
+import { membershipMailbox, settlementVerdict } from './mapping'
 import type { OutboxStore } from './outboxStore'
 import { parseMessageMutation } from './wasmUtil'
 
@@ -45,30 +39,10 @@ export interface ReplicaAdapterDeps {
 }
 
 interface ViewEntry {
-  handle: ReplicaHandle
+  handle: RuntimeReplicaHandle
   membershipMailbox: string | null
   lastSnapshot: RuntimeViewSnapshot<RuntimeMailListViewState>
   lastProjectionJson: string
-}
-
-/**
- * Reconcile a runtime mail-list delta (replication client-link) into a served row set:
- * when `order` is present, reorder to it and drop rows whose key is absent;
- * then apply `upserts` by `rowKey`. Produces the same served base a whole
- * `viewReplace` would, which the replica then re-ingests (keeping pending).
- */
-function applyRuntimeDelta(
-  rows: RuntimeMailListRowState[],
-  delta: RuntimeMailListDelta,
-): RuntimeMailListRowState[] {
-  const upsertByKey = new Map(delta.upserts.map((row) => [row.rowKey, row]))
-  if (delta.order) {
-    const heldByKey = new Map(rows.map((row) => [row.rowKey, row]))
-    return delta.order
-      .map((key) => upsertByKey.get(key) ?? heldByKey.get(key))
-      .filter((row): row is RuntimeMailListRowState => row != null)
-  }
-  return rows.map((row) => upsertByKey.get(row.rowKey) ?? row)
 }
 
 class ReplicaController {
@@ -89,9 +63,7 @@ class ReplicaController {
     const result =
       await this.deps.base.openRuntimeSessionMessageListView(request)
     const handle = this.deps.makeHandle()
-    handle.ingestJson(
-      JSON.stringify(replicaRowsFromViewState(result.snapshot.data)),
-    )
+    handle.ingestViewJson(JSON.stringify(result.snapshot.data.rows))
     // Rehydrate any unconfirmed intent (durable across reload) over the base.
     for (const record of await this.deps.outbox.all()) {
       handle.acceptJson(
@@ -112,7 +84,7 @@ class ReplicaController {
       lastProjectionJson: '',
     }
     this.views.set(result.viewId, entry)
-    const snapshot = this.projectSnapshot(entry)
+    const snapshot = this.projectView(entry)
     return { viewId: result.viewId, snapshot }
   }
 
@@ -191,11 +163,9 @@ class ReplicaController {
           handlers.onFrame(frame)
           return
         }
-        entry.handle.ingestJson(
-          JSON.stringify(replicaRowsFromViewState(frame.snapshot.data)),
-        )
+        entry.handle.ingestViewJson(JSON.stringify(frame.snapshot.data.rows))
         entry.lastSnapshot = frame.snapshot
-        const snapshot = this.projectSnapshot(entry)
+        const snapshot = this.projectView(entry)
         handlers.onFrame({ ...frame, snapshot })
         return
       }
@@ -205,23 +175,14 @@ class ReplicaController {
           handlers.onFrame(frame)
           return
         }
-        // Fold the runtime delta into the held served base, then re-ingest the
-        // reconstructed base (replace_base keeps unconfirmed optimism). Emit the
-        // folded result as a viewReplace; emitting deltas to the renderer is a
-        // later step (L6 U3c).
-        const rows = applyRuntimeDelta(
-          entry.lastSnapshot.data.rows,
-          frame.delta,
-        )
+        // Delegate delta reconciliation to the WASM replica (which keeps
+        // pending optimism) and emit the folded result as a viewReplace.
+        entry.handle.applyDeltaJson(JSON.stringify(frame.delta))
         entry.lastSnapshot = {
           ...entry.lastSnapshot,
           revision: frame.revision,
-          data: { ...entry.lastSnapshot.data, rows },
         }
-        entry.handle.ingestJson(
-          JSON.stringify(replicaRowsFromViewState(entry.lastSnapshot.data)),
-        )
-        const snapshot = this.projectSnapshot(entry)
+        const snapshot = this.projectView(entry)
         handlers.onFrame({
           type: 'viewReplace',
           sessionSeq: frame.sessionSeq,
@@ -261,7 +222,7 @@ class ReplicaController {
       return
     }
     for (const [viewId, entry] of this.views) {
-      const json = entry.handle.projectJson(entry.membershipMailbox)
+      const json = entry.handle.projectViewJson(entry.membershipMailbox)
       if (json === entry.lastProjectionJson) {
         continue
       }
@@ -276,22 +237,22 @@ class ReplicaController {
     }
   }
 
-  private projectSnapshot(
+  private projectView(
     entry: ViewEntry,
   ): RuntimeViewSnapshot<RuntimeMailListViewState> {
-    const json = entry.handle.projectJson(entry.membershipMailbox)
+    const json = entry.handle.projectViewJson(entry.membershipMailbox)
     return this.snapshotFrom(entry, json)
   }
 
   private snapshotFrom(
     entry: ViewEntry,
-    projectionJson: string,
+    rowsJson: string,
   ): RuntimeViewSnapshot<RuntimeMailListViewState> {
-    entry.lastProjectionJson = projectionJson
-    const projections = JSON.parse(projectionJson) as unknown[]
+    entry.lastProjectionJson = rowsJson
+    const rows = JSON.parse(rowsJson) as RuntimeMailListRowState[]
     return {
       ...entry.lastSnapshot,
-      data: applyOptimisticRows(entry.lastSnapshot.data, projections),
+      data: { ...entry.lastSnapshot.data, rows },
     }
   }
 }
