@@ -12,7 +12,7 @@ use posthaste_domain::{
     ReplaceMailboxesCommand, SecretStore, SendMessageRequest, ServiceError, SetKeywordsCommand,
     SmartMailboxId, StoreError, SyncMode,
 };
-use posthaste_link_contract::{BackendApi, BackendLink};
+use posthaste_link_contract::{message_mutation::MessageMutation, BackendApi, BackendLink};
 use posthaste_link_core::{
     MessageChangeDiff, MessageFoldState, MutationId, PendingMessageMutation,
 };
@@ -28,17 +28,13 @@ use posthaste_runtime_contract::{
 use thiserror::Error;
 use tokio::sync::broadcast;
 
-use crate::mutation_args::{
-    parse_args, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
-    MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs, MessageSetKeywordsMutationArgs,
-    MessageSetReadStateArgs, MessageSetUserTagsArgs, MessageTargetArgs,
-};
 use crate::near_node::{named_message_assertion, RuntimeBackendOutbox};
 use crate::read::ReadCache;
 use crate::secret::SystemSecretStore;
 use crate::sessions::{MutationAcceptance, SessionRegistry};
 use crate::transport::RemoteBackend;
 use crate::views::ViewRegistry;
+use posthaste_runtime_contract::mutation_args::{parse_args, MessageApplyDiffArgs};
 
 const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
@@ -559,67 +555,11 @@ impl RuntimeHandle {
         // below, uniform across names. `diff_eligible` marks mutations whose
         // change-diff is recorded for undo (destroy is non-invertible; applyDiff
         // is the undo/redo replay and never records a fresh diff).
-        let (source_id, message_id, diff_eligible) = match request.name.as_str() {
-            "message.setKeywords" => {
-                let args: MessageSetKeywordsMutationArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.setReadState" => {
-                let args: MessageSetReadStateArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.setFlaggedState" => {
-                let args: MessageSetFlaggedStateArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.setUserTags" => {
-                let args: MessageSetUserTagsArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.moveToMailbox" => {
-                let args: MessageMoveToMailboxArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.replaceMailboxes" => {
-                let args: MessageReplaceMailboxesArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.moveToRole" => {
-                let args: MessageMoveToRoleArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.archive" | "message.trash" | "message.restoreToInbox" => {
-                let args: MessageTargetArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                (args.source_id, args.message_id, true)
-            }
-            "message.destroy" => {
-                let args: MessageTargetArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                // Destroy is the one non-invertible message mutation.
-                (args.source_id, args.message_id, false)
-            }
-            "message.applyDiff" => {
-                let args: MessageApplyDiffArgs = parse_args(&request)?;
-                Self::ensure_account_in_scope(&args.source_id, session_scope.as_deref())?;
-                // applyDiff is the undo/redo vehicle; its history navigation is
-                // owned by `run_apply_diff`. It never records a fresh diff.
-                (args.source_id, args.message_id, false)
-            }
-            _ => {
-                return Err(RuntimeError::invalid_mutation(format!(
-                    "unknown runtime mutation '{}'",
-                    request.name
-                )))
-            }
-        };
+        let mutation = MessageMutation::from_request(&request)?;
+        let source_id = mutation.account_id().to_string();
+        let message_id = mutation.message_id().to_string();
+        Self::ensure_account_in_scope(&source_id, session_scope.as_deref())?;
+        let diff_eligible = mutation.diff_eligible();
         // Before-read for the diff (diff-eligible mutations only). Read before
         // forwarding so the diff captures the pre-apply state.
         let before = if diff_eligible {

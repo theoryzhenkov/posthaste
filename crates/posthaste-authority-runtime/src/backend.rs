@@ -45,12 +45,8 @@ use crate::account_reads::AccountReadService;
 use crate::live_accounts::LiveAccountRuntimeProvider;
 use crate::mail_queries::MailQueryService;
 use crate::mutations::AccountMutationService;
-use posthaste_runtime::mutation_args::{
-    keyword_toggle, parse_args, MessageApplyDiffArgs, MessageMoveToMailboxArgs,
-    MessageMoveToRoleArgs, MessageReplaceMailboxesArgs, MessageSetFlaggedStateArgs,
-    MessageSetKeywordsMutationArgs, MessageSetReadStateArgs, MessageSetUserTagsArgs,
-    MessageTargetArgs,
-};
+use posthaste_link_contract::message_mutation::MessageMutation;
+use posthaste_runtime_contract::mutation_args::keyword_toggle;
 
 /// The backend far node ([replication backend-link L1 §3](../replication/backend-link/L1.md)): owns the
 /// service + store + the live-account supervisor + the event publisher, and
@@ -702,9 +698,9 @@ impl Backend {
         &self,
         request: &MutationRequest,
     ) -> Result<CommandAck, RuntimeError> {
-        match request.name.as_str() {
-            "message.setKeywords" => {
-                let args: MessageSetKeywordsMutationArgs = parse_args(request)?;
+        let mutation = MessageMutation::from_request(request)?;
+        match mutation {
+            MessageMutation::SetKeywords(args) => {
                 self.set_keywords(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -712,8 +708,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.setReadState" => {
-                let args: MessageSetReadStateArgs = parse_args(request)?;
+            MessageMutation::SetReadState(args) => {
                 self.set_keywords(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -721,8 +716,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.setFlaggedState" => {
-                let args: MessageSetFlaggedStateArgs = parse_args(request)?;
+            MessageMutation::SetFlaggedState(args) => {
                 self.set_keywords(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -730,8 +724,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.setUserTags" => {
-                let args: MessageSetUserTagsArgs = parse_args(request)?;
+            MessageMutation::SetUserTags(args) => {
                 self.set_keywords(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -742,8 +735,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.moveToMailbox" => {
-                let args: MessageMoveToMailboxArgs = parse_args(request)?;
+            MessageMutation::MoveToMailbox(args) => {
                 self.replace_mailboxes(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -753,8 +745,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.replaceMailboxes" => {
-                let args: MessageReplaceMailboxesArgs = parse_args(request)?;
+            MessageMutation::ReplaceMailboxes(args) => {
                 self.replace_mailboxes(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -764,8 +755,7 @@ impl Backend {
                 )
                 .await
             }
-            "message.moveToRole" => {
-                let args: MessageMoveToRoleArgs = parse_args(request)?;
+            MessageMutation::MoveToRole(args) => {
                 self.move_message_to_role(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
@@ -773,22 +763,31 @@ impl Backend {
                 )
                 .await
             }
-            "message.archive" | "message.trash" | "message.restoreToInbox" => {
-                let args: MessageTargetArgs = parse_args(request)?;
-                let role = match request.name.as_str() {
-                    "message.archive" => "archive",
-                    "message.trash" => "trash",
-                    _ => "inbox",
-                };
+            MessageMutation::Archive(args) => {
                 self.move_message_to_role(
                     AccountId(args.source_id),
                     MessageId(args.message_id),
-                    role.to_string(),
+                    "archive".to_string(),
                 )
                 .await
             }
-            "message.destroy" => {
-                let args: MessageTargetArgs = parse_args(request)?;
+            MessageMutation::Trash(args) => {
+                self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    "trash".to_string(),
+                )
+                .await
+            }
+            MessageMutation::RestoreToInbox(args) => {
+                self.move_message_to_role(
+                    AccountId(args.source_id),
+                    MessageId(args.message_id),
+                    "inbox".to_string(),
+                )
+                .await
+            }
+            MessageMutation::Destroy(args) => {
                 self.destroy(AccountId(args.source_id), MessageId(args.message_id))
                     .await
             }
@@ -797,8 +796,7 @@ impl Backend {
             // Keywords are a delta (`SetKeywordsCommand`); mailboxes are computed
             // against the current membership and applied as one replace. This is
             // the far-node mirror of the near-node `ApplyDiff` assertion fold.
-            "message.applyDiff" => {
-                let args: MessageApplyDiffArgs = parse_args(request)?;
+            MessageMutation::ApplyDiff(args) => {
                 let account_id = AccountId(args.source_id);
                 let message_id = MessageId(args.message_id);
                 let mut events = Vec::new();
@@ -841,10 +839,6 @@ impl Backend {
                 }
                 Ok(CommandAck { events })
             }
-            _ => Err(RuntimeError::invalid_mutation(format!(
-                "unknown runtime mutation '{}'",
-                request.name
-            ))),
         }
     }
 }

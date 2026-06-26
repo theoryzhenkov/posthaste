@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
 
+pub mod message_mutation;
+
 use posthaste_domain::{
     AccountId, AccountOverview, AddToMailboxCommand, AppSettings, CachedSenderAddress, CommandAck,
     ConversationId, ConversationView, DomainEvent, DraftContent, EventFilter, Identity, MailboxId,
