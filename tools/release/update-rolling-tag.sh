@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Update a lightweight rolling tag to point at a release tag.
+# Move a lightweight rolling tag to point at a release tag.
 #
-# The tag is force-pushed, so a channel's static GitHub Release asset URL always
-# resolves to the latest release for that channel.
+# This only moves the git tag; it does NOT attach release assets. The Tauri
+# updater's channel URL (`releases/download/<channel>/<manifest>`) resolves via
+# a GitHub *release* object for the rolling tag, which is created separately by
+# the `Publish updater manifest to rolling channel release` workflow step.
+# Moving the tag alone is not enough — assets are bound to a release, not a
+# tag.
 #
 # Usage:
 #   update-rolling-tag.sh <channel> <release-tag>
