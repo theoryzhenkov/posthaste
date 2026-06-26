@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -10,6 +10,7 @@ use posthaste_domain::{
     ReplyContext, SendMessageRequest, SetKeywordsCommand, SyncBatch, SyncCursor, SyncObject,
     ThreadId,
 };
+use tokio::sync::Notify;
 
 mod samples;
 mod state;
@@ -77,7 +78,61 @@ impl MockJmapGateway {
     pub fn clear_sync_delay_for_tests() {
         SYNC_DELAY_MILLIS.store(0, Ordering::SeqCst);
     }
+
+    /// Gate the next `sync` call for `account_id` at method entry.
+    ///
+    /// The test waits on `entered` to know the sync has begun (i.e. the
+    /// `flush_account` phase has finished and the pull is about to start), then
+    /// releases via `release` to let the sync complete. The returned guard
+    /// removes the gate on drop so a panicking test cannot poison later tests.
+    pub fn gate_sync_at_entry(
+        account_id: &AccountId,
+        entered: Arc<Notify>,
+        release: Arc<Notify>,
+    ) -> SyncGateGuard {
+        let mut gates = SYNC_GATES.lock().expect("sync gates mutex poisoned");
+        gates.insert(
+            account_id.as_str().to_string(),
+            SyncGate { entered, release },
+        );
+        SyncGateGuard {
+            account_id: account_id.as_str().to_string(),
+        }
+    }
+
+    /// Clear every installed sync gate. Mostly useful as a defensive reset in
+    /// tests that do not use the `SyncGateGuard` RAII helper.
+    pub fn clear_sync_gates_for_tests() {
+        let mut gates = SYNC_GATES.lock().expect("sync gates mutex poisoned");
+        gates.clear();
+    }
+
 }
+
+/// Account-scoped sync gates for deterministic coalescing tests. A single
+/// static map is acceptable because tests set gates for account ids they own
+/// and the RAII guard clears them on drop.
+static SYNC_GATES: LazyLock<Mutex<HashMap<String, SyncGate>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone)]
+struct SyncGate {
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+/// RAII guard returned by [`MockJmapGateway::gate_sync_at_entry`].
+pub struct SyncGateGuard {
+    account_id: String,
+}
+
+impl Drop for SyncGateGuard {
+    fn drop(&mut self) {
+        let mut gates = SYNC_GATES.lock().expect("sync gates mutex poisoned");
+        gates.remove(&self.account_id);
+    }
+}
+
 
 /// Build a mock mutation outcome from the current revision.
 #[async_trait]
@@ -85,10 +140,22 @@ impl MailGateway for MockJmapGateway {
     /// Return a full snapshot of all mock mailboxes and messages.
     async fn sync(
         &self,
-        _account_id: &AccountId,
+        account_id: &AccountId,
         _cursors: &[SyncCursor],
         _progress: Option<posthaste_domain::SyncProgressReporter>,
     ) -> Result<SyncBatch, GatewayError> {
+        // Account-scoped gate: lets a test block the pull phase until the test
+        // has enqueued more local mutations, deterministically reproducing the
+        // case where a mutation's provider flush is delayed by sync coalescing.
+        let gate = SYNC_GATES
+            .lock()
+            .expect("sync gates mutex poisoned")
+            .get(account_id.as_str())
+            .cloned();
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            gate.release.notified().await;
+        }
         let delay_millis = SYNC_DELAY_MILLIS.load(Ordering::SeqCst);
         if delay_millis > 0 {
             tokio::time::sleep(Duration::from_millis(delay_millis as u64)).await;

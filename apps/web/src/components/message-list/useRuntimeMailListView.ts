@@ -9,6 +9,7 @@ import type {
   RuntimeMailListViewState,
   RuntimeViewSnapshot,
 } from '@/runtime/types'
+import { uiLogger } from '@/logger'
 import type { OperationContext } from '@/observability'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
 import type { SidebarSelection } from '../Sidebar'
@@ -159,6 +160,19 @@ export function useRuntimeMailListView({
                   if (frame.viewId !== openedViewId) {
                     return
                   }
+                  uiLogger.debug(
+                    {
+                      viewId: frame.viewId,
+                      type: frame.type,
+                      sessionSeq: frame.sessionSeq,
+                      revision: frame.revision,
+                      rowCount: frame.snapshot.data.rows.length,
+                      flaggedCount: frame.snapshot.data.rows.filter(
+                        (row) => row.projection.isFlagged,
+                      ).length,
+                    },
+                    'mail-list view frame applied',
+                  )
                   setHasMore(frame.snapshot.data.continuation.hasAfter)
                   queryClient.setQueryData(
                     queryKey,
@@ -172,6 +186,17 @@ export function useRuntimeMailListView({
                   if (frame.viewId !== openedViewId) {
                     return
                   }
+                  uiLogger.debug(
+                    {
+                      viewId: frame.viewId,
+                      type: frame.type,
+                      sessionSeq: frame.sessionSeq,
+                      revision: frame.revision,
+                      upsertCount: frame.delta.upserts.length,
+                      orderChanged: frame.delta.order !== null,
+                    },
+                    'mail-list delta applied',
+                  )
                   queryClient.setQueryData<
                     InfiniteData<MessagePage, string | null>
                   >(queryKey, (current) =>

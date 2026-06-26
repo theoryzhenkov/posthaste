@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
+use tokio::sync::Notify;
 use posthaste_authority_runtime::oauth::OAuthTokenSet;
 use posthaste_authority_runtime::{
     build_authority_runtime, from_api_bridge_for_migration, RuntimeBuildConfig, RuntimeBuildError,
@@ -2639,5 +2640,189 @@ async fn rapid_mutation_burst_coalesces_provider_sync_triggers() {
     assert!(
         additional_cycles <= 2,
         "15 rapid mutations should produce at most 2 additional provider sync cycles, got {additional_cycles}"
+    );
+}
+
+// spec: docs/runtime/mutations/L1#mutation-pipeline-and-catalog
+#[tokio::test]
+async fn rapid_undo_stays_consistent_when_provider_sync_coalesces() {
+    let root = temp_root();
+    let config =
+        RuntimeBuildConfig::new(root.join("config"), root.join("state"), root.join("cache"))
+            .with_secret_store(Arc::new(TestSecretStore::default()));
+    let build = build_authority_runtime(config)
+        .await
+        .expect("authority runtime should build");
+
+    let mut mutation = mock_account_mutation("undo-coalesce-account");
+    mutation.enabled = Some(true);
+    let account = build
+        .handle
+        .create_account(RuntimeCaller::test(), mutation)
+        .await
+        .expect("account should create");
+
+    // Baseline sync seeds the account with the mock gateway's sample data
+    // (mb-inbox, mb-archive, mb-trash; em-001/em-002/em-003). This ensures a
+    // later sync does not delete/recreate mailboxes out from under the open view.
+    build
+        .account_supervisor
+        .sync_account(&account.id)
+        .await
+        .expect("baseline sync should run");
+
+    // Gate the provider sync at entry: the test will apply the undo while the
+    // first sync is blocked after its flush phase, so the undo's provider flush
+    // is coalesced into the follow-up cycle.
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let _gate = MockJmapGateway::gate_sync_at_entry(&account.id, entered.clone(), release.clone());
+
+    let session = build
+        .handle
+        .open_session(RuntimeCaller::test())
+        .await
+        .expect("session should open");
+    let inbox_query = format!("in:{}/mb-inbox", account.id.as_str());
+    let view = build
+        .handle
+        .open_session_view(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            mail_list_descriptor(&inbox_query),
+        )
+        .await
+        .expect("view should open");
+    let view_id = view.view_id;
+
+    let mut subscription = build
+        .handle
+        .subscribe_runtime_frames(
+            RuntimeCaller::test(),
+            session.session_id.clone(),
+            Some(RuntimeSessionSeq::new(0)),
+        )
+        .await
+        .expect("runtime stream should subscribe");
+
+    let unflag = MutationRequest {
+        session_id: Some(session.session_id.clone()),
+        name: "message.setFlaggedState".to_string(),
+        args: serde_json::json!({
+            "sourceId": account.id.as_str(),
+            "messageId": "em-001",
+            "flagged": false,
+        }),
+        client_mutation_id: ClientMutationId::new("unflag-1"),
+        context: None,
+    };
+
+    // Action A: unflag the message. This triggers sync cycle 1.
+    build
+        .handle
+        .run_mutation(RuntimeCaller::test(), unflag)
+        .await
+        .expect("unflag mutation should run");
+
+    // Wait until sync 1 has flushed the flag to the provider and is blocked at
+    // the pull phase.
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("sync should enter the gate");
+
+    // Read the undo step from the history frame broadcast when the unflag was recorded.
+    let history = next_history_frame(&mut subscription).await;
+    let undo_step = match history {
+        RuntimeFrame::MutationHistory {
+            undo_top: Some(step),
+            ..
+        } => step,
+        other => panic!("expected undo_top after unflag mutation, got {other:?}"),
+    };
+
+    // Undo A while sync 1 is still blocked. The undo's provider flush will be
+    // coalesced into sync cycle 2, but locally the message should already show
+    // as flagged again.
+    let undo = MutationRequest {
+        session_id: Some(session.session_id.clone()),
+        name: "message.applyDiff".to_string(),
+        args: serde_json::json!({
+            "sourceId": account.id.as_str(),
+            "messageId": "em-001",
+            "diff": undo_step.diff.inverse(),
+            "undoOf": undo_step.seq,
+        }),
+        client_mutation_id: ClientMutationId::new("undo-1"),
+        context: None,
+    };
+    build
+        .handle
+        .run_mutation(RuntimeCaller::test(), undo)
+        .await
+        .expect("undo mutation should run");
+
+    // Release sync 1. It returns provider state that reflects the unflag but
+    // not yet the undo, so the view should transiently revert to unflagged.
+    release.notify_one();
+
+    // Collect every view frame for this view until no new one arrives for a
+    // short interval.
+    // Collect every view frame for this view until no new one arrives for a
+    // short interval.
+    let mut snapshots: Vec<MailListViewState> = Vec::new();
+    let idle_timeout = Duration::from_millis(500);
+    let mut idle_attempts = 0;
+    loop {
+        match tokio::time::timeout(idle_timeout, subscription.live.next()).await {
+            Ok(Some(frame)) => match frame {
+                RuntimeFrame::ViewSnapshot { view_id: fid, snapshot, .. }
+                | RuntimeFrame::ViewReplace { view_id: fid, snapshot, .. }
+                    if fid == view_id =>
+                {
+                    snapshots.push(mail_list_state(&snapshot));
+                    idle_attempts = 0;
+                }
+                _ => {}
+            },
+            Ok(None) => break,
+            Err(_) => {
+                idle_attempts += 1;
+                if idle_attempts >= 4 {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Helper: is em-001 flagged in this snapshot, if present?
+    let is_flagged = |state: &MailListViewState| -> bool {
+        state
+            .rows
+            .iter()
+            .find(|row| row.projection["id"] == "em-001")
+            .map(|row| row.projection["isFlagged"].as_bool().unwrap_or(false))
+            .unwrap_or(false)
+    };
+
+    assert!(
+        snapshots.len() >= 2,
+        "expected at least the optimistic undo frame and the final frame, got {snapshots:?}"
+    );
+
+    // The runtime/domain outbox overlay keeps the pending undo visible across
+    // the coalesced sync boundary, so the view must never revert to the
+    // pre-undo provider state. If it ever flickered flagged -> unflagged ->
+    // flagged, the overlay has a gap.
+    for window in snapshots.windows(3) {
+        assert!(
+            !(is_flagged(&window[0]) && !is_flagged(&window[1]) && is_flagged(&window[2])),
+            "view flickered when sync coalesced: {snapshots:?}"
+        );
+    }
+
+    // The final observed state must settle to flagged.
+    assert!(
+        is_flagged(snapshots.last().unwrap()),
+        "final frame should settle flagged, got {snapshots:?}"
     );
 }
