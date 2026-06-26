@@ -11,7 +11,7 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     MailListAnchorState, MailListContinuation, MailListProjectionKind, MailListRowState,
     MailListViewState, MailPresentationRequest, MailQueryPage, MailQueryRequest, ReadWatermark,
-    RuntimeCoverage, RuntimeCoverageKind, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
+    CoverageRange, RuntimeCoverage, RuntimeError, RuntimeErrorCode, RuntimeViewSubscription,
     ViewDescriptor, ViewFrame, ViewId, ViewLifecycle, ViewRevision, ViewSnapshot,
 };
 use serde::Deserialize;
@@ -531,9 +531,11 @@ fn local_watermark() -> Option<ReadWatermark> {
 }
 
 fn complete_coverage() -> RuntimeCoverage {
+    // A single range spanning TOP..BOTTOM — the degenerate complete case, used
+    // for single-object views (message detail, conversation) and the all-accounts
+    // status, which genuinely hold their whole result.
     RuntimeCoverage {
-        kind: RuntimeCoverageKind::Complete,
-        details: Value::Null,
+        ranges: vec![CoverageRange { from: None, to: None }],
     }
 }
 
@@ -680,6 +682,22 @@ fn mail_list_state(
             }
         })
         .collect();
+    // Honest coverage over the query's sort order: a top-anchored window from
+    // TOP down to the last held row's sort key, reaching BOTTOM only when there
+    // is no next page. Replaces the hardcoded `Complete` that could not
+    // distinguish "absent because unchanged" from "absent because not held."
+    let has_after = page.next_cursor.is_some();
+    let coverage = if has_after {
+        let to = page
+            .items
+            .last()
+            .map(|message| json!([message.received_at, message.id.as_str()]));
+        RuntimeCoverage {
+            ranges: vec![CoverageRange { from: None, to }],
+        }
+    } else {
+        complete_coverage()
+    };
     Ok(MailListViewState {
         scope: json!({ "query": request.query }),
         projection_kind: MailListProjectionKind::Message,
@@ -698,10 +716,7 @@ fn mail_list_state(
         read_watermark: Some(ReadWatermark {
             value: "local".to_string(),
         }),
-        coverage: RuntimeCoverage {
-            kind: RuntimeCoverageKind::Complete,
-            details: Value::Null,
-        },
+        coverage,
         known_total_count: None,
         pending_mutations: Vec::new(),
         anchor: MailListAnchorState::NotRequested,

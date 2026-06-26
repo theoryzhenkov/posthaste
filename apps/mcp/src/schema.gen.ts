@@ -1486,6 +1486,12 @@ export interface components {
             messages: components["schemas"]["MessageSummary"][];
             subject?: string | null;
         };
+        CoverageRange: {
+            /** @description Inclusive lower bound; `None` = TOP (unbounded above). */
+            from?: unknown;
+            /** @description Inclusive upper bound; `None` = BOTTOM (unbounded below). */
+            to?: unknown;
+        };
         /**
          * @description Request body for `POST /v1/accounts`.
          *
@@ -2093,11 +2099,22 @@ export interface components {
             retryable: boolean;
         };
         RuntimeCoverage: {
-            details?: Record<string, never>;
-            kind: components["schemas"]["RuntimeCoverageKind"];
+            /**
+             * @description The sort-key ranges a consumer holds every matching row within, with no
+             *     gaps. A range is inclusive in the composite sort-key domain (`(sortField,
+             *     dir, id)`): `from = None` is unbounded above (TOP, the greatest sort key);
+             *     `to = None` is unbounded below (BOTTOM). A single range `[TOP, BOTTOM]`
+             *     denotes a complete result; `[TOP, k]` a window from the top down to `k`
+             *     with potentially more rows below. Empty for a view with no held rows and
+             *     no claim of completeness.
+             *
+             *     Replaces the coarse `RuntimeCoverageKind { Complete, Partial, Unknown }`,
+             *     which was hardcoded `Complete` for windowed mail lists and so could not
+             *     distinguish "absent because unchanged" from "absent because not held"
+             *     ([replication client-link L2 coverage redesign](../../docs/eph/DESIGN-L2-client-link-reactive-store.md)).
+             */
+            ranges?: components["schemas"]["CoverageRange"][];
         };
-        /** @enum {string} */
-        RuntimeCoverageKind: "complete" | "partial" | "unknown";
         /** @enum {string} */
         RuntimeErrorCode: "runtime_not_ready" | "invalid_descriptor" | "invalid_mutation" | "invalid_secret" | "invalid_account" | "account_base_url_required" | "account_secret_required" | "account_username_required" | "account_sender_required" | "unauthorized" | "not_found" | "provider_unavailable" | "conflict" | "network_error" | "state_mismatch" | "cannot_calculate_changes" | "gateway_rejected" | "secret_unavailable" | "secret_unsupported" | "storage_failure" | "storage_corrupted" | "config_validation" | "config_io" | "config_parse" | "transport_disconnected" | "internal";
         RuntimeFrame: {

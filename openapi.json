@@ -4952,6 +4952,17 @@
           }
         }
       },
+      "CoverageRange": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "description": "Inclusive lower bound; `None` = TOP (unbounded above)."
+          },
+          "to": {
+            "description": "Inclusive upper bound; `None` = BOTTOM (unbounded below)."
+          }
+        }
+      },
       "CreateAccountRequest": {
         "type": "object",
         "description": "Request body for `POST /v1/accounts`.\n\n@spec docs/L1-api#account-crud-lifecycle",
@@ -6454,25 +6465,15 @@
       },
       "RuntimeCoverage": {
         "type": "object",
-        "required": [
-          "kind"
-        ],
         "properties": {
-          "details": {
-            "type": "object"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/RuntimeCoverageKind"
+          "ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CoverageRange"
+            },
+            "description": "The sort-key ranges a consumer holds every matching row within, with no\ngaps. A range is inclusive in the composite sort-key domain (`(sortField,\ndir, id)`): `from = None` is unbounded above (TOP, the greatest sort key);\n`to = None` is unbounded below (BOTTOM). A single range `[TOP, BOTTOM]`\ndenotes a complete result; `[TOP, k]` a window from the top down to `k`\nwith potentially more rows below. Empty for a view with no held rows and\nno claim of completeness.\n\nReplaces the coarse `RuntimeCoverageKind { Complete, Partial, Unknown }`,\nwhich was hardcoded `Complete` for windowed mail lists and so could not\ndistinguish \"absent because unchanged\" from \"absent because not held\"\n([replication client-link L2 coverage redesign](../../docs/eph/DESIGN-L2-client-link-reactive-store.md))."
           }
         }
-      },
-      "RuntimeCoverageKind": {
-        "type": "string",
-        "enum": [
-          "complete",
-          "partial",
-          "unknown"
-        ]
       },
       "RuntimeErrorCode": {
         "type": "string",

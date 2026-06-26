@@ -219,7 +219,7 @@ use utoipa::OpenApi;
         posthaste_runtime_contract::ViewDescriptor,
         posthaste_runtime_contract::ViewLifecycle,
         posthaste_runtime_contract::RuntimeCoverage,
-        posthaste_runtime_contract::RuntimeCoverageKind,
+        posthaste_runtime_contract::CoverageRange,
         posthaste_runtime_contract::ReadWatermark,
         posthaste_runtime_contract::RuntimeAdapterError,
         posthaste_runtime_contract::RuntimeErrorCode,
