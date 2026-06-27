@@ -484,6 +484,16 @@ impl EntityStore {
         if deleted {
             self.messages.remove(message_id);
             self.engine.remove_base(&message_id.to_string());
+            // Authoritative removal: purge any pending optimism on this entity.
+            // It is gone — the op can neither fold into a base nor revert to
+            // one — so without this it leaks pending forever (has_pending stuck
+            // true; the durable outbox grows unbounded on delete-heavy
+            // workloads). settle(Confirmed)'s version-gated retire can't reach
+            // a deleted entity (no version for the gate), and unconfirmed ops
+            // are never retired there anyway. Scoped to deleted=true — a
+            // *never-ingested* entity is not an authoritative removal; its
+            // deferred pending must survive to fold on a later ingest.
+            self.engine.remove_pending(&message_id.to_string());
             self.remove_message_from_views(message_id);
         } else {
             // Staleness guard: reject a base whose authority-state version is
@@ -1032,6 +1042,47 @@ mod tests {
         assert!(store.has_pending());
         let dirty = store.drain_dirty();
         assert!(dirty.contains(&DirtyKey::Message("m2".into())));
+    }
+
+    #[test]
+    fn authoritative_delete_purges_pending_op() {
+        let (mut store, _view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        // A pending optimistic op on m2 (a flag).
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        assert!(
+            store.has_pending(),
+            "op pending before the authoritative delete"
+        );
+
+        // Authoritative removal of m2 (expunge / rule / another client): a
+        // `message.updated` with `deleted: true` and no projection.
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m2".into(),
+            projection: json!(null),
+            deleted: true,
+            count_deltas: vec![],
+        }]);
+
+        // The op is purged — it can neither fold into nor revert against a
+        // deleted entity, so it must not leak pending forever (`has_pending`
+        // stuck true; the durable outbox growing unbounded on a delete-heavy
+        // workload). Before the fix the version-gated retire on
+        // `settle(Confirmed)` couldn't reach a deleted entity (no version), and
+        // unconfirmed ops are never retired there anyway.
+        assert!(
+            !store.has_pending(),
+            "pending op purged on authoritative delete"
+        );
+        assert!(store.engine.pending().is_empty());
+
+        // A late `settle(Confirmed)` for the now-purged op is a no-op (the op is
+        // absent from pending -> settle finds no key -> no retire), not a leak.
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(!result.retired, "late confirm on the purged op is a no-op");
+        assert!(!store.has_pending());
     }
 
     #[test]
