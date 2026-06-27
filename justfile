@@ -49,16 +49,26 @@ check:
 
 # Run all tests
 test *args:
+    bash tools/disk-guard.sh
     just backend test {{ args }}
     just desktop test
     just web test
 
 # Build everything
 build:
+    bash tools/disk-guard.sh
     just backend build
     just web build
     just desktop build
     just site build
+
+# Report quota usage + every target/ dir under the checkout (the recurring hog).
+disk:
+    bash tools/disk-guard.sh report
+
+# Reclaim disk: clean this workspace's Rust target/ (regenerable build cache).
+reclaim:
+    bash tools/disk-guard.sh clean
 
 # Build the client-layer replica WASM bundle (posthaste-link-wasm) and emit the
 # JS loader + .d.ts into apps/web/src/runtime/wasm/. The replicaAdapter loads
