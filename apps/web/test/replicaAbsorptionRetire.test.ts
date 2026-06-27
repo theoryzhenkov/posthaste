@@ -7,7 +7,7 @@ const present =
   existsSync(join(wasmDir, 'posthaste_link_wasm.js')) &&
   existsSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm'))
 
-function projection(keywords: string[]) {
+function projection(keywords: string[], version?: number) {
   return {
     id: 'm1',
     sourceId: 's',
@@ -17,6 +17,7 @@ function projection(keywords: string[]) {
     isRead: keywords.includes('$seen'),
     isFlagged: keywords.includes('$flagged'),
     subject: 'm1',
+    ...(version !== undefined ? { version } : {}),
   }
 }
 
@@ -177,81 +178,81 @@ describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
     expect(flag()).toBe(true)
     expect(h.hasPending()).toBe(true)
   })
-  it.failing(
-    'BUG 1b: a stale re-serve AFTER confirm reverts a retired flag (needs the version guard)',
-    async () => {
-      const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
-      mod.initSync({
-        module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
-      })
-      const h = new mod.EntityStoreHandle()
-      h.registerViewJson(
-        'v',
-        JSON.stringify({
-          predicate: { inMailbox: 'inbox' },
-          sortField: 'date',
-          sortDirection: 'desc',
-          watermark: null,
-        }),
-      )
-      const flag = () =>
-        JSON.parse(h.projectViewJson('v'))?.[0]?.projection.isFlagged === true
-      h.ingestBatchJson(
-        JSON.stringify([
-          {
-            message: {
-              messageId: 'm1',
-              projection: projection([]),
-              deleted: false,
-              countDeltas: [],
-            },
-          },
-        ]),
-      )
-      h.setViewRowsJson(
-        'v',
-        JSON.stringify([
-          {
-            rowKey: 's:m1',
+  it('BUG 1b guard target: a stale re-serve (older version) after confirm is rejected', async () => {
+    const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+    mod.initSync({
+      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+    })
+    const h = new mod.EntityStoreHandle()
+    h.registerViewJson(
+      'v',
+      JSON.stringify({
+        predicate: { inMailbox: 'inbox' },
+        sortField: 'date',
+        sortDirection: 'desc',
+        watermark: null,
+      }),
+    )
+    const flag = () =>
+      JSON.parse(h.projectViewJson('v'))?.[0]?.projection.isFlagged === true
+    // seed unflagged @ v1
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
             messageId: 'm1',
-            sortKey: { receivedAt: '2026-04-28T12:00:00Z', messageId: 'm1' },
+            projection: projection([], 1),
+            deleted: false,
+            countDeltas: [],
           },
-        ]),
-        'null',
-      )
-      h.acceptMutationJson(
-        JSON.stringify({
-          mutationId: 'op-1',
+        },
+      ]),
+    )
+    h.setViewRowsJson(
+      'v',
+      JSON.stringify([
+        {
+          rowKey: 's:m1',
           messageId: 'm1',
-          assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
-        }),
-      )
-      h.ingestBatchJson(
-        JSON.stringify([
-          {
-            message: {
-              messageId: 'm1',
-              projection: projection(['$flagged']),
-              deleted: false,
-              countDeltas: [],
-            },
+          sortKey: { receivedAt: '2026-04-28T12:00:00Z', messageId: 'm1' },
+        },
+      ]),
+      'null',
+    )
+    h.acceptMutationJson(
+      JSON.stringify({
+        mutationId: 'op-1',
+        messageId: 'm1',
+        assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      }),
+    )
+    // provider applies the flag @ v2; confirm it (the op retires)
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: projection(['$flagged'], 2),
+            deleted: false,
+            countDeltas: [],
           },
-        ]),
-      )
-      h.settle('op-1', 'confirmed')
-      h.ingestBatchJson(
-        JSON.stringify([
-          {
-            message: {
-              messageId: 'm1',
-              projection: projection([]),
-              deleted: false,
-              countDeltas: [],
-            },
+        },
+      ]),
+    )
+    h.settle('op-1', 'confirmed')
+    // late STALE re-serve @ v1 (1 < 2) must be rejected — the flag holds
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: projection([], 1),
+            deleted: false,
+            countDeltas: [],
           },
-        ]),
-      )
-      expect(flag()).toBe(true)
-    },
-  )
+        },
+      ]),
+    )
+    expect(flag()).toBe(true)
+  })
 })

@@ -356,6 +356,23 @@ impl EntityStore {
             self.engine.remove_base(&message_id.to_string());
             self.remove_message_from_views(message_id);
         } else {
+            // Staleness guard: reject a base whose authority-state version is
+            // STRICTLY OLDER than the held one. A late provider re-serve carrying
+            // a snapshot that predates the current state (the post-confirm
+            // flicker tail) must not clobber a newer confirmed base. Equal
+            // versions are idempotent (accepted); absent versions (no provider
+            // version yet) skip the guard, so it is inert until the runtime
+            // stamps `version` on the projection.
+            if let (Some(incoming), Some(held)) = (
+                authority_version(projection),
+                self.messages
+                    .get(message_id)
+                    .and_then(|entity| authority_version(&entity.projection)),
+            ) {
+                if incoming < held {
+                    return;
+                }
+            }
             self.messages.insert(
                 message_id.to_string(),
                 MessageEntity {
@@ -497,6 +514,14 @@ impl EntityStore {
     pub fn drain_dirty(&mut self) -> Vec<DirtyKey> {
         self.dirty.drain().collect()
     }
+}
+
+/// The per-message authority-state version of a projection, if present — an
+/// opaque, provider-causality-ordered counter (IMAP MODSEQ / JMAP object state,
+/// stamped by the runtime). Compared opaquely by [`EntityStore::apply_message`]'s
+/// staleness guard; `None` (no version yet) disables the guard for that message.
+fn authority_version(projection: &Value) -> Option<u64> {
+    projection.get("version").and_then(Value::as_u64)
 }
 
 /// The composite sort key `[receivedAt, id]` read out of a projection.
@@ -650,6 +675,21 @@ mod tests {
         proj["keywords"] = json!(keywords);
         proj["isRead"] = json!(keywords.contains(&"$seen"));
         proj["isFlagged"] = json!(keywords.contains(&"$flagged"));
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m2".into(),
+            projection: proj,
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+    }
+
+    /// Ingest m2 stamped with an authority-state `version` (for the staleness guard).
+    fn ingest_m2_v(store: &mut EntityStore, keywords: &[&str], version: u64) {
+        let mut proj = summary("m2", "2026-04-28T12:00:00Z", &["inbox"]);
+        proj["keywords"] = json!(keywords);
+        proj["isRead"] = json!(keywords.contains(&"$seen"));
+        proj["isFlagged"] = json!(keywords.contains(&"$flagged"));
+        proj["version"] = json!(version);
         store.ingest_batch(vec![StoreUpdate::Message {
             message_id: "m2".into(),
             projection: proj,
@@ -912,6 +952,31 @@ mod tests {
         ingest_m2(&mut store, &["$flagged"]);
         assert!(!store.has_pending());
         assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+    }
+
+    #[test]
+    fn ingest_rejects_a_strictly_older_authority_version() {
+        // The Bug-1b tail: after the op has legitimately retired (confirmed +
+        // absorbed), a late stale provider re-serve carrying an OLDER authority
+        // version must be rejected, so it cannot clobber the newer confirmed base.
+        let (mut store, _view) = inbox_view();
+        ingest_m2_v(&mut store, &[], 1);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        // Provider applies the flag @ v2; confirm it (op retires).
+        ingest_m2_v(&mut store, &["$flagged"], 2);
+        store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(!store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        // A late STALE re-serve @ v1 (1 < 2) is rejected — the flag holds.
+        ingest_m2_v(&mut store, &[], 1);
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        // A genuinely newer state @ v3 (a real unflag) is accepted.
+        ingest_m2_v(&mut store, &[], 3);
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(false));
     }
 
     #[test]
