@@ -42,6 +42,41 @@ function dirtyKey(key: DirtyKey): string {
   return `view:${key.view}`
 }
 
+/** The two foldable facets the absorption check compares. */
+interface Facets {
+  keywords: Set<string>
+  mailboxIds: string[]
+}
+
+function facetsOf(projection: Record<string, unknown>): Facets {
+  return {
+    keywords: new Set((projection.keywords as string[] | undefined) ?? []),
+    mailboxIds: [...((projection.mailboxIds as string[] | undefined) ?? [])],
+  }
+}
+
+/** Fold one assertion's facet delta; `null` for a destroy (not absorbable). */
+function foldFacets(state: Facets, assertion: ReplicaAssertion): Facets | null {
+  if (assertion.kind === 'setKeywords') {
+    const keywords = new Set(state.keywords)
+    for (const k of assertion.remove) keywords.delete(k)
+    for (const k of assertion.add) keywords.add(k)
+    return { keywords, mailboxIds: state.mailboxIds }
+  }
+  if (assertion.kind === 'replaceMailboxes') {
+    return { keywords: state.keywords, mailboxIds: [...assertion.mailboxIds] }
+  }
+  return null
+}
+
+function sameFacets(a: Facets, b: Facets): boolean {
+  if (a.keywords.size !== b.keywords.size) return false
+  for (const k of a.keywords) if (!b.keywords.has(k)) return false
+  const am = [...a.mailboxIds].sort()
+  const bm = [...b.mailboxIds].sort()
+  return am.length === bm.length && am.every((m, i) => m === bm[i])
+}
+
 class FakeHandle implements EntityStoreHandle {
   private readonly messages = new Map<string, Record<string, unknown>>()
   private readonly mailboxes = new Map<
@@ -122,6 +157,9 @@ class FakeHandle implements EntityStoreHandle {
           this.removeMessageFromViews(messageId)
         } else {
           this.messages.set(messageId, projection)
+          // A base update retires any pending op the new base now carries
+          // (mirrors the engine's absorption-gated retire — the flicker fix).
+          this.retireAbsorbed(messageId)
           this.rederive(messageId)
         }
         this.dirty.add(dirtyKey({ message: messageId }))
@@ -155,16 +193,47 @@ class FakeHandle implements EntityStoreHandle {
     this.dirty.add(dirtyKey({ message: messageId }))
   }
 
-  settle(mutationId: string, _outcome: SettlementVerdict): boolean {
+  settle(mutationId: string, outcome: SettlementVerdict): boolean {
     const op = this.pending.get(mutationId)
     if (!op) {
       return false
     }
-    this.pending.delete(mutationId)
+    if (outcome === 'failed') {
+      // Rejection retires unconditionally + reverts to authoritative state.
+      this.pending.delete(mutationId)
+      if (this.messages.has(op.messageId)) {
+        this.rederive(op.messageId)
+      }
+      return true
+    }
+    // Confirmation is absorption-gated: retire only what the base carries, so a
+    // confirmation that outruns the base update never reverts (the flicker fix).
+    this.retireAbsorbed(op.messageId)
     if (this.messages.has(op.messageId)) {
       this.rederive(op.messageId)
     }
-    return _outcome === 'failed' // a failure reverts the fold
+    return false
+  }
+
+  /** Drop pending ops on `messageId` the confirmed base now absorbs (folding
+   * them produces no change), in order — the race-free retire trigger. */
+  private retireAbsorbed(messageId: string): void {
+    const base = this.messages.get(messageId)
+    if (!base) {
+      return
+    }
+    let running = facetsOf(base)
+    for (const [id, op] of [...this.pending.entries()]) {
+      if (op.messageId !== messageId) {
+        continue
+      }
+      const next = foldFacets(running, op.assertion)
+      if (next && sameFacets(next, running)) {
+        this.pending.delete(id)
+      } else if (next) {
+        running = next
+      }
+    }
   }
 
   hasPending(): boolean {
@@ -523,14 +592,16 @@ describe('entityStoreAdapter', () => {
     expect(keywordsOf(frames, 'm1')).toContain('$flagged')
 
     built.harness.push({
-      type: 'mutationSettlement',
+      type: 'mutationNotification',
       sessionSeq: 5,
-      mutationId: 'r-1',
-      state: {
-        clientMutationId: 'c1',
-        name: 'message.setKeywords',
-        status: 'failed',
-        error: null,
+      clientMutationId: 'c1',
+      notification: {
+        type: 'rejected',
+        error: {
+          code: 'conflict',
+          message: 'rejected by the authority',
+          retryable: false,
+        },
       },
     })
     await Promise.resolve()
@@ -538,6 +609,47 @@ describe('entityStoreAdapter', () => {
 
     expect(await outbox.all()).toHaveLength(0)
     expect(keywordsOf(frames, 'm1')).not.toContain('$flagged')
+  })
+
+  it('confirmed before the base update does not revert (flicker fix)', async () => {
+    const built = build()
+    const { adapter, outbox, frames } = built
+    await adapter.openRuntimeSessionMessageListView(viewRequest)
+    await adapter.runRuntimeMutation(setFlagged('m1', 'c1'))
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+
+    // The confirmation outruns the authoritative message.updated. It must NOT
+    // flip the row back to the un-flagged base; the durable outbox clears.
+    built.harness.push({
+      type: 'mutationNotification',
+      sessionSeq: 5,
+      clientMutationId: 'c1',
+      notification: { type: 'confirmed' },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
+    expect(await outbox.all()).toHaveLength(0)
+
+    // The base then catches up; still flagged, no revert anywhere.
+    built.harness.push(
+      messageUpdated(
+        'm1',
+        {
+          id: 'm1',
+          sourceId: 's',
+          receivedAt: '2026-04-29T10:00:00Z',
+          keywords: ['$flagged'],
+          mailboxIds: ['inbox'],
+          isRead: false,
+          isFlagged: true,
+          subject: 'm1',
+        },
+        [],
+      ),
+    )
+    await Promise.resolve()
+    expect(keywordsOf(frames, 'm1')).toContain('$flagged')
   })
 
   it('ingests a message.updated notification and re-projects the row', async () => {

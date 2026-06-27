@@ -157,12 +157,16 @@ export interface RuntimeAdapterError {
   details?: unknown
 }
 
-export interface RuntimeMutationSettlementState {
-  clientMutationId: string
-  name: string
-  status: RuntimeMutationSettlementStatus
-  error: RuntimeAdapterError | null
-}
+/**
+ * A terminal verdict about a named client mutation, carried by the
+ * `mutationNotification` frame and keyed to the client mutation id. `confirmed`
+ * retires the optimistic op by absorption (when the base carries the effect);
+ * `rejected` reverts it and surfaces the error. The non-terminal acks are not
+ * sent — the client tracks the in-flight op in its own outbox.
+ */
+export type RuntimeMutationNotification =
+  | { type: 'confirmed' }
+  | { type: 'rejected'; error: RuntimeAdapterError }
 
 export interface RuntimeMutationReceipt {
   runtimeMutationId: string | null
@@ -198,10 +202,10 @@ export type RuntimeFrame<TData = unknown> =
   | { type: 'viewError'; sessionSeq: number; viewId: string; error: unknown }
   | { type: 'viewClosed'; sessionSeq: number; viewId: string }
   | {
-      type: 'mutationSettlement'
+      type: 'mutationNotification'
       sessionSeq: number
-      mutationId: string
-      state: RuntimeMutationSettlementState
+      clientMutationId: string
+      notification: RuntimeMutationNotification
     }
   | { type: 'notification'; sessionSeq: number; kind: string; payload: unknown }
   | {
