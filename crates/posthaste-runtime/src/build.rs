@@ -1365,27 +1365,27 @@ pub enum RuntimeShutdownError {
 }
 
 #[cfg(test)]
-mod cancel_dispatch_tests {
+mod outbox_lifecycle_tests {
     use super::*;
     use posthaste_domain::MessageSummary;
     use posthaste_link_contract::{DownStream, LinkCoverage};
     use posthaste_runtime_contract::ClientMutationId;
 
-    // A never-invoked `BackendApi`: the cancel-guard's settle path touches only
-    // the session registry, never the backend, so the stub's methods are inert.
-    // (Only the 4 non-defaulted trait methods need bodies; the rest inherit
-    // defaults.)
+    // A never-invoked `BackendApi`: the outbox-lifecycle paths under test touch
+    // only the session registry, never the backend, so the stub's methods are
+    // inert. (Only the 4 non-defaulted trait methods need bodies; the rest
+    // inherit defaults.)
     struct NoopBackend;
     #[async_trait]
     impl BackendApi for NoopBackend {
         async fn forward_mutation(&self, _: MutationRequest) -> Result<MutationReceipt, RuntimeError> {
-            unimplemented!("cancel-guard test does not dispatch")
+            unimplemented!("outbox-lifecycle tests do not dispatch")
         }
         async fn subscribe(&self, _: LinkCoverage) -> Result<DownStream, RuntimeError> {
             Ok(Box::pin(futures_util::stream::empty()))
         }
         async fn query_mail_page(&self, _: MailQueryRequest) -> Result<MailQueryPage, RuntimeError> {
-            unimplemented!("cancel-guard test does not query")
+            unimplemented!("outbox-lifecycle tests do not query")
         }
         async fn current_summary(
             &self,
@@ -1393,6 +1393,37 @@ mod cancel_dispatch_tests {
             _: MessageId,
         ) -> Result<Option<MessageSummary>, RuntimeError> {
             Ok(None)
+        }
+    }
+
+    fn test_session_registry() -> Arc<SessionRegistry> {
+        let event_sender = broadcast::channel(16).0;
+        let outbox = Arc::new(RuntimeBackendOutbox::new());
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopBackend)));
+        let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
+        Arc::new(SessionRegistry::new(views, event_sender))
+    }
+
+    fn accept(
+        sessions: &Arc<SessionRegistry>,
+        caller: &RuntimeCaller,
+        session_id: &RuntimeSessionId,
+        client_mutation_id: &ClientMutationId,
+    ) -> RuntimeMutationId {
+        let request = MutationRequest {
+            session_id: Some(session_id.clone()),
+            name: "message.setKeywords".to_string(),
+            args: serde_json::json!({
+                "sourceId": "outbox-acct",
+                "messageId": "m-1",
+                "command": {"add": ["$flagged"], "remove": []},
+            }),
+            client_mutation_id: client_mutation_id.clone(),
+            context: None,
+        };
+        match sessions.accept_mutation(caller.clone(), &request).unwrap() {
+            MutationAcceptance::New { mutation_id } => mutation_id,
+            MutationAcceptance::Existing(_) => panic!("expected a new mutation"),
         }
     }
 
@@ -1404,32 +1435,13 @@ mod cancel_dispatch_tests {
     // alongside (4 lines, documented at the call site).
     #[tokio::test]
     async fn cancelled_dispatch_guard_settles_failed_not_accepted() {
-        let event_sender = broadcast::channel(16).0;
-        let outbox = Arc::new(RuntimeBackendOutbox::new());
-        let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopBackend)));
-        let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
-        let sessions = Arc::new(SessionRegistry::new(views, event_sender));
-
+        let sessions = test_session_registry();
         let caller = RuntimeCaller::test();
         let session = sessions.open_session(caller.clone()).expect("session opens");
         let session_id = session.session_id.clone();
         let client_mutation_id = ClientMutationId::new("cancel-cmid");
+        let mutation_id = accept(&sessions, &caller, &session_id, &client_mutation_id);
 
-        let request = MutationRequest {
-            session_id: Some(session_id.clone()),
-            name: "message.setKeywords".to_string(),
-            args: serde_json::json!({
-                "sourceId": "cancel-acct",
-                "messageId": "m-1",
-                "command": {"add": ["$flagged"], "remove": []},
-            }),
-            client_mutation_id: client_mutation_id.clone(),
-            context: None,
-        };
-        let mutation_id = match sessions.accept_mutation(caller, &request).unwrap() {
-            MutationAcceptance::New { mutation_id } => mutation_id,
-            MutationAcceptance::Existing(_) => panic!("expected a new mutation"),
-        };
         assert_eq!(
             sessions.mutation_state(&session_id, &client_mutation_id),
             Some(MutationSettlementState::Accepted),
@@ -1450,6 +1462,52 @@ mod cancel_dispatch_tests {
             sessions.mutation_state(&session_id, &client_mutation_id),
             Some(MutationSettlementState::Failed),
             "cancelled dispatch must settle Failed, not leak Accepted"
+        );
+    }
+
+    // Outbox C: a `Failed` (Rejected) verdict is retired only by delivering its
+    // frame — the base never absorbs a rejection — so it must NOT be evicted by
+    // the `Confirmed` pruning cap. Otherwise a disconnect-stranded client never
+    // reverts its optimistic row (no recovery path).
+    #[tokio::test]
+    async fn rejected_verdict_survives_the_confirmed_eviction_window() {
+        let sessions = test_session_registry();
+        let caller = RuntimeCaller::test();
+        let session = sessions.open_session(caller.clone()).expect("session opens");
+        let session_id = session.session_id.clone();
+
+        let rejected_cmid = ClientMutationId::new("rej-1");
+        let rejected_mid = accept(&sessions, &caller, &session_id, &rejected_cmid);
+        sessions
+            .settle_mutation(
+                &session_id,
+                &rejected_mid,
+                MutationSettlementState::Failed,
+                None,
+                serde_json::Value::Null,
+            )
+            .unwrap();
+
+        // Bury the rejection under well over the `Confirmed` pruning cap
+        // (MAX_LATEST_MUTATIONS = 100).
+        for i in 0..105 {
+            let cmid = ClientMutationId::new(format!("cf-{i}"));
+            let mid = accept(&sessions, &caller, &session_id, &cmid);
+            sessions
+                .settle_mutation(
+                    &session_id,
+                    &mid,
+                    MutationSettlementState::Confirmed,
+                    None,
+                    serde_json::Value::Null,
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            sessions.mutation_state(&session_id, &rejected_cmid),
+            Some(MutationSettlementState::Failed),
+            "Rejected verdict must be retained across the Confirmed eviction window"
         );
     }
 }
