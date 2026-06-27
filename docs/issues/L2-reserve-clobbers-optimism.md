@@ -5,7 +5,7 @@ modified: 2026-06-27
 reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
-status: open
+status: done
 priority: high
 depends:
   - path: docs/eph/DESIGN-L2-client-link-reactive-store
@@ -14,7 +14,38 @@ depends:
 
 # Re-serve clobbers optimism (the on-mutation flicker)
 
-**Status: OPEN — user-reported, partially confirmed in code.** Found in the
+**Status: DONE — shipped in nightly `.21` (2026-06-27), independently verified by
+the sibling session.** Both A and B are resolved by the flicker arc:
+
+- **A (membership clobber)** — fixed by the `set_view_rows` reconcile (the `.20`
+  fix: keep only served rows whose folded base still matches the predicate, then
+  re-apply pending optimism) AND, decisively, by the `.21` **version-gated
+  retire** + **role-move optimism**. The reconcile alone was insufficient because
+  a *local move doesn't bump the provider modseq*, so the moved `[archive]@v5`
+  base and a stale `[inbox]@v5` re-serve are equal-version — the op retired on the
+  equal-version echo, leaving nothing to re-fold. The version-gated retire holds
+  the op through the equal-version window (retiring only at the real modseq bump);
+  fix (b) gave archive/trash/role moves the optimism (`ReplaceMailboxes` via the
+  role map) they previously lacked.
+- **B (stale re-serve clobbers confirmed content, the undo flag/read flicker)** —
+  fixed by the per-message authority **version guard** in `apply_message`
+  (reject a base strictly older than the held one) plus the **absorption-gated /
+  confirmed-gated retire** (an op retires only when authority-confirmed AND
+  base-absorbed, so a stale re-serve in the retire window can't clobber).
+
+Resolution commits on `main`: the `.20` reconcile (`set_view_rows`), `.21` fix
+(a) `fix(link-core): gate op retire on a strictly-higher base version`, and `.21`
+fix (b) `fix(link-contract): resolve archive/role moves to replaceMailboxes via
+role map`. Regression coverage: real-WASM `mailboxMoveFlicker` /
+`mailboxMoveEqualVersion` / `archiveOptimismEqualVersion` +
+the Rust `move_op_holds_through_equal_version_then_retires_on_bump`. See
+[[mutation-notification-flicker]]. The deeper single-source-of-truth follow-up
+(retire the redundant re-serve entirely) is tracked in
+[[L2-single-source-view-membership]].
+
+---
+
+**Original report (preserved).** Found in the
 flicker-investigation round (2026-06-27), *not* by the four-reviewer pass (which
 was scoped to the mutation/settlement path and never traced the re-serve path).
 
