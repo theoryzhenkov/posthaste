@@ -387,12 +387,22 @@ pub enum RuntimeFrame {
         #[serde(rename = "viewId")]
         view_id: ViewId,
     },
-    MutationSettlement {
+    /// A verdict about a named client mutation, keyed to its **client** mutation
+    /// id so the client correlates it to the optimistic op in its outbox. The
+    /// authoritative state change (if any) arrives *separately* as a
+    /// `message.updated` domain fact via [`Self::Notification`] — this frame is
+    /// the verdict, not the data, and the two are never merged (facts come from
+    /// the firehose uncorrelated; verdicts come from the command path keyed by
+    /// id). A `Confirmed` retires the op by absorption when the base carries its
+    /// effect (no revert); a `Rejected` reverts the optimism and surfaces the
+    /// error. Replaces the former `MutationSettlement`
+    /// ([mutation.notification design](../../eph/DESIGN-L2-mutation-notification.md)).
+    MutationNotification {
         #[serde(rename = "sessionSeq")]
         session_seq: RuntimeSessionSeq,
-        #[serde(rename = "mutationId")]
-        mutation_id: RuntimeMutationId,
-        state: RuntimeMutationSettlement,
+        #[serde(rename = "clientMutationId")]
+        client_mutation_id: ClientMutationId,
+        notification: MutationNotification,
     },
     Notification {
         #[serde(rename = "sessionSeq")]
@@ -433,7 +443,7 @@ impl RuntimeFrame {
             | Self::ViewDelta { session_seq, .. }
             | Self::ViewError { session_seq, .. }
             | Self::ViewClosed { session_seq, .. }
-            | Self::MutationSettlement { session_seq, .. }
+            | Self::MutationNotification { session_seq, .. }
             | Self::MutationHistory { session_seq, .. }
             | Self::Notification { session_seq, .. }
             | Self::Heartbeat { session_seq } => *session_seq,
@@ -721,14 +731,31 @@ pub struct MutationReceipt {
     pub output: Value,
 }
 
+/// A terminal verdict about a named client mutation, carried by
+/// [`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.
+/// The two outcomes are deliberately the only ones on the wire: `Confirmed` is
+/// otherwise implicit in the base update (it serves the no-op-confirmation and
+/// durable-outbox-clear cases), and `Rejected` is the *only* signal a failed
+/// mutation produces — a rejection changes no state, so no `message.updated`
+/// accompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the
+/// client already tracks the op the moment it enqueues it.
+///
+/// @spec docs/eph/DESIGN-L2-mutation-notification
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeMutationSettlement {
-    pub client_mutation_id: ClientMutationId,
-    pub name: String,
-    pub status: MutationSettlementState,
-    pub error: Option<RuntimeAdapterError>,
+#[cfg_attr(feature = "openapi", schema(rename_all = "camelCase"))]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum MutationNotification {
+    /// The mutation succeeded. The client retires the optimistic op once the
+    /// authoritative base absorbs its effect (or immediately, for a no-op).
+    Confirmed,
+    /// The mutation was rejected (validation, conflict, transport). The client
+    /// drops the op, reverts the optimistic projection, and surfaces the error.
+    Rejected { error: RuntimeAdapterError },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
