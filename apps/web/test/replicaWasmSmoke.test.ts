@@ -100,9 +100,34 @@ describe.skipIf(!artifactsPresent)('entity-store WASM boundary smoke', () => {
     >
     expect(dirty.some((key) => 'message' in key)).toBe(true)
 
-    // Confirmation retires the pending op without reverting optimism.
+    // A confirmation that outruns the base update must NOT revert: the base
+    // has not yet absorbed the flag, so the op stays folded (the flicker fix).
     const reverted = handle.settle('c1', 'confirmed')
     expect(reverted).toBe(false)
+    expect(handle.hasPending()).toBe(true)
+
+    // The authoritative base update carrying the flag retires the op.
+    handle.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: {
+              id: 'm1',
+              sourceId: 'primary',
+              receivedAt: '2026-04-29T10:00:00Z',
+              mailboxIds: ['inbox'],
+              keywords: ['$flagged'],
+              isRead: false,
+              isFlagged: true,
+              subject: 'm1',
+            },
+            deleted: false,
+            countDeltas: [],
+          },
+        },
+      ]),
+    )
     expect(handle.hasPending()).toBe(false)
   })
 })
