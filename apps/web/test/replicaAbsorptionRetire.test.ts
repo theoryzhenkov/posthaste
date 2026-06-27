@@ -20,7 +20,9 @@ function projection(keywords: string[]) {
   }
 }
 
-async function stillPendingAfterAbsorbingBase(
+// Retire is confirmed-gated: an op retires only once the authority confirms it
+// AND the base absorbs its effect.
+async function stillPendingAfterConfirmAndAbsorbingBase(
   seed: string[],
   base: string[],
 ): Promise<boolean> {
@@ -80,20 +82,103 @@ async function stillPendingAfterAbsorbingBase(
       },
     ]),
   )
+  h.settle('op-1', 'confirmed')
   return h.hasPending()
 }
 
 describe.skipIf(!present)('replica absorption-retire (real WASM)', () => {
-  it('retires the op when the base carries the effect (single keyword)', async () => {
-    expect(await stillPendingAfterAbsorbingBase([], ['$flagged'])).toBe(false)
-  })
-  it('realistic projection ($seen present) — op retires (absorption is set-insensitive)', async () => {
+  it('retires on confirm when the base carries the effect (single keyword)', async () => {
     expect(
-      await stillPendingAfterAbsorbingBase(['$seen'], ['$seen', '$flagged']),
+      await stillPendingAfterConfirmAndAbsorbingBase([], ['$flagged']),
     ).toBe(false)
   })
+  it('realistic projection ($seen) — retires on confirm (absorption set-insensitive)', async () => {
+    expect(
+      await stillPendingAfterConfirmAndAbsorbingBase(
+        ['$seen'],
+        ['$seen', '$flagged'],
+      ),
+    ).toBe(false)
+  })
+  it('a stale provider re-serve BEFORE confirm does not revert (confirmed-gating, Bug 1a)', async () => {
+    const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+    mod.initSync({
+      module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+    })
+    const h = new mod.EntityStoreHandle()
+    h.registerViewJson(
+      'v',
+      JSON.stringify({
+        predicate: { inMailbox: 'inbox' },
+        sortField: 'date',
+        sortDirection: 'desc',
+        watermark: null,
+      }),
+    )
+    const flag = () =>
+      JSON.parse(h.projectViewJson('v'))?.[0]?.projection.isFlagged === true
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: projection([]),
+            deleted: false,
+            countDeltas: [],
+          },
+        },
+      ]),
+    )
+    h.setViewRowsJson(
+      'v',
+      JSON.stringify([
+        {
+          rowKey: 's:m1',
+          messageId: 'm1',
+          sortKey: { receivedAt: '2026-04-28T12:00:00Z', messageId: 'm1' },
+        },
+      ]),
+      'null',
+    )
+    h.acceptMutationJson(
+      JSON.stringify({
+        mutationId: 'op-1',
+        messageId: 'm1',
+        assertion: { kind: 'setKeywords', add: ['$flagged'], remove: [] },
+      }),
+    )
+    // The optimistic echo carries the flag (does NOT retire — unconfirmed)...
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: projection(['$flagged']),
+            deleted: false,
+            countDeltas: [],
+          },
+        },
+      ]),
+    )
+    // ...and a stale sync re-serve (no flag) arrives BEFORE confirm: the op is
+    // still folded, so the flag survives (the common during-sync case).
+    h.ingestBatchJson(
+      JSON.stringify([
+        {
+          message: {
+            messageId: 'm1',
+            projection: projection([]),
+            deleted: false,
+            countDeltas: [],
+          },
+        },
+      ]),
+    )
+    expect(flag()).toBe(true)
+    expect(h.hasPending()).toBe(true)
+  })
   it.failing(
-    'BUG: a late stale provider re-serve reverts a retired flag (the flicker)',
+    'BUG 1b: a stale re-serve AFTER confirm reverts a retired flag (needs the version guard)',
     async () => {
       const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
       mod.initSync({
