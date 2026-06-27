@@ -181,6 +181,16 @@ impl<C: Convergence> Replica<C> {
         }
     }
 
+    /// Mark a mutation authority-confirmed **without** retiring it. The caller
+    /// then gates retirement itself via [`retire_absorbed_if`](Self::retire_absorbed_if)
+    /// — the message layer does so on the per-message authority version, so an
+    /// op accepted at version `v` retires only once a base at a STRICTLY HIGHER
+    /// version absorbs it (the equal-version hold that survives the local-echo
+    /// + stale re-serve window). Use [`settle`](Self::settle) for the ungated path (it calls this then retires unconditionally).
+    pub fn mark_confirmed(&mut self, id: &MutationId) {
+        self.confirmed.insert(id.clone());
+    }
+
     /// Retire pending mutations on `key` that are **both authority-confirmed and
     /// absorbed** by the confirmed base (folding the op over the running base
     /// produces no change at its position). Ops are checked in order; a
@@ -200,6 +210,22 @@ impl<C: Convergence> Replica<C> {
     where
         C::State: PartialEq,
     {
+        self.retire_absorbed_if(key, |_| true)
+    }
+
+    /// [`retire_absorbed`](Self::retire_absorbed) with a per-op gate: an op is
+    /// retired only if it is confirmed, absorbed, AND `can_retire(&op.id)`.
+    /// The message layer passes the version gate here — an op accepted at base
+    /// version `v` is `can_retire` only once the current base version is
+    /// strictly greater than `v`, so it holds through the equal-version
+    /// unconfirmed window (a local move does not bump the provider modseq, so
+    /// the moved base and a stale re-serve share the op's accepted-at version;
+    /// retiring there would let the stale re-serve clobber membership).
+    pub fn retire_absorbed_if<F>(&mut self, key: &C::Key, can_retire: F) -> bool
+    where
+        C::State: PartialEq,
+        F: Fn(&MutationId) -> bool,
+    {
         let Some(base) = self.base.get(key).cloned() else {
             // No base: the entity left the working set (authoritative removal).
             // A confirmed op on it is moot (there is nothing to absorb against,
@@ -208,7 +234,11 @@ impl<C: Convergence> Replica<C> {
             let retire: Vec<MutationId> = self
                 .pending
                 .iter()
-                .filter(|held| &held.key == key && self.confirmed.contains(&held.id))
+                .filter(|held| {
+                    &held.key == key
+                        && self.confirmed.contains(&held.id)
+                        && can_retire(&held.id)
+                })
                 .map(|held| held.id.clone())
                 .collect();
             if retire.is_empty() {
@@ -227,7 +257,7 @@ impl<C: Convergence> Replica<C> {
         for held in self.pending.iter().filter(|held| &held.key == key) {
             match C::fold(running.clone(), std::slice::from_ref(&held.effect)) {
                 Outcome::Present(next) if next == running => {
-                    if self.confirmed.contains(&held.id) {
+                    if self.confirmed.contains(&held.id) && can_retire(&held.id) {
                         retire.push(held.id.clone());
                     }
                 }
