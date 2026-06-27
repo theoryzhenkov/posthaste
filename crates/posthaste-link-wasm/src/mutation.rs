@@ -118,12 +118,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_archive_resolves_via_the_role_map() {
+    fn parse_move_to_role_resolves_via_the_role_map() {
         let request = json!({
-            "name": "message.archive",
+            "name": "message.moveToRole",
             "args": {
                 "sourceId": "acct-1",
-                "messageId": "msg-1"
+                "messageId": "msg-1",
+                "role": "archive"
             },
             "clientMutationId": "op-1"
         });

@@ -31,9 +31,6 @@ pub enum MessageMutation {
     MoveToMailbox(MessageMoveToMailboxArgs),
     MoveToRole(MessageMoveToRoleArgs),
     ReplaceMailboxes(MessageReplaceMailboxesArgs),
-    Archive(MessageTargetArgs),
-    Trash(MessageTargetArgs),
-    RestoreToInbox(MessageTargetArgs),
     Destroy(MessageTargetArgs),
     ApplyDiff(MessageApplyDiffArgs),
 }
@@ -49,9 +46,6 @@ impl MessageMutation {
             "message.moveToMailbox" => MessageMutation::MoveToMailbox(parse_args(request)?),
             "message.moveToRole" => MessageMutation::MoveToRole(parse_args(request)?),
             "message.replaceMailboxes" => MessageMutation::ReplaceMailboxes(parse_args(request)?),
-            "message.archive" => MessageMutation::Archive(parse_args(request)?),
-            "message.trash" => MessageMutation::Trash(parse_args(request)?),
-            "message.restoreToInbox" => MessageMutation::RestoreToInbox(parse_args(request)?),
             "message.destroy" => MessageMutation::Destroy(parse_args(request)?),
             "message.applyDiff" => MessageMutation::ApplyDiff(parse_args(request)?),
             _ => {
@@ -73,9 +67,6 @@ impl MessageMutation {
             MessageMutation::MoveToMailbox(args) => &args.source_id,
             MessageMutation::MoveToRole(args) => &args.source_id,
             MessageMutation::ReplaceMailboxes(args) => &args.source_id,
-            MessageMutation::Archive(args) => &args.source_id,
-            MessageMutation::Trash(args) => &args.source_id,
-            MessageMutation::RestoreToInbox(args) => &args.source_id,
             MessageMutation::Destroy(args) => &args.source_id,
             MessageMutation::ApplyDiff(args) => &args.source_id,
         }
@@ -91,9 +82,6 @@ impl MessageMutation {
             MessageMutation::MoveToMailbox(args) => &args.message_id,
             MessageMutation::MoveToRole(args) => &args.message_id,
             MessageMutation::ReplaceMailboxes(args) => &args.message_id,
-            MessageMutation::Archive(args) => &args.message_id,
-            MessageMutation::Trash(args) => &args.message_id,
-            MessageMutation::RestoreToInbox(args) => &args.message_id,
             MessageMutation::Destroy(args) => &args.message_id,
             MessageMutation::ApplyDiff(args) => &args.message_id,
         }
@@ -165,9 +153,6 @@ impl MessageMutation {
                 diff: args.diff.clone(),
             }),
             // Role moves resolve to ReplaceMailboxes via the account's role→id map.
-            MessageMutation::Archive(_) => role_to_replace(roles, "archive"),
-            MessageMutation::Trash(_) => role_to_replace(roles, "trash"),
-            MessageMutation::RestoreToInbox(_) => role_to_replace(roles, "inbox"),
             MessageMutation::MoveToRole(args) => role_to_replace(roles, &args.role),
         }
     }
@@ -215,9 +200,14 @@ mod tests {
     #[test]
     fn role_moves_resolve_to_replace_mailboxes_via_the_role_map() {
         let map = role_map();
-        let target = serde_json::json!({ "sourceId": "acct", "messageId": "m1" });
-
-        let archive = parse("message.archive", target.clone()).to_assertion_with_roles(&map);
+        // A role move (moveToRole) carries the role explicitly — archive/trash/
+        // restoreToInbox are no longer separate mutations (they were 1:1 aliases
+        // of moveToRole with a hardcoded role).
+        let archive = parse(
+            "message.moveToRole",
+            serde_json::json!({ "sourceId": "acct", "messageId": "m1", "role": "archive" }),
+        )
+        .to_assertion_with_roles(&map);
         assert_eq!(
             archive,
             Some(MessageAssertion::ReplaceMailboxes {
@@ -225,7 +215,11 @@ mod tests {
             })
         );
 
-        let restore = parse("message.restoreToInbox", target).to_assertion_with_roles(&map);
+        let restore = parse(
+            "message.moveToRole",
+            serde_json::json!({ "sourceId": "acct", "messageId": "m1", "role": "inbox" }),
+        )
+        .to_assertion_with_roles(&map);
         assert_eq!(
             restore,
             Some(MessageAssertion::ReplaceMailboxes {
@@ -240,8 +234,8 @@ mod tests {
         // no regression (the row leaves only on provider confirm).
         let map = HashMap::new(); // no roles
         let archive = parse(
-            "message.archive",
-            serde_json::json!({ "sourceId": "acct", "messageId": "m1" }),
+            "message.moveToRole",
+            serde_json::json!({ "sourceId": "acct", "messageId": "m1", "role": "archive" }),
         );
         assert_eq!(archive.to_assertion_with_roles(&map), None);
         // And the legacy no-map path still returns None for role moves.

@@ -7,6 +7,7 @@ lifecycle: ephemeral
 type: ISSUE
 status: open
 dependents:
+  - path: docs/issues/L2-sugar-role-mutations
   - path: docs/issues/L2-single-source-view-membership
   - path: docs/issues/L2-reserve-clobbers-optimism
   - path: docs/issues/L2-outbox-op-lifecycle
@@ -38,6 +39,7 @@ own status, severity, location, mechanism, and proposed fix.
 | MEDIUM | [[L2-runtime-nearnode-remote-seam]] | Runtime near-node retires unconditionally on receipt (flicker when remote); overlay not account-scoped; phantom seq gaps; dead Conflict arm. |
 | MEDIUM | [[L2-adapter-reproject-all]] | Adapter re-projects every open view every drain (O(views×rows)); needs a message→views reverse index. |
 | MEDIUM | [[L2-legacy-leftover-structures]] | Dual-path mail-list query (loaded gun); ungated legacy invalidation storm during sync; dead `useDomainEventRefresh`; rejection has no UI. |
+| DONE | [[L2-sugar-role-mutations]] | `archive`/`trash`/`restoreToInbox` were 1:1 aliases of `moveToRole` (no extra authority semantics); collapsed into `moveToRole`. `destroy` kept (genuine permanent deletion). |
 | MEDIUM | [[L2-single-source-view-membership]] | The dual-source membership smell: retire the runtime's redundant incremental-membership re-serve so the firehose is the single source of truth for evaluable views (perf + one channel). The deeper cleanup the `set_view_rows` reconcile is a stepping-stone toward. |
 | MIXED | [[L2-store-correctness-grabbag]] | `in_range` ignores sort direction (HIGH); timestamp lexicographic sort; no base GC; `writeMailboxCount` unknown-account; unguarded async; nits. |
 

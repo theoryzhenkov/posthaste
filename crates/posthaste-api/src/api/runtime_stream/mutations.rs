@@ -5,7 +5,7 @@ use super::*;
     path = "/v1/runtime/sessions/{session_id}/mutations",
     tag = "runtime",
     summary = "Run a runtime mutation",
-    description = "Submits a named mutation to a runtime session (message read/flag/tags/move/archive/trash/restore/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.",
+    description = "Submits a named mutation to a runtime session (message read/flag/tags/move/destroy) and emits mutationSettlement RuntimeFrame values on the session stream.",
     params(
         ("session_id" = String, Path, description = "Runtime session id"),
         RuntimeSessionQuery

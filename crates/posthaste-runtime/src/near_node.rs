@@ -285,10 +285,11 @@ mod tests {
                 remove: vec![],
             }
         );
-        // Role moves are not folded optimistically yet.
+        // Role moves aren't folded at the near-node (no role map here) — the
+        // client adapter resolves them via `to_assertion_with_roles`.
         assert!(named_message_assertion(&request(
-            "message.archive",
-            json!({ "sourceId": "acct", "messageId": "m1" }),
+            "message.moveToRole",
+            json!({ "sourceId": "acct", "messageId": "m1", "role": "archive" }),
         ))
         .is_none());
         // applyDiff folds as an ApplyDiff assertion carrying the request's diff
