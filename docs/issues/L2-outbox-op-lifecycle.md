@@ -89,7 +89,7 @@ doesn't cross — the guard-level test is the reliable seam).
 
 Provenance: four-reviewer Task 2 (MEDIUM-3).
 
-## C — `Rejected` verdicts evicted by the reconnect cap → permanent ghost (MEDIUM)
+## C — `Rejected` verdicts evicted by the reconnect cap → permanent ghost (MEDIUM) — **RESOLVED**
 
 `prune_settled_mutations` evicts oldest terminal verdicts FIFO under a uniform
 `MAX_LATEST_MUTATIONS = 100` (`sessions.rs:77`). `Confirmed` eviction is safe
@@ -102,6 +102,18 @@ the client **never reverts**: a stuck optimistic row with no recovery path.
 **Fix:** retain `Rejected` verdicts under a separate, larger (or unbounded-until-
 acked) budget; never evict an un-replayed rejection. The uniform cap conflates
 two outcomes with very different recoverability.
+
+**Resolved:** went with "never evict an un-replayed rejection." `settle_mutation`
+(`crates/posthaste-runtime/src/sessions.rs`) now pushes only `Confirmed`
+verdicts to the prunable `settled_mutation_ids` deque; `Failed` (Rejected)
+verdicts stay in `latest_mutations` for the session lifetime — retired only by
+delivery, since `collapse_session_frames` re-emits them on reconnect. `Confirmed`
+eviction stays safe (absorption retires the op from the re-served snapshot
+independently of the verdict frame). The separate-budget option was unnecessary:
+rejections are rare and session-bounded, so unbounded-until-session-end is
+acceptable. Regression test `rejected_verdict_survives_the_confirmed_eviction_window`
+buries a `Failed` verdict under 105 `Confirmed` and asserts it is retained
+(fails-without/passes-with).
 
 Provenance: four-reviewer Task 2 (MEDIUM-4).
 
