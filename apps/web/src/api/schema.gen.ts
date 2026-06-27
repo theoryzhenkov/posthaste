@@ -1790,6 +1790,26 @@ export interface components {
             subject?: string | null;
             to: components["schemas"]["Recipient"][];
         };
+        /**
+         * @description A terminal verdict about a named client mutation, carried by
+         *     [`RuntimeFrame::MutationNotification`] and keyed to the client mutation id.
+         *     The two outcomes are deliberately the only ones on the wire: `Confirmed` is
+         *     otherwise implicit in the base update (it serves the no-op-confirmation and
+         *     durable-outbox-clear cases), and `Rejected` is the *only* signal a failed
+         *     mutation produces — a rejection changes no state, so no `message.updated`
+         *     accompanies it. The non-terminal acks (Accepted/Queued) are not emitted: the
+         *     client already tracks the op the moment it enqueues it.
+         *
+         *     @spec docs/eph/DESIGN-L2-mutation-notification
+         */
+        MutationNotification: {
+            /** @enum {string} */
+            type: "confirmed";
+        } | {
+            error: components["schemas"]["RuntimeAdapterError"];
+            /** @enum {string} */
+            type: "rejected";
+        };
         MutationReceipt: {
             clientMutationId: components["schemas"]["ClientMutationId"];
             error?: null | components["schemas"]["RuntimeAdapterError"];
@@ -2150,11 +2170,11 @@ export interface components {
             type: "viewClosed";
             viewId: components["schemas"]["ViewId"];
         } | {
-            mutationId: components["schemas"]["RuntimeMutationId"];
+            clientMutationId: components["schemas"]["ClientMutationId"];
+            notification: components["schemas"]["MutationNotification"];
             sessionSeq: components["schemas"]["RuntimeSessionSeq"];
-            state: components["schemas"]["RuntimeMutationSettlement"];
             /** @enum {string} */
-            type: "mutationSettlement";
+            type: "mutationNotification";
         } | {
             kind: string;
             payload: Record<string, never>;
@@ -2175,12 +2195,6 @@ export interface components {
             type: "heartbeat";
         };
         RuntimeMutationId: string;
-        RuntimeMutationSettlement: {
-            clientMutationId: components["schemas"]["ClientMutationId"];
-            error?: null | components["schemas"]["RuntimeAdapterError"];
-            name: string;
-            status: components["schemas"]["MutationSettlementState"];
-        };
         RuntimeSession: {
             sessionId: components["schemas"]["RuntimeSessionId"];
         };
