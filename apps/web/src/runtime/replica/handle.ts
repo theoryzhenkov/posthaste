@@ -90,3 +90,63 @@ export function loadReplicaHandleFactory(): Promise<ReplicaHandleFactory> {
   })()
   return cachedFactory
 }
+
+/**
+ * The narrow JS surface of the WASM `EntityStoreHandle` (slice 2e), declared
+ * independently of the generated module so the host glue + its tests depend on
+ * this interface. Production resolves it from the generated bundle via
+ * {@link loadEntityStoreHandleFactory}; tests substitute an in-memory fake.
+ *
+ * Values cross the boundary as JSON strings (camelCase, externally-tagged) —
+ * the wire contract is pinned by `entity_store::tests` in `posthaste-link-replica`
+ * + the end-to-end handle tests in `posthaste-link-wasm`.
+ *
+ * @spec docs/eph/DESIGN-L2-client-link-reactive-store (2e)
+ */
+export interface EntityStoreHandle {
+  /** Register a view: `{predicate, sortField, sortDirection, watermark?}`. */
+  registerViewJson(viewId: string, argsJson: string): void
+  /** Replace a view's rows + watermark (a served snapshot / page / resync). */
+  setViewRowsJson(viewId: string, rowsJson: string, watermarkJson: string): void
+  closeView(viewId: string): void
+  /** Apply an authoritative batch atomically. */
+  ingestBatchJson(batchJson: string): void
+  /** Accept an optimistic mutation: `{mutationId, messageId, assertion}`. */
+  acceptMutationJson(acceptJson: string): void
+  /** Settle a pending mutation; returns `true` when a failure reverted. */
+  settle(mutationId: string, outcome: SettlementVerdict): boolean
+  hasPending(): boolean
+  /** A message's optimistic projection JSON, or `"null"`. */
+  messageJson(messageId: string): string
+  /** A mailbox's counts `{unreadCount, totalCount}` JSON, or `"null"`. */
+  mailboxJson(mailboxId: string): string
+  /** A view's rows JSON (`[{rowKey, messageId, sortKey}]`), or `"null"`. */
+  viewRowsJson(viewId: string): string
+  /**
+   * A view's projected rows (`[{rowKey, messageId, sortKey, projection}]`) —
+   * the optimistic projection joined to each row in one call. `"null"` if the
+   * view is not registered.
+   */
+  projectViewJson(viewId: string): string
+  /** Drain the dirty keys (`[{message|mailbox|view: id}]`) since the last drain. */
+  drainDirtyJson(): string
+}
+
+export type EntityStoreHandleFactory = () => EntityStoreHandle
+
+let cachedEntityStoreFactory: Promise<EntityStoreHandleFactory> | undefined
+
+/**
+ * Load + instantiate the WASM `EntityStore` module once, returning a factory
+ * for fresh handles. Cached so the module initializes a single time. The
+ * dynamic import keeps the WASM out of the main bundle unless the
+ * entityStoreAdapter is actually selected (`VITE_ENTITY_STORE`).
+ */
+export function loadEntityStoreHandleFactory(): Promise<EntityStoreHandleFactory> {
+  cachedEntityStoreFactory ??= (async () => {
+    const module = await import('../wasm/posthaste_link_wasm.js')
+    await module.default()
+    return () => new module.EntityStoreHandle() as EntityStoreHandle
+  })()
+  return cachedEntityStoreFactory
+}

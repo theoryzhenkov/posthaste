@@ -195,6 +195,32 @@ impl EntityStoreHandle {
         serde_json::to_string(&rows).unwrap_or_else(|_| "null".to_string())
     }
 
+    /// A view's **projected** rows as a JSON array of `{rowKey, messageId,
+    /// sortKey, projection}` — the optimistic message projection joined to each
+    /// row in one call, so the host re-projects a view with a single round-trip
+    /// per drain (P1: a row implies a live base, so `projection` is non-null for
+    /// every placed row). `"null"` if the view is not registered.
+    #[wasm_bindgen(js_name = projectViewJson)]
+    pub fn project_view_json(&self, view_id: &str) -> String {
+        let rows = match self.inner.view_rows(view_id) {
+            Some(r) => r,
+            None => return "null".to_string(),
+        };
+        let projected: Vec<Value> = rows
+            .iter()
+            .map(|row| {
+                let projection = self.inner.message(&row.message_id);
+                serde_json::json!({
+                    "rowKey": row.row_key,
+                    "messageId": row.message_id,
+                    "sortKey": row.sort_key,
+                    "projection": projection,
+                })
+            })
+            .collect();
+        serde_json::to_string(&projected).unwrap_or_else(|_| "[]".to_string())
+    }
+
     /// Drain the keys changed since the last drain as a JSON array of
     /// `{"message":id}` / `{"mailbox":id}` / `{"view":id}`. The host re-reads
     /// these (re-project views, re-write counts). One drain per batch.

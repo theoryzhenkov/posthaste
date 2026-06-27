@@ -5,8 +5,10 @@ import {
 import { LOG_EVENTS, syncLogger } from '../logger'
 
 import { httpRuntimeAdapter } from './httpAdapter'
+import { loadEntityStoreHandleFactory } from './replica/handle'
 import { loadReplicaHandleFactory } from './replica/handle'
 import { defaultOutboxStore } from './replica/outboxStore'
+import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
 import { createReplicaAdapter } from './replica/replicaAdapter'
 import type { RuntimeAdapter } from './types'
 
@@ -110,6 +112,13 @@ export function isReplicaAdapterActive(): boolean {
   return replicaActive
 }
 
+let entityStoreActive = false
+
+/** Whether the client-layer WASM entity-store adapter (2e) is active. */
+export function isEntityStoreAdapterActive(): boolean {
+  return entityStoreActive
+}
+
 /** Test-only: override the active adapter without starting a backend. */
 export function setRuntimeAdapterForTesting(
   adapter: RuntimeAdapter,
@@ -131,8 +140,13 @@ export function replicaAdapterEnabled(): boolean {
   return import.meta.env?.VITE_RUNTIME_REPLICA === 'true'
 }
 
-let replicaInstall: Promise<void> | undefined
+/** Whether the client-layer entity store is enabled (controlled by
+ * VITE_ENTITY_STORE). Takes precedence over the legacy replica adapter. */
+export function entityStoreAdapterEnabled(): boolean {
+  return import.meta.env?.VITE_ENTITY_STORE === 'true'
+}
 
+let replicaInstall: Promise<void> | undefined
 /**
  * Load the WASM replica, wrap the active adapter with the replicaAdapter, and
  * make it the active runtime adapter. Idempotent; the renderer keeps using the
@@ -168,6 +182,38 @@ syncLogger.info(
   'runtime adapter initialized',
 )
 
-if (replicaAdapterEnabled()) {
+let entityStoreInstall: Promise<void> | undefined
+
+/**
+ * Load the WASM entity store, wrap the active adapter with the
+ * entityStoreAdapter, and make it the active runtime adapter. Idempotent; the
+ * renderer keeps using the base adapter until the WASM finishes loading. The
+ * store is the single derivation for the mail list (rows + counts on one
+ * stream); the legacy REST invalidation path retires in 2e.3.
+ */
+export function installEntityStoreAdapter(): Promise<void> {
+  entityStoreInstall ??= (async () => {
+    const makeHandle = await loadEntityStoreHandleFactory()
+    activeRuntimeAdapter = createEntityStoreAdapter({
+      base: activeRuntimeAdapter,
+      makeHandle,
+      outbox: defaultOutboxStore(),
+    })
+    entityStoreActive = true
+    syncLogger.info(
+      {
+        event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
+        entityStore: true,
+        adapterMode: injectedRuntimeMode() ?? 'loopback',
+      },
+      'entity-store adapter installed and active',
+    )
+  })()
+  return entityStoreInstall
+}
+
+if (entityStoreAdapterEnabled()) {
+  void installEntityStoreAdapter()
+} else if (replicaAdapterEnabled()) {
   void installReplicaAdapter()
 }
