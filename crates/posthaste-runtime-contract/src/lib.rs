@@ -532,7 +532,7 @@ pub struct RuntimeStoreStatus {
     pub cache_root_ready: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ViewDescriptor {
@@ -540,6 +540,23 @@ pub struct ViewDescriptor {
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub payload: Value,
+    /// Whether the client entity store self-maintains this view's membership from
+    /// the `message.updated` firehose (evaluable predicates only). When true
+    /// the runtime skips the per-event re-serve for this view (option iii,
+    /// single-source-view-membership); when false the runtime re-serves on every
+    /// affecting event — required for `Deferred` mail-lists (smart-mailbox /
+    /// global / non-`date`) the store cannot self-maintain. Single source: the
+    /// client computes it from its predicate and stamps it here; the runtime
+    /// never re-derives it (no TS↔Rust drift).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub client_self_maintained: bool,
+}
+
+/// `skip_serializing_if` helper: omit `client_self_maintained` from the wire when
+/// false (the default) — only `clientSelfMaintained: true` is sent, so non-
+/// self-maintained + non-mail-list descriptors stay unchanged on the wire.
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1425,6 +1442,7 @@ mod tests {
             descriptor: ViewDescriptor {
                 family: "mailList".to_string(),
                 payload: serde_json::json!({ "sourceId": "primary" }),
+                ..Default::default()
             },
             revision: ViewRevision::new(7),
             lifecycle: ViewLifecycle::Ready,
@@ -1480,6 +1498,7 @@ mod tests {
             descriptor: ViewDescriptor {
                 family: "mailList".to_string(),
                 payload: serde_json::json!({ "sourceId": "primary" }),
+                ..Default::default()
             },
             revision: ViewRevision::new(1),
             lifecycle: ViewLifecycle::Ready,

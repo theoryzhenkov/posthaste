@@ -54,6 +54,7 @@ import type {
   SettlementVerdict,
 } from './handle'
 import { settlementVerdict } from './mapping'
+import { isMailListSelfMaintained } from '../mailListSelfMaintained'
 import type { OutboxStore } from './outboxStore'
 import { parseMessageMutation } from './wasmUtil'
 
@@ -123,10 +124,7 @@ function predicateForScope(
   scope: RuntimeMessagePageScope,
   sort: RuntimeMessagePageRequest['sort'],
 ): ViewPredicate {
-  if (sort && sort !== 'date') {
-    return 'deferred'
-  }
-  if (scope.kind === 'source-mailbox' && scope.mailboxId) {
+  if (isMailListSelfMaintained(scope, sort)) {
     return { inMailbox: scope.mailboxId }
   }
   return 'deferred'

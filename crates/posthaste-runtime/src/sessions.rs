@@ -1019,6 +1019,7 @@ mod delta_tests {
             descriptor: ViewDescriptor {
                 family: "mailList".into(),
                 payload: Value::Null,
+                ..Default::default()
             },
             revision: ViewRevision::new(1),
             lifecycle: ViewLifecycle::Ready,

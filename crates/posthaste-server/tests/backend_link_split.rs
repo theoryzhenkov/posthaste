@@ -209,6 +209,7 @@ fn mail_list_descriptor(query: &str) -> ViewDescriptor {
     ViewDescriptor {
         family: "mailList".to_string(),
         payload: serde_json::to_value(request).unwrap(),
+        ..Default::default()
     }
 }
 
