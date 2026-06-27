@@ -177,9 +177,25 @@ store notifications → cache).
   4 new tests (legacy parity + store-active skip on arrived/mailboxes/keywords/
   deletion); 252 web tests green.
 
-  **Remaining (2e.4):** delete the now-redundant `MailListReplica`/
-  `view_replica.rs`/`ReplicaController` (the old single-view replica, superseded
-  by the EntityStore).
+  **2e.4 LANDED (2026-06-27, `lmpunzlw`):** deleted the superseded
+  single-view `MailListReplica`. The client old path is gone: `ReplicaController`
+  (`replicaAdapter.ts`) + its WASM bindings (`view_replica.rs`'s
+  `RuntimeMailListReplica` + `lib.rs`'s `MailListReplicaHandle`) + the old
+  handle/factory/mapping pieces + `adapter.ts`'s `installReplicaAdapter`/
+  `replicaAdapterEnabled`/`isReplicaAdapterActive`/`VITE_RUNTIME_REPLICA`.
+  The `MailListReplica` struct itself is gone too — its only remaining consumer
+  was the runtime's near-node outbox overlay (`near_node.rs`), which now folds
+  via the shared `MessageReplica` engine + the (now-pub)
+  `fold_state_from_projection`/`apply_fold_to_projection` helpers directly
+  (moved into `entity_store.rs`, re-exported). TS smoke test rewritten for
+  `EntityStoreHandle`; `replicaAdapter.test.ts` + `replicaMapping.test.ts`
+  deleted. 239 web tests green; tsc + eslint + prettier + runtime-boundaries +
+  logging/api clean. Rust: link-replica 19, link-wasm 6, runtime 25,
+  authority-runtime 58; wasm32 + clippy + workspace clean.
+
+  **The 2e cluster (2e.1→2e.4) is complete.** The store is the single mail-list
+  derivation behind `VITE_ENTITY_STORE`; the legacy REST invalidation is retired
+  (2e.3) + the old replica is deleted (2e.4).
 - **2f — Flip default.** Store on by default once real-browser-validated; the
   legacy REST/invalidation paths become dead code to remove (then realized
   `client-link/L2.md` §4/§5/§6 are rewritten).
