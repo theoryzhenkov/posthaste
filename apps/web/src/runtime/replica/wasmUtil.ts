@@ -22,7 +22,10 @@ interface WasmModule {
    * the bundled URL.
    */
   initSync(input: BufferSource | WebAssembly.Module): unknown
-  parseMessageMutation(requestJson: string): string | undefined
+  parseMessageMutation(
+    requestJson: string,
+    roleMapJson: string,
+  ): string | undefined
   invertMessageChangeDiff(diffJson: string): string
 }
 
@@ -52,15 +55,25 @@ async function loadWasmModule(): Promise<WasmModule> {
 /**
  * Parse a runtime mutation request into the message id and the optimistic
  * assertion the local replica can fold. Returns `null` when the mutation is
- * not locally foldable (e.g. role moves that need account resolution).
+ * not locally foldable. `roleMap` is the account's role→mailbox-id map
+ * (`{ archive: 'mbx-...' }`), built client-side from the mailbox list; it
+ * resolves role moves (archive/trash/restoreToInbox/moveToRole) to
+ * `replaceMailboxes`. An empty map → role moves get no optimism (graceful when
+ * the mailbox list isn't loaded yet).
  */
-export async function parseMessageMutation(request: {
-  name: string
-  args?: unknown
-  clientMutationId: string
-}): Promise<ParsedMessageMutation | null> {
+export async function parseMessageMutation(
+  request: {
+    name: string
+    args?: unknown
+    clientMutationId: string
+  },
+  roleMap: Record<string, string> = {},
+): Promise<ParsedMessageMutation | null> {
   const module = await loadWasmModule()
-  const result = module.parseMessageMutation(JSON.stringify(request))
+  const result = module.parseMessageMutation(
+    JSON.stringify(request),
+    JSON.stringify(roleMap),
+  )
   if (result == null) {
     return null
   }

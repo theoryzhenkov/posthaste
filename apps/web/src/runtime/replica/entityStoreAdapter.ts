@@ -263,7 +263,10 @@ class EntityStoreController {
   }
 
   async runMutation(request: RuntimeRunMutationRequest) {
-    const translated = await parseMessageMutation(request)
+    const translated = await parseMessageMutation(
+      request,
+      this.roleMapForRequest(request),
+    )
     if (!translated) {
       return this.deps.base.runRuntimeMutation(request)
     }
@@ -399,6 +402,29 @@ class EntityStoreController {
         this.mailboxAccount.set(delta.mailboxId, accountId)
       }
     }
+  }
+
+  /** The account's role→mailbox-id map from the cached mailbox list, so role
+   *  moves (archive/trash/restoreToInbox/moveToRole) resolve to a
+   *  `replaceMailboxes` op the replica can hold through the unconfirmed window.
+   *  Empty when the mailbox list isn't cached yet (rare — the sidebar loads it
+   *  on mount) → role moves get no optimism and fall back to the server-only
+   *  path; no regression. */
+  private roleMapForRequest(
+    request: RuntimeRunMutationRequest,
+  ): Record<string, string> {
+    const sourceId = (
+      request.args as { sourceId?: string } | undefined
+    )?.sourceId
+    if (!sourceId) return {}
+    const mailboxes = this.queryClient.getQueryData<Mailbox[]>(
+      queryKeys.mailboxes(sourceId),
+    )
+    const roleMap: Record<string, string> = {}
+    for (const mailbox of mailboxes ?? []) {
+      if (mailbox.role) roleMap[mailbox.role] = mailbox.id
+    }
+    return roleMap
   }
 
   private async settleAll(

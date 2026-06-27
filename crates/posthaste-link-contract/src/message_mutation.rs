@@ -10,6 +10,8 @@
 //! - Far node: backend command execution (kept in `authority-runtime/backend.rs`
 //!   because it uses internal `Backend` methods).
 
+use std::collections::HashMap;
+
 use posthaste_link_core::MessageAssertion;
 use posthaste_runtime_contract::mutation_args::{
     keyword_toggle, MessageApplyDiffArgs, MessageMoveToMailboxArgs, MessageMoveToRoleArgs,
@@ -109,9 +111,26 @@ impl MessageMutation {
     }
 
     /// Optimistic assertion the runtime near node can fold into a mail-list
-    /// view before the backend confirms. `None` for mutations whose effect
-    /// cannot be resolved locally (role moves) or is non-invertible (destroy).
+    /// view before the backend confirms. `None` for role moves when no role map
+    /// is supplied (the legacy no-optimism path) or when the role is absent
+    /// from the map (mailbox list not loaded yet); `Destroy` is non-invertible
+    /// but still folded (the row leaves immediately).
     pub fn to_assertion(&self) -> Option<MessageAssertion> {
+        self.to_assertion_with_roles(&HashMap::new())
+    }
+
+    /// Like [`to_assertion`](Self::to_assertion) but resolves role moves
+    /// (`archive`/`trash`/`restoreToInbox`/`moveToRole`) to `ReplaceMailboxes`
+    /// via the account's role→mailbox-id `roles` map. `None` for a role not in
+    /// the map — graceful degradation (no optimism; the row leaves only on
+    /// provider confirm) when the mailbox list isn't loaded yet. Non-role moves
+    /// ignore the map. This is fix (b) for the move/archive flicker: the role
+    /// move now carries optimism, so fix (a)'s equal-version hold can keep it
+    /// folded through the unconfirmed window.
+    pub fn to_assertion_with_roles(
+        &self,
+        roles: &HashMap<String, String>,
+    ) -> Option<MessageAssertion> {
         match self {
             MessageMutation::SetKeywords(args) => Some(MessageAssertion::SetKeywords {
                 add: args.command.add.clone(),
@@ -145,14 +164,22 @@ impl MessageMutation {
             MessageMutation::ApplyDiff(args) => Some(MessageAssertion::ApplyDiff {
                 diff: args.diff.clone(),
             }),
-            // Role moves need account role→mailbox resolution, so they are not
-            // folded optimistically yet.
-            MessageMutation::MoveToRole(_)
-            | MessageMutation::Archive(_)
-            | MessageMutation::Trash(_)
-            | MessageMutation::RestoreToInbox(_) => None,
+            // Role moves resolve to ReplaceMailboxes via the account's role→id map.
+            MessageMutation::Archive(_) => role_to_replace(roles, "archive"),
+            MessageMutation::Trash(_) => role_to_replace(roles, "trash"),
+            MessageMutation::RestoreToInbox(_) => role_to_replace(roles, "inbox"),
+            MessageMutation::MoveToRole(args) => role_to_replace(roles, &args.role),
         }
     }
+}
+
+/// Resolve a `role` (e.g. "archive") to a `ReplaceMailboxes([mailbox_id])`
+/// assertion via the account's role→mailbox-id map. `None` when the role is
+/// absent (mailbox list not loaded) — the caller then falls back to no optimism.
+fn role_to_replace(roles: &HashMap<String, String>, role: &str) -> Option<MessageAssertion> {
+    roles.get(role).map(|mailbox_id| MessageAssertion::ReplaceMailboxes {
+        mailbox_ids: vec![mailbox_id.clone()],
+    })
 }
 
 fn parse_args<T>(request: &MutationRequest) -> Result<T, RuntimeError>
@@ -160,4 +187,81 @@ where
     T: for<'de> serde::Deserialize<'de>,
 {
     posthaste_runtime_contract::mutation_args::parse_args(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn role_map() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("inbox".into(), "mbx-inbox".into());
+        m.insert("archive".into(), "mbx-archive".into());
+        m.insert("trash".into(), "mbx-trash".into());
+        m
+    }
+
+    fn parse(name: &str, args: serde_json::Value) -> MessageMutation {
+        let request: MutationRequest = serde_json::from_value(serde_json::json!({
+            "name": name,
+            "args": args,
+            "clientMutationId": "op"
+        }))
+        .unwrap();
+        MessageMutation::from_request(&request).unwrap()
+    }
+
+    #[test]
+    fn role_moves_resolve_to_replace_mailboxes_via_the_role_map() {
+        let map = role_map();
+        let target = serde_json::json!({ "sourceId": "acct", "messageId": "m1" });
+
+        let archive = parse("message.archive", target.clone()).to_assertion_with_roles(&map);
+        assert_eq!(
+            archive,
+            Some(MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: vec!["mbx-archive".into()]
+            })
+        );
+
+        let restore = parse("message.restoreToInbox", target).to_assertion_with_roles(&map);
+        assert_eq!(
+            restore,
+            Some(MessageAssertion::ReplaceMailboxes {
+                mailbox_ids: vec!["mbx-inbox".into()]
+            })
+        );
+    }
+
+    #[test]
+    fn role_move_without_a_map_entry_returns_none() {
+        // Graceful degradation: the mailbox list isn't loaded yet → no optimism,
+        // no regression (the row leaves only on provider confirm).
+        let map = HashMap::new(); // no roles
+        let archive = parse(
+            "message.archive",
+            serde_json::json!({ "sourceId": "acct", "messageId": "m1" }),
+        );
+        assert_eq!(archive.to_assertion_with_roles(&map), None);
+        // And the legacy no-map path still returns None for role moves.
+        assert_eq!(archive.to_assertion(), None);
+    }
+
+    #[test]
+    fn non_role_moves_ignore_the_role_map() {
+        let map = role_map();
+        let set_keywords = parse(
+            "message.setKeywords",
+            serde_json::json!({
+                "sourceId": "acct",
+                "messageId": "m1",
+                "command": { "add": ["$seen"], "remove": [] }
+            }),
+        );
+        assert_eq!(
+            set_keywords.to_assertion_with_roles(&map),
+            set_keywords.to_assertion()
+        );
+    }
 }
