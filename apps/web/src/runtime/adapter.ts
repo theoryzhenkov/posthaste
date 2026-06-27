@@ -120,10 +120,13 @@ export function resetRuntimeAdapterForTesting(): void {
   activeRuntimeAdapter = httpRuntimeAdapter
 }
 
-/** Whether the client-layer entity store is enabled (controlled by
- * VITE_ENTITY_STORE). */
+/** Whether the client-layer entity store is enabled. Default on as of the
+ * reactive-store work (2f) — the store is the single mail-list derivation (rows
+ * + counts on one stream, the legacy REST invalidation retired in 2e.3). Set
+ * `VITE_ENTITY_STORE=false` to opt out (fall back to the HTTP adapter, e.g. for
+ * debugging). */
 export function entityStoreAdapterEnabled(): boolean {
-  return import.meta.env?.VITE_ENTITY_STORE === 'true'
+  return import.meta.env?.VITE_ENTITY_STORE !== 'false'
 }
 
 syncLogger.info(
