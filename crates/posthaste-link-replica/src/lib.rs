@@ -1,26 +1,25 @@
-//! Client-layer replica view layer.
+//! Client-layer reactive entity store.
 //!
-//! Wraps the [`posthaste_link_core`] convergence engine with the working-set
-//! view logic ([client-link L2 §2](../replication/client-link/L2.md)): it takes the
-//! runtime's served mail-list rows as its confirmed base, folds the outbox of
-//! pending mutations over them with the shared predictor, and serves optimistic
-//! rows to the renderer — so an archive/flag/read shows instantly instead of
-//! after a round-trip to a remote runtime.
+//! Wraps the [`posthaste_link_core`] convergence engine with a normalized,
+//! keyed entity store ([client-link L2 §2](../replication/client-link/L2.md)):
+//! `message[id]`, `mailbox[id]` (server-authoritative count scalars), and
+//! `view[viewId]` (an ordered row list + coverage). The host feeds it
+//! authoritative batches — message mutations (carrying the full projection) +
+//! count deltas — and the store applies the batch atomically, self-maintains
+//! each evaluable view's membership, then reports the changed keys. Optimism is
+//! a pure fold over the confirmed base (the shared predictor); the store never
+//! stores it as truth.
 //!
-//! Like `posthaste-link-core` this is portable (serde only, no I/O): the
-//! contract↔replica mapping, transport, and persistence belong to the host (the
-//! web adapter or native node). General query-membership re-evaluation (does a
-//! folded row still match a smart-mailbox?) is injected as a predicate and
-//! otherwise deferred to the runtime's authoritative recompute — that is the
-//! later coverage/atoms layer, not this one.
+//! Like `posthaste-link-core` this is portable (serde only, no I/O): transport +
+//! persistence belong to the host (the web adapter).
 //!
 //! @spec docs/replication/client-link/L2#2-the-replica-node-posthaste-link-replica
+//! @spec docs/eph/DESIGN-L2-client-link-reactive-store
 
-mod mail_list;
 pub mod entity_store;
 
 pub use entity_store::{
-    CountDelta, DirtyKey, EntityStore, MailboxEntity, SortDirection, SortKey, StoreUpdate,
-    ViewEntity, ViewPredicate, ViewRow,
+    apply_fold_to_projection, fold_state_from_projection, CountDelta, DirtyKey,
+    EntityStore, MailboxEntity, SortDirection, SortKey, StoreUpdate, ViewEntity,
+    ViewPredicate, ViewRow,
 };
-pub use mail_list::{MailListReplica, MailListRow};

@@ -6,11 +6,9 @@ import { LOG_EVENTS, syncLogger } from '../logger'
 
 import { httpRuntimeAdapter } from './httpAdapter'
 import { loadEntityStoreHandleFactory } from './replica/handle'
-import { loadReplicaHandleFactory } from './replica/handle'
 import { defaultOutboxStore } from './replica/outboxStore'
 import { markEntityStoreActive } from './entityStoreState'
 import { createEntityStoreAdapter } from './replica/entityStoreAdapter'
-import { createReplicaAdapter } from './replica/replicaAdapter'
 import type { RuntimeAdapter } from './types'
 
 function unsupportedRuntimeAdapter(mode: InjectedRuntimeMode): RuntimeAdapter {
@@ -106,13 +104,6 @@ export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntimeAdapter
 }
 
-let replicaActive = false
-
-/** Whether the client-layer WASM replica adapter is currently active. */
-export function isReplicaAdapterActive(): boolean {
-  return replicaActive
-}
-
 /** Test-only: override the active adapter without starting a backend. */
 export function setRuntimeAdapterForTesting(
   adapter: RuntimeAdapter,
@@ -129,48 +120,16 @@ export function resetRuntimeAdapterForTesting(): void {
   activeRuntimeAdapter = httpRuntimeAdapter
 }
 
-/** Whether the client-layer replica is enabled (controlled by VITE_RUNTIME_REPLICA). */
-export function replicaAdapterEnabled(): boolean {
-  return import.meta.env?.VITE_RUNTIME_REPLICA === 'true'
-}
-
 /** Whether the client-layer entity store is enabled (controlled by
- * VITE_ENTITY_STORE). Takes precedence over the legacy replica adapter. */
+ * VITE_ENTITY_STORE). */
 export function entityStoreAdapterEnabled(): boolean {
   return import.meta.env?.VITE_ENTITY_STORE === 'true'
-}
-
-let replicaInstall: Promise<void> | undefined
-/**
- * Load the WASM replica, wrap the active adapter with the replicaAdapter, and
- * make it the active runtime adapter. Idempotent; the renderer keeps using the
- * base adapter until the WASM finishes loading.
- */
-export function installReplicaAdapter(): Promise<void> {
-  replicaInstall ??= (async () => {
-    const makeHandle = await loadReplicaHandleFactory()
-    activeRuntimeAdapter = createReplicaAdapter({
-      base: activeRuntimeAdapter,
-      makeHandle,
-      outbox: defaultOutboxStore(),
-    })
-    replicaActive = true
-    syncLogger.info(
-      {
-        event: LOG_EVENTS.runtimeReplicaAdapterInstalled,
-        replica: true,
-        adapterMode: injectedRuntimeMode() ?? 'loopback',
-      },
-      'replica adapter installed and active',
-    )
-  })()
-  return replicaInstall
 }
 
 syncLogger.info(
   {
     event: LOG_EVENTS.runtimeAdapterInitialized,
-    replicaEnabled: replicaAdapterEnabled(),
+    entityStoreEnabled: entityStoreAdapterEnabled(),
     adapterMode: injectedRuntimeMode() ?? 'loopback',
   },
   'runtime adapter initialized',
@@ -208,6 +167,4 @@ export function installEntityStoreAdapter(): Promise<void> {
 
 if (entityStoreAdapterEnabled()) {
   void installEntityStoreAdapter()
-} else if (replicaAdapterEnabled()) {
-  void installReplicaAdapter()
 }
