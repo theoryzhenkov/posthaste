@@ -13,6 +13,18 @@ depends:
 
 # Legacy / leftover structures around the store
 
+**Status: PARTIALLY RESOLVED, 2026-06-27.** The dead `useDomainEventRefresh` /
+`eventMayAffectView` / `MAIL_DOMAIN_EVENT_NAME` path was deleted (the
+constant-true domain-event-refresh list path). **Still open:** the legacy
+`useInfiniteQuery` on the mail-list key (`MessageList.tsx:114` — the disarmed
+loaded gun), the ungated legacy domain-cache invalidations that storm during
+sync, and the lack of a user-facing rejection surface. Closing these is the
+dual-path/single-source cleanup, related to [[L2-single-source-view-membership]].
+
+---
+
+**Original finding (preserved).**
+
 The store sits in front of the *old* HTTP + domain-event machinery rather than
 replacing it. Several of those reused structures are fragile or counter-productive.
 
