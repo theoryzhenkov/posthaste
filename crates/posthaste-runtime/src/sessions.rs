@@ -557,7 +557,7 @@ impl SessionRegistry {
         let session = sessions
             .get_mut(session_id)
             .ok_or_else(|| RuntimeError::not_found("runtime session not found"))?;
-        let is_terminal = state.is_terminal();
+        let is_confirmed = state == MutationSettlementState::Confirmed;
         let (receipt, frame) = {
             let mutation = session
                 .latest_mutations
@@ -570,7 +570,13 @@ impl SessionRegistry {
             let frame = mutation.notification_frame(next_seq(session));
             (mutation.receipt(), frame)
         };
-        if is_terminal {
+        // Outbox C: retain `Failed` (Rejected) verdicts for the session lifetime.
+        // A rejection is retired only by delivering its verdict — the base never
+        // absorbs it (a rejection changes no state) — so evicting it before
+        // reconnect strands the client's optimistic row with no recovery path.
+        // `Confirmed` is safe to evict: absorption retires the op from the
+        // re-served snapshot independently of the verdict frame.
+        if is_confirmed {
             session.settled_mutation_ids.push_back(mutation_id.clone());
             session.prune_settled_mutations();
         }
