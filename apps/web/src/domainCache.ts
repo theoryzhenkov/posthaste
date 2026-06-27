@@ -13,8 +13,6 @@ export { applyDomainEvent } from './domain-cache/handlers'
 export {
   invalidateAccountReadModels,
   invalidateComposeSendReadModels,
-  invalidateMessageMutationReadModels,
-  invalidateMessageScopeReadModels,
   invalidateSmartMailboxMutationReadModels,
   invalidateSyncStartedReadModels,
 } from './domain-cache/invalidations'
