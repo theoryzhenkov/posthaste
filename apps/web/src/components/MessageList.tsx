@@ -8,7 +8,6 @@
  * @spec docs/L1-ui#messagelist
  * @spec docs/L1-ui#keyboard-shortcuts
  */
-import { useInfiniteQuery } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 
@@ -18,7 +17,6 @@ import {
 } from '../accountDirectory'
 import { ApiError } from '../api/errors'
 import type { MessageSummary } from '../api/types'
-import { runtimeMailListViewsEnabled } from '../features'
 import type { EmailActions } from '../hooks/useEmailActions'
 import type { MailSelection } from '../mailState'
 import { createOperationContext } from '../observability'
@@ -29,11 +27,7 @@ import {
   type MessageListErrorState,
 } from './message-list/MessageListRows'
 import { NoMailboxSelected } from './message-list/MessageListStates'
-import {
-  fetchMessagesForView,
-  selectionKey,
-  viewKey,
-} from './message-list/model'
+import { selectionKey, viewKey } from './message-list/model'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
@@ -105,50 +99,38 @@ export function MessageList({
     null,
   )
   const accountDirectory = useAccountDirectory()
-  const useRuntimeViewFrames = runtimeMailListViewsEnabled()
   const messageQueryKey = useMemo(
     () => queryKeys.messages(selectedView, searchQuery, sort),
     [selectedView, searchQuery, sort],
   )
 
-  const query = useInfiniteQuery({
+  // Single source for the list: the runtime `mailList` view (the legacy HTTP
+  // query + event-patch fork was retired). The hook owns the rows, loading,
+  // window-extend, and retry; the component renders what it returns.
+  const runtimeMailListView = useRuntimeMailListView({
+    enabled: true,
+    operation: operationEntry.context,
+    preparedSearchQuery,
     queryKey: messageQueryKey,
-    queryFn: ({ pageParam, signal }) =>
-      fetchMessagesForView(
-        selectedView!,
-        preparedSearchQuery,
-        sort,
-        pageParam,
-        signal,
-        operationEntry.context,
-      ),
-    enabled:
-      selectedView !== null &&
-      !preparedSearchQuery.isBlocked &&
-      !useRuntimeViewFrames,
-    initialPageParam: null as string | null,
-    placeholderData: (previousData) => previousData,
-    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    selectedView,
+    sort,
   })
 
   const rawMessages = useMemo(
-    () =>
-      preparedSearchQuery.isBlocked
-        ? []
-        : (query.data?.pages.flatMap((page) => page.items) ?? []),
-    [query.data, preparedSearchQuery.isBlocked],
+    () => (preparedSearchQuery.isBlocked ? [] : runtimeMailListView.items),
+    [runtimeMailListView.items, preparedSearchQuery.isBlocked],
   )
   const messages = useMemo(
     () => applyAccountNamesToMessages(rawMessages, accountDirectory),
     [accountDirectory, rawMessages],
   )
   const selectedKey = selectionKey(selection)
-  const errorKey = query.error
-    ? `${operationEntry.viewKey}:${query.error.message}`
-    : null
+  // The mail-list view surfaces no fetch error of its own (search-syntax errors
+  // still flow through `buildErrorState` via `preparedSearchQuery`).
+  const errorKey: string | null = null
   const errorState = buildErrorState({
     dismissedErrorKey,
-    error: query.error,
+    error: null,
     errorKey,
     preparedSearchQuery,
   })
@@ -161,14 +143,6 @@ export function MessageList({
     onSelectMessage,
     selectedKey,
     selection,
-  })
-  const runtimeMailListView = useRuntimeMailListView({
-    enabled: useRuntimeViewFrames,
-    operation: operationEntry.context,
-    preparedSearchQuery,
-    queryKey: messageQueryKey,
-    selectedView,
-    sort,
   })
   const { handleScroll, scrollContainerRef, scrollTop, viewportHeight } =
     useMessageListScroll({
@@ -246,12 +220,12 @@ export function MessageList({
               columns={columns}
               errorState={errorState}
               isFetchingNextPage={false}
-              isLoading={query.isLoading}
+              isLoading={runtimeMailListView.isLoading}
               layout={tableLayout}
               messages={messages}
               onClearSearchQuery={onClearSearchQuery}
               onDismissError={() => setDismissedErrorKey(errorKey)}
-              onRetry={() => void query.refetch()}
+              onRetry={() => runtimeMailListView.retry()}
               onSelectRowMessage={handleSelectRowMessage}
               scrollTop={scrollTop}
               selectedKey={selectedKey}
