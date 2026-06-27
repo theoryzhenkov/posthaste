@@ -1,6 +1,247 @@
 /* @ts-self-types="./posthaste_link_wasm.d.ts" */
 
 /**
+ * A live reactive entity store owned by JS: messages, mailboxes (count
+ * scalars), and views (ordered row lists + coverage), with a message optimism
+ * fold. The host feeds it authoritative batches and reads the dirty keys to
+ * drive the renderer.
+ */
+export class EntityStoreHandle {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EntityStoreHandleFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_entitystorehandle_free(ptr, 0);
+    }
+    /**
+     * Accept an optimistic message mutation into the outbox (idempotent on
+     * mutation id). `accept_json` is `{mutationId, messageId, assertion}`.
+     * The projected state is re-derived so reads reflect the fold
+     * immediately; a mutation on a not-yet-ingested message is tracked but
+     * deferred.
+     * @param {string} accept_json
+     */
+    acceptMutationJson(accept_json) {
+        const ptr0 = passStringToWasm0(accept_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.entitystorehandle_acceptMutationJson(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Close a view (it was closed on the host).
+     * @param {string} view_id
+     */
+    closeView(view_id) {
+        const ptr0 = passStringToWasm0(view_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.entitystorehandle_closeView(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Drain the keys changed since the last drain as a JSON array of
+     * `{"message":id}` / `{"mailbox":id}` / `{"view":id}`. The host re-reads
+     * these (re-project views, re-write counts). One drain per batch.
+     * @returns {string}
+     */
+    drainDirtyJson() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.entitystorehandle_drainDirtyJson(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Whether any optimistic mutation is still pending.
+     * @returns {boolean}
+     */
+    hasPending() {
+        const ret = wasm.entitystorehandle_hasPending(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Apply an authoritative batch atomically: every update is applied before
+     * any dirty key is reported. `batch_json` is a JSON array of
+     * `{"message":{messageId, projection, deleted, countDeltas:[{mailboxId,
+     * unreadCount, totalCount}]}}` and/or `{"mailboxCount":{mailboxId,
+     * unreadCount, totalCount}}`.
+     * @param {string} batch_json
+     */
+    ingestBatchJson(batch_json) {
+        const ptr0 = passStringToWasm0(batch_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.entitystorehandle_ingestBatchJson(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * A mailbox's server-authoritative counts as `{"unreadCount",
+     * "totalCount"}`, or `"null"` if the mailbox is not held.
+     * @param {string} mailbox_id
+     * @returns {string}
+     */
+    mailboxJson(mailbox_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(mailbox_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.entitystorehandle_mailboxJson(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * A message's optimistic projection as a JSON string, or `"null"` if the
+     * message is not held or has been optimistically destroyed. The projection
+     * is the confirmed base with the pending outbox folded over it (keywords +
+     * mailbox membership) — never stored as truth.
+     * @param {string} message_id
+     * @returns {string}
+     */
+    messageJson(message_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(message_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.entitystorehandle_messageJson(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    constructor() {
+        const ret = wasm.entitystorehandle_new();
+        this.__wbg_ptr = ret >>> 0;
+        EntityStoreHandleFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * A view's **projected** rows as a JSON array of `{rowKey, messageId,
+     * sortKey, projection}` — the optimistic message projection joined to each
+     * row in one call, so the host re-projects a view with a single round-trip
+     * per drain (P1: a row implies a live base, so `projection` is non-null for
+     * every placed row). `"null"` if the view is not registered.
+     * @param {string} view_id
+     * @returns {string}
+     */
+    projectViewJson(view_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(view_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.entitystorehandle_projectViewJson(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Register a view with its predicate, sort, and initial coverage
+     * watermark. The host calls this when a view is opened (or its window
+     * grows). `args_json` is `{predicate, sortField, sortDirection,
+     * watermark?}` where `predicate` is `{"inMailbox":id}` / `"all"` /
+     * `"deferred"` and `watermark` is `{"receivedAt","messageId"}` or null
+     * (reaches BOTTOM). Marks the view dirty.
+     * @param {string} view_id
+     * @param {string} args_json
+     */
+    registerViewJson(view_id, args_json) {
+        const ptr0 = passStringToWasm0(view_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(args_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.entitystorehandle_registerViewJson(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Replace a view's held rows + watermark (a served snapshot / page /
+     * resync). `rows_json` is a JSON array of `{rowKey, messageId,
+     * sortKey:{receivedAt,messageId}}`; `watermark_json` is the new watermark
+     * (`{"receivedAt","messageId"}` or `null`). Does not touch the message
+     * base — the host ingests the rows' projections atomically in the same
+     * batch via [`ingest_batch_json`](Self::ingest_batch_json) (P1: a row
+     * implies a live base).
+     * @param {string} view_id
+     * @param {string} rows_json
+     * @param {string} watermark_json
+     */
+    setViewRowsJson(view_id, rows_json, watermark_json) {
+        const ptr0 = passStringToWasm0(view_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(rows_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(watermark_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.entitystorehandle_setViewRowsJson(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Settle a pending mutation by its terminal outcome. `outcome` is
+     * `"confirmed"` or `"failed"`. Returns `true` when the settlement reverted
+     * an optimistic change (a failure the host should surface).
+     * @param {string} mutation_id
+     * @param {string} outcome
+     * @returns {boolean}
+     */
+    settle(mutation_id, outcome) {
+        const ptr0 = passStringToWasm0(mutation_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(outcome, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.entitystorehandle_settle(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * A view's rows as a JSON array of `{rowKey, messageId, sortKey}`, or
+     * `"null"` if the view is not registered.
+     * @param {string} view_id
+     * @returns {string}
+     */
+    viewRowsJson(view_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(view_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.entitystorehandle_viewRowsJson(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) EntityStoreHandle.prototype[Symbol.dispose] = EntityStoreHandle.prototype.free;
+
+/**
  * A live mail-list replica owned by JS: the served rows are its base, the
  * outbox holds optimistic mutations, and `projectJson` returns the folded rows.
  */
@@ -301,6 +542,9 @@ function __wbg_get_imports() {
     };
 }
 
+const EntityStoreHandleFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_entitystorehandle_free(ptr >>> 0, 1));
 const MailListReplicaHandleFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_maillistreplicahandle_free(ptr >>> 0, 1));
