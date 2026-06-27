@@ -4,10 +4,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { DomainEvent } from '../src/api/types'
-import {
-  MAIL_DOMAIN_EVENT_NAME,
-  useDaemonEvents,
-} from '../src/hooks/useDaemonEvents'
+import { useDaemonEvents } from '../src/hooks/useDaemonEvents'
 import {
   resetRuntimeAdapterForTesting,
   setRuntimeAdapterForTesting,
@@ -57,49 +54,43 @@ afterEach(() => {
 })
 
 describe('useDaemonEvents runtime adapter subscription', () => {
-  it('subscribes through the runtime session stream and dispatches notification events', async () => {
-    const received: DomainEvent[] = []
-    const listener = (receivedEvent: Event) => {
-      received.push((receivedEvent as CustomEvent<DomainEvent>).detail)
-    }
-    window.addEventListener(MAIL_DOMAIN_EVENT_NAME, listener)
+  it('subscribes through the runtime session stream and tracks the frame cursor', async () => {
+    const { unmount } = renderHook(() => useDaemonEvents(), { wrapper })
 
-    try {
-      const { unmount } = renderHook(() => useDaemonEvents(), { wrapper })
+    await waitFor(() =>
+      expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
+        { request: { sessionId: 'session-1', afterSeq: null } },
+      ]),
+    )
+    runtimeAdapter.emitRuntimeFrame({
+      type: 'notification',
+      sessionSeq: 1,
+      kind: event.topic,
+      payload: event,
+    })
 
-      await waitFor(() =>
-        expect(runtimeAdapter.runtimeFrameSubscriptionCalls).toEqual([
-          { request: { sessionId: 'session-1', afterSeq: null } },
-        ]),
-      )
-      runtimeAdapter.emitRuntimeFrame({
-        type: 'notification',
-        sessionSeq: 1,
-        kind: event.topic,
-        payload: event,
-      })
-
-      await waitFor(() => expect(received).toEqual([event]))
+    await waitFor(() =>
       expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
         '1',
-      )
+      ),
+    )
 
-      unmount()
-      await waitFor(() =>
-        expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
-          { sessionId: 'session-1', sourceId: undefined },
-        ]),
-      )
-      runtimeAdapter.emitRuntimeFrame({
-        type: 'notification',
-        sessionSeq: 2,
-        kind: event.topic,
-        payload: { ...event, seq: 43 },
-      })
-      expect(received).toEqual([event])
-    } finally {
-      window.removeEventListener(MAIL_DOMAIN_EVENT_NAME, listener)
-    }
+    unmount()
+    await waitFor(() =>
+      expect(runtimeAdapter.runtimeSessionCloseCalls).toEqual([
+        { sessionId: 'session-1', sourceId: undefined },
+      ]),
+    )
+    runtimeAdapter.emitRuntimeFrame({
+      type: 'notification',
+      sessionSeq: 2,
+      kind: event.topic,
+      payload: { ...event, seq: 43 },
+    })
+    // After unmount the subscription is closed; the cursor does not advance.
+    expect(window.sessionStorage.getItem('mail:last-runtime-frame-seq')).toBe(
+      '1',
+    )
   })
 
   it('resumes from the stored runtime frame sequence', async () => {

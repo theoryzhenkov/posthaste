@@ -34,7 +34,6 @@ import {
   selectionKey,
   viewKey,
 } from './message-list/model'
-import { useDomainEventRefresh } from './message-list/useDomainEventRefresh'
 import { useRuntimeMailListView } from './message-list/useRuntimeMailListView'
 import { useMessageListNavigation } from './message-list/useMessageListNavigation'
 import { useMessageListScroll } from './message-list/useMessageListScroll'
@@ -171,28 +170,14 @@ export function MessageList({
     selectedView,
     sort,
   })
-  useDomainEventRefresh({
-    enabled: !useRuntimeViewFrames,
-    isSearchBlocked: preparedSearchQuery.isBlocked,
-    refetch: () => void query.refetch(),
-    selectedView,
-  })
   const { handleScroll, scrollContainerRef, scrollTop, viewportHeight } =
     useMessageListScroll({
       currentViewKey,
       fetchNextPage: () => {
-        if (useRuntimeViewFrames) {
-          runtimeMailListView.loadMore()
-        } else {
-          void query.fetchNextPage()
-        }
+        runtimeMailListView.loadMore()
       },
-      hasNextPage: useRuntimeViewFrames
-        ? runtimeMailListView.hasMore
-        : Boolean(query.hasNextPage),
-      isFetchingNextPage: useRuntimeViewFrames
-        ? runtimeMailListView.isLoadingMore
-        : query.isFetchingNextPage,
+      hasNextPage: runtimeMailListView.hasMore,
+      isFetchingNextPage: runtimeMailListView.isLoadingMore,
       isSearchBlocked: preparedSearchQuery.isBlocked,
       messageCount: messages.length,
     })
@@ -260,9 +245,7 @@ export function MessageList({
               actions={actions}
               columns={columns}
               errorState={errorState}
-              isFetchingNextPage={
-                !useRuntimeViewFrames && query.isFetchingNextPage
-              }
+              isFetchingNextPage={false}
               isLoading={query.isLoading}
               layout={tableLayout}
               messages={messages}
