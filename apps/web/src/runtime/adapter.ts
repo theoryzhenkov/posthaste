@@ -120,19 +120,9 @@ export function resetRuntimeAdapterForTesting(): void {
   activeRuntimeAdapter = httpRuntimeAdapter
 }
 
-/** Whether the client-layer entity store is enabled. Default on as of the
- * reactive-store work (2f) — the store is the single mail-list derivation (rows
- * + counts on one stream, the legacy REST invalidation retired in 2e.3). Set
- * `VITE_ENTITY_STORE=false` to opt out (fall back to the HTTP adapter, e.g. for
- * debugging). */
-export function entityStoreAdapterEnabled(): boolean {
-  return import.meta.env?.VITE_ENTITY_STORE !== 'false'
-}
-
 syncLogger.info(
   {
     event: LOG_EVENTS.runtimeAdapterInitialized,
-    entityStoreEnabled: entityStoreAdapterEnabled(),
     adapterMode: injectedRuntimeMode() ?? 'loopback',
   },
   'runtime adapter initialized',
@@ -168,6 +158,9 @@ export function installEntityStoreAdapter(): Promise<void> {
   return entityStoreInstall
 }
 
-if (entityStoreAdapterEnabled()) {
-  void installEntityStoreAdapter()
-}
+// The client-layer entity store is the sole mail-list derivation (rows + counts
+// on one stream) and the read model the runtime no longer re-serves redundantly
+// (option iii). It is unconditional — the prior `VITE_ENTITY_STORE` opt-out was
+// retired so there is no path that depends on the runtime's per-event re-serve.
+// Until the WASM finishes loading the base HTTP adapter serves (bootstrap only).
+void installEntityStoreAdapter()
