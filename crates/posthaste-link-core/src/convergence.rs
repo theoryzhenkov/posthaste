@@ -196,6 +196,45 @@ impl<C: Convergence> Replica<C> {
         }
     }
 
+    /// Retire pending mutations on `key` that the confirmed base now **absorbs**:
+    /// folding the op over the running confirmed state produces no change, so it
+    /// is redundant — the authoritative base already carries its effect. Ops are
+    /// checked in order; a still-effective op is kept and advances the running
+    /// state, so a later op is judged against the state its predecessors produce.
+    ///
+    /// This is the race-free retire trigger ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
+    /// an op retires exactly when the base carries its effect, whether that is
+    /// learned from a base update (`message.updated`) or a confirmation. Because
+    /// retirement is gated on absorption, a confirmation that outruns the base
+    /// update never reverts a not-yet-absorbed op — it simply finds nothing to
+    /// retire and waits for the base. Returns whether any op was retired; a no-op
+    /// when the key has no confirmed base (nothing to absorb against) or is a
+    /// destroy over a present base (a removal a present base cannot carry).
+    pub fn retire_absorbed(&mut self, key: &C::Key) -> bool
+    where
+        C::State: PartialEq,
+    {
+        let Some(base) = self.base.get(key).cloned() else {
+            return false;
+        };
+        let before = self.pending.len();
+        let mut running = base;
+        self.pending.retain(|held| {
+            if &held.key != key {
+                return true;
+            }
+            match C::fold(running.clone(), std::slice::from_ref(&held.effect)) {
+                Outcome::Present(next) if next == running => false,
+                Outcome::Present(next) => {
+                    running = next;
+                    true
+                }
+                Outcome::Removed => true,
+            }
+        });
+        self.pending.len() != before
+    }
+
     /// The optimistic state of one entity: `replay(base, its pending)`. `None`
     /// when the entity is not in the confirmed base (not held / not covered).
     pub fn project(&self, key: &C::Key) -> Option<Outcome<C::State>> {
@@ -428,5 +467,88 @@ mod tests {
         replica.accept(flag("op1", "m1"));
         replica.accept(flag("op1", "m1"));
         assert_eq!(replica.pending().len(), 1);
+    }
+
+    // --- retire_absorbed: the race-free retire trigger -----------------------
+
+    #[test]
+    fn retire_absorbed_drops_an_op_the_base_now_carries() {
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        // Base catches up to the flag (the `message.updated` for the mutation).
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(!replica.has_pending());
+        // The projection still shows the flag — retire did not revert.
+        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+    }
+
+    #[test]
+    fn retire_absorbed_keeps_an_op_the_base_does_not_carry() {
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        // Base has NOT caught up (settlement outran the base update).
+        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.has_pending());
+        // Optimism survives — no revert window.
+        assert_eq!(present(&replica, "m1").keywords, vec!["$flagged".to_string()]);
+    }
+
+    #[test]
+    fn retire_absorbed_drops_a_leading_absorbed_op_but_keeps_a_later_effective_one() {
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
+        // op1: flag; op2: mark read.
+        replica.accept(flag("op1", "m1"));
+        replica.accept(PendingMessageMutation {
+            id: MutationId("op2".into()),
+            key: "m1".into(),
+            effect: MessageAssertion::SetKeywords {
+                add: vec!["$seen".into()],
+                remove: vec![],
+            },
+        });
+        // Base caught up to the flag only (op1), not the read (op2).
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        assert!(replica.retire_absorbed(&"m1".to_string()));
+        let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["op2"]);
+        // The still-pending read folds over the caught-up base.
+        let mut keywords = present(&replica, "m1").keywords;
+        keywords.sort();
+        assert_eq!(keywords, vec!["$flagged".to_string(), "$seen".to_string()]);
+    }
+
+    #[test]
+    fn retire_absorbed_drops_a_no_op_optimism_immediately() {
+        // A flag on an already-flagged message: absorbed from the start, so a
+        // confirmation clears it with no base update ever arriving.
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(!replica.has_pending());
+    }
+
+    #[test]
+    fn retire_absorbed_on_an_absent_base_is_a_no_op() {
+        let mut replica = MessageReplica::new();
+        replica.accept(flag("op1", "m1"));
+        assert!(!replica.retire_absorbed(&"m1".to_string()));
+        assert!(replica.has_pending());
+    }
+
+    #[test]
+    fn retire_absorbed_leaves_other_keys_pending() {
+        let mut replica = MessageReplica::new();
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
+        replica.set_base("m2".to_string(), state(&[], &["inbox"]));
+        replica.accept(flag("op1", "m1"));
+        replica.accept(flag("op2", "m2"));
+        replica.retire_absorbed(&"m1".to_string());
+        let ids: Vec<&str> = replica.pending().iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["op2"]);
     }
 }
