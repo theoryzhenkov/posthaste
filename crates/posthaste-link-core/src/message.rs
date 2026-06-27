@@ -8,10 +8,35 @@ use crate::convergence::Outcome;
 /// keyword set and mailbox membership. Renderer-facing derivations (is_read,
 /// is_flagged) are computed by the caller from `keywords`; the predictor only
 /// moves keywords and membership so it stays independent of presentation shape.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MessageFoldState {
     pub keywords: Vec<String>,
     pub mailbox_ids: Vec<String>,
+}
+
+impl PartialEq for MessageFoldState {
+    /// **Set-insensitive** equality: two fold states are equal iff they carry
+    /// the same keyword set and the same mailbox set, regardless of order.
+    ///
+    /// This is load-bearing for `retire_absorbed`'s absorption test
+    /// (`fold(base, [op]) == base`). The confirmed base is built from the served
+    /// projection in **provider order** (`fold_state_from_projection`), while the
+    /// fold canonicalizes via `BTreeSet` (sorted). A derived, order-sensitive
+    /// `PartialEq` therefore reports "changed" for any ≥-2-keyword message whose
+    /// provider order isn't already sorted (e.g. anything carrying `$seen`), so
+    /// the op never absorbs and never retires — the intermittent
+    /// stuck-optimism bug. Comparing as sets is also the correct semantics: a
+    /// fold state *is* a keyword set + a mailbox set.
+    fn eq(&self, other: &Self) -> bool {
+        as_set(&self.keywords) == as_set(&other.keywords)
+            && as_set(&self.mailbox_ids) == as_set(&other.mailbox_ids)
+    }
+}
+
+impl Eq for MessageFoldState {}
+
+fn as_set(items: &[String]) -> BTreeSet<&str> {
+    items.iter().map(String::as_str).collect()
 }
 
 /// A symmetric add/remove delta over one facet of a message's mutable state.
