@@ -122,6 +122,25 @@ store notifications → cache).
 - **2d — Gap-detection (G4).** The notification stream detects a missed
   `sessionSeq`/`Lagged` and forces a resync (re-snapshot open views + refetch
   counts) — never a silent drop. Reuses the session collapse path.
+
+  **LANDED (2026-06-26, the no-silent-drop half):** `spawn_notification_forwarder`
+  caught `broadcast::Lagged(_)` and silently continued — the event bus had
+  dropped events for the forwarder, so they never reached the session's frame
+  stream (the I3 silent-drop). On `Lagged(missed)` it now calls
+  `collapse_session_into_stream` (new) — the same collapse path `subscribe_frames`
+  already uses on a client-side `Lagged` — pushing a collapsed snapshot
+  (re-snapshot open views + replay the live mutation window) into the frame stream
+  so the client resyncs. Both lag paths (event_bus→forwarder and
+  session.frames→client) now collapse; the runtime guarantees a consistent
+  snapshot on any lag, so no client-side seq-gap detection is needed. Test:
+  `collapse_session_frames_into` streams the live mutation window. 25 runtime
+  tests green; clippy + workspace clean.
+  **Remaining (flagged, separate slice):** the collapse re-snapshots views but
+  does NOT refresh mailbox counts (the dropped `countDeltas` are gone) — a
+  transient count divergence after a resync that self-heals on the next
+  `message.updated` countDelta. Pre-existing in the collapse path (affects the
+  client-side-lag resync too); fixing it needs a counts frame in the collapse or
+  a client count-refetch on resync.
 - **2e — Retire invalidation (G5).** When the store is active, stop
   `applyDomainEvent` invalidating store-owned entities; remove
   `useDomainEventRefresh`/`eventMayAffectView` for those.
