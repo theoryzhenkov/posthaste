@@ -186,13 +186,32 @@ fn partial_imap_location_delete_removes_only_that_mailbox_membership() -> Result
     );
     assert_eq!(
         store.get_message_mailboxes(&account, &message_id)?,
-        vec![archive_id]
+        vec![archive_id.clone()]
     );
-    assert!(events.iter().any(|event| {
-        event.topic == EVENT_TOPIC_MESSAGE_UPDATED
-            && event.payload["changes"]["mailboxes"] == true
-            && event.payload["removedMailboxId"] == inbox_id.as_str()
-    }));
+    // The membership-removal event self-maintains the reactive store (option iii):
+    // it carries the post-removal projection (mailboxIds = [archive]) + the removed
+    // mailbox's countDeltas, instead of being projection-less (which the store
+    // dropped, leaving the runtime's per-view re-serve as the only corrector).
+    let membership_event = events
+        .iter()
+        .find(|event| {
+            event.topic == EVENT_TOPIC_MESSAGE_UPDATED
+                && event.payload["changes"]["mailboxes"] == true
+                && event.payload["removedMailboxId"] == inbox_id.as_str()
+        })
+        .expect("membership-change event for the removed inbox location");
+    assert_eq!(
+        membership_event.payload["projection"]["mailboxIds"],
+        serde_json::json!([archive_id.as_str()]),
+    );
+    assert!(
+        membership_event.payload["countDeltas"]
+            .as_array()
+            .is_some_and(|deltas| deltas
+                .iter()
+                .any(|delta| delta["mailboxId"] == inbox_id.as_str())),
+        "countDeltas carries the removed mailbox",
+    );
     assert_eq!(
         store
             .list_events(&EventFilter {

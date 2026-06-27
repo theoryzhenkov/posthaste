@@ -168,9 +168,12 @@ That is the prerequisite decision, not a detail.
    was removed; `installEntityStoreAdapter()` is unconditional, so no path
    depends on the runtime's per-event re-serve. (The base HTTP adapter remains
    only as the wrapped base + the WASM-load bootstrap window.)
-2. **Confirm the entity store self-maintains everything #3 covers** for an
-   evaluable list: keyword, mailbox membership, arrival, deletion, reorder —
-   against the real engine (now that the FakeHandle is gone).
+2. **Confirm the entity store self-maintains everything #3 covers** — **DONE,
+   and it found the real blocker:** the store dropped *projection-less* sync
+   events (IMAP expunge / membership-removal / delete), for which #3 was the only
+   corrector. Fixed in [[L2-projectionless-sync-events]] (fix a) — the three sync
+   emitters now attach `projection` + `countDeltas`, so the store self-maintains
+   rows + counts on those paths. This unblocks #3 removal.
 3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` (skip
    `send_recomputed_replace`); keep it for the other view kinds and keep
    #1/#2/#4/#5/#6 untouched.
