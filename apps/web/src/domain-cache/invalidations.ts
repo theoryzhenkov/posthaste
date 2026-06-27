@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { DomainEvent, SourceMessageRef } from '../api/types'
+import type { DomainEvent } from '../api/types'
 import { findConversationIdForMessage, mailKeys } from '../mailState'
 import { queryKeys } from '../queryKeys'
 import { eventTarget, payloadConversationId } from './payload'
@@ -58,45 +58,6 @@ export async function invalidateComposeSendReadModels(
     queryClient.invalidateQueries({ queryKey: queryKeys.senderAddresses }),
     queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot }),
   ])
-}
-
-export async function invalidateMessageMutationReadModels(
-  queryClient: QueryClient,
-  target: SourceMessageRef,
-) {
-  await Promise.all([
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.mailboxes(target.sourceId),
-    }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.mailNavigationRead }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot }),
-  ])
-}
-
-export async function invalidateMessageScopeReadModels(
-  queryClient: QueryClient,
-  target: SourceMessageRef,
-  conversationId: string | null,
-) {
-  const invalidations = [
-    queryClient.invalidateQueries({
-      queryKey: mailKeys.message(target.sourceId, target.messageId),
-    }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot }),
-  ]
-  if (conversationId) {
-    invalidations.push(
-      queryClient.invalidateQueries({
-        queryKey: mailKeys.conversation(conversationId),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: mailKeys.conversationSummary(conversationId),
-      }),
-    )
-  }
-  await Promise.all(invalidations)
 }
 
 export async function invalidateSmartMailboxMutationReadModels(

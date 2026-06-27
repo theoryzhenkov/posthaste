@@ -63,9 +63,6 @@ export const runtimeViews = {
     messagePage(request: RuntimeMessagePageRequest): Promise<MessagePage> {
       return getRuntimeAdapter().fetchMessagePage(request)
     },
-    openMessageList(request: RuntimeMessagePageRequest) {
-      return getRuntimeAdapter().openMessageListView(request)
-    },
     read(request: ReadRequest): Promise<ReadResponse> {
       return getRuntimeAdapter().read(request)
     },
