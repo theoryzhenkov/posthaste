@@ -174,9 +174,21 @@ That is the prerequisite decision, not a detail.
    corrector. Fixed in [[L2-projectionless-sync-events]] (fix a) — the three sync
    emitters now attach `projection` + `countDeltas`, so the store self-maintains
    rows + counts on those paths. This unblocks #3 removal.
-3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` — **DONE.** The
-   event pump skips `send_recomputed_replace` for mail-list views (the client
-   self-maintains); detail/conversation/account views still recompute.
+3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` — **DONE, then
+   NARROWED (regression fix `b7c65f58`).** Originally skipped for *all* mail-lists,
+   but the client store self-maintains only *evaluable* predicates (InMailbox,
+   date-sort); `Deferred` mail-lists (smart-mailbox / global / null-mailbox /
+   non-`date`) have no self-maintenance and went stale until reload (the `.22`
+   regression — Playwright-confirmed: archiving from "All Inboxes" caused 0 DOM
+   mutations; regular Inbox, being evaluable, was unaffected). Narrowed: the client
+   stamps `client_self_maintained` on the `ViewDescriptor` (single-source
+   `isMailListSelfMaintained` helper, used by both the store's predicate
+   derivation and the centralized mailList descriptor builder — no TS<->Rust
+   drift; the runtime reads the bool, never re-derives), and the event pump skips
+   `send_recomputed_replace` only when `MailList && descriptor.client_self_maintained`.
+   Deferred views are re-served (live updates restored); evaluable views stay
+   self-maintained (perf win preserved). detail/conversation/account views still
+   recompute.
 4. **Harden gap-detection** — **DONE.** Removing #3 makes the session's stored
    mail-list snapshot go stale (only fresh on open/extend), so every resync path
    now recomputes open views fresh first via `SessionRegistry::refresh_open_views`
@@ -206,9 +218,12 @@ That is the prerequisite decision, not a detail.
      the notification, and `recompute_and_await_view` added to measure the
      eliminated cost.)
 
-**STATUS: option iii COMPLETE (steps 1–5).** The runtime no longer recomputes +
-re-serves an evaluable mail-list per event; the firehose is the single membership
-channel; the per-event-per-view recompute (~1.5 ms, serde-heavy) is gone.
+**STATUS: option iii COMPLETE (steps 1–5, step 3 narrowed in `b7c65f58`).** The
+runtime no longer recomputes + re-serves an *evaluable* mail-list per event; the
+firehose is the single membership channel for those; the per-event-per-view
+recompute (~1.5 ms, serde-heavy) is gone. `Deferred` mail-lists (smart-mailbox /
+global / non-`date`) are still re-served per event — the client cannot
+self-maintain them, so neutering #3 for them would stale them.
 
 ## Provenance
 
