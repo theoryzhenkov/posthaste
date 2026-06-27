@@ -310,11 +310,16 @@ impl EntityStore {
         }
     }
 
-    /// Settle a pending mutation by its terminal outcome (`Confirmed`/`Failed`).
-    /// `Confirmed` retires the now-redundant pending op (a visual no-op — the
-    /// served base already carries the effect); `Failed` retires it and the
-    /// projection reverts to authoritative state. Out-of-order safe: only the
-    /// named mutation is touched; idempotent on an unknown id.
+    /// Settle a pending mutation by its terminal outcome.
+    ///
+    /// `Confirmed` does **not** revert: it retires the op only if the confirmed
+    /// base already carries its effect (`retire_absorbed`), otherwise it leaves
+    /// the op folded for the authoritative `message.updated` to retire. This is
+    /// the race fix ([mutation.notification design](../eph/DESIGN-L2-mutation-notification.md)):
+    /// a confirmation that outruns the base update can no longer flip the
+    /// projection back to a stale base. `Failed` retires the op unconditionally
+    /// and the projection reverts to authoritative state (the rejection path).
+    /// Out-of-order safe; idempotent on an unknown id.
     pub fn settle(
         &mut self,
         mutation_id: &MutationId,
@@ -327,7 +332,21 @@ impl EntityStore {
             .iter()
             .find(|held| &held.id == mutation_id)
             .map(|held| held.key.clone());
-        let result = self.engine.settle(mutation_id, outcome);
+        let result = match outcome {
+            // Confirmation is absorption-gated: retire only what the base carries.
+            SettlementOutcome::Confirmed => {
+                let retired = key
+                    .as_ref()
+                    .map(|message_id| self.engine.retire_absorbed(message_id))
+                    .unwrap_or(false);
+                SettlementResult {
+                    retired,
+                    reverted: false,
+                }
+            }
+            // Rejection retires unconditionally and reverts to authoritative state.
+            SettlementOutcome::Failed => self.engine.settle(mutation_id, outcome),
+        };
         if let Some(message_id) = key {
             if self.messages.contains_key(&message_id) {
                 self.rederive_message(&message_id);
@@ -358,6 +377,10 @@ impl EntityStore {
                 message_id.to_string(),
                 fold_state_from_projection(projection),
             );
+            // A base update retires any pending op the new base now carries
+            // (the race-free happy-path retire); optimism the base has not yet
+            // caught up to stays folded and re-derives below.
+            self.engine.retire_absorbed(&message_id.to_string());
             self.rederive_message(message_id);
         }
         self.dirty.insert(DirtyKey::Message(message_id.to_string()));
@@ -850,14 +873,62 @@ mod tests {
     }
 
     #[test]
-    fn confirm_retires_pending_and_base_carries_the_effect() {
+    fn base_update_retires_pending_when_it_carries_the_effect() {
         let (mut store, _view) = inbox_view();
         ingest_m2(&mut store, &[]);
         store.drain_dirty();
 
         store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
-        // The authority applies the flag and re-serves the base with it.
+        // The authority applies the flag and re-serves the base with it: the
+        // base update itself retires the now-redundant optimism (no settlement
+        // needed) and the projection stays flagged throughout — no revert.
         ingest_m2(&mut store, &["$flagged"]);
+        assert!(!store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        // A confirmation arriving after the base already absorbed it is a no-op.
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(!result.retired);
+        assert!(!result.reverted);
+    }
+
+    #[test]
+    fn confirm_before_base_update_does_not_revert() {
+        // The regression test for the flicker: a confirmation that outruns the
+        // authoritative `message.updated` must NOT flip the projection back to
+        // the stale base. The op stays folded until the base catches up.
+        let (mut store, _view) = inbox_view();
+        ingest_m2(&mut store, &[]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        // Confirmation arrives FIRST (base has not caught up). No revert.
+        let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
+        assert!(!result.retired);
+        assert!(!result.reverted);
+        assert!(store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+
+        // Then the base update lands and retires the op — still flagged, still no
+        // revert anywhere in the sequence.
+        ingest_m2(&mut store, &["$flagged"]);
+        assert!(!store.has_pending());
+        assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+    }
+
+    #[test]
+    fn confirm_retires_a_no_op_optimism_without_any_base_update() {
+        // Flagging an already-flagged message: the optimism is absorbed from the
+        // start, so no `message.updated` will carry it. The confirmation clears
+        // the otherwise-lingering op.
+        let (mut store, _view) = inbox_view();
+        ingest_m2(&mut store, &["$flagged"]);
+        store.drain_dirty();
+
+        store.accept_mutation(MutationId("op1".into()), "m2", flag_assertion());
+        assert!(store.has_pending());
 
         let result = store.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         assert!(result.retired);
