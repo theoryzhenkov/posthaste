@@ -19,7 +19,8 @@ use posthaste_domain::{
 use posthaste_engine::MockJmapGateway;
 use posthaste_runtime_contract::{
     AccountTransportMutation, ClientMutationId, CreateAccountMutation, MailListViewState,
-    MailPresentationRequest, MailQueryRequest, MutationRequest, MutationSettlementState,
+    MailPresentationRequest, MailQueryRequest, MutationNotification, MutationRequest,
+    MutationSettlementState,
     RuntimeCaller, RuntimeCore, RuntimeErrorCode, RuntimeFrame, RuntimeFrameSubscription,
     RuntimeLifecycle, RuntimeSessionSeq, SecretWriteMode, SecretWriteMutation, ViewDescriptor,
     ViewFrame, ViewRevision,
@@ -787,31 +788,30 @@ async fn runtime_mutation_streams_settlement_frames() {
     assert_eq!(receipt.state, MutationSettlementState::Confirmed);
     assert_eq!(receipt.output["events"].as_array().unwrap().len(), 1);
 
-    let settlements = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        let mut settlements = Vec::new();
-        while settlements.len() < 2 {
+    // The runtime emits a single terminal verdict, keyed by the client mutation
+    // id, with no non-terminal `Accepted` frame (the mutation.notification
+    // model: only terminal outcomes are emitted).
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
             let frame = subscription
                 .live
                 .next()
                 .await
                 .expect("runtime stream should remain open");
-            if let RuntimeFrame::MutationSettlement {
-                mutation_id, state, ..
+            if let RuntimeFrame::MutationNotification {
+                client_mutation_id,
+                notification,
+                ..
             } = frame
             {
-                settlements.push((mutation_id, state));
+                break (client_mutation_id, notification);
             }
         }
-        settlements
     })
     .await
-    .expect("settlement frames should arrive");
-    assert_eq!(settlements[0].0, mutation_id);
-    assert_eq!(settlements[0].1.client_mutation_id.as_str(), "client-1");
-    assert_eq!(settlements[0].1.name, "message.setKeywords");
-    assert_eq!(settlements[0].1.status, MutationSettlementState::Accepted);
-    assert_eq!(settlements[1].0, mutation_id);
-    assert_eq!(settlements[1].1.status, MutationSettlementState::Confirmed);
+    .expect("a mutation notification should arrive");
+    assert_eq!(notification.0.as_str(), "client-1");
+    assert_eq!(notification.1, MutationNotification::Confirmed);
 
     let duplicate = build
         .handle
