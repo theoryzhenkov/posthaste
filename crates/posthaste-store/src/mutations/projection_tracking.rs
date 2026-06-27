@@ -195,16 +195,26 @@ pub(crate) fn delete_imap_message_location_and_track_projection_inputs(
         return Ok(());
     }
 
+    // Attach the post-removal projection + the removed mailbox's counts, like the
+    // command path: the reactive store drops projection-less events, so without
+    // these the store cannot self-maintain membership for an IMAP
+    // expunge/location-removal and the row only corrected on a full re-serve.
+    let detail = query_message_detail_tx(tx, account_id, &location.message_id)?;
+    let count_deltas =
+        crate::query::mailbox_counts_json_tx(tx, account_id, std::iter::once(&location.mailbox_id))?;
+    let mut payload = json!({
+        "messageId": location.message_id.as_str(),
+        "changes": { "mailboxes": true },
+        "mailboxIds": current_mailboxes.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
+        "removedMailboxId": location.mailbox_id.as_str(),
+        "projection": detail.as_ref().map(|detail| &detail.summary),
+    });
+    payload["countDeltas"] = count_deltas;
     events.record(
         EVENT_TOPIC_MESSAGE_UPDATED,
         current_mailboxes.first(),
         Some(&location.message_id),
-        json!({
-            "messageId": location.message_id.as_str(),
-            "changes": { "mailboxes": true },
-            "mailboxIds": current_mailboxes.iter().map(MailboxId::as_str).collect::<Vec<_>>(),
-            "removedMailboxId": location.mailbox_id.as_str(),
-        }),
+        payload,
     )?;
     Ok(())
 }
