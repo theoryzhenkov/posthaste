@@ -4048,14 +4048,10 @@ name = "posthaste-api"
 version = "0.1.0"
 dependencies = [
  "ammonia",
- "async-stream",
- "async-trait",
  "axum",
  "base64 0.22.1",
  "dirs",
- "futures-util",
  "http-body-util",
- "jsonwebtoken",
  "keyring",
  "macaroon",
  "posthaste-config",
@@ -4066,7 +4062,6 @@ dependencies = [
  "posthaste-store",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-stream",
@@ -4099,7 +4094,6 @@ dependencies = [
  "posthaste-imap",
  "posthaste-link-contract",
  "posthaste-link-core",
- "posthaste-link-replica",
  "posthaste-observability",
  "posthaste-runtime",
  "posthaste-runtime-contract",
@@ -4107,7 +4101,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-stream",
@@ -4141,10 +4134,6 @@ version = "0.1.0"
 dependencies = [
  "posthaste-domain",
  "serde",
- "serde_json",
- "thiserror 2.0.18",
- "time",
- "tokio",
  "toml 0.8.2",
 ]
 
@@ -4202,7 +4191,6 @@ dependencies = [
  "pulldown-cmark",
  "reqwest 0.12.28",
  "serde_json",
- "thiserror 2.0.18",
  "time",
  "tokio",
  "url",
@@ -4252,7 +4240,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -4260,7 +4247,6 @@ name = "posthaste-link-core"
 version = "0.1.0"
 dependencies = [
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -4312,9 +4298,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -4390,17 +4374,12 @@ dependencies = [
 name = "posthaste-store"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "hex",
  "posthaste-domain",
  "posthaste-observability",
  "rusqlite",
- "serde",
  "serde_json",
  "sha2",
- "thiserror 2.0.18",
- "time",
- "tokio",
  "tracing",
 ]
 
