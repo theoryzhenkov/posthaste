@@ -30,7 +30,7 @@ fn set_keywords_mutation(account_id: &str, message_id: &str, cmid: &str) -> Muta
 }
 
 #[tokio::test]
-async fn keyword_toggle_settles_and_recomputes_the_touched_view() {
+async fn keyword_toggle_settles_and_fires_notification_without_re_serving_the_view() {
     let harness = Harness::new().with_runtime().await;
     let account = harness.create_mock_account("a").await;
     harness.seed_messages(&account, &[("m-1", "inbox"), ("m-2", "inbox")]);
