@@ -186,10 +186,29 @@ That is the prerequisite decision, not a detail.
    trio (`live_inbox_convergence` / `gmail_inbox_sync` / `mutation_flicker`) all
    pass without #3; `view_settlement` updated to the new contract (firehose fires,
    no per-event re-serve). runtime 25 / testkit all green; clippy 0.
-5. **Measure** the recompute drop — pending (the `posthaste-bench` harness; the
-   win is structural: no `build_snapshot` per affecting `message.updated`).
+5. **Measure** the recompute drop — **DONE** (`posthaste-bench` runtime workload,
+   release, 50-row window). Per affecting `message.updated`, per open mail-list
+   view:
+   - **eliminated recompute** (`runtime_view_recompute` = one `build_snapshot` +
+     frame, the per-event work #3 used to do): **~1512 µs**
+   - **remaining per-event cost** (`runtime_mutation_notify` = store write + event
+     + notification, post-iii): **~307 µs**
+   - old per-event ≈ **1819 µs → 307 µs ≈ 5.9× less runtime work per event per
+     open view**; the eliminated recompute alone was ~4.9× the entire new
+     per-event cost. The saving scales with **(open mail-list views × burst
+     events)** — the notification is one shared forward; the recompute was
+     per-view.
+   - Bonus finding: the recompute is **serde-dominated** — 1512 µs vs a 234 µs
+     raw `query_mail_page` (`list_inbox`), i.e. ~6.5×; the `to_value(whole
+     MailListViewState)` + `mail_list_delta` (`from_value` ×2) is the bulk, and
+     it grows with window size. (The bench's `mutate_and_await_view` was broken
+     by option iii — it awaited a now-absent view frame — so it was fixed to await
+     the notification, and `recompute_and_await_view` added to measure the
+     eliminated cost.)
 
-**STATUS: option iii landed (steps 1–4).** Only the perf measurement (5) remains.
+**STATUS: option iii COMPLETE (steps 1–5).** The runtime no longer recomputes +
+re-serves an evaluable mail-list per event; the firehose is the single membership
+channel; the per-event-per-view recompute (~1.5 ms, serde-heavy) is gone.
 
 ## Provenance
 
