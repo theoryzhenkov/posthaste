@@ -15,7 +15,6 @@ import type {
   MessageSummary,
   SourceMessageRef,
 } from '../api/types'
-import { runtimeObjectViewsEnabled } from '../features'
 import { mailKeys, mergeConversationView } from '../mailState'
 import { runtimeViews } from '../runtime/views'
 import { useRuntimeObjectView } from '../runtime/useRuntimeObjectView'
@@ -111,16 +110,15 @@ export function MessageDetail({
 
   // 5b-1: layer the runtime's overlay-folded conversation + detail views over
   // the HTTP queries so flag/read/move optimism shows without a cache patch.
-  const runtimeViewsOn = runtimeObjectViewsEnabled()
   useRuntimeObjectView<ConversationView>({
-    enabled: runtimeViewsOn && selection !== null,
+    enabled: selection !== null,
     family: 'conversation',
     payload: selection ? { conversationId: selection.conversationId } : {},
     queryKey: conversationQueryKey,
     sourceId: selection?.sourceId ?? null,
   })
   useRuntimeObjectView<MessageDetailPayload | MessageSummary>({
-    enabled: runtimeViewsOn && selection !== null,
+    enabled: selection !== null,
     family: 'messageDetail',
     merge: mergeMessageDetail,
     payload: selection
