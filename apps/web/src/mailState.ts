@@ -7,14 +7,8 @@
  * @spec docs/L1-ui#data-fetching
  */
 export { mailKeys } from './mail-state/keys'
-export {
-  getConversationSummary,
-  mergeConversationView,
-  normalizeConversationPage,
-  readConversationIds,
-  upsertConversationSummaries,
-} from './mail-state/conversations'
-export { deriveKeywordState, mergeMessageDetail } from './mail-state/keywords'
+export { mergeConversationView } from './mail-state/conversations'
+export { deriveKeywordState } from './mail-state/keywords'
 export { findConversationIdForMessage } from './mail-state/lookup'
 export type {
   ConversationPageSlice,

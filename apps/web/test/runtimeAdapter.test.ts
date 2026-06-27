@@ -209,7 +209,7 @@ describe('runtime adapter facade', () => {
       sort: 'date' as const,
       sortDir: 'desc' as const,
     }
-    expect(await runtimeViews.mail.openMessageList(request)).toBe(result)
+    expect(await getRuntimeAdapter().openMessageListView(request)).toBe(result)
 
     const frames: unknown[] = []
     const unsubscribe = runtimeSubscriptions.view(
@@ -355,7 +355,7 @@ describe('runtime adapter facade', () => {
     })
 
     try {
-      const result = await runtimeViews.mail.openMessageList({
+      const result = await getRuntimeAdapter().openMessageListView({
         scope: {
           kind: 'source-mailbox',
           sourceId: 'primary',

@@ -1,51 +1,7 @@
-import type { InfiniteData, QueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 
-import type {
-  ConversationPage,
-  ConversationSummary,
-  ConversationView,
-} from '../api/types'
+import type { ConversationSummary, ConversationView } from '../api/types'
 import { mailKeys } from './keys'
-import type { ConversationPageSlice } from './types'
-
-/**
- * Normalize a backend conversation page into a cache slice,
- * extracting each summary into its own query entry.
- * @spec docs/L1-ui#data-fetching
- */
-export function normalizeConversationPage(
-  queryClient: QueryClient,
-  page: ConversationPage,
-): ConversationPageSlice {
-  upsertConversationSummaries(queryClient, page.items)
-  return {
-    itemIds: page.items.map((item) => item.id),
-    nextCursor: page.nextCursor,
-  }
-}
-
-/** Write each conversation summary into its own React Query entry. */
-export function upsertConversationSummaries(
-  queryClient: QueryClient,
-  conversations: ConversationSummary[],
-) {
-  for (const conversation of conversations) {
-    queryClient.setQueryData(
-      mailKeys.conversationSummary(conversation.id),
-      conversation,
-    )
-  }
-}
-
-/** Read a cached conversation summary by ID. */
-export function getConversationSummary(
-  queryClient: QueryClient,
-  conversationId: string,
-): ConversationSummary | undefined {
-  return queryClient.getQueryData<ConversationSummary>(
-    mailKeys.conversationSummary(conversationId),
-  )
-}
 
 /**
  * Derive a conversation summary from a full conversation view.
@@ -97,14 +53,4 @@ export function mergeConversationView(
     mailKeys.conversationSummary(conversation.id),
     summarizeConversation(conversation),
   )
-}
-
-/**
- * Flatten all pages of an infinite conversation query into a single ID array.
- * @spec docs/L1-ui#messagelist
- */
-export function readConversationIds(
-  data: InfiniteData<ConversationPageSlice, unknown> | undefined,
-): string[] {
-  return data?.pages.flatMap((page) => page.itemIds) ?? []
 }
