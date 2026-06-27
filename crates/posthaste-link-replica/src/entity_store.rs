@@ -61,7 +61,11 @@ use posthaste_link_core::{
 use crate::mail_list::{apply_fold_to_projection, fold_state_from_projection};
 
 /// A changed entity key, reported by [`EntityStore::drain_dirty`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// Serializes externally-tagged + camelCase so the WASM host can parse a drain
+/// as a JSON array of `{"message":id}` / `{"mailbox":id}` / `{"view":id}`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum DirtyKey {
     Message(String),
     Mailbox(String),
@@ -81,7 +85,8 @@ pub enum SortDirection {
 /// cheap; it matches the runtime's `mail_list_state` sort key. Lexicographic on
 /// `(received_at, message_id)` — ISO-8601 timestamps compare chronologically
 /// and the id is a stable tiebreak.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SortKey {
     pub received_at: String,
     pub message_id: String,
@@ -89,7 +94,11 @@ pub struct SortKey {
 
 /// A view's membership predicate. `InMailbox`/`All` are **evaluable** (the store
 /// self-maintains placement); `Deferred` is not (the host drives deltas).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Serializes externally-tagged + camelCase: `{"inMailbox":id}` / `"all"` /
+/// `"deferred"`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ViewPredicate {
     InMailbox(String),
     All,
@@ -116,7 +125,8 @@ impl ViewPredicate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ViewRow {
     pub row_key: String,
     pub message_id: String,
@@ -142,7 +152,8 @@ pub struct ViewEntity {
 
 /// A mailbox entity: server-authoritative count scalars (the store is partial,
 /// so counts are never derived from the held message set).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MailboxEntity {
     pub unread_count: i64,
     pub total_count: i64,
@@ -160,7 +171,8 @@ struct MessageEntity {
 }
 
 /// A count delta shipped with a message event (atomic per batch — `D3`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CountDelta {
     pub mailbox_id: String,
     pub unread_count: i64,
@@ -168,11 +180,16 @@ pub struct CountDelta {
 }
 
 /// One authoritative update in a batch.
-#[derive(Clone, Debug)]
+///
+/// Serializes externally-tagged + camelCase: `{"message":{messageId,
+/// projection, deleted, countDeltas}}` / `{"mailboxCount":{mailboxId,...}}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum StoreUpdate {
     /// A message mutation carrying the full projection (enough to evaluate
     /// membership, compute the sort key, and render) plus the affected
     /// mailboxes' new counts (`firehose-carries-rows`, `D2`).
+    #[serde(rename_all = "camelCase")]
     Message {
         message_id: String,
         projection: Value,
@@ -871,5 +888,97 @@ mod tests {
         // The base arrives: optimism folds in.
         ingest_m2(&mut store, &[]);
         assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+    }
+
+    // --- WASM boundary serde shapes ----------------------------------------
+    // The web adapter builds these JSON shapes; the WASM handle deserializes
+    // them into the store types. Pin the camelCase wire contract here so a
+    // Rust rename can't silently break the host.
+
+    #[test]
+    fn store_update_message_round_trips_camel_case() {
+        let update = StoreUpdate::Message {
+            message_id: "m1".into(),
+            projection: summary("m1", "2026-04-29T10:00:00Z", &["inbox"]),
+            deleted: false,
+            count_deltas: vec![CountDelta {
+                mailbox_id: "inbox".into(),
+                unread_count: 3,
+                total_count: 10,
+            }],
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(
+            json["message"]["messageId"], json!("m1"),
+            "message update is externally-tagged + camelCase"
+        );
+        assert_eq!(json["message"]["deleted"], json!(false));
+        assert_eq!(
+            json["message"]["countDeltas"][0]["mailboxId"],
+            json!("inbox")
+        );
+        // Round-trips back unchanged.
+        let back: StoreUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(back, update);
+    }
+
+    #[test]
+    fn mailbox_count_update_round_trips() {
+        let update = StoreUpdate::MailboxCount(CountDelta {
+            mailbox_id: "inbox".into(),
+            unread_count: 1,
+            total_count: 2,
+        });
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["mailboxCount"]["unreadCount"], json!(1));
+        let back: StoreUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(back, update);
+    }
+
+    #[test]
+    fn dirty_key_serializes_externally_tagged() {
+        // The host drains dirty as a JSON array of these.
+        assert_eq!(
+            serde_json::to_value(DirtyKey::Message("m1".into())).unwrap(),
+            json!({"message": "m1"})
+        );
+        assert_eq!(
+            serde_json::to_value(DirtyKey::Mailbox("inbox".into())).unwrap(),
+            json!({"mailbox": "inbox"})
+        );
+        assert_eq!(
+            serde_json::to_value(DirtyKey::View("inbox".into())).unwrap(),
+            json!({"view": "inbox"})
+        );
+    }
+
+    #[test]
+    fn view_row_and_predicate_round_trip_camel_case() {
+        let row = ViewRow {
+            row_key: "primary:m1".into(),
+            message_id: "m1".into(),
+            sort_key: SortKey {
+                received_at: "2026-04-29T10:00:00Z".into(),
+                message_id: "m1".into(),
+            },
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["rowKey"], json!("primary:m1"));
+        assert_eq!(json["sortKey"]["receivedAt"], json!("2026-04-29T10:00:00Z"));
+        let back: ViewRow = serde_json::from_value(json).unwrap();
+        assert_eq!(back, row);
+
+        assert_eq!(
+            serde_json::to_value(ViewPredicate::InMailbox("inbox".into())).unwrap(),
+            json!({"inMailbox": "inbox"})
+        );
+        assert_eq!(
+            serde_json::to_value(ViewPredicate::All).unwrap(),
+            json!("all")
+        );
+        assert_eq!(
+            serde_json::to_value(ViewPredicate::Deferred).unwrap(),
+            json!("deferred")
+        );
     }
 }

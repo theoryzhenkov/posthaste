@@ -20,7 +20,7 @@ mod mail_list;
 pub mod entity_store;
 
 pub use entity_store::{
-    CountDelta, DirtyKey, EntityStore, MailboxEntity, SortDirection, StoreUpdate,
+    CountDelta, DirtyKey, EntityStore, MailboxEntity, SortDirection, SortKey, StoreUpdate,
     ViewEntity, ViewPredicate, ViewRow,
 };
 pub use mail_list::{MailListReplica, MailListRow};
