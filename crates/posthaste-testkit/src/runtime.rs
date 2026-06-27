@@ -604,6 +604,39 @@ impl ViewSettlement {
         );
     }
 
+    /// Assert the settled view was NOT re-served by the runtime. Option iii
+    /// ([single-source-view-membership]): an evaluable mail-list view is
+    /// self-maintained by the client from the `message.updated` firehose, so the
+    /// runtime emits no per-event recompute (`ViewReplace`/`ViewDelta`) for it.
+    pub fn assert_view_not_recomputed(&self) {
+        let count = self
+            .frames
+            .iter()
+            .filter(|frame| is_view_recompute(frame, &self.view_id))
+            .count();
+        assert_eq!(
+            count, 0,
+            "expected no runtime re-serve for the self-maintained view {:?}, got {count}",
+            self.view_id
+        );
+    }
+
+    /// Assert a `message.updated` notification fired — the firehose input the
+    /// client self-maintains the view from (the update path under option iii,
+    /// replacing the runtime's per-event view recompute).
+    pub fn assert_message_updated_notification(&self) {
+        let found = self.frames.iter().any(|frame| {
+            matches!(
+                frame,
+                RuntimeFrame::Notification { kind, .. } if kind == "message.updated"
+            )
+        });
+        assert!(
+            found,
+            "expected a message.updated notification (the client's self-maintenance input)"
+        );
+    }
+
     /// Assert no view other than the settled one recomputed (over-broad
     /// invalidation across unrelated views).
     pub fn assert_only_view_recomputed(&self) {
