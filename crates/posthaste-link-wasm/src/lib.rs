@@ -17,6 +17,7 @@ use posthaste_link_core::{MessageAssertion, MutationId, SettlementOutcome};
 use posthaste_link_replica::{MailListReplica, MailListRow};
 
 pub mod mutation;
+pub mod entity_store;
 pub mod view_replica;
 
 /// A live mail-list replica owned by JS: the served rows are its base, the
