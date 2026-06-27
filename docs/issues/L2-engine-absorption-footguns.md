@@ -6,12 +6,34 @@ reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
 status: open
-priority: medium
+priority: low
 depends:
   - path: docs/eph/DESIGN-L2-mutation-notification
 ---
 
 # Engine-layer absorption footguns
+
+**Status: PARTIALLY RESOLVED (downgraded to LOW), 2026-06-27.** The dead
+base-update methods the original finding named are gone (`apply_base_update` /
+`replace_base` / `project_all` were deleted in the legacy-cleanup arc), and
+`Replica::settle(Confirmed)` is no longer the pre-fix *unconditional* retire — it
+is now confirmed-gated (the engine owns a `confirmed` set; an op retires only
+once confirmed AND absorbed). The engine also gained `mark_confirmed` +
+`retire_absorbed_if` for the caller-gated path.
+
+**What remains (the residual LOW footgun):** the *version* gate (hold an op until
+a strictly-higher base version absorbs it — the equal-version fix) lives in
+`EntityStore` (link-replica), not the generic engine. A future caller using the
+engine's `settle`/`retire_absorbed` directly gets confirmed-gating but NOT
+version-gating, so an equal-version stale re-serve could re-open the move flicker
+for that caller. Today the only caller is `EntityStore`, which is correct. If a
+second convergence consumer appears, lift the version notion into the engine
+(e.g. `Convergence::version_of` with a `None` default) so the invariant is
+enforced in one place. Until then, this is documentation, not an active bug.
+
+---
+
+**Original finding (preserved).**
 
 The mutation.notification design (§4) specifies that a base update *itself* drops
 absorbed ops and that confirmation never reverts. But the guarantee is enforced
