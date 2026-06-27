@@ -16,6 +16,7 @@ import {
   invalidateTargetMessageReadModels,
 } from './invalidations'
 import { pushNotification } from '../notifications/store'
+import { isEntityStoreAdapterActive } from '../runtime/entityStoreState'
 import { payloadString } from './payload'
 import {
   applyResourceInvalidationsOrFallback,
@@ -111,31 +112,46 @@ const eventHandlers = {
     invalidateTargetMessageReadModels(queryClient, event)
   },
   [EVENT_TOPICS.MessageUpdated]: (queryClient, event) => {
-    invalidateMessageListReadModels(queryClient)
+    // When the entity store is active it owns the mail-list rows (synthesized
+    // view frames) + the mailbox counts (`setQueryData`), so the store-owned
+    // invalidations are skipped to avoid a redundant REST refetch. Surfaces the
+    // store does not own (conversations, smart-mailboxes, tags, mail-navigation,
+    // message detail) still invalidate.
+    const skipStoreOwned = isEntityStoreAdapterActive()
+    invalidateMessageListReadModels(queryClient, { skipStoreOwned })
 
     if (payloadChangeFlag(event, 'arrived')) {
-      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailboxReadModels(queryClient, event.accountId, {
+        skipStoreOwned,
+      })
       invalidateMailNavigationBootstrapReadModels(queryClient)
     }
 
     if (payloadChangeFlag(event, 'mailboxes')) {
-      invalidateMailboxReadModels(queryClient, event.accountId)
+      invalidateMailboxReadModels(queryClient, event.accountId, {
+        skipStoreOwned,
+      })
       invalidateMailNavigationBootstrapReadModels(queryClient)
     }
 
     if (payloadChangeFlag(event, 'keywords')) {
-      // List and detail surfaces render from runtime view frames, which
-      // recompute on keyword events; the renderer no longer patches message
-      // caches here. Counts/sidebar (not view-backed) still invalidate.
-      invalidateMailboxReadModels(queryClient, event.accountId)
+      // List/detail surfaces render from runtime view frames, which recompute
+      // on keyword events. When the entity store is active it owns the counts
+      // too (`setQueryData`); otherwise counts/sidebar invalidate here.
+      invalidateMailboxReadModels(queryClient, event.accountId, {
+        skipStoreOwned,
+      })
       invalidateMailNavigationBootstrapReadModels(queryClient)
     }
 
     if (event.payload.deleted === true) {
       // A destroy/expunge carries no `changes` object, so the membership
       // branches above don't fire. Counts/sidebar are not view-backed and would
-      // otherwise lag until the next sync, so invalidate them on deletion too.
-      invalidateMailboxReadModels(queryClient, event.accountId)
+      // otherwise lag until the next sync, so invalidate them on deletion too
+      // (unless the entity store owns them).
+      invalidateMailboxReadModels(queryClient, event.accountId, {
+        skipStoreOwned,
+      })
       invalidateMailNavigationBootstrapReadModels(queryClient)
     }
 
