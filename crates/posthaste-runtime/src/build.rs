@@ -21,7 +21,7 @@ use posthaste_runtime_contract::{
     MailQueryRequest, MessageResourceKind, MutationReceipt, MutationRequest,
     MutationSettlementState, PatchAccountMutation, RuntimeAccountList, RuntimeCaller, RuntimeCore,
     RuntimeError, RuntimeErrorCode, RuntimeEventSubscription, RuntimeFrameSubscription,
-    RuntimeLifecycle, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
+    RuntimeLifecycle, RuntimeMutationId, RuntimeResourceBytes, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
     RuntimeStatus, RuntimeStoreStatus, RuntimeViewSubscription, ViewDescriptor, ViewId,
     ViewRevision,
 };
@@ -343,6 +343,44 @@ pub struct RuntimeHandle {
     core: Arc<RuntimeCoreState>,
 }
 
+/// Drop-guard ensuring a runtime mutation reaches a terminal settlement even
+/// when its dispatch future is cancelled (e.g. the client disconnects mid-
+/// `run_message_mutation`). Without it, a dropped `forward.await` skips both the
+/// `Confirmed` and `Failed` branches, leaving the mutation stuck `Accepted`
+/// forever — never pruned, no terminal `mutation.notification` frame, an
+/// unbounded outbox leak. Disarmed on the normal settle paths so it no-ops when
+/// the dispatch completes.
+struct MutationCancelGuard {
+    sessions: Arc<SessionRegistry>,
+    session_id: RuntimeSessionId,
+    mutation_id: RuntimeMutationId,
+    armed: bool,
+}
+
+impl Drop for MutationCancelGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.sessions
+                .settle_mutation(
+                    &self.session_id,
+                    &self.mutation_id,
+                    MutationSettlementState::Failed,
+                    Some(
+                        RuntimeError::internal(
+                            "runtime mutation dispatch was cancelled \
+                             (client disconnect mid-dispatch)",
+                            None,
+                        )
+                        .envelope()
+                        .clone(),
+                    ),
+                    serde_json::Value::Null,
+                )
+                .ok();
+        }
+    }
+}
+
 impl RuntimeHandle {
     /// MIGRATION(api-runtime-wrapper): create a runtime handle around existing
     /// test/API parts until all router state is produced by the authority
@@ -412,8 +450,19 @@ impl RuntimeHandle {
             MutationAcceptance::New { mutation_id, .. } => mutation_id,
             MutationAcceptance::Existing(receipt) => return Ok(receipt),
         };
+        // Arm the cancel-guard before awaiting the backend: if `forward.await`
+        // is dropped (client disconnect mid-dispatch), neither branch below
+        // runs, and the guard's Drop settles `Failed` so the mutation doesn't
+        // leak `Accepted` forever. Disarmed on each normal settle path.
+        let mut guard = MutationCancelGuard {
+            sessions: self.core.sessions.clone(),
+            session_id: session_id.clone(),
+            mutation_id: mutation_id.clone(),
+            armed: true,
+        };
         match forward.await {
             Ok(backend_receipt) => {
+                guard.armed = false;
                 // The backend already serialized the command's events as the
                 // receipt output (state-before-event: the effect is applied
                 // before the receipt returns); settle the session with it.
@@ -426,6 +475,7 @@ impl RuntimeHandle {
                 )
             }
             Err(error) => {
+                guard.armed = false;
                 let envelope = error.envelope().clone();
                 self.core.sessions.settle_mutation(
                     &session_id,
@@ -1312,4 +1362,94 @@ pub enum RuntimeBuildError {
 pub enum RuntimeShutdownError {
     #[error("runtime shutdown failed: {0}")]
     Failed(String),
+}
+
+#[cfg(test)]
+mod cancel_dispatch_tests {
+    use super::*;
+    use posthaste_domain::MessageSummary;
+    use posthaste_link_contract::{DownStream, LinkCoverage};
+    use posthaste_runtime_contract::ClientMutationId;
+
+    // A never-invoked `BackendApi`: the cancel-guard's settle path touches only
+    // the session registry, never the backend, so the stub's methods are inert.
+    // (Only the 4 non-defaulted trait methods need bodies; the rest inherit
+    // defaults.)
+    struct NoopBackend;
+    #[async_trait]
+    impl BackendApi for NoopBackend {
+        async fn forward_mutation(&self, _: MutationRequest) -> Result<MutationReceipt, RuntimeError> {
+            unimplemented!("cancel-guard test does not dispatch")
+        }
+        async fn subscribe(&self, _: LinkCoverage) -> Result<DownStream, RuntimeError> {
+            Ok(Box::pin(futures_util::stream::empty()))
+        }
+        async fn query_mail_page(&self, _: MailQueryRequest) -> Result<MailQueryPage, RuntimeError> {
+            unimplemented!("cancel-guard test does not query")
+        }
+        async fn current_summary(
+            &self,
+            _: AccountId,
+            _: MessageId,
+        ) -> Result<Option<MessageSummary>, RuntimeError> {
+            Ok(None)
+        }
+    }
+
+    // Outbox B: a mutation whose dispatch future is cancelled (client disconnect
+    // mid-forward) must still reach a terminal `Failed` settlement via the
+    // drop-guard, not leak `Accepted` forever — never pruned, no terminal frame.
+    // The guard is constructed + dropped by hand to stand in for the cancelled
+    // `forward.await`; `run_message_mutation`'s arm/disarm wiring is reviewed
+    // alongside (4 lines, documented at the call site).
+    #[tokio::test]
+    async fn cancelled_dispatch_guard_settles_failed_not_accepted() {
+        let event_sender = broadcast::channel(16).0;
+        let outbox = Arc::new(RuntimeBackendOutbox::new());
+        let reads = Arc::new(ReadCache::passthrough(Arc::new(NoopBackend)));
+        let views = Arc::new(ViewRegistry::new(event_sender.clone(), outbox, reads));
+        let sessions = Arc::new(SessionRegistry::new(views, event_sender));
+
+        let caller = RuntimeCaller::test();
+        let session = sessions.open_session(caller.clone()).expect("session opens");
+        let session_id = session.session_id.clone();
+        let client_mutation_id = ClientMutationId::new("cancel-cmid");
+
+        let request = MutationRequest {
+            session_id: Some(session_id.clone()),
+            name: "message.setKeywords".to_string(),
+            args: serde_json::json!({
+                "sourceId": "cancel-acct",
+                "messageId": "m-1",
+                "command": {"add": ["$flagged"], "remove": []},
+            }),
+            client_mutation_id: client_mutation_id.clone(),
+            context: None,
+        };
+        let mutation_id = match sessions.accept_mutation(caller, &request).unwrap() {
+            MutationAcceptance::New { mutation_id } => mutation_id,
+            MutationAcceptance::Existing(_) => panic!("expected a new mutation"),
+        };
+        assert_eq!(
+            sessions.mutation_state(&session_id, &client_mutation_id),
+            Some(MutationSettlementState::Accepted),
+            "mutation is Accepted once dispatched, before any verdict"
+        );
+
+        // Simulate the dispatch future being dropped mid-await (client disconnect
+        // mid-forward): the armed guard's Drop settles `Failed`.
+        {
+            let _guard = MutationCancelGuard {
+                sessions: sessions.clone(),
+                session_id: session_id.clone(),
+                mutation_id: mutation_id.clone(),
+                armed: true,
+            };
+        }
+        assert_eq!(
+            sessions.mutation_state(&session_id, &client_mutation_id),
+            Some(MutationSettlementState::Failed),
+            "cancelled dispatch must settle Failed, not leak Accepted"
+        );
+    }
 }
