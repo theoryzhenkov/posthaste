@@ -48,7 +48,7 @@ the partial-window store cannot self-derive. Be precise about the target:
 | Pagination / window-extend | **keep** | a message below the watermark `W` is outside the store's world |
 | Resync / gap recovery (forwarder lag → collapse) | **keep** | the recovery path; the firehose dropped events |
 | Deferred (smart-mailbox) views | **keep** | store can't evaluate the predicate |
-| Store-off fallback (`VITE_ENTITY_STORE=false`) | **keep** | re-serve is the only source then |
+| ~~Store-off fallback (`VITE_ENTITY_STORE=false`)~~ | **RETIRED** | the opt-out is gone (step 1); the store is the sole read model |
 | **Incremental membership (move in/out within window) for an evaluable view while the store is active** | **RETIRE** | the store already maintains it from `message.updated` |
 
 Only the last row is the redundant slice. The radical change is *"the runtime
@@ -164,8 +164,10 @@ That is the prerequisite decision, not a detail.
 
 ### Concrete migration (supersedes the sketch above)
 
-1. **Retire `VITE_ENTITY_STORE`** (commit to the store) — prerequisite, since #3
-   is the store-off path's only list-updater.
+1. **Retire `VITE_ENTITY_STORE`** (commit to the store) — **DONE.** The opt-out
+   was removed; `installEntityStoreAdapter()` is unconditional, so no path
+   depends on the runtime's per-event re-serve. (The base HTTP adapter remains
+   only as the wrapped base + the WASM-load bootstrap window.)
 2. **Confirm the entity store self-maintains everything #3 covers** for an
    evaluable list: keyword, mailbox membership, arrival, deletion, reorder —
    against the real engine (now that the FakeHandle is gone).

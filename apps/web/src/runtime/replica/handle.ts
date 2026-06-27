@@ -89,8 +89,8 @@ let cachedEntityStoreFactory: Promise<EntityStoreHandleFactory> | undefined
 /**
  * Load + instantiate the WASM `EntityStore` module once, returning a factory
  * for fresh handles. Cached so the module initializes a single time. The
- * dynamic import keeps the WASM out of the main bundle unless the
- * entityStoreAdapter is actually selected (`VITE_ENTITY_STORE`).
+ * dynamic import keeps the WASM lazy — loaded once on startup when the
+ * entityStoreAdapter installs (the sole read model).
  */
 export function loadEntityStoreHandleFactory(): Promise<EntityStoreHandleFactory> {
   cachedEntityStoreFactory ??= (async () => {

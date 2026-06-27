@@ -1,8 +1,8 @@
 /**
  * The client-layer entity-store adapter (slice 2e): a `RuntimeAdapter` that
  * drives the normalized WASM `EntityStore` from the runtime frame stream, while
- * every other surface passes through to a base adapter. Selected behind
- * `VITE_ENTITY_STORE`; the renderer is unchanged (`runtime-adapter-opaque`) —
+ * every other surface passes through to a base adapter. Unconditional (the
+ * client's sole read model); the renderer is unchanged (`runtime-adapter-opaque`) —
  * it still consumes `viewSnapshot`/`viewReplace` frames, which this adapter
  * synthesizes from the store's projected rows.
  *
