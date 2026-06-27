@@ -1,14 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const __wbg_runtimemaillistreplica_free: (a: number, b: number) => void;
-export const runtimemaillistreplica_acceptJson: (a: number, b: number, c: number) => [number, number];
-export const runtimemaillistreplica_applyDeltaJson: (a: number, b: number, c: number) => [number, number];
-export const runtimemaillistreplica_hasPending: (a: number) => number;
-export const runtimemaillistreplica_ingestViewJson: (a: number, b: number, c: number) => [number, number];
-export const runtimemaillistreplica_new: () => number;
-export const runtimemaillistreplica_projectViewJson: (a: number, b: number, c: number) => [number, number, number, number];
-export const runtimemaillistreplica_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const __wbg_entitystorehandle_free: (a: number, b: number) => void;
 export const entitystorehandle_acceptMutationJson: (a: number, b: number, c: number) => [number, number];
 export const entitystorehandle_closeView: (a: number, b: number, c: number) => void;
@@ -23,13 +15,6 @@ export const entitystorehandle_registerViewJson: (a: number, b: number, c: numbe
 export const entitystorehandle_setViewRowsJson: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const entitystorehandle_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const entitystorehandle_viewRowsJson: (a: number, b: number, c: number) => [number, number];
-export const __wbg_maillistreplicahandle_free: (a: number, b: number) => void;
-export const maillistreplicahandle_acceptJson: (a: number, b: number, c: number) => [number, number];
-export const maillistreplicahandle_hasPending: (a: number) => number;
-export const maillistreplicahandle_ingestJson: (a: number, b: number, c: number) => [number, number];
-export const maillistreplicahandle_new: () => number;
-export const maillistreplicahandle_projectJson: (a: number, b: number, c: number) => [number, number, number, number];
-export const maillistreplicahandle_settle: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const invertMessageChangeDiff: (a: number, b: number) => [number, number, number, number];
 export const parseMessageMutation: (a: number, b: number) => [number, number, number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
