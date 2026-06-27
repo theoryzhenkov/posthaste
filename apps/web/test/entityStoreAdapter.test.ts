@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'bun:test'
+import { beforeAll, describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { QueryClient } from '@tanstack/react-query'
 
@@ -6,11 +8,7 @@ import type { OkResponse } from '../src/api/types'
 import type { Mailbox } from '../src/api/types'
 import { queryKeys } from '../src/queryKeys'
 import { createEntityStoreAdapter } from '../src/runtime/replica/entityStoreAdapter'
-import type {
-  EntityStoreHandle,
-  ReplicaAssertion,
-  SettlementVerdict,
-} from '../src/runtime/replica/handle'
+import type { EntityStoreHandle } from '../src/runtime/replica/handle'
 import { MemoryOutboxStore } from '../src/runtime/replica/outboxStore'
 import type {
   RuntimeAdapter,
@@ -23,341 +21,21 @@ import type {
   RuntimeViewSnapshot,
 } from '../src/runtime/types'
 
-// --- A faithful in-TS entity-store handle (the WASM handle is covered by the
-// Rust tests + the smoke test); this exercises the controller's orchestration.
-// Mirrors the store: per-key message bases + the optimism fold, evaluable-view
-// self-maintenance, authority-only mailbox counts, dirty tracking. ---
+// The adapter test drives the REAL wasm EntityStore handle (not a TS re-impl of
+// the engine), so the controller's orchestration is verified against the engine
+// that ships. The wasm bundle is a committed artifact; load + initialize it once.
+const wasmDir = join(import.meta.dir, '..', 'src', 'runtime', 'wasm')
+let makeRealHandle: () => EntityStoreHandle
 
-interface StoreViewRow {
-  rowKey: string
-  messageId: string
-  sortKey: { receivedAt: string; messageId: string }
-}
-type ViewPredicate = { inMailbox: string } | 'all' | 'deferred'
-type DirtyKey = { message: string } | { mailbox: string } | { view: string }
-
-function dirtyKey(key: DirtyKey): string {
-  if ('message' in key) return `message:${key.message}`
-  if ('mailbox' in key) return `mailbox:${key.mailbox}`
-  return `view:${key.view}`
-}
-
-/** The two foldable facets the absorption check compares. */
-interface Facets {
-  keywords: Set<string>
-  mailboxIds: string[]
-}
-
-function facetsOf(projection: Record<string, unknown>): Facets {
-  return {
-    keywords: new Set((projection.keywords as string[] | undefined) ?? []),
-    mailboxIds: [...((projection.mailboxIds as string[] | undefined) ?? [])],
-  }
-}
-
-/** Fold one assertion's facet delta; `null` for a destroy (not absorbable). */
-function foldFacets(state: Facets, assertion: ReplicaAssertion): Facets | null {
-  if (assertion.kind === 'setKeywords') {
-    const keywords = new Set(state.keywords)
-    for (const k of assertion.remove) keywords.delete(k)
-    for (const k of assertion.add) keywords.add(k)
-    return { keywords, mailboxIds: state.mailboxIds }
-  }
-  if (assertion.kind === 'replaceMailboxes') {
-    return { keywords: state.keywords, mailboxIds: [...assertion.mailboxIds] }
-  }
-  return null
-}
-
-function sameFacets(a: Facets, b: Facets): boolean {
-  if (a.keywords.size !== b.keywords.size) return false
-  for (const k of a.keywords) if (!b.keywords.has(k)) return false
-  const am = [...a.mailboxIds].sort()
-  const bm = [...b.mailboxIds].sort()
-  return am.length === bm.length && am.every((m, i) => m === bm[i])
-}
-
-class FakeHandle implements EntityStoreHandle {
-  private readonly messages = new Map<string, Record<string, unknown>>()
-  private readonly mailboxes = new Map<
-    string,
-    { unreadCount: number; totalCount: number }
-  >()
-  private readonly views = new Map<
-    string,
-    { predicate: ViewPredicate; rows: StoreViewRow[]; watermark: unknown }
-  >()
-  private readonly pending = new Map<
-    string,
-    { messageId: string; assertion: ReplicaAssertion }
-  >()
-  private readonly dirty = new Set<string>()
-
-  registerViewJson(viewId: string, argsJson: string): void {
-    const args = JSON.parse(argsJson) as {
-      predicate: ViewPredicate
-      watermark: unknown
-    }
-    this.views.set(viewId, {
-      predicate: args.predicate,
-      rows: [],
-      watermark: null,
-    })
-    this.dirty.add(dirtyKey({ view: viewId }))
-  }
-
-  setViewRowsJson(
-    viewId: string,
-    rowsJson: string,
-    watermarkJson: string,
-  ): void {
-    const rows = JSON.parse(rowsJson) as StoreViewRow[]
-    const view = this.views.get(viewId)
-    if (view) {
-      view.rows = rows
-      view.watermark = JSON.parse(watermarkJson)
-    }
-    this.dirty.add(dirtyKey({ view: viewId }))
-  }
-
-  closeView(viewId: string): void {
-    this.views.delete(viewId)
-  }
-
-  ingestBatchJson(batchJson: string): void {
-    const batch = JSON.parse(batchJson) as Array<
-      | {
-          message: {
-            messageId: string
-            projection: Record<string, unknown>
-            deleted: boolean
-            countDeltas: Array<{
-              mailboxId: string
-              unreadCount: number
-              totalCount: number
-            }>
-          }
-        }
-      | {
-          mailboxCount: {
-            mailboxId: string
-            unreadCount: number
-            totalCount: number
-          }
-        }
-    >
-    for (const update of batch) {
-      if ('message' in update) {
-        const { messageId, projection, deleted, countDeltas } = update.message
-        if (deleted) {
-          this.messages.delete(messageId)
-          this.pending.forEach((op, id) => {
-            if (op.messageId === messageId) this.pending.delete(id)
-          })
-          this.removeMessageFromViews(messageId)
-        } else {
-          this.messages.set(messageId, projection)
-          // A base update retires any pending op the new base now carries
-          // (mirrors the engine's absorption-gated retire — the flicker fix).
-          this.retireAbsorbed(messageId)
-          this.rederive(messageId)
-        }
-        this.dirty.add(dirtyKey({ message: messageId }))
-        for (const delta of countDeltas) {
-          this.mailboxes.set(delta.mailboxId, {
-            unreadCount: delta.unreadCount,
-            totalCount: delta.totalCount,
-          })
-          this.dirty.add(dirtyKey({ mailbox: delta.mailboxId }))
-        }
-      } else {
-        this.mailboxes.set(update.mailboxCount.mailboxId, {
-          unreadCount: update.mailboxCount.unreadCount,
-          totalCount: update.mailboxCount.totalCount,
-        })
-        this.dirty.add(dirtyKey({ mailbox: update.mailboxCount.mailboxId }))
-      }
-    }
-  }
-
-  acceptMutationJson(acceptJson: string): void {
-    const { mutationId, messageId, assertion } = JSON.parse(acceptJson) as {
-      mutationId: string
-      messageId: string
-      assertion: ReplicaAssertion
-    }
-    this.pending.set(mutationId, { messageId, assertion })
-    if (this.messages.has(messageId)) {
-      this.rederive(messageId)
-    }
-    this.dirty.add(dirtyKey({ message: messageId }))
-  }
-
-  settle(mutationId: string, outcome: SettlementVerdict): boolean {
-    const op = this.pending.get(mutationId)
-    if (!op) {
-      return false
-    }
-    if (outcome === 'failed') {
-      // Rejection retires unconditionally + reverts to authoritative state.
-      this.pending.delete(mutationId)
-      if (this.messages.has(op.messageId)) {
-        this.rederive(op.messageId)
-      }
-      return true
-    }
-    // Confirmation is absorption-gated: retire only what the base carries, so a
-    // confirmation that outruns the base update never reverts (the flicker fix).
-    this.retireAbsorbed(op.messageId)
-    if (this.messages.has(op.messageId)) {
-      this.rederive(op.messageId)
-    }
-    return false
-  }
-
-  /** Drop pending ops on `messageId` the confirmed base now absorbs (folding
-   * them produces no change), in order — the race-free retire trigger. */
-  private retireAbsorbed(messageId: string): void {
-    const base = this.messages.get(messageId)
-    if (!base) {
-      return
-    }
-    let running = facetsOf(base)
-    for (const [id, op] of [...this.pending.entries()]) {
-      if (op.messageId !== messageId) {
-        continue
-      }
-      const next = foldFacets(running, op.assertion)
-      if (next && sameFacets(next, running)) {
-        this.pending.delete(id)
-      } else if (next) {
-        running = next
-      }
-    }
-  }
-
-  hasPending(): boolean {
-    return this.pending.size > 0
-  }
-
-  messageJson(messageId: string): string {
-    return JSON.stringify(this.foldedProjection(messageId) ?? null)
-  }
-
-  mailboxJson(mailboxId: string): string {
-    return JSON.stringify(this.mailboxes.get(mailboxId) ?? null)
-  }
-
-  viewRowsJson(viewId: string): string {
-    const view = this.views.get(viewId)
-    return JSON.stringify(view?.rows ?? null)
-  }
-
-  projectViewJson(viewId: string): string {
-    const view = this.views.get(viewId)
-    if (!view) {
-      return 'null'
-    }
-    const projected = view.rows.map((row) => ({
-      rowKey: row.rowKey,
-      messageId: row.messageId,
-      sortKey: row.sortKey,
-      projection: this.foldedProjection(row.messageId) ?? null,
-    }))
-    return JSON.stringify(projected)
-  }
-
-  drainDirtyJson(): string {
-    const keys = [...this.dirty].map((encoded) => {
-      const [kind, id] = encoded.split(':')
-      return kind === 'message'
-        ? { message: id }
-        : kind === 'mailbox'
-          ? { mailbox: id }
-          : { view: id }
-    })
-    this.dirty.clear()
-    return JSON.stringify(keys)
-  }
-
-  /** Fold the pending outbox over a message's base projection (optimism). */
-  private foldedProjection(
-    messageId: string,
-  ): Record<string, unknown> | undefined {
-    const base = this.messages.get(messageId)
-    if (!base) {
-      return undefined
-    }
-    let projection = { ...base }
-    let destroyed = false
-    for (const op of this.pending.values()) {
-      if (op.messageId !== messageId) {
-        continue
-      }
-      if (op.assertion.kind === 'setKeywords') {
-        const keywords = new Set(
-          (projection.keywords as string[] | undefined) ?? [],
-        )
-        for (const k of op.assertion.remove) {
-          keywords.delete(k)
-        }
-        for (const k of op.assertion.add) {
-          keywords.add(k)
-        }
-        projection = { ...projection, keywords: [...keywords] }
-      } else if (op.assertion.kind === 'replaceMailboxes') {
-        projection = { ...projection, mailboxIds: [...op.assertion.mailboxIds] }
-      } else if (op.assertion.kind === 'destroy') {
-        destroyed = true
-      }
-    }
-    return destroyed ? undefined : projection
-  }
-
-  /** Re-evaluate a held message's placement across evaluable views. */
-  private rederive(messageId: string): void {
-    const projection = this.foldedProjection(messageId)
-    for (const [viewId, view] of this.views) {
-      if (view.predicate === 'deferred') {
-        continue
-      }
-      const matches =
-        projection != null &&
-        (view.predicate === 'all' ||
-          (view.predicate.inMailbox &&
-            ((projection.mailboxIds as string[] | undefined) ?? []).includes(
-              view.predicate.inMailbox,
-            )))
-      const index = view.rows.findIndex((r) => r.messageId === messageId)
-      if (matches && projection) {
-        const receivedAt = (projection.receivedAt as string | undefined) ?? ''
-        const row: StoreViewRow = {
-          rowKey: `${projection.sourceId}:${messageId}`,
-          messageId,
-          sortKey: { receivedAt, messageId },
-        }
-        if (index >= 0) {
-          view.rows[index] = row
-        } else {
-          view.rows.push(row)
-        }
-      } else if (index >= 0) {
-        view.rows.splice(index, 1)
-      }
-      this.dirty.add(dirtyKey({ view: viewId }))
-    }
-  }
-
-  private removeMessageFromViews(messageId: string): void {
-    for (const [viewId, view] of this.views) {
-      const index = view.rows.findIndex((r) => r.messageId === messageId)
-      if (index >= 0) {
-        view.rows.splice(index, 1)
-        this.dirty.add(dirtyKey({ view: viewId }))
-      }
-    }
-  }
-}
+beforeAll(async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod = (await import(join(wasmDir, 'posthaste_link_wasm.js'))) as any
+  // Bun: initialize synchronously from the binary (avoids the file:// fetch).
+  mod.initSync({
+    module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
+  })
+  makeRealHandle = () => new mod.EntityStoreHandle() as EntityStoreHandle
+})
 
 // --- A fake base adapter exposing the overridden surfaces + a push. ---
 
@@ -548,7 +226,7 @@ function build() {
   ])
   const adapter = createEntityStoreAdapter({
     base: harness.base,
-    makeHandle: () => new FakeHandle(),
+    makeHandle: () => makeRealHandle(),
     outbox,
     queryClient,
     now: () => 1,
