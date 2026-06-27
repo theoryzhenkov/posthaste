@@ -95,26 +95,22 @@ impl StoredMutation {
     }
 
     /// The terminal verdict to publish for this mutation's current state, or
-    /// `None` while it is still non-terminal (Accepted/Queued) — those acks are
-    /// not emitted (`mutation.notification` carries only terminal outcomes; the
+    /// `None` while it is still non-terminal (Accepted) — that ack is not
+    /// emitted (`mutation.notification` carries only terminal outcomes; the
     /// client tracks the in-flight op locally). `Confirmed` maps through;
-    /// `Failed`/`Conflict` collapse into `Rejected`, the distinction carried by
-    /// the error code.
+    /// `Failed` collapses into `Rejected`, the distinction carried by the error
+    /// code.
     fn notification(&self) -> Option<MutationNotification> {
         match self.state {
             MutationSettlementState::Confirmed => Some(MutationNotification::Confirmed),
-            MutationSettlementState::Failed | MutationSettlementState::Conflict => {
-                Some(MutationNotification::Rejected {
-                    error: self.error.clone().unwrap_or_else(|| {
-                        RuntimeError::internal("mutation rejected without an error", None)
-                            .envelope()
-                            .clone()
-                    }),
-                })
-            }
-            MutationSettlementState::Accepted
-            | MutationSettlementState::LocalApplied
-            | MutationSettlementState::Queued => None,
+            MutationSettlementState::Failed => Some(MutationNotification::Rejected {
+                error: self.error.clone().unwrap_or_else(|| {
+                    RuntimeError::internal("mutation rejected without an error", None)
+                        .envelope()
+                        .clone()
+                }),
+            }),
+            MutationSettlementState::Accepted => None,
         }
     }
 
@@ -998,10 +994,8 @@ mod delta_tests {
                 "readWatermark": null,
                 "coverage": { "ranges": [{ "from": null, "to": null }] },
                 "knownTotalCount": null,
-                "pendingMutations": [],
                 "anchor": { "kind": "notRequested" }
             }),
-            pending_mutations: vec![],
             error: None,
         }
     }
