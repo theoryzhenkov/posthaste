@@ -40,8 +40,8 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
       module: readFileSync(join(wasmDir, 'posthaste_link_wasm_bg.wasm')),
     })
     const request = JSON.stringify({
-      name: 'message.archive',
-      args: { sourceId: 'acct', messageId: 'm1' },
+      name: 'message.moveToRole',
+      args: { sourceId: 'acct', messageId: 'm1', role: 'archive' },
       clientMutationId: 'arc-1',
     })
     // No role map → no optimism (mailbox list not loaded yet; graceful).
@@ -95,8 +95,8 @@ describe.skipIf(!present)('archive optimism (real WASM)', () => {
     const parsed = JSON.parse(
       mod.parseMessageMutation(
         JSON.stringify({
-          name: 'message.archive',
-          args: { sourceId: 'acct', messageId: 'm1' },
+          name: 'message.moveToRole',
+          args: { sourceId: 'acct', messageId: 'm1', role: 'archive' },
           clientMutationId: 'arc-1',
         }),
         '{"archive":"mbx-archive"}',

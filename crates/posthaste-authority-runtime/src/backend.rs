@@ -687,7 +687,7 @@ impl Backend {
 
     /// Apply one named message mutation — the backend's up-channel handler. This
     /// is the dispatch from a transport-neutral named mutation
-    /// (`message.setKeywords` / `message.archive` / …) to the typed command,
+    /// (`message.setKeywords` / `message.moveToRole` / …) to the typed command,
     /// moved here from the runtime: the backend "accepts named mutations"
     /// ([replication backend-link L1 §3](../replication/backend-link/L1.md)). The runtime keeps the
     /// session/undo/scope concerns around this call; this node only applies the
@@ -760,30 +760,6 @@ impl Backend {
                     AccountId(args.source_id),
                     MessageId(args.message_id),
                     args.role,
-                )
-                .await
-            }
-            MessageMutation::Archive(args) => {
-                self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    "archive".to_string(),
-                )
-                .await
-            }
-            MessageMutation::Trash(args) => {
-                self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    "trash".to_string(),
-                )
-                .await
-            }
-            MessageMutation::RestoreToInbox(args) => {
-                self.move_message_to_role(
-                    AccountId(args.source_id),
-                    MessageId(args.message_id),
-                    "inbox".to_string(),
                 )
                 .await
             }
