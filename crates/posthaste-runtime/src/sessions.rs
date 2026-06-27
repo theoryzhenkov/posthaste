@@ -582,6 +582,22 @@ impl SessionRegistry {
         Ok(receipt)
     }
 
+    /// Read the current settlement state of a mutation by its **client** mutation
+    /// id. `None` when the session or mutation is unknown (or already evicted).
+    pub(crate) fn mutation_state(
+        &self,
+        session_id: &RuntimeSessionId,
+        client_mutation_id: &ClientMutationId,
+    ) -> Option<MutationSettlementState> {
+        let sessions = self.lock_sessions();
+        let session = sessions.get(session_id)?;
+        let mutation_id = session.mutations_by_client_id.get(client_mutation_id)?;
+        session
+            .latest_mutations
+            .get(mutation_id)
+            .map(|m| m.state.clone())
+    }
+
     pub(crate) fn session_scope(
         &self,
         session_id: &RuntimeSessionId,

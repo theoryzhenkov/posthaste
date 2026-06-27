@@ -56,7 +56,7 @@ deferred-pending path), which must still fold in on a later ingest.
 
 Provenance: four-reviewer Task 1 (C1) + Task 4 (H3), corroborated.
 
-## B — Cancelled dispatch leaks as never-pruned `Accepted` (MEDIUM)
+## B — Cancelled dispatch leaks as never-pruned `Accepted` (MEDIUM) — **RESOLVED**
 
 `accept_mutation` inserts into `latest_mutations`/`mutations_by_client_id`
 (`crates/posthaste-runtime/src/sessions.rs:400`) but only `settle_mutation`
@@ -71,6 +71,21 @@ may never come.
 independent of `settled_mutation_ids`), and either re-emit an in-flight signal
 on reconnect or guarantee a terminal settle on cancellation (settle `Failed` in
 a drop-guard around `run_message_mutation`).
+
+**Resolved:** went with the terminal-settle-on-cancel option. A
+`MutationCancelGuard` drop-guard in `run_message_mutation`
+(`crates/posthaste-runtime/src/build.rs`) is armed after `accept_mutation` and
+disarmed on each normal settle path (Confirmed/Failed). On cancel — the dispatch
+future dropped mid-`forward.await` (client disconnect) — the guard's `Drop` calls
+`settle_mutation(Failed)`, guaranteeing a terminal verdict and pruning. The
+bounding-cap alternative was unnecessary: the guard eliminates the leak at the
+source rather than capping it. Regression test
+`cancelled_dispatch_guard_settles_failed_not_accepted` verifies the guard
+settles `Failed` (fails-without/passes-with). The arm/disarm wiring in
+`run_message_mutation` is 4 lines, reviewed alongside (a full cancel-spawn test
+was blocked: `RuntimeHandle` has no in-crate constructor, and the testkit
+dev-dep cycle creates a second `posthaste-runtime` instance so `pub(crate)`
+doesn't cross — the guard-level test is the reliable seam).
 
 Provenance: four-reviewer Task 2 (MEDIUM-3).
 
