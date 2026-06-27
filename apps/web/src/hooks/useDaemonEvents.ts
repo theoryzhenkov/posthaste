@@ -24,9 +24,6 @@ import { runtimeSessionClient } from '../runtime/sessionClient'
 /** `sessionStorage` key for the last processed runtime frame sequence number. */
 const EVENT_CURSOR_STORAGE_KEY = 'mail:last-runtime-frame-seq'
 
-/** Custom browser event name used to relay domain events to components. */
-export const MAIL_DOMAIN_EVENT_NAME = 'mail:domain-event'
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -41,13 +38,6 @@ function isDomainEventPayload(payload: unknown): payload is DomainEvent {
     typeof payload.topic === 'string' &&
     typeof payload.occurredAt === 'string' &&
     isRecord(payload.payload)
-  )
-}
-
-/** Re-dispatch a domain event as a browser `CustomEvent` for component listeners. */
-function dispatchDomainEvent(payload: DomainEvent) {
-  window.dispatchEvent(
-    new CustomEvent<DomainEvent>(MAIL_DOMAIN_EVENT_NAME, { detail: payload }),
   )
 }
 
@@ -89,7 +79,6 @@ export function useDaemonEvents() {
           // The renderer holds no optimistic overlay, so every runtime event is
           // authoritative and always applies — there is no local echo to drop.
           applyDomainEvent(queryClient, payload)
-          dispatchDomainEvent(payload)
         },
         onMalformedFrame({ raw, error }) {
           syncLogger.warn(

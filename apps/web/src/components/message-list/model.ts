@@ -1,9 +1,4 @@
-import type {
-  DomainEvent,
-  MessagePage,
-  MessageSortField,
-  MessageSummary,
-} from '@/api/types'
+import type { MessagePage, MessageSortField, MessageSummary } from '@/api/types'
 import { messagePageClient } from '@/messagePageClient'
 import type { OperationContext } from '@/observability'
 import type { RuntimeMessagePageRequest } from '@/runtime/types'
@@ -43,24 +38,6 @@ export function viewKey(
     return `smart:${selectedView.id}${query}${sortKey}`
   }
   return `source:${selectedView.sourceId}:${selectedView.mailboxId}${query}${sortKey}`
-}
-
-export function eventMayAffectView(
-  payload: DomainEvent,
-  selectedView: SidebarSelection | null,
-): boolean {
-  if (!selectedView) {
-    return false
-  }
-  if (selectedView.kind === 'smart-mailbox') {
-    return true
-  }
-  if (payload.accountId !== selectedView.sourceId) {
-    return false
-  }
-  return (
-    payload.mailboxId === null || payload.mailboxId === selectedView.mailboxId
-  )
 }
 
 function serverSortField(sort: SortConfig): MessageSortField {
