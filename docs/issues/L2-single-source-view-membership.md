@@ -113,6 +113,69 @@ finding four bugs in the thing it backs up is premature.
 Scope: cross-cutting (runtime view machinery + the link handshake), so a
 deliberate effort under [[client-link-unification]] — not a flicker patch.
 
+## Call-site map (2026-06-27)
+
+Every point where the runtime pushes a view frame to a session, mapped against
+KEEP vs the redundant target. All frames originate as a `ViewFrame` and are
+converted by `view_frame_to_runtime` (sessions.rs) into
+`ViewSnapshot`/`ViewReplace`/`ViewDelta` (delta-capable sessions get `ViewDelta`
+for row-local mail-list changes).
+
+| # | Site | Frame | Trigger | Verdict |
+| --- | --- | --- | --- | --- |
+| 1 | `open_view` → `subscribe_view.catch_up` (views.rs:113, 205) | Snapshot | a view is opened | **KEEP** (initial) |
+| 2 | `extend_view` (views.rs:187) | Replace | client window-extend (pagination) | **KEEP** (page) |
+| 3 | `spawn_event_pump` → `send_recomputed_replace` (views.rs:237, 270) | Replace/Delta | **every affecting `message.updated`** | **REDUNDANT — the target** |
+| 4 | `spawn_event_pump` lag → `send_recomputed_snapshot` (views.rs:280) | Snapshot | per-view event-bus lag | **KEEP** (resync) |
+| 5 | `subscribe_view` lag (views.rs:217) | Snapshot | view subscription lag | **KEEP** (resync) |
+| 6 | `collapse_session_frames` (sessions.rs:730) | Snapshot | notification-forwarder lag | **KEEP** (session resync) |
+
+### The target (#3) in detail
+
+Each open view spawns `spawn_event_pump` — a tokio task subscribed to the domain
+event bus. On each event, `event_affects_view(kind, event)` gates a recompute;
+for `ViewKind::MailList` it fires on `message.updated` whose `changes.keywords`,
+`changes.mailboxes`, `created`, or `deleted` is set. A hit calls
+`recompute_view_if_changed` → `build_snapshot` (a **full `query_mail_page`
+re-query of the store** + serialize) → emits `ViewFrame::Replace` if the data
+changed. So **every membership/keyword/arrival/deletion event triggers a full
+view rebuild per open view** — O(open-views × view-size) of store query + serialize
+per mutation/sync event. That recompute cost is the perf prize.
+
+### Why it's redundant — and the dependency that gates removal
+
+The **same event bus** also feeds `spawn_notification_forwarder` (sessions.rs),
+which forwards the raw `message.updated` as a `RuntimeFrame::Notification`. So
+the client receives *both* the recomputed view Replace/Delta (#3) **and** the raw
+notification. The **entity-store adapter** (`entityStoreAdapter.ts`) ingests the
+notification, self-maintains membership, and **synthesizes its own view frames** —
+so #3 is pure duplication *when the entity store is active*.
+
+**The gate (found in the map):** self-maintenance lives **only** in the
+entity-store adapter. The mail-list hook (`useRuntimeMailListView`) *ignores*
+`notification` frames — with the store **off** (`VITE_ENTITY_STORE=false`), #3 is
+the **only** thing that updates the list. So removing #3 **requires** retiring the
+`VITE_ENTITY_STORE` opt-out (committing to the entity store as the sole path).
+That is the prerequisite decision, not a detail.
+
+`event_affects_view` also serves `MessageDetail` / `Conversation` /
+`AccountStatus` recomputes — the entity store does **not** self-maintain those, so
+#3 must stay for them. Option iii neuters #3 **only for `ViewKind::MailList`**.
+
+### Concrete migration (supersedes the sketch above)
+
+1. **Retire `VITE_ENTITY_STORE`** (commit to the store) — prerequisite, since #3
+   is the store-off path's only list-updater.
+2. **Confirm the entity store self-maintains everything #3 covers** for an
+   evaluable list: keyword, mailbox membership, arrival, deletion, reorder —
+   against the real engine (now that the FakeHandle is gone).
+3. **Neuter #3 for `ViewKind::MailList`** in `spawn_event_pump` (skip
+   `send_recomputed_replace`); keep it for the other view kinds and keep
+   #1/#2/#4/#5/#6 untouched.
+4. **Harden gap-detection** (#4/#5/#6 become the *only* correctors) before, not
+   after.
+5. **Measure** the recompute drop.
+
 ## Provenance
 
 Architectural discussion during the move/delete-flicker fix (2026-06-27), after
