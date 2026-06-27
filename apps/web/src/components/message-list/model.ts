@@ -1,5 +1,4 @@
-import type { MessagePage, MessageSortField, MessageSummary } from '@/api/types'
-import { messagePageClient } from '@/messagePageClient'
+import type { MessageSortField, MessageSummary } from '@/api/types'
 import type { OperationContext } from '@/observability'
 import type { RuntimeMessagePageRequest } from '@/runtime/types'
 import type { PreparedServerSearchQuery } from '@/searchQuery'
@@ -81,24 +80,4 @@ export function buildMessagePageRequest(
     signal,
     operation,
   }
-}
-
-export async function fetchMessagesForView(
-  selectedView: SidebarSelection,
-  preparedSearchQuery: PreparedServerSearchQuery,
-  sort: SortConfig,
-  cursor: string | null,
-  signal: AbortSignal,
-  operation: OperationContext,
-): Promise<MessagePage> {
-  return messagePageClient.fetchPage(
-    buildMessagePageRequest(
-      selectedView,
-      preparedSearchQuery,
-      sort,
-      cursor,
-      signal,
-      operation,
-    ),
-  )
 }

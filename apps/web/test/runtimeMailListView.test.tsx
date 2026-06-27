@@ -126,6 +126,33 @@ function wrapper({ children }: { children: ReactNode }) {
   )
 }
 
+// Stable input across the hook's own re-renders (the production caller memoizes
+// these). The hook re-renders when its rows change, so inline objects would make
+// the open-view effect re-run on every frame — see the loadMore test's note.
+function mailListHookInput(queryKey: readonly unknown[]) {
+  return {
+    enabled: true,
+    operation: {
+      operationId: 'op_1',
+      operationKind: 'mail.list',
+      operationSource: 'test',
+      sessionId: 'session_1',
+    },
+    preparedSearchQuery: {
+      query: undefined,
+      validation: { state: 'valid' as const },
+      isBlocked: false,
+    },
+    queryKey,
+    selectedView: {
+      kind: 'source-mailbox' as const,
+      sourceId: 'primary',
+      mailboxId: 'inbox',
+    },
+    sort: { columnId: 'date', direction: 'desc' as const },
+  }
+}
+
 beforeEach(() => {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -153,29 +180,9 @@ describe('useRuntimeMailListView', () => {
       snapshot: mailListSnapshot(1, message),
     })
 
-    const { unmount } = renderHook(
-      () =>
-        useRuntimeMailListView({
-          enabled: true,
-          operation: {
-            operationId: 'op_1',
-            operationKind: 'mail.list',
-            operationSource: 'test',
-            sessionId: 'session_1',
-          },
-          preparedSearchQuery: {
-            query: undefined,
-            validation: { state: 'valid' },
-            isBlocked: false,
-          },
-          queryKey,
-          selectedView: {
-            kind: 'source-mailbox',
-            sourceId: 'primary',
-            mailboxId: 'inbox',
-          },
-          sort: { columnId: 'date', direction: 'desc' },
-        }),
+    const hookInput = mailListHookInput(queryKey)
+    const { result, unmount } = renderHook(
+      () => useRuntimeMailListView(hookInput),
       { wrapper },
     )
 
@@ -185,6 +192,8 @@ describe('useRuntimeMailListView', () => {
         pageParams: [null],
       }),
     )
+    // The hook also returns the rows as its view-model (the component reads this).
+    expect(result.current.items).toEqual([message])
     expect(runtimeAdapter.messagePageCalls).toEqual([])
     expect(runtimeAdapter.runtimeSessionCalls).toEqual([
       { sourceId: 'primary', viewDelta: true },
@@ -211,6 +220,7 @@ describe('useRuntimeMailListView', () => {
         pageParams: [null],
       }),
     )
+    expect(result.current.items).toEqual([updatedMessage])
 
     unmount()
     await waitFor(() =>
@@ -238,31 +248,8 @@ describe('useRuntimeMailListView', () => {
       snapshot: mailListSnapshotRows(1, [message, secondMessage], false),
     })
 
-    renderHook(
-      () =>
-        useRuntimeMailListView({
-          enabled: true,
-          operation: {
-            operationId: 'op_1',
-            operationKind: 'mail.list',
-            operationSource: 'test',
-            sessionId: 'session_1',
-          },
-          preparedSearchQuery: {
-            query: undefined,
-            validation: { state: 'valid' },
-            isBlocked: false,
-          },
-          queryKey,
-          selectedView: {
-            kind: 'source-mailbox',
-            sourceId: 'primary',
-            mailboxId: 'inbox',
-          },
-          sort: { columnId: 'date', direction: 'desc' },
-        }),
-      { wrapper },
-    )
+    const hookInput = mailListHookInput(queryKey)
+    renderHook(() => useRuntimeMailListView(hookInput), { wrapper })
 
     await waitFor(() =>
       expect(queryClient.getQueryData(queryKey)).toEqual({
@@ -389,30 +376,11 @@ describe('useRuntimeMailListView', () => {
       snapshot: mailListSnapshot(1, message),
     })
 
+    const hookInput = mailListHookInput(queryKey)
     renderHook(
       () => {
         useDaemonEvents()
-        useRuntimeMailListView({
-          enabled: true,
-          operation: {
-            operationId: 'op_1',
-            operationKind: 'mail.list',
-            operationSource: 'test',
-            sessionId: 'session_1',
-          },
-          preparedSearchQuery: {
-            query: undefined,
-            validation: { state: 'valid' },
-            isBlocked: false,
-          },
-          queryKey,
-          selectedView: {
-            kind: 'source-mailbox',
-            sourceId: 'primary',
-            mailboxId: 'inbox',
-          },
-          sort: { columnId: 'date', direction: 'desc' },
-        })
+        useRuntimeMailListView(hookInput)
       },
       { wrapper },
     )

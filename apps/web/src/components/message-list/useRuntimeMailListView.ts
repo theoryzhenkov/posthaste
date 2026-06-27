@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
+import {
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from '@tanstack/react-query'
 
-import type { MessagePage } from '@/api/types'
+import type { MessagePage, MessageSummary } from '@/api/types'
 import { runtimeSessionClient } from '@/runtime/sessionClient'
 import type {
   RuntimeMailListDelta,
@@ -72,6 +76,12 @@ function applyDeltaToQueryData(
 }
 
 export interface RuntimeMailListView {
+  /** The current window's rows (message projections), reactive to view frames. */
+  items: MessageSummary[]
+  /** True only on the first load of a view with no rows yet to show. */
+  isLoading: boolean
+  /** Re-open the view (the renderer's retry affordance). */
+  retry: () => void
   /** Grow the open view's window by a page; no-op while one is in flight. */
   loadMore: () => void
   /** Whether the runtime view reports more rows past the current window. */
@@ -106,6 +116,31 @@ export function useRuntimeMailListView({
   const loadingMoreRef = useRef(false)
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [retryNonce, setRetryNonce] = useState(0)
+  const retry = useCallback(() => setRetryNonce((n) => n + 1), [])
+
+  // The mail-list rows live in the query cache (written by this hook from view
+  // frames); this read makes them reactive without a second, fetching query.
+  // The view is runtime-fed, so the queryFn must never run (enabled: false);
+  // `placeholderData` keeps the prior view's rows visible across a view switch
+  // until the new snapshot lands (the old HTTP query's behavior).
+  const cached = useQuery<InfiniteData<MessagePage, string | null>>({
+    queryKey,
+    queryFn: () => {
+      throw new Error('mail-list view is runtime-fed; it must not be fetched')
+    },
+    enabled: false,
+    placeholderData: (previous) => previous,
+  })
+  const items = useMemo(
+    () => cached.data?.pages.flatMap((page) => page.items) ?? [],
+    [cached.data],
+  )
+  const isLoading =
+    enabled &&
+    selectedView !== null &&
+    !preparedSearchQuery.isBlocked &&
+    cached.data === undefined
 
   useEffect(() => {
     if (!enabled || !selectedView || preparedSearchQuery.isBlocked) {
@@ -236,6 +271,7 @@ export function useRuntimeMailListView({
     preparedSearchQuery,
     queryClient,
     queryKey,
+    retryNonce,
     selectedView,
     sort,
   ])
@@ -268,5 +304,5 @@ export function useRuntimeMailListView({
       })
   }, [hasMore, queryClient, queryKey])
 
-  return { hasMore, isLoadingMore, loadMore }
+  return { items, isLoading, retry, hasMore, isLoadingMore, loadMore }
 }

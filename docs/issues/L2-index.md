@@ -38,7 +38,7 @@ own status, severity, location, mechanism, and proposed fix.
 | LOW (was MED) | [[L2-engine-absorption-footguns]] | **Mostly resolved**: dead base-update methods gone; `settle(Confirmed)` now confirmed-gated; engine gained `mark_confirmed`/`retire_absorbed_if`. Residual: version-gating lives in link-replica not the engine — lift it up if a 2nd convergence consumer appears. |
 | MEDIUM | [[L2-runtime-nearnode-remote-seam]] | Runtime near-node retires unconditionally on receipt (flicker when remote); overlay not account-scoped; phantom seq gaps; dead Conflict arm. |
 | MEDIUM | [[L2-adapter-reproject-all]] | Adapter re-projects every open view every drain (O(views×rows)); needs a message→views reverse index. |
-| MEDIUM | [[L2-legacy-leftover-structures]] | **Partial**: dead `useDomainEventRefresh` removed. Still open: dual-path mail-list query (loaded gun, `MessageList.tsx`); ungated legacy invalidation storm during sync; rejection has no UI. |
+| MEDIUM | [[L2-legacy-leftover-structures]] | **Mostly resolved**: the dual-path mail-list query (loaded gun) + `fetchMessagesForView` + `runtimeMailListViewsEnabled` flag retired — the list is single-source via `useRuntimeMailListView`; dead `useDomainEventRefresh` gone. **Still open:** the ungated invalidation storm (sidebar/nav/detail) during sync; rejection has no UI. |
 | DONE | [[L2-sugar-role-mutations]] | `archive`/`trash`/`restoreToInbox` were 1:1 aliases of `moveToRole` (no extra authority semantics); collapsed into `moveToRole`. `destroy` kept (genuine permanent deletion). |
 | MEDIUM | [[L2-single-source-view-membership]] | The dual-source membership smell: retire the runtime's redundant incremental-membership re-serve so the firehose is the single source of truth for evaluable views (perf + one channel). The deeper cleanup the `set_view_rows` reconcile is a stepping-stone toward. |
 | MIXED | [[L2-store-correctness-grabbag]] | `in_range` ignores sort direction (HIGH); timestamp lexicographic sort; no base GC; `writeMailboxCount` unknown-account; unguarded async; nits. |
@@ -72,4 +72,5 @@ own status, severity, location, mechanism, and proposed fix.
 - [[L2-reserve-clobbers-optimism]] — the on-mutation flicker (A+B), shipped `.21`.
 - [[L2-sugar-role-mutations]] — archive/trash/restoreToInbox collapsed into `moveToRole`.
 - [[L2-test-fakehandle-drift]] — adapter test retargeted onto the real wasm engine; `FakeHandle` deleted.
+- [[L2-legacy-leftover-structures]] A+C — the legacy mail-list REST fork + flag retired (single-source via `useRuntimeMailListView`); B (invalidation storm) remains.
 - [[L2-engine-absorption-footguns]] — mostly resolved (dead methods gone; confirmed-gating in the engine).

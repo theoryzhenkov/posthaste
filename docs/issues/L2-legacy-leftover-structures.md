@@ -13,13 +13,22 @@ depends:
 
 # Legacy / leftover structures around the store
 
-**Status: PARTIALLY RESOLVED, 2026-06-27.** The dead `useDomainEventRefresh` /
-`eventMayAffectView` / `MAIL_DOMAIN_EVENT_NAME` path was deleted (the
-constant-true domain-event-refresh list path). **Still open:** the legacy
-`useInfiniteQuery` on the mail-list key (`MessageList.tsx:114` — the disarmed
-loaded gun), the ungated legacy domain-cache invalidations that storm during
-sync, and the lack of a user-facing rejection surface. Closing these is the
-dual-path/single-source cleanup, related to [[L2-single-source-view-membership]].
+**Status: MOSTLY RESOLVED, 2026-06-27.**
+- **A (the loaded-gun dual-path) — DONE.** The legacy `useInfiniteQuery` +
+  `fetchMessagesForView` + the `runtimeMailListViewsEnabled` flag were retired.
+  `MessageList` now renders the list from a single source: `useRuntimeMailListView`
+  owns the rows (its internal TanStack cache) and returns the view-model; the
+  component reads only the hook. No second data path, no flag.
+- **C (dead `useDomainEventRefresh`) — DONE** (deleted earlier).
+- **B (ungated invalidation storm) — STILL OPEN** (below): on every
+  `message.updated`, `invalidateMailNavigationBootstrapReadModels` /
+  `invalidateTargetMessageReadModels` fire un-gated — a sidebar/nav/detail refetch
+  storm during sync. Note: `invalidateMessageListReadModels` now invalidates a
+  runtime-fed (fetcher-less) key, so it's inert for the list but pointless — fold
+  into the same audit.
+- Rejection still has no user-facing surface (separate, small).
+
+The end-state pairs with [[L2-single-source-view-membership]].
 
 ---
 
