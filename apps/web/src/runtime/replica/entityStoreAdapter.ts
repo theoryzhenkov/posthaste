@@ -26,6 +26,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { queryClient as singletonQueryClient } from '@/app/queryClient'
+import { LOG_EVENTS, syncLogger } from '@/logger'
 import type { Mailbox } from '@/api/types'
 import type { DomainEvent } from '@/api/types'
 import { queryKeys } from '@/queryKeys'
@@ -338,13 +339,24 @@ class EntityStoreController {
         handlers.onFrame(frame)
         return
       }
-      case 'mutationSettlement': {
-        const verdict = settlementVerdict(frame.state.status)
-        if (verdict) {
-          // Settle the fold + retire the outbox record (durable intent clears
-          // only on a terminal outcome).
-          void this.settleAll(frame.state.clientMutationId, verdict)
+      case 'mutationNotification': {
+        // The verdict for a named mutation. `confirmed` retires the op by
+        // absorption (no revert — it never outruns the base into a revert);
+        // `rejected` reverts the optimism and surfaces the error. Either way the
+        // durable outbox record clears (the server has reached a terminal state).
+        const verdict = settlementVerdict(frame.notification)
+        if (frame.notification.type === 'rejected') {
+          syncLogger.warn(
+            {
+              event: LOG_EVENTS.runtimeMutationRejected,
+              clientMutationId: frame.clientMutationId,
+              errorCode: frame.notification.error.code,
+              retryable: frame.notification.error.retryable,
+            },
+            'runtime mutation rejected; reverting optimism',
+          )
         }
+        void this.settleAll(frame.clientMutationId, verdict)
         handlers.onFrame(frame)
         return
       }
