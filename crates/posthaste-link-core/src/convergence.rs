@@ -51,14 +51,6 @@ pub struct PendingMutation<C: Convergence> {
     pub effect: C::Effect,
 }
 
-/// An authoritative update to one entity's confirmed base: a new asserted state
-/// or a removal ([replication L1 §5.1](../replication/L1.md)).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BaseUpdate<S> {
-    Present(S),
-    Removed,
-}
-
 /// A pending mutation's terminal outcome, as the far node reports it
 /// ([replication L1 §5.5](../replication/L1.md)). The wire form is the contract's
 /// `RuntimeFrame::MutationSettlement`.
@@ -123,20 +115,6 @@ impl<C: Convergence> Replica<C> {
         self.base.insert(key, state);
     }
 
-    /// Swap the **entire** confirmed base for a freshly served one, keeping the
-    /// pending outbox intact. Use this when adopting a served view snapshot:
-    /// entities absent from the new base leave the base (the served base is
-    /// authoritative for the working set), but unconfirmed optimistic mutations
-    /// must survive to re-fold over it (`view-is-pure-fold`; they retire only on
-    /// settlement, §5.5). Replacing the base without clearing pending is the
-    /// base-replace half of the rebase loop ([replication L1 §5.3](../replication/L1.md)).
-    pub fn replace_base<I>(&mut self, base: I)
-    where
-        I: IntoIterator<Item = (C::Key, C::State)>,
-    {
-        self.base = base.into_iter().collect();
-    }
-
     /// Drop an entity from the confirmed base (authoritative removal).
     pub fn remove_base(&mut self, key: &C::Key) {
         self.base.remove(key);
@@ -150,32 +128,6 @@ impl<C: Convergence> Replica<C> {
             return;
         }
         self.pending.push(mutation);
-    }
-
-    /// Apply an authoritative base update: **replace** the asserted confirmed
-    /// states (or remove them). This does not retire pending mutations on its
-    /// own — retirement is driven by per-mutation [`settle`](Self::settle), the
-    /// shape the contract serves (`RuntimeFrame::MutationSettlement`). Recompute
-    /// is `project`, called by the caller for the views it serves.
-    ///
-    /// Because the local effect is idempotent, the interval where the base
-    /// already reflects a still-pending mutation (base updated, settlement not
-    /// yet seen) is a visual no-op, so the retire instant cannot flicker
-    /// ([replication L1 §5.3](../replication/L1.md)).
-    pub fn apply_base_update<I>(&mut self, updates: I)
-    where
-        I: IntoIterator<Item = (C::Key, BaseUpdate<C::State>)>,
-    {
-        for (key, update) in updates {
-            match update {
-                BaseUpdate::Present(state) => {
-                    self.base.insert(key, state);
-                }
-                BaseUpdate::Removed => {
-                    self.base.remove(&key);
-                }
-            }
-        }
     }
 
     /// Settle a pending mutation by its terminal outcome — the
@@ -248,21 +200,6 @@ impl<C: Convergence> Replica<C> {
         Some(C::fold(base, &effects))
     }
 
-    /// The optimistic state of every held entity, with removed entities elided —
-    /// the projected working set.
-    pub fn project_all(&self) -> BTreeMap<C::Key, C::State>
-    where
-        C::State: PartialEq,
-    {
-        let mut projected = BTreeMap::new();
-        for key in self.base.keys() {
-            if let Some(Outcome::Present(state)) = self.project(key) {
-                projected.insert(key.clone(), state);
-            }
-        }
-        projected
-    }
-
     pub fn pending(&self) -> &[PendingMutation<C>] {
         &self.pending
     }
@@ -295,8 +232,6 @@ pub type MessageReplica = Replica<MessageConvergence>;
 /// A pending message mutation — [`PendingMutation<MessageConvergence>`]. Fields
 /// are the generic `key` (message id) / `effect` (assertion).
 pub type PendingMessageMutation = PendingMutation<MessageConvergence>;
-/// A message base update — [`BaseUpdate<MessageFoldState>`].
-pub type MessageBaseUpdate = BaseUpdate<MessageFoldState>;
 
 #[cfg(test)]
 mod tests {
@@ -345,10 +280,7 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        replica.apply_base_update([(
-            "m1".to_string(),
-            MessageBaseUpdate::Present(state(&["$flagged"], &["inbox"])),
-        )]);
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
         let result = replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         assert!(result.retired && !result.reverted);
         assert!(!replica.has_pending());
@@ -363,10 +295,7 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        replica.apply_base_update([(
-            "m1".to_string(),
-            MessageBaseUpdate::Present(state(&["$flagged"], &["inbox"])),
-        )]);
+        replica.set_base("m1".to_string(), state(&["$flagged"], &["inbox"]));
         assert!(replica.has_pending());
         assert_eq!(
             present(&replica, "m1").keywords,
@@ -379,10 +308,7 @@ mod tests {
         let mut replica = MessageReplica::new();
         replica.set_base("m1".to_string(), state(&[], &["inbox"]));
         replica.accept(flag("op1", "m1"));
-        replica.apply_base_update([(
-            "m2".to_string(),
-            MessageBaseUpdate::Present(state(&[], &["inbox"])),
-        )]);
+        replica.set_base("m2".to_string(), state(&[], &["inbox"]));
         assert!(replica.has_pending());
         assert_eq!(
             present(&replica, "m1").keywords,
@@ -436,28 +362,10 @@ mod tests {
             replica.project(&"m1".to_string()),
             Some(MessageOutcome::Removed)
         );
-        assert!(replica.project_all().is_empty());
-        replica.apply_base_update([("m1".to_string(), MessageBaseUpdate::Removed)]);
+        replica.remove_base(&"m1".to_string());
         replica.settle(&MutationId("op1".into()), SettlementOutcome::Confirmed);
         assert_eq!(replica.project(&"m1".to_string()), None);
         assert!(!replica.has_pending());
-    }
-
-    #[test]
-    fn replace_base_swaps_states_but_keeps_pending() {
-        let mut replica = MessageReplica::new();
-        replica.set_base("m1".to_string(), state(&[], &["inbox"]));
-        replica.accept(flag("op1", "m1"));
-        replica.replace_base([
-            ("m1".to_string(), state(&[], &["inbox"])),
-            ("m2".to_string(), state(&[], &["inbox"])),
-        ]);
-        assert!(replica.has_pending());
-        assert_eq!(
-            present(&replica, "m1").keywords,
-            vec!["$flagged".to_string()]
-        );
-        assert_eq!(present(&replica, "m2").keywords, Vec::<String>::new());
     }
 
     #[test]
