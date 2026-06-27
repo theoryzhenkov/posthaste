@@ -5,8 +5,16 @@ import { findConversationIdForMessage, mailKeys } from '../mailState'
 import { queryKeys } from '../queryKeys'
 import { eventTarget, payloadConversationId } from './payload'
 
-export function invalidateMessageListReadModels(queryClient: QueryClient) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
+export function invalidateMessageListReadModels(
+  queryClient: QueryClient,
+  options: { skipStoreOwned?: boolean } = {},
+) {
+  // `messagesRoot` (the mail list) is owned by the entity store when active —
+  // it drives rows via synthesized view frames, so invalidating would refetch
+  // redundantly. `conversationsRoot` is not store-owned and always invalidates.
+  if (!options.skipStoreOwned) {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.messagesRoot })
+  }
   void queryClient.invalidateQueries({ queryKey: queryKeys.conversationsRoot })
 }
 
@@ -124,12 +132,18 @@ export function invalidateSmartMailboxReadModels(
 export function invalidateMailboxReadModels(
   queryClient: QueryClient,
   accountId: string,
+  options: { skipStoreOwned?: boolean } = {},
 ) {
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.mailboxes(accountId),
-  })
+  // `mailboxes(accountId)` carries the counts the entity store owns when
+  // active (it writes them via `setQueryData`), so invalidating would refetch
+  // redundantly. Smart-mailboxes + the message list are not store-owned.
+  if (!options.skipStoreOwned) {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.mailboxes(accountId),
+    })
+  }
   void queryClient.invalidateQueries({ queryKey: queryKeys.smartMailboxes })
-  invalidateMessageListReadModels(queryClient)
+  invalidateMessageListReadModels(queryClient, options)
 }
 
 export function invalidateAccountRuntimeReadModels(
