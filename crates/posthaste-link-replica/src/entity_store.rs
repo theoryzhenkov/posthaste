@@ -245,22 +245,72 @@ impl EntityStore {
         self.dirty.insert(DirtyKey::View(view_id.to_string()));
     }
 
-    /// Replace a view's held rows and watermark (a served snapshot / page from
-    /// the authority). Used on open, extend, and resync. Does not touch the
-    /// message base or outbox — those are seeded by message ingest and retire on
-    /// settlement, so optimism placed by a prior base survives a re-served
-    /// snapshot. (Base trimming for messages that have left every view is a
-    /// later concern; today bases accumulate per ingest.)
+    /// Adopt a served snapshot / page / resync for a view — but **reconcile, not
+    /// clobber**. The runtime's full-view re-serve is a *second* membership source
+    /// for an evaluable view the store already self-maintains from `message.updated`;
+    /// a stale re-serve must not re-add a row the client's (version-guarded) base
+    /// says has moved out, nor drop a row the client has optimistically placed. So
+    /// for an evaluable predicate: (1) keep only served rows whose current
+    /// optimistic projection still matches the predicate + coverage — a row the
+    /// folded base has moved out of the view, or destroyed, is dropped; then
+    /// (2) re-apply pending optimistic placements over the result. A `Deferred`
+    /// view is host-driven, so its served rows are trusted as-is.
+    ///
+    /// This establishes the invariant: in an evaluable view a row is present iff
+    /// its folded base matches the predicate — making the store's self-maintained
+    /// membership authoritative, so a stale `viewReplace`/`viewSnapshot` can no
+    /// longer clobber it (the move/delete/archive flicker,
+    /// [reserve-clobbers-optimism](../../issues/L2-reserve-clobbers-optimism)).
+    /// Does not touch the message base or outbox.
     pub fn set_view_rows(
         &mut self,
         view_id: &str,
         rows: Vec<ViewRow>,
         watermark: Option<SortKey>,
     ) {
+        let reconciled = match self.views.get(view_id) {
+            None => return,
+            Some(view) if !view.predicate.is_evaluable() => rows,
+            Some(view) => {
+                let predicate = view.predicate.clone();
+                rows.into_iter()
+                    .filter(|row| {
+                        // No held base yet (the served snapshot precedes its
+                        // ingest): trust the served row — ingest + rederive will
+                        // re-evaluate it. A held base that no longer matches
+                        // (moved out) or is destroyed (project → None) is dropped.
+                        if !self.messages.contains_key(&row.message_id) {
+                            return true;
+                        }
+                        match self.optimistic_projection(&row.message_id) {
+                            Some(projection) => {
+                                predicate.matches(&projection)
+                                    && in_range(&row.sort_key, &watermark)
+                            }
+                            None => false,
+                        }
+                    })
+                    .collect()
+            }
+        };
         if let Some(view) = self.views.get_mut(view_id) {
-            view.rows = rows;
+            view.rows = reconciled;
             view.watermark = watermark;
             self.dirty.insert(DirtyKey::View(view_id.to_string()));
+        }
+        // Re-apply pending optimistic membership over the freshly-served rows, so
+        // a re-serve cannot drop an optimistically-placed row (e.g. an optimistic
+        // move-in). No-op for the common archive/move/delete case (no pending op).
+        let pending: Vec<String> = self
+            .engine
+            .pending()
+            .iter()
+            .map(|op| op.key.clone())
+            .collect();
+        for message_id in pending {
+            if self.messages.contains_key(&message_id) {
+                self.rederive_message(&message_id);
+            }
         }
     }
 
@@ -952,6 +1002,46 @@ mod tests {
         ingest_m2(&mut store, &["$flagged"]);
         assert!(!store.has_pending());
         assert_eq!(store.message("m2").unwrap()["isFlagged"], json!(true));
+    }
+
+    #[test]
+    fn stale_re_serve_does_not_re_add_a_moved_out_row() {
+        // The move/archive/delete flicker: a row leaves the inbox, then a stale
+        // view re-serve that still lists it must NOT re-add it (it must not
+        // "come back and stay until refresh"). set_view_rows reconciles against
+        // the version-guarded base, not the served list.
+        let (mut store, view) = inbox_view();
+        ingest_m2_v(&mut store, &[], 1); // m2 in inbox @ v1
+        store.drain_dirty();
+        assert_eq!(store.view_rows(view).unwrap().len(), 1);
+
+        // The move: m2 leaves inbox (authoritative, no client optimism) @ v2.
+        let mut moved = summary("m2", "2026-04-28T12:00:00Z", &["archive"]);
+        moved["version"] = json!(2);
+        store.ingest_batch(vec![StoreUpdate::Message {
+            message_id: "m2".into(),
+            projection: moved,
+            deleted: false,
+            count_deltas: vec![],
+        }]);
+        assert!(store.view_rows(view).unwrap().is_empty()); // the blink: m2 gone
+
+        // A STALE re-serve still lists m2 in inbox @ v1: the version guard rejects
+        // the base (1 < 2), and set_view_rows must reconcile m2 away.
+        ingest_m2_v(&mut store, &[], 1);
+        store.set_view_rows(
+            view,
+            vec![ViewRow {
+                row_key: "primary:m2".into(),
+                message_id: "m2".into(),
+                sort_key: key("2026-04-28T12:00:00Z", "m2"),
+            }],
+            Some(key("2026-04-28T12:00:00Z", "m2")),
+        );
+
+        // m2 stays gone, and the held base is still archive (guard held).
+        assert!(store.view_rows(view).unwrap().is_empty());
+        assert_eq!(store.message("m2").unwrap()["mailboxIds"], json!(["archive"]));
     }
 
     #[test]
