@@ -15,6 +15,24 @@ dependents: []
 
 # A general mutation.notification, and a race-free retire
 
+> **LANDED (2026-06-27).** Engine `retire_absorbed` + absorption-gated store
+> settle (the flicker fix) shipped first and independently; the contract
+> generalization (this doc) shipped on top. The runtime now emits
+> `RuntimeFrame::MutationNotification { clientMutationId, confirmed | rejected{error} }`
+> from the command path, drops the non-terminal `Accepted` ack, and leaves
+> `message.updated` untouched on the firehose. The client retires confirmed ops
+> by **absorption**, never by reverting. Verified: link-core 88, link-replica
+> 21, runtime 25, authority-runtime 58+32, web 240. **Follow-up:** a user-facing
+> rejection toast — the client logs `runtime.mutation.rejected` + reverts, but
+> there is no UI surface yet.
+>
+> **The key correction during design:** the original instinct was to merge base
+> facts (`MessageUpdated`) into the mutation envelope and have the runtime track
+> a mutation across its lifecycle. That is the smell. Facts and verdicts are two
+> families — facts come from the firehose uncorrelated; verdicts come from the
+> command path keyed by id — and **absorption removes the need to correlate them
+> at all**, so no lifecycle tracker is built.
+
 ## 1. The problem: settlement races the base update
 
 An optimistic row flickers when a mutation settles — most visibly on undo, but
