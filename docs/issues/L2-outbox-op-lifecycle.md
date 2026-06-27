@@ -18,7 +18,19 @@ The absorption-gated retire is correct on the happy path, but several lifecycle
 edges leave optimistic ops (in-engine and/or durable) stuck forever or cleared
 too early.
 
-## A — Op leaks forever on authoritative message removal (CRITICAL, corroborated)
+## A — Op leaks forever on authoritative message removal (CRITICAL, corroborated) — **RESOLVED**
+
+**Fix landed:** `Replica::remove_pending(&key)` added to the engine
+(`posthaste-link-core/src/convergence.rs`) — drops every pending op on a key
+(both confirmed and unconfirmed) + clears their confirmed markers; the store
+calls it in `apply_message`'s `deleted` branch, after `remove_base`. Scoped to
+`deleted=true` (a never-ingested entity is not an authoritative removal; its
+deferred pending must survive to fold on a later ingest). Regression test
+`authoritative_delete_purges_pending_op` (real engine) — verified it fails without
+the fix (op stuck pending) and passes with it; a late `settle(Confirmed)` on the
+purged op is a no-op (settle finds no key → no retire), not a leak.
+
+**Original finding (preserved).**
 
 `retire_absorbed` early-returns `false` when the key has no base
 (`crates/posthaste-link-core/src/convergence.rs:217`); the store's

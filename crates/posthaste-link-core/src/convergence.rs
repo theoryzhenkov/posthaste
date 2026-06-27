@@ -126,6 +126,37 @@ impl<C: Convergence> Replica<C> {
         self.base.remove(key);
     }
 
+    /// Drop every pending op on `key` (authoritative removal of the entity).
+    ///
+    /// An authoritative delete (expunge, a rule, another client) makes any
+    /// pending optimism on that entity moot — the entity is gone, so the op can
+    /// neither fold into a base nor revert to one. Without this the op sticks
+    /// pending forever (`has_pending` stuck true; the durable outbox grows
+    /// unbounded on a delete-heavy workload): the version-gated retire on
+    /// `settle(Confirmed)` can't reach a deleted entity (it carries no version
+    /// for the gate), and unconfirmed ops are never retired there anyway. Both
+    /// confirmed and unconfirmed ops on `key` are dropped, and their confirmed
+    /// markers cleared. Idempotent. The caller scopes this to
+    /// `apply_message(deleted=true)` — a *never-ingested* entity is not an
+    /// authoritative removal, so its deferred pending ops must survive to fold
+    /// on a later ingest.
+    pub fn remove_pending(&mut self, key: &C::Key) -> bool {
+        let remove: Vec<MutationId> = self
+            .pending
+            .iter()
+            .filter(|held| &held.key == key)
+            .map(|held| held.id.clone())
+            .collect();
+        if remove.is_empty() {
+            return false;
+        }
+        self.pending.retain(|held| !remove.contains(&held.id));
+        for id in &remove {
+            self.confirmed.remove(id);
+        }
+        true
+    }
+
     /// Accept an optimistic mutation: append it to the outbox. Idempotent on
     /// mutation id — re-accepting an already-held id is a no-op
     /// ([replication L1 §4.2](../replication/L1.md)).
