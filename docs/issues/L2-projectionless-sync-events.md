@@ -5,7 +5,7 @@ modified: 2026-06-27
 reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
-status: open
+status: done
 priority: high
 depends:
   - path: docs/eph/DESIGN-L2-client-link-reactive-store
@@ -14,8 +14,33 @@ depends:
 
 # Projection-less sync events break the rows+counts invariant
 
-**Corroborated independently by two reviewers** (four-reviewer Task 2 HIGH-1 +
-Task 3 HIGH-1). The strongest user-impacting correctness gap besides the flicker.
+**Status: DONE, 2026-06-27 (fix (a)).** All three sync emitters now attach
+`projection` + `countDeltas` like the command path, so the reactive store
+self-maintains rows AND counts on expunge / membership-removal / delete — no
+longer dropped:
+- **A** `projection_tracking.rs` (IMAP expunge / location-removal): attaches the
+  post-removal `projection` (via `query_message_detail_tx`) + the removed
+  mailbox's `countDeltas`.
+- **B** `sync_batch.rs` (full delete): the store handles the row via
+  `deleted:true`; now also attaches `countDeltas` for the message's previous
+  mailboxes (captured before the delete).
+- **C** `mailbox_cleanup.rs` (mailbox-deletion cleanup): attaches the projection
+  (the cleaned mailbox's count is moot — it's being deleted).
+
+This was the hard prerequisite for option iii ([[L2-single-source-view-membership]]):
+#3 (the runtime re-serve) was the *only* corrector for these projection-less
+events, so it could not be retired until the store self-maintained them.
+Coverage: extended the path-A test in `tests/imap_snapshots.rs` (the
+membership-removal event now carries `projection.mailboxIds = [archive]` +
+`countDeltas` for the removed mailbox); the adapter ingest + count-write + store
+membership-rederive legs are already covered. store 82 / authority-runtime 58 /
+runtime 25; clippy 0.
+
+---
+
+**Original finding (preserved).** Corroborated independently by two reviewers
+(four-reviewer Task 2 HIGH-1 + Task 3 HIGH-1). The strongest user-impacting
+correctness gap besides the flicker.
 
 The reactive store assumes "2c attaches the projection (and countDeltas) to every
 non-destroy `message.updated`." That holds on the **command** paths

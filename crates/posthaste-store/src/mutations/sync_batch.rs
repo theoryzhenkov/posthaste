@@ -90,12 +90,20 @@ pub(crate) fn apply_sync_batch_tx(
     }
 
     for message_id in &batch.deleted_message_ids {
+        // Capture the message's mailboxes before the delete so we can report the
+        // (now decremented) counts; the store handles the row via `deleted:true`
+        // but needs countDeltas to keep the sidebar live (was projection-less).
+        let previous_mailboxes = fetch_mailbox_ids_tx(tx, account_id, message_id)?;
         delete_message_and_track_projection_inputs(tx, account_id, message_id, &mut affected)?;
+        let count_deltas =
+            crate::query::mailbox_counts_json_tx(tx, account_id, previous_mailboxes.iter())?;
+        let mut payload = json!({ "messageId": message_id.as_str(), "deleted": true });
+        payload["countDeltas"] = count_deltas;
         events.record(
             EVENT_TOPIC_MESSAGE_UPDATED,
-            None,
+            previous_mailboxes.first(),
             Some(message_id),
-            json!({ "messageId": message_id.as_str(), "deleted": true }),
+            payload,
         )?;
     }
 
