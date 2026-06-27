@@ -20,6 +20,7 @@ export const LOG_EVENTS = {
   runtimeAdapterInitialized: 'runtime.adapter.initialized',
   runtimeFrameDispatched: 'runtime.frame.dispatched',
   runtimeMutationSent: 'runtime.mutation.sent',
+  runtimeMutationRejected: 'runtime.mutation.rejected',
   runtimeReplicaAdapterInstalled: 'runtime.adapter.replica_installed',
   uiShortcutKeyPressed: 'ui.shortcut.key.pressed',
   updateCheckFailed: 'update.check.failed',

@@ -5,25 +5,21 @@
  *
  * @spec docs/eph/DESIGN-L2-client-link-reactive-store (2e)
  */
-import type { RuntimeMutationSettlementStatus } from '../types'
+import type { RuntimeMutationNotification } from '../types'
 import type { SettlementVerdict } from './handle'
 
 /**
- * The replica verdict for a settlement status, or `null` when the status is
- * non-terminal (`accepted` / `localApplied` / `queued`) and must be ignored.
+ * The store's settle verdict for a `mutationNotification` body: `confirmed`
+ * retires the op by absorption (no revert); `rejected` reverts it. Maps onto the
+ * WASM boundary's `SettlementVerdict` (`'failed'` is its term for a rejection).
  */
 export function settlementVerdict(
-  status: RuntimeMutationSettlementStatus,
-): SettlementVerdict | null {
-  switch (status) {
+  notification: RuntimeMutationNotification,
+): SettlementVerdict {
+  switch (notification.type) {
     case 'confirmed':
       return 'confirmed'
-    case 'failed':
-    case 'conflict':
+    case 'rejected':
       return 'failed'
-    case 'accepted':
-    case 'localApplied':
-    case 'queued':
-      return null
   }
 }
