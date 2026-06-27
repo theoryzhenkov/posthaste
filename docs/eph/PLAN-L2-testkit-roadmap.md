@@ -39,15 +39,22 @@ parity tests behave as before.
 harness config root; `ViewSettlement` captures the ordered `RuntimeFrame` stream
 a mutation settles through and asserts confirmed / recompute-present /
 only-touched-view / session-seq-monotonic. First regression:
-`keyword_toggle_settles_and_recomputes_the_touched_view`.
+`keyword_toggle_settles_and_fires_notification_without_re_serving_the_view`.
 
-Finding (characterized, not a bug): a `run_mutation` keyword toggle on a live
-mock account recomputes the touched view *twice* — optimistic (rev 2, from the
-mutation's local event) then sync-confirmed (rev 3, after the supervisor syncs)
-— with a ~16-notification fan-out between them. This is expected local-first
-two-phase behavior, so the first test asserts `at_least_once`, not
-`exactly_once` (the latter is reserved for no-follow-up-sync scenarios). The
-notification fan-out breadth is worth a future profiling look.
+**Superseded for mail-list views by option iii (2026-06-27):** the runtime no
+longer recomputes + re-serves an evaluable mail-list view per event — the client
+self-maintains it from the `message.updated` firehose
+([single-source-view-membership]). The first regression now asserts the
+option-iii contract (`assert_message_updated_notification` +
+`assert_view_not_recomputed`); the recompute-present assertions
+(`assert_view_recomputed_*`) remain valid for the still-server-recomputed view
+kinds (detail, conversation, account).
+
+Historical finding (pre-option-iii, characterized, not a bug): a `run_mutation`
+keyword toggle on a live mock account recomputed the touched mail-list view
+*twice* — optimistic (rev 2) then sync-confirmed (rev 3) — with a ~16-notification
+fan-out between them. The notification fan-out breadth is still worth a future
+profiling look.
 
 ### P3a — StalwartFixture::inject + live scenario (done 2026-06-26)
 
