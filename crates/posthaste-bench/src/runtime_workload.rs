@@ -26,7 +26,7 @@ use posthaste_domain::{
 use posthaste_runtime_contract::{
     AccountTransportMutation, CreateAccountMutation, MailListViewState, MailPresentationRequest,
     MailQueryRequest, RuntimeCaller, RuntimeCore, RuntimeFrame, RuntimeFrameSubscription,
-    RuntimeSessionSeq, SecretWriteMutation, ViewDescriptor,
+    RuntimeSessionId, RuntimeSessionSeq, SecretWriteMutation, ViewDescriptor, ViewId,
 };
 use tempfile::TempDir;
 
@@ -45,6 +45,8 @@ pub struct RuntimeInbox {
     // dropped; the temp dir is removed last.
     build: posthaste_authority_runtime::AuthorityRuntimeBuild,
     account_id: AccountId,
+    session_id: RuntimeSessionId,
+    view_id: ViewId,
     subscription: RuntimeFrameSubscription,
     /// A message id known to be inside the view window, toggled each iteration.
     visible_id: String,
@@ -132,6 +134,8 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
 
     Ok(RuntimeInbox {
         account_id: account.id,
+        session_id: session.session_id.clone(),
+        view_id: snapshot.view_id.clone(),
         subscription,
         visible_id,
         toggle: false,
@@ -140,19 +144,24 @@ pub async fn open_runtime_inbox(message_count: usize) -> Result<RuntimeInbox> {
     })
 }
 
-/// THE MEASURED OP: write a keyword change to the store and broadcast the
-/// resulting event onto the runtime event bus, then drain frames until the
-/// mail-list view frame reflecting the change arrives. This exercises the
-/// regression hot path end to end: event -> `recompute_view_if_changed` ->
-/// `build_snapshot` (query_mail_page through the link) -> `serde_json::to_value`
-/// of the whole state -> whole-`Value` equality compare -> `mail_list_delta`
-/// (`serde_json::from_value` back on *both* snapshots) -> frame.
+/// THE PER-EVENT COST AFTER option iii: write a keyword change to the store and
+/// broadcast the event, then drain until the `message.updated` **notification**
+/// (the firehose) lands. This is what an affecting event now costs the runtime
+/// for a mail-list view: a store write + an event-bus forward — NO per-event
+/// `build_snapshot`/recompute (the client self-maintains the view from the
+/// firehose, single-source-view-membership). Pair its iterations/3s with
+/// [`recompute_and_await_view`] (the recompute cost option iii removed per event)
+/// to read the win.
+///
+/// Awaits the notification, not a view frame: post-option-iii the runtime emits
+/// no `ViewReplace`/`ViewDelta` for a mail-list on a keyword change, so the old
+/// "drain until view frame" would hang.
 ///
 /// It triggers via `store.set_keywords` + manual event broadcast (the pattern
 /// the runtime's own `authority_runtime_handle` tests use) rather than
 /// `run_mutation`: the full named-mutation pipeline's existence check
 /// (`get_message_mailboxes`) rejects bulk-seeded messages, and that pipeline is
-/// upstream of — not part of — the view-recompute regression we are profiling.
+/// upstream of — not part of — the path we are profiling.
 pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> Result<()> {
     inbox.toggle = !inbox.toggle;
     // Alternate add/remove so every iteration changes view state and forces a
@@ -189,7 +198,52 @@ pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> R
             .map_err(|error| anyhow!("broadcast event: {error}"))?;
     }
 
-    // Drain frames until the view frame for this change lands.
+    // Drain frames until the message.updated notification (the client's
+    // self-maintenance input) lands. No view frame arrives for a mail-list under
+    // option iii.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let frame = inbox
+                .subscription
+                .live
+                .next()
+                .await
+                .ok_or_else(|| anyhow!("runtime frame stream closed"))?;
+            if matches!(
+                frame,
+                RuntimeFrame::Notification { ref kind, .. } if kind == "message.updated"
+            ) {
+                return Ok::<(), anyhow::Error>(());
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("timed out awaiting message.updated notification"))?
+}
+
+/// THE COST option iii REMOVED per event: force one mail-list view recompute +
+/// frame — exactly the `build_snapshot` (query_mail_page -> `serde_json::to_value`
+/// of the whole state -> `mail_list_delta`) the runtime USED to run on every
+/// affecting `message.updated` per open mail-list view, and no longer does.
+///
+/// Measured via `extend_session_view` by **0 rows**: a fixed-window recompute
+/// (same window as the event pump's `recompute_view_if_changed`) that always
+/// emits a `ViewReplace`/`ViewDelta`, so its iterations/3s is the per-event
+/// runtime cost option iii eliminated. (The extend path is retained — pagination;
+/// only the per-event re-serve was retired.)
+pub async fn recompute_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> Result<()> {
+    inbox
+        .build
+        .handle
+        .extend_session_view(
+            RuntimeCaller::test(),
+            inbox.session_id.clone(),
+            inbox.view_id.clone(),
+            0,
+        )
+        .await
+        .map_err(|error| anyhow!("extend_session_view: {error}"))?;
+
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let frame = inbox
@@ -207,7 +261,7 @@ pub async fn mutate_and_await_view(inbox: &mut RuntimeInbox, _index: usize) -> R
         }
     })
     .await
-    .map_err(|_| anyhow!("timed out awaiting view frame"))?
+    .map_err(|_| anyhow!("timed out awaiting view recompute frame"))?
 }
 
 /// A Mock-driver account mutation (offline; no secret/transport needed).
