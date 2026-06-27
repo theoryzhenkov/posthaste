@@ -452,7 +452,6 @@ impl ViewRegistry {
             read_watermark,
             coverage,
             data,
-            pending_mutations: Vec::new(),
             error: None,
         })
     }
@@ -678,7 +677,6 @@ fn mail_list_state(
                 sort_key: json!([message.received_at, message.id.as_str()]),
                 projection,
                 order_key: format!("{index:08}"),
-                pending_markers: Vec::new(),
             }
         })
         .collect();
@@ -718,7 +716,6 @@ fn mail_list_state(
         }),
         coverage,
         known_total_count: None,
-        pending_mutations: Vec::new(),
         anchor: MailListAnchorState::NotRequested,
     })
 }

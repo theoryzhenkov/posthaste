@@ -167,7 +167,6 @@ mod tests {
             }),
             sort_key: json!(["2026-06-24T00:00:00Z", id]),
             order_key: "00000000".to_string(),
-            pending_markers: Vec::new(),
         }
     }
 
@@ -189,7 +188,6 @@ mod tests {
                 ranges: vec![CoverageRange { from: None, to: None }],
             },
             known_total_count: None,
-            pending_mutations: Vec::new(),
             anchor: MailListAnchorState::NotRequested,
         }
     }

@@ -5360,12 +5360,6 @@
           "orderKey": {
             "type": "string"
           },
-          "pendingMarkers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RuntimeMutationId"
-            }
-          },
           "projection": {
             "type": "object"
           },
@@ -5791,11 +5785,8 @@
         "type": "string",
         "enum": [
           "accepted",
-          "localApplied",
-          "queued",
           "confirmed",
-          "failed",
-          "conflict"
+          "failed"
         ]
       },
       "OkResponse": {
@@ -7700,12 +7691,6 @@
           },
           "lifecycle": {
             "$ref": "#/components/schemas/ViewLifecycle"
-          },
-          "pendingMutations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RuntimeMutationId"
-            }
           },
           "readWatermark": {
             "oneOf": [

@@ -1679,7 +1679,6 @@ export interface components {
         };
         MailListRowState: {
             orderKey: string;
-            pendingMarkers?: components["schemas"]["RuntimeMutationId"][];
             projection?: Record<string, never>;
             resourceRef?: string | null;
             rowKey: string;
@@ -1837,7 +1836,7 @@ export interface components {
             sessionId?: null | components["schemas"]["RuntimeSessionId"];
         };
         /** @enum {string} */
-        MutationSettlementState: "accepted" | "localApplied" | "queued" | "confirmed" | "failed" | "conflict";
+        MutationSettlementState: "accepted" | "confirmed" | "failed";
         /**
          * @description Generic success response for mutating endpoints that return no domain data.
          *
@@ -2596,7 +2595,6 @@ export interface components {
             descriptor: components["schemas"]["ViewDescriptor"];
             error?: null | components["schemas"]["RuntimeAdapterError"];
             lifecycle: components["schemas"]["ViewLifecycle"];
-            pendingMutations?: components["schemas"]["RuntimeMutationId"][];
             readWatermark?: null | components["schemas"]["ReadWatermark"];
             revision: components["schemas"]["ViewRevision"];
             viewId: components["schemas"]["ViewId"];

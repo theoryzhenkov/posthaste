@@ -610,8 +610,6 @@ pub struct MailListViewState {
     pub read_watermark: Option<ReadWatermark>,
     pub coverage: RuntimeCoverage,
     pub known_total_count: Option<u64>,
-    #[serde(default)]
-    pub pending_mutations: Vec<RuntimeMutationId>,
     pub anchor: MailListAnchorState,
 }
 
@@ -636,8 +634,6 @@ pub struct MailListRowState {
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub sort_key: Value,
     pub order_key: String,
-    #[serde(default)]
-    pub pending_markers: Vec<RuntimeMutationId>,
 }
 
 /// An incremental mail-list view update ([replication client-link L1](../../replication/client-link/L1.md)):
@@ -700,8 +696,6 @@ pub struct ViewSnapshot {
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub data: Value,
-    #[serde(default)]
-    pub pending_mutations: Vec<RuntimeMutationId>,
     pub error: Option<RuntimeAdapterError>,
 }
 
@@ -763,11 +757,8 @@ pub enum MutationNotification {
 #[serde(rename_all = "camelCase")]
 pub enum MutationSettlementState {
     Accepted,
-    LocalApplied,
-    Queued,
     Confirmed,
     Failed,
-    Conflict,
 }
 
 impl MutationSettlementState {
@@ -777,9 +768,7 @@ impl MutationSettlementState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            MutationSettlementState::Confirmed
-                | MutationSettlementState::Failed
-                | MutationSettlementState::Conflict
+            MutationSettlementState::Confirmed | MutationSettlementState::Failed
         )
     }
 }
@@ -1395,7 +1384,6 @@ mod tests {
                 projection: serde_json::json!({ "subject": "Subject" }),
                 sort_key: serde_json::json!(["2026-04-28T12:00:00Z", "m1"]),
                 order_key: "0001".to_string(),
-                pending_markers: vec![RuntimeMutationId::new("mutation-1")],
             }],
             continuation: MailListContinuation {
                 before_cursor: Some("before-1".to_string()),
@@ -1413,7 +1401,6 @@ mod tests {
                 }],
             },
             known_total_count: Some(1),
-            pending_mutations: vec![RuntimeMutationId::new("mutation-1")],
             anchor: MailListAnchorState::Kept {
                 row_key: "primary:m1".to_string(),
             },
@@ -1421,7 +1408,6 @@ mod tests {
 
         let serialized = serde_json::to_value(&state).expect("state should serialize");
         assert_eq!(serialized["rows"][0]["rowKey"], "primary:m1");
-        assert_eq!(serialized["rows"][0]["pendingMarkers"][0], "mutation-1");
         assert_eq!(serialized["continuation"]["beforeCursor"], "before-1");
         assert_eq!(serialized["continuation"]["afterCursor"], "after-1");
         assert_eq!(serialized["readWatermark"]["value"], "watermark-1");
@@ -1429,7 +1415,6 @@ mod tests {
             serialized["coverage"]["ranges"][0]["to"].clone(),
             serde_json::json!(["2026-04-28T12:00:00Z", "m1"])
         );
-        assert_eq!(serialized["pendingMutations"][0], "mutation-1");
         assert_eq!(serialized["anchor"]["kind"], "kept");
     }
 
@@ -1448,7 +1433,6 @@ mod tests {
                 ranges: vec![CoverageRange { from: None, to: None }],
             },
             data: serde_json::json!({ "rows": [] }),
-            pending_mutations: Vec::new(),
             error: None,
         };
         let serialized = serde_json::to_value(RuntimeFrame::ViewReplace {
@@ -1487,7 +1471,6 @@ mod tests {
                 ranges: vec![CoverageRange { from: None, to: None }],
             },
             known_total_count: Some(0),
-            pending_mutations: Vec::new(),
             anchor: MailListAnchorState::Removed {
                 row_key: "primary:m1".to_string(),
             },
@@ -1507,7 +1490,6 @@ mod tests {
                 ranges: vec![CoverageRange { from: None, to: None }],
             },
             data: serde_json::to_value(state).expect("state should serialize"),
-            pending_mutations: Vec::new(),
             error: None,
         };
 
