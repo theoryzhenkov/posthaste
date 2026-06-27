@@ -430,6 +430,30 @@ mod tests {
     }
 
     #[test]
+    fn retire_absorbed_is_set_insensitive_on_unsorted_keywords() {
+        // A realistic projection: base carries $seen (in provider order) and the
+        // flag op's effect. The fold canonicalizes via BTreeSet (sorted); the
+        // base keeps provider order. Absorption must compare as SETS, else the
+        // op never retires for any message carrying a second keyword.
+        let mut replica = MessageReplica::new();
+        replica.set_base(
+            "m1".to_string(),
+            // provider order ($seen before $flagged) — NOT sorted
+            state(&["$seen", "$flagged"], &["inbox"]),
+        );
+        replica.accept(PendingMessageMutation {
+            id: MutationId("op1".into()),
+            key: "m1".into(),
+            effect: MessageAssertion::SetKeywords {
+                add: vec!["$flagged".into()],
+                remove: vec![],
+            },
+        });
+        assert!(replica.retire_absorbed(&"m1".to_string()));
+        assert!(!replica.has_pending());
+    }
+
+    #[test]
     fn retire_absorbed_drops_a_no_op_optimism_immediately() {
         // A flag on an already-flagged message: absorbed from the start, so a
         // confirmation clears it with no base update ever arriving.
