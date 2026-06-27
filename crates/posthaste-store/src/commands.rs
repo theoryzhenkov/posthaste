@@ -71,7 +71,6 @@ impl SyncWriteStore for DatabaseStore {
     /// transaction: prunes locals absent from the complete remote id set and
     /// commits the cursors withheld until the full stream succeeded.
     ///
-    /// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
     fn reconcile_sync(
         &self,
         account_id: &AccountId,

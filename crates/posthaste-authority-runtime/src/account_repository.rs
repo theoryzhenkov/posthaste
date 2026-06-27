@@ -556,7 +556,6 @@ mod tests {
         }
     }
 
-    // spec: docs/stale/L1-accounts#account-secret-saga
     #[test]
     fn create_rolls_back_source_when_secret_write_fails() {
         let (repo, config, secret_store) = repository();

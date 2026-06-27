@@ -38,7 +38,6 @@ impl SyncCursor {
 /// the stream already self-reconciled (e.g. a single full batch), so no final
 /// pass runs.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 #[derive(Clone, Debug, Default)]
 pub struct SyncOutcome {
     pub reconciliation: Option<SyncReconciliation>,
@@ -58,7 +57,6 @@ impl SyncOutcome {
 /// chunks: the complete remote ids to retain, which object types to prune, and
 /// the cursors to commit only once the full stream succeeded.
 ///
-/// @spec docs/stale/L1-sync#progressive-delivery-and-final-reconciliation
 #[derive(Clone, Debug, Default)]
 pub struct SyncReconciliation {
     pub remote_message_ids: Vec<MessageId>,

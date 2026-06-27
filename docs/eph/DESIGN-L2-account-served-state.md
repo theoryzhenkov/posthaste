@@ -11,8 +11,6 @@ depends:
   - path: docs/runtime/adapter/L2
     section: "7. View operation flow"
   - path: docs/eph/DESIGN-L2-account-state-architecture
-  - path: docs/stale/L1-accounts
-  - path: docs/stale/L1-sync
 ---
 
 # Account management as a coherent link
