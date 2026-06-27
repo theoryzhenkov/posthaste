@@ -163,12 +163,23 @@ store notifications → cache).
   self-maintain, others `Deferred`. WASM `projectViewJson` (one call per view per
   drain). 7 controller tests (faithful in-TS fake); 248 web tests green.
 
-  **Remaining (2e.3, the retirement):** `applyDomainEvent` + `useDaemonEvents`
-  + `useDomainEventRefresh`/`eventMayAffectView` still run alongside the store
-  (redundant invalidation for `message.updated` — rows via messagesRoot + counts
-  via mailboxes refetch). 2e.3 retires them for store-owned entities (keeps the
-  conversations/tags/smart-mailboxes invalidations, which the store does not
-  own). Then 2e.4 deletes `MailListReplica`/`view_replica.rs`/`ReplicaController`.
+  **2e.3 LANDED (2026-06-26, `uuwpxuwp`):** retired the redundant REST
+  invalidation for `message.updated` when the store is active. The handler now
+  passes `{skipStoreOwned: isEntityStoreAdapterActive()}` to
+  `invalidateMessageListReadModels` + `invalidateMailboxReadModels`; when the
+  store is active, `messagesRoot` (rows) + `mailboxes(accountId)` (counts) are
+  NOT invalidated (the store drives them), while `conversationsRoot` +
+  `smartMailboxes` + `mailNavigationRead` + tags + the message-detail
+  invalidation still run (the store does not own those). `useDomainEventRefresh`
+  was already gated off (`!runtimeMailListViewsEnabled`, default true). The
+  activation flag moved to a runtime intent facade (`runtime/entityStoreState.ts`)
+  so `domain-cache` can read it without crossing the runtime boundary.
+  4 new tests (legacy parity + store-active skip on arrived/mailboxes/keywords/
+  deletion); 252 web tests green.
+
+  **Remaining (2e.4):** delete the now-redundant `MailListReplica`/
+  `view_replica.rs`/`ReplicaController` (the old single-view replica, superseded
+  by the EntityStore).
 - **2f — Flip default.** Store on by default once real-browser-validated; the
   legacy REST/invalidation paths become dead code to remove (then realized
   `client-link/L2.md` §4/§5/§6 are rewritten).
