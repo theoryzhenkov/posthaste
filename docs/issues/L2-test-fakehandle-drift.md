@@ -5,7 +5,7 @@ modified: 2026-06-27
 reviewed: 2026-06-27
 lifecycle: ephemeral
 type: ISSUE
-status: open
+status: done
 priority: high
 depends:
   - path: docs/eph/DESIGN-L2-client-link-reactive-store
@@ -13,6 +13,23 @@ depends:
 ---
 
 # Test fidelity: the FakeHandle drifts from the real engine
+
+**Status: DONE, 2026-06-27.** `apps/web/test/entityStoreAdapter.test.ts` now
+drives the **real wasm `EntityStoreHandle`** (loaded + `initSync`'d once in a
+`beforeAll`, the committed-artifact pattern), and the 250-line `FakeHandle`
+re-implementation plus its private fold helpers (`foldFacets`/`sameFacets`/
+`facetsOf`/`dirtyKey`/the `Facets`/`StoreViewRow`/`ViewPredicate`/`DirtyKey`
+types) were deleted. All 8 orchestration tests pass against the real engine, so
+the always-on adapter regression (incl. the flicker-fix "confirmed before the
+base update does not revert" case) is now real-verified, not fake-verified. This
+retires the whole class of false-greens the fake masked. The skip-gated
+real-wasm repros (`mailboxMoveFlicker` / `mailboxMoveEqualVersion` /
+`archiveOptimismEqualVersion` / `replicaAbsorptionRetire`) remain as additional
+focused coverage.
+
+---
+
+**Original finding (preserved).**
 
 The flicker fix has three test surfaces of very different fidelity:
 - Rust engine tests (`convergence.rs`, `entity_store.rs`) — drive the *real*
