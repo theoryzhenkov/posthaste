@@ -212,7 +212,7 @@ use utoipa::OpenApi;
         posthaste_runtime_contract::MutationRequest,
         posthaste_runtime_contract::MutationReceipt,
         posthaste_runtime_contract::MutationSettlementState,
-        posthaste_runtime_contract::RuntimeMutationSettlement,
+        posthaste_runtime_contract::MutationNotification,
         posthaste_runtime_contract::ViewId,
         posthaste_runtime_contract::ViewRevision,
         posthaste_runtime_contract::ViewSnapshot,
