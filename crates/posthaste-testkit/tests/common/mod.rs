@@ -23,5 +23,9 @@ pub fn mail_list_view(query: &str) -> ViewDescriptor {
     ViewDescriptor {
         family: "mailList".to_string(),
         payload: serde_json::to_value(&request).expect("request should serialize"),
+        // An evaluable `date`-sorted source-mailbox view — the client
+        // self-maintains it, so the runtime skips the per-event re-serve
+        // (option iii). Tests asserting `not_recomputed` rely on this.
+        client_self_maintained: true,
     }
 }

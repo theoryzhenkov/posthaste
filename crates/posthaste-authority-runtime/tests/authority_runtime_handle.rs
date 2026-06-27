@@ -257,6 +257,7 @@ fn mail_list_descriptor_with_limit(query: &str, limit: usize) -> ViewDescriptor 
     ViewDescriptor {
         family: "mailList".to_string(),
         payload: serde_json::to_value(request).expect("request should serialize"),
+        ..Default::default()
     }
 }
 
@@ -268,6 +269,7 @@ fn message_detail_descriptor(source_id: &str, message_id: &str) -> ViewDescripto
     ViewDescriptor {
         family: "messageDetail".to_string(),
         payload: serde_json::json!({ "sourceId": source_id, "messageId": message_id }),
+        ..Default::default()
     }
 }
 
@@ -1028,6 +1030,7 @@ async fn conversation_view_replaces_snapshot_after_keyword_event() {
             ViewDescriptor {
                 family: "conversation".to_string(),
                 payload: serde_json::json!({ "conversationId": conversation_id }),
+                ..Default::default()
             },
         )
         .await
@@ -1266,6 +1269,7 @@ async fn runtime_session_view_extends_its_window_in_place() {
                     "sourceId": account.id.as_str(),
                     "messageId": "message-1",
                 }),
+                ..Default::default()
             },
         )
         .await
@@ -1315,6 +1319,7 @@ async fn runtime_account_status_view_serves_and_recomputes() {
             ViewDescriptor {
                 family: "accountStatus".to_string(),
                 payload: serde_json::Value::Null,
+                ..Default::default()
             },
         )
         .await

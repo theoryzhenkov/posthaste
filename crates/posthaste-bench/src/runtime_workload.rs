@@ -295,6 +295,10 @@ fn mail_list_descriptor(query: &str, limit: usize) -> ViewDescriptor {
     ViewDescriptor {
         family: "mailList".to_string(),
         payload: serde_json::to_value(request).expect("mail query request should serialize"),
+        // Self-maintained: the bench measures the post-option-iii per-event
+        // cost (notification only, no re-serve) for `runtime_mutation_notify`,
+        // and the eliminated recompute separately via `runtime_view_recompute`.
+        client_self_maintained: true,
     }
 }
 

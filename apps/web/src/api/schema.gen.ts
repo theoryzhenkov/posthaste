@@ -2581,6 +2581,17 @@ export interface components {
             pushSupported: boolean;
         };
         ViewDescriptor: {
+            /**
+             * @description Whether the client entity store self-maintains this view's membership from
+             *     the `message.updated` firehose (evaluable predicates only). When true
+             *     the runtime skips the per-event re-serve for this view (option iii,
+             *     single-source-view-membership); when false the runtime re-serves on every
+             *     affecting event — required for `Deferred` mail-lists (smart-mailbox /
+             *     global / non-`date`) the store cannot self-maintain. Single source: the
+             *     client computes it from its predicate and stamps it here; the runtime
+             *     never re-derives it (no TS↔Rust drift).
+             */
+            clientSelfMaintained?: boolean;
             family: string;
             payload?: Record<string, never>;
         };

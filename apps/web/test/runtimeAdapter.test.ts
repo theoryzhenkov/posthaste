@@ -388,6 +388,7 @@ describe('runtime adapter facade', () => {
               },
               visibility: null,
             },
+            clientSelfMaintained: true,
           },
         },
         { sourceId: 'primary' },
