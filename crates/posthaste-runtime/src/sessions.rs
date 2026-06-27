@@ -7,9 +7,9 @@ use posthaste_domain::{DomainEvent, Id};
 use posthaste_link_core::MessageChangeDiff;
 use posthaste_runtime_contract::{
     ClientMutationId, DiffStep, MailListDelta, MailListRowState, MailListViewState,
-    MutationReceipt, MutationRequest, MutationSettlementState, RuntimeAdapterError, RuntimeCaller,
-    RuntimeError, RuntimeFrame, RuntimeFrameSubscription, RuntimeMutationId,
-    RuntimeMutationSettlement, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
+    MutationNotification, MutationReceipt, MutationRequest, MutationSettlementState,
+    RuntimeAdapterError, RuntimeCaller, RuntimeError, RuntimeFrame, RuntimeFrameSubscription,
+    RuntimeMutationId, RuntimeSession, RuntimeSessionId, RuntimeSessionSeq,
     RuntimeViewSubscription, ViewDescriptor, ViewFrame, ViewId, ViewSnapshot,
 };
 use serde_json::Value;
@@ -94,21 +94,37 @@ impl StoredMutation {
         }
     }
 
-    fn settlement(&self) -> RuntimeMutationSettlement {
-        RuntimeMutationSettlement {
-            client_mutation_id: self.client_mutation_id.clone(),
-            name: self.name.clone(),
-            status: self.state.clone(),
-            error: self.error.clone(),
+    /// The terminal verdict to publish for this mutation's current state, or
+    /// `None` while it is still non-terminal (Accepted/Queued) — those acks are
+    /// not emitted (`mutation.notification` carries only terminal outcomes; the
+    /// client tracks the in-flight op locally). `Confirmed` maps through;
+    /// `Failed`/`Conflict` collapse into `Rejected`, the distinction carried by
+    /// the error code.
+    fn notification(&self) -> Option<MutationNotification> {
+        match self.state {
+            MutationSettlementState::Confirmed => Some(MutationNotification::Confirmed),
+            MutationSettlementState::Failed | MutationSettlementState::Conflict => {
+                Some(MutationNotification::Rejected {
+                    error: self.error.clone().unwrap_or_else(|| {
+                        RuntimeError::internal("mutation rejected without an error", None)
+                            .envelope()
+                            .clone()
+                    }),
+                })
+            }
+            MutationSettlementState::Accepted
+            | MutationSettlementState::LocalApplied
+            | MutationSettlementState::Queued => None,
         }
     }
 
-    fn frame(&self, session_seq: RuntimeSessionSeq) -> RuntimeFrame {
-        RuntimeFrame::MutationSettlement {
-            session_seq,
-            mutation_id: self.mutation_id.clone(),
-            state: self.settlement(),
-        }
+    fn notification_frame(&self, session_seq: RuntimeSessionSeq) -> Option<RuntimeFrame> {
+        self.notification()
+            .map(|notification| RuntimeFrame::MutationNotification {
+                session_seq,
+                client_mutation_id: self.client_mutation_id.clone(),
+                notification,
+            })
     }
 }
 
@@ -395,11 +411,11 @@ impl SessionRegistry {
             .insert(request.client_mutation_id.clone(), mutation_id.clone());
         session
             .latest_mutations
-            .insert(mutation_id.clone(), mutation.clone());
-        let frame = mutation.frame(next_seq(session));
-        let sender = session.frames.clone();
+            .insert(mutation_id.clone(), mutation);
+        // No frame on accept: `mutation.notification` carries only terminal
+        // verdicts, and the client already tracks the in-flight op in its own
+        // outbox the moment it dispatches it.
         drop(sessions);
-        let _ = sender.send(frame);
         Ok(MutationAcceptance::New { mutation_id })
     }
 
@@ -538,7 +554,7 @@ impl SessionRegistry {
             mutation.error = error;
             mutation.output = output;
             let mutation = mutation.clone();
-            let frame = mutation.frame(next_seq(session));
+            let frame = mutation.notification_frame(next_seq(session));
             (mutation.receipt(), frame)
         };
         if is_terminal {
@@ -547,7 +563,9 @@ impl SessionRegistry {
         }
         let sender = session.frames.clone();
         drop(sessions);
-        let _ = sender.send(frame);
+        if let Some(frame) = frame {
+            let _ = sender.send(frame);
+        }
         Ok(receipt)
     }
 
@@ -727,8 +745,11 @@ fn collapse_session_frames(session: &mut StoredSession) -> Vec<RuntimeFrame> {
     let mut mutations: Vec<_> = session.latest_mutations.values().cloned().collect();
     mutations.sort_by(|left, right| left.mutation_id.as_str().cmp(right.mutation_id.as_str()));
     for mutation in mutations {
-        let session_seq = next_seq(session);
-        frames.push(mutation.frame(session_seq));
+        // Replay only terminal verdicts on collapse; in-flight ops are re-folded
+        // by the client from its own outbox over the re-served snapshots.
+        if let Some(frame) = mutation.notification_frame(next_seq(session)) {
+            frames.push(frame);
+        }
     }
     frames
 }
@@ -1170,7 +1191,7 @@ mod mutation_eviction_tests {
         let frames = collapse_session_frames(&mut session);
         let mutation_frames = frames
             .iter()
-            .filter(|f| matches!(f, RuntimeFrame::MutationSettlement { .. }))
+            .filter(|f| matches!(f, RuntimeFrame::MutationNotification { .. }))
             .count();
         assert_eq!(
             mutation_frames, cap,
@@ -1196,7 +1217,7 @@ mod mutation_eviction_tests {
 
         let mut streamed = 0;
         while let Ok(frame) = rx.try_recv() {
-            if matches!(frame, RuntimeFrame::MutationSettlement { .. }) {
+            if matches!(frame, RuntimeFrame::MutationNotification { .. }) {
                 streamed += 1;
             }
         }
