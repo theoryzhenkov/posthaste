@@ -271,25 +271,31 @@ export function invertMessageChangeDiff(diff_json) {
 /**
  * Parse a runtime mutation request and return `{ messageId, assertion }` as
  * JSON when the mutation is locally foldable. Returns `null` for mutations
- * whose effect cannot be folded from the request alone (role moves such as
- * archive/trash/moveToRole). Mirrors the Rust near-node
- * `MessageMutation::from_request` + `to_assertion` path.
+ * whose effect cannot be folded from the request alone. `role_map_json` is the
+ * account's role→mailbox-id map (`{"archive": "mbx-..."}`, built client-side
+ * from the mailbox list); it resolves role moves (archive/trash/restoreToInbox/
+ * moveToRole) to `ReplaceMailboxes`. `{}` → role moves get no optimism (graceful
+ * when the mailbox list isn't loaded yet). Mirrors the Rust near-node
+ * `MessageMutation::from_request` + `to_assertion_with_roles` path.
  * @param {string} request_json
+ * @param {string} role_map_json
  * @returns {string | undefined}
  */
-export function parseMessageMutation(request_json) {
+export function parseMessageMutation(request_json, role_map_json) {
     const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.parseMessageMutation(ptr0, len0);
+    const ptr1 = passStringToWasm0(role_map_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.parseMessageMutation(ptr0, len0, ptr1, len1);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
-    let v2;
+    let v3;
     if (ret[0] !== 0) {
-        v2 = getStringFromWasm0(ret[0], ret[1]).slice();
+        v3 = getStringFromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
-    return v2;
+    return v3;
 }
 
 function __wbg_get_imports() {
